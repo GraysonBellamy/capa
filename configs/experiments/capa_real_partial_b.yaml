@@ -1,0 +1,52 @@
+# CAPA pyrolysis integration — variant B (cameras + mass).
+# Real: FLIR E85 + webcam + Sartorius. Sim: Watlow + Alicat + NI-DAQ.
+
+hardware: ../hardware/capa_real_partial_b.toml
+method: ../methods/sim_capa_pyrolysis.method.toml
+
+procedure:
+  id: capa.builtin.recipe_runner
+  version: "0.1"
+  config:
+    auto_acknowledge_prompts: true
+    notes: "Hardware-day variant B: real E85+webcam+balance, sim heater+MFC+NI-DAQ."
+
+domain_profile:
+  id: capa.profiles.capa_pyrolysis
+  metadata:
+    specimen:
+      id: REAL-B-001
+      material: PMMA
+      initial_mass_g: 5.0
+      form: pellet
+      crucible: "alumina 70 uL"
+      conditioning: "23C / 50% RH for 48h"
+    program:
+      initial_temperature_c: 30.0
+      final_temperature_c: 600.0
+      ramp_rate_c_per_min: 300.0
+    atmosphere:
+      mode: inert
+      purge_duration_s: 30.0
+      carrier:
+        species: N2
+        purity: "UHP 5.0"
+        target_flow_sccm: 100.0
+
+calibration_set:
+  name: default
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: REAL-B-001
+  material: PMMA
+  notes: "Hardware-day variant B integration"
+
+tags:
+  - real
+  - partial
+  - capa
+  - pyrolysis

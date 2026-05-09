@@ -1,0 +1,52 @@
+name = "watlow_real"
+
+# Single real Watlow temperature controller. Adjust ``port``, ``address``,
+# and ``protocol`` to match the rig wiring; the defaults are the
+# EZ-ZONE PM Standard Bus factory settings (38400 8-N-1).
+[[devices]]
+name = "heater"
+adapter = "capa.devices.watlow"
+[devices.params]
+port = "/dev/ttyUSB0"
+address = 1
+protocol = "stdbus"
+parameters = ["process_value", "setpoint"]
+instances = [1]
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+identify_on_open = true
+
+# --- Channels ---
+
+[[channels]]
+name = "heater.pv"
+kind = "process_var"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "process_value"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "heater.setpoint"
+kind = "setpoint"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "setpoint"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"

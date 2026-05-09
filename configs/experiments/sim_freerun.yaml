@@ -1,0 +1,75 @@
+# Free-run experiment: record-only, no method.
+# Used by tests to verify ExperimentConfig validation end-to-end.
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 0.5    # short demo run; remove to make it interruptable-only
+
+calibration_set:
+  name: default
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: SIM-FREERUN-001
+  material: none
+  notes: synthetic free run
+
+tags:
+  - sim
+  - freerun
+
+# Hardware section is loaded from configs/hardware/sim_minimal.toml at
+# config-build time; tests inline it via Python. This YAML is a stub that
+# documents the procedure / sample shape.
+
+hardware:
+  name: sim_minimal
+  devices:
+    - name: heater
+      adapter: capa.devices.sim.watlow_sim
+    - name: air_mfc
+      adapter: capa.devices.sim.alicat_sim
+  channels:
+    - name: heater.pv
+      kind: process_var
+      unit: degC
+      derived_unit: degC
+      source:
+        source: watlow_parameter
+        device: heater
+        parameter: process_value
+        instance: 1
+      calibration:
+        kind: identity
+        input_unit: degC
+        output_unit: degC
+    - name: heater.setpoint
+      kind: setpoint
+      unit: degC
+      derived_unit: degC
+      source:
+        source: watlow_parameter
+        device: heater
+        parameter: setpoint
+        instance: 1
+      calibration:
+        kind: identity
+        input_unit: degC
+        output_unit: degC
+    - name: MFC_air.flow
+      kind: mfc_flow
+      unit: slpm
+      derived_unit: slpm
+      source:
+        source: alicat_frame_field
+        device: air_mfc
+        field: Mass_Flow
+      calibration:
+        kind: identity
+        input_unit: slpm
+        output_unit: slpm

@@ -1,0 +1,174 @@
+# CAPA-shaped sim hardware profile (controlled atmosphere pyrolysis).
+#
+# Provides every channel group required by capa.profiles.capa_pyrolysis:
+# heater_setpoint, heater_pv, sample_temperature, carrier_gas_flow.
+# Optional: mass (TGA-style), reactive_gas_flow (partial-oxidation runs).
+#
+# Each device's `params` declare TOML-friendly signal specs that the sim
+# adapters' from_params() classmethods convert into SignalFn callables at
+# construction. See capa.devices.sim._signals.signal_from_dict for the
+# spec schema (kind = "constant" | "sine" | "ramp" | "step").
+
+name = "sim_capa"
+
+[[devices]]
+name = "heater"
+adapter = "capa.devices.sim.watlow_sim"
+[devices.params.signals."process_value/1"]
+kind = "ramp"
+start = 30.0
+end = 600.0
+duration_s = 0.2
+[devices.params.signals."setpoint/1"]
+kind = "constant"
+value = 600.0
+
+[[devices]]
+name = "carrier_mfc"
+adapter = "capa.devices.sim.alicat_sim"
+[devices.params.signals.Mass_Flow]
+kind = "constant"
+value = 100.0
+[devices.params.signals.Abs_Press]
+kind = "constant"
+value = 101.3
+[devices.params.signals.Mass_Flow_Setpt]
+kind = "constant"
+value = 100.0
+
+[[devices]]
+name = "balance"
+adapter = "capa.devices.sim.sartorius_sim"
+[devices.params.mass_signal]
+kind = "ramp"
+start = 5.0
+end = 4.0
+duration_s = 0.2
+
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.sim.nidaq_polled_sim"
+[devices.params.signals.TC_top_1]
+kind = "ramp"
+start = 303.0
+end = 873.0
+duration_s = 0.2
+[devices.params.signals.TC_top_2]
+kind = "ramp"
+start = 303.0
+end = 873.0
+duration_s = 0.2
+
+# --- Controller channels ---
+
+[[channels]]
+name = "heater.pv"
+kind = "process_var"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "heater_pv"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "process_value"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "heater.setpoint"
+kind = "setpoint"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "heater_setpoint"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "setpoint"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+# --- Carrier gas (the inert sweep that defines "controlled atmosphere") ---
+
+[[channels]]
+name = "carrier.flow"
+kind = "mfc_flow"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+[channels.metadata]
+capa_group = "carrier_gas_flow"
+[channels.source]
+source = "alicat_frame_field"
+device = "carrier_mfc"
+field = "Mass_Flow"
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"
+
+# --- Sample-thermocouples (one or more inside / near the sample) ---
+
+[[channels]]
+name = "TC_sample_top"
+kind = "tc"
+unit = "K"
+derived_unit = "K"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "sample_temperature"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_top_1"
+[channels.calibration]
+kind = "identity"
+input_unit = "K"
+output_unit = "K"
+
+[[channels]]
+name = "TC_sample_mid"
+kind = "tc"
+unit = "K"
+derived_unit = "K"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "sample_temperature"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_top_2"
+[channels.calibration]
+kind = "identity"
+input_unit = "K"
+output_unit = "K"
+
+# --- Mass (TGA-style; optional under the CAPA profile) ---
+
+[[channels]]
+name = "balance.mass"
+kind = "mass"
+unit = "g"
+derived_unit = "g"
+plot_group = "mass"
+[channels.metadata]
+capa_group = "mass"
+[channels.source]
+source = "sartorius_reading"
+device = "balance"
+field = "value"
+[channels.calibration]
+kind = "identity"
+input_unit = "g"
+output_unit = "g"

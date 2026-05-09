@@ -1,0 +1,39 @@
+# Free-run experiment against a real Alicat MFC (P2).
+#
+# Records mass-flow + absolute-pressure + setpoint at 2 Hz into both
+# ``device_records/alicat.parquet`` (wide-row library-native frames) and
+# ``scalars.parquet`` (calibrated ChannelSamples). The bundle's manifest
+# captures the device identity (model, serial, firmware) at run-start.
+#
+# Run with:
+#
+#   capa validate --strict configs/experiments/alicat_real_freerun.yaml
+#   capa run --headless     configs/experiments/alicat_real_freerun.yaml
+#
+# Adjust ``configs/hardware/alicat_real.toml`` first to match the rig's
+# port + unit id + baud.
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 30.0
+
+calibration_set:
+  name: default
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: ALICAT-REAL-001
+  material: none
+  notes: "P2 real-hardware MFC free run"
+
+tags:
+  - real
+  - alicat
+  - freerun
+
+hardware: ../hardware/alicat_real.toml

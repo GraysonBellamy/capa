@@ -1,0 +1,190 @@
+# CAPA pyrolysis integration profile — variant A (control + visible).
+#
+# Real silicon: Watlow + Alicat + external webcam.
+# Sim devices: Sartorius balance, NI-DAQ thermocouples (no Linux driver).
+# Channels match the capa.profiles.capa_pyrolysis required groups so the
+# same method (configs/methods/sim_capa_pyrolysis.method.toml) drives it.
+
+name = "capa_real_partial_a"
+
+# --- Real heater controller ---
+[[devices]]
+name = "heater"
+adapter = "capa.devices.watlow"
+[devices.params]
+port = "/dev/ttyUSB0"
+address = 1
+protocol = "stdbus"
+parameters = ["process_value", "setpoint"]
+instances = [1]
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+identify_on_open = true
+
+# --- Real carrier MFC ---
+[[devices]]
+name = "carrier_mfc"
+adapter = "capa.devices.alicat"
+[devices.params]
+port = "/dev/ttyUSB2"
+unit_id = "A"
+baudrate = 115200
+rate_hz = 2.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
+# --- Sim balance (real one belongs to variant B) ---
+[[devices]]
+name = "balance"
+adapter = "capa.devices.sim.sartorius_sim"
+[devices.params.mass_signal]
+kind = "ramp"
+start = 5.0
+end = 4.0
+duration_s = 30.0
+
+# --- Sim NI-DAQ thermocouples (no Linux driver) ---
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.sim.nidaq_polled_sim"
+[devices.params.signals.TC_top_1]
+kind = "ramp"
+start = 303.0
+end = 873.0
+duration_s = 30.0
+[devices.params.signals.TC_top_2]
+kind = "ramp"
+start = 303.0
+end = 873.0
+duration_s = 30.0
+
+# --- Real visible camera ---
+[[cameras]]
+name = "visible_cam0"
+adapter = "capa.devices.camera.webcam"
+kind = "visible"
+estimated_bps = 1_500_000
+on_failure = "warn"
+[cameras.params]
+fps = 30
+width = 1280
+height = 720
+codec = "libx264"
+pix_fmt = "yuv420p"
+input_format = "v4l2"
+input_url = "/dev/video4"
+
+# --- Controller channels (heater) ---
+
+[[channels]]
+name = "heater.pv"
+kind = "process_var"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "heater_pv"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "process_value"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "heater.setpoint"
+kind = "setpoint"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "heater_setpoint"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "setpoint"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+# --- Carrier gas (real Alicat) ---
+
+[[channels]]
+name = "carrier.flow"
+kind = "mfc_flow"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+[channels.metadata]
+capa_group = "carrier_gas_flow"
+[channels.source]
+source = "alicat_frame_field"
+device = "carrier_mfc"
+field = "Mass_Flow"
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"
+
+# --- Sample-thermocouples (sim NI-DAQ) ---
+
+[[channels]]
+name = "TC_sample_top"
+kind = "tc"
+unit = "K"
+derived_unit = "K"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "sample_temperature"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_top_1"
+[channels.calibration]
+kind = "identity"
+input_unit = "K"
+output_unit = "K"
+
+[[channels]]
+name = "TC_sample_mid"
+kind = "tc"
+unit = "K"
+derived_unit = "K"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "sample_temperature"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_top_2"
+[channels.calibration]
+kind = "identity"
+input_unit = "K"
+output_unit = "K"
+
+# --- Mass (sim balance) ---
+
+[[channels]]
+name = "balance.mass"
+kind = "mass"
+unit = "g"
+derived_unit = "g"
+plot_group = "mass"
+[channels.metadata]
+capa_group = "mass"
+[channels.source]
+source = "sartorius_reading"
+device = "balance"
+field = "value"
+[channels.calibration]
+kind = "identity"
+input_unit = "g"
+output_unit = "g"

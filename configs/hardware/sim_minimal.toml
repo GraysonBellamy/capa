@@ -1,0 +1,99 @@
+name = "sim_minimal"
+
+[[devices]]
+name = "heater"
+adapter = "capa.devices.sim.watlow_sim"
+
+[[devices]]
+name = "air_mfc"
+adapter = "capa.devices.sim.alicat_sim"
+
+[[devices]]
+name = "balance"
+adapter = "capa.devices.sim.sartorius_sim"
+
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.sim.nidaq_polled_sim"
+[devices.params]
+task = "tc_task"
+
+# --- Channels ---
+
+[[channels]]
+name = "heater.pv"
+kind = "process_var"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "process_value"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "heater.setpoint"
+kind = "setpoint"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "setpoint"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "MFC_air.flow"
+kind = "mfc_flow"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+[channels.source]
+source = "alicat_frame_field"
+device = "air_mfc"
+field = "Mass_Flow"
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"
+
+[[channels]]
+name = "balance.mass"
+kind = "mass"
+unit = "g"
+derived_unit = "g"
+plot_group = "mass"
+[channels.source]
+source = "sartorius_reading"
+device = "balance"
+field = "value"
+[channels.calibration]
+kind = "identity"
+input_unit = "g"
+output_unit = "g"
+
+[[channels]]
+name = "TC_top_1"
+kind = "tc"
+unit = "K"
+derived_unit = "K"
+plot_group = "temperatures"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "tc_task"
+field = "TC_top_1"
+[channels.calibration]
+kind = "identity"
+input_unit = "K"
+output_unit = "K"

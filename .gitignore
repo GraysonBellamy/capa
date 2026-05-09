@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+build/
+dist/
+*.egg
+.coverage
+htmlcov/
+
+# uv
+.python-version
+
+# capa runtime
+runs/
+~/.capa/
+
+# editor
+.vscode/
+.idea/
+
+# Local tooling
+.claude/
+.codex

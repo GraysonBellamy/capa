@@ -1,0 +1,38 @@
+# Free-run experiment against an external USB webcam (P4 stage B).
+#
+# Records H.264 → MKV plus a per-frame parquet sidecar in ``video/``. The
+# bundle's manifest captures the camera identity (adapter, model, serial
+# when reported by V4L2) at run-start.
+#
+# Run with:
+#
+#   capa validate --strict configs/experiments/webcam_real_freerun.yaml
+#   capa run --headless     configs/experiments/webcam_real_freerun.yaml
+#
+# Adjust ``configs/hardware/webcam_real.toml`` first to point at the
+# correct ``/dev/video*`` node for the external webcam.
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 30.0
+
+calibration_set:
+  name: default
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: WEBCAM-REAL-001
+  material: none
+  notes: "P4-B real-hardware visible-camera free run"
+
+tags:
+  - real
+  - webcam
+  - freerun
+
+hardware: ../hardware/webcam_real.toml

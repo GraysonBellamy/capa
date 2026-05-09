@@ -1,0 +1,20 @@
+name = "webcam_real"
+
+# Single visible-spectrum USB webcam. The default ``input_url`` of
+# ``/dev/video0`` covers the laptop's built-in camera; an external webcam
+# typically appears at /dev/video2 or higher (UVC drivers expose two nodes
+# per camera). Override via env at run time, or edit ``params.input_url``.
+[[cameras]]
+name = "visible_cam0"
+adapter = "capa.devices.camera.webcam"
+kind = "visible"
+estimated_bps = 1_500_000   # 30 fps H.264 720p ≈ 2 Mbps; 1.5 MB/s gives generous headroom
+on_failure = "warn"
+[cameras.params]
+fps = 30
+width = 1280
+height = 720
+codec = "libx264"
+pix_fmt = "yuv420p"
+input_format = "v4l2"
+input_url = "/dev/video4"

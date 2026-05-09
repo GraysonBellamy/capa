@@ -1,0 +1,27 @@
+name = "sim_basic"
+description = "Hold/ramp/wait/safe_shutdown for sim_minimal."
+
+[[steps]]
+kind = "hold"
+value = 400.0
+duration_s = 30.0
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "ramp"
+end_value = 600.0
+rate_per_second = 2.0
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+duration_s = 60.0
+
+[[steps]]
+kind = "safe_shutdown"
+duration_s = 120.0
+[steps.cool_target]
+"heater.setpoint" = 100.0
+"MFC_air.flow" = 0.0

@@ -1,0 +1,17 @@
+name = "flir_e85_real"
+
+# Single FLIR E85 IR camera over USB. Resolved via the
+# ``capa_flir.flir_ir`` module path; capa core doesn't bundle the FLIR
+# Atlas SDK so this profile only loads if the ``capa-flir`` package is
+# installed in the active environment.
+[[cameras]]
+name = "ir_cam0"
+adapter = "capa_flir.flir_ir"
+kind = "ir"
+model_hint = "FLIR E85"
+estimated_bps = 4_500_000   # 30 Hz uncompressed .csq, conservative
+on_failure = "warn"
+[cameras.params]
+circular_buffer_frames = 60
+compression = false
+discovery_timeout_s = 5.0

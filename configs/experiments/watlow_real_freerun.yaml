@@ -1,0 +1,40 @@
+# Free-run experiment against the real Watlow controller (P0d).
+#
+# Records process_value + setpoint at 1 Hz into both
+# ``device_records/watlow.parquet`` (long-format library rows) and
+# ``scalars.parquet`` (calibrated ChannelSamples). The bundle's
+# ``manifest.json`` captures the device identity (part number, firmware,
+# hardware id) from ``Controller.identify`` at run-start.
+#
+# Run with:
+#
+#   capa validate --strict configs/experiments/watlow_real_freerun.yaml
+#   capa run --headless     configs/experiments/watlow_real_freerun.yaml
+#
+# Adjust ``configs/hardware/watlow_real.toml`` first to match the rig's
+# port / address / protocol.
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 30.0   # short demo run; remove to make it interruptable-only
+
+calibration_set:
+  name: default
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: WATLOW-REAL-001
+  material: none
+  notes: "P0d real-hardware free run"
+
+tags:
+  - real
+  - watlow
+  - freerun
+
+hardware: ../hardware/watlow_real.toml

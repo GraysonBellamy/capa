@@ -1,0 +1,182 @@
+[build-system]
+requires = ["hatchling>=1.29.0", "hatch-vcs>=0.5.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "capa"
+dynamic = ["version"]
+description = "Control and DAQ application for a custom cone-calorimeter-class lab instrument."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = "MIT"
+authors = [{ name = "Grayson Bellamy", email = "gbellamy@umd.edu" }]
+keywords = [
+    "cone-calorimeter",
+    "data-acquisition",
+    "instrument",
+    "laboratory",
+    "astm-e1354",
+    "iso-5660",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Framework :: AnyIO",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "anyio>=4.6",
+    "pydantic>=2.9",
+    "pint>=0.24",
+    "structlog>=24.4",
+    "tomli-w>=1.0",
+    "ruamel.yaml>=0.18",
+    "pyarrow>=18",
+    "typer>=0.12",
+    "alicatlib",
+    "watlowlib>=0.2.0",
+    "sartoriuslib",
+    "nidaqlib",
+    "pyqt6>=6.7",
+    "qasync>=0.27",
+    "pyqtgraph>=0.13",
+    "psutil>=6",
+    "numpy>=1.26",
+    "av>=13",
+    "pillow>=10",
+]
+
+[project.scripts]
+capa = "capa.app:main"
+
+[project.entry-points."capa.procedures"]
+# Builtin procedures (plan §11). Discovered via importlib.metadata at startup
+# and registered in the trusted ProcedureRegistry. Same machinery is used by
+# third-party plugins.
+"capa.builtin.free_run" = "capa.experiment.procedures.builtin.free_run:FreeRun"
+"capa.builtin.recipe_runner" = "capa.experiment.procedures.builtin.recipe_runner:RecipeRunner"
+"capa.builtin.batch" = "capa.experiment.procedures.builtin.batch:Batch"
+
+[project.entry-points."capa.profiles"]
+# Domain profiles. CAPA (controlled atmosphere pyrolysis) is the default
+# profile; cone_calorimeter is shipped but not the default.
+"capa.profiles.capa_pyrolysis" = "capa.experiment.profiles.capa_pyrolysis"
+"capa.profiles.cone_calorimeter" = "capa.experiment.profiles.cone_calorimeter"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-anyio>=0.0.0; python_version < '0'",
+    "pytest-qt>=4.4",
+    "anyio[trio]>=4.6",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/capa"]
+
+[tool.uv.sources]
+alicatlib = { path = "../alicatlib", editable = true }
+sartoriuslib = { path = "../sartoriuslib", editable = true }
+nidaqlib = { path = "../nidaqlib", editable = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",
+    "I",     # isort
+    "B",     # bugbear
+    "UP",    # pyupgrade
+    "SIM",   # simplify
+    "RUF",
+    "N",     # pep8-naming
+    "PLC", "PLE", "PLW",
+]
+ignore = [
+    "E501",   # line too long (formatter handles it)
+    "RUF001", # ambiguous unicode (we use ×, ±, etc. in scientific docstrings)
+    "RUF002", # ambiguous unicode in docstrings
+    "RUF003", # ambiguous unicode in comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "PLC0415",  # inline imports are common in test setup
+    "B017",     # pytest.raises(Exception) is fine for "this should fail somehow"
+    "F841",     # unused-but-assigned in tests is often deliberate
+    "PLR2004",  # magic numbers are fine in tests
+]
+# Cone-calorimeter profile uses scientific unit suffixes in field names
+# (target_external_flux_kW_m2, etc.). These mixed-case suffixes match the
+# wider scientific convention; we don't want to rename them to snake_case.
+"src/capa/experiment/profiles/cone_calorimeter.py" = ["N815"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+packages = ["capa"]
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+namespace_packages = true
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["pint", "pint.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["ruamel", "ruamel.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
+# UI deps without py.typed markers (pyqtgraph, qasync) and stubless C-extension
+# libraries (psutil) — turn off the missing-import noise for these only.
+[[tool.mypy.overrides]]
+module = ["pyqtgraph", "pyqtgraph.*", "qasync", "qasync.*", "psutil", "psutil.*"]
+ignore_missing_imports = true
+
+# pyarrow's ParquetWriter / write_table / read_table / close / IPC stream
+# helpers are untyped; downstream code that calls them shouldn't be punished
+# under --strict.
+[[tool.mypy.overrides]]
+module = [
+    "capa.storage._ipc",
+    "capa.storage.channel_samples_sink",
+    "capa.storage.device_records_sink",
+    "capa.storage.finalize",
+    "capa.storage.video_sink",
+]
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = ["-q", "--strict-markers", "--strict-config"]
+markers = [
+    "hardware: requires real hardware (skipped unless CAPA_HARDWARE_TESTS=1)",
+]
+

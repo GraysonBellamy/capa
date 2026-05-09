@@ -1,0 +1,34 @@
+name = "sartorius_real"
+
+# Single real Sartorius balance. Adjust ``port``, ``baudrate``, and
+# ``protocol`` to match the rig wiring; the defaults are the factory
+# Sartorius shipment (xBPI, 9600 8-N-1, dst_sbn 0x09).
+[[devices]]
+name = "balance"
+adapter = "capa.devices.sartorius"
+[devices.params]
+port = "/dev/ttyUSB0"
+protocol = "xbpi"
+baudrate = 19200
+src_sbn = 1
+dst_sbn = 9
+rate_hz = 2.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
+# --- Channels ---
+
+[[channels]]
+name = "balance.mass"
+kind = "mass"
+unit = "g"
+derived_unit = "g"
+plot_group = "mass"
+[channels.source]
+source = "sartorius_reading"
+device = "balance"
+field = "value"
+[channels.calibration]
+kind = "identity"
+input_unit = "g"
+output_unit = "g"

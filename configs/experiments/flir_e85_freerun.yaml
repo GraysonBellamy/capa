@@ -1,0 +1,41 @@
+# Free-run experiment against a real FLIR E85 over USB (P4 stage H).
+#
+# Records a vendor-calibrated ``.csq`` plus a per-frame parquet sidecar
+# in ``video/``. The bundle's manifest captures the camera identity
+# (model, serial reported by Atlas discovery) at run-start and the
+# manifest sha256 covers the .csq + .csq.meta.json + .frames.parquet
+# trio.
+#
+# Run with:
+#
+#   capa validate --strict configs/experiments/flir_e85_freerun.yaml
+#   capa run --headless     configs/experiments/flir_e85_freerun.yaml
+#
+# Requires the ``capa-flir`` package installed and the Atlas SDK
+# discoverable via ``CAPA_FLIR_ATLAS_ROOT`` + ``LD_LIBRARY_PATH``.
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 60.0   # plan §4.2: 60-s gate, ~1800 frames at 30 Hz
+
+calibration_set:
+  name: default
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: FLIR-E85-REAL-001
+  material: none
+  notes: "P4-H real-hardware IR-camera free run"
+
+tags:
+  - real
+  - flir-e85
+  - ir
+  - freerun
+
+hardware: ../hardware/flir_e85_real.toml

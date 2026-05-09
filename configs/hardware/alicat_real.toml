@@ -1,0 +1,62 @@
+name = "alicat_real"
+
+# Single real Alicat MFC (or pressure controller). Adjust ``port``,
+# ``unit_id``, and ``baudrate`` to match the rig wiring; the defaults are
+# Alicat's factory shipment (19200 8-N-1, unit "A").
+[[devices]]
+name = "carrier_mfc"
+adapter = "capa.devices.alicat"
+[devices.params]
+port = "/dev/ttyUSB0"
+unit_id = "A"
+baudrate = 115200
+rate_hz = 2.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
+# --- Channels ---
+
+[[channels]]
+name = "carrier.flow"
+kind = "mfc_flow"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+[channels.source]
+source = "alicat_frame_field"
+device = "carrier_mfc"
+field = "Mass_Flow"
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"
+
+[[channels]]
+name = "carrier.abs_press"
+kind = "process_var"
+unit = "psi"
+derived_unit = "psi"
+plot_group = "pressures"
+[channels.source]
+source = "alicat_frame_field"
+device = "carrier_mfc"
+field = "Abs_Press"
+[channels.calibration]
+kind = "identity"
+input_unit = "psi"
+output_unit = "psi"
+
+[[channels]]
+name = "carrier.setpoint"
+kind = "setpoint"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+[channels.source]
+source = "alicat_frame_field"
+device = "carrier_mfc"
+field = "Mass_Flow_Setpt"
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"

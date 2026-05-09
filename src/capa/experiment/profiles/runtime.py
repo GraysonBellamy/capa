@@ -1,0 +1,453 @@
+"""Domain-profile preflight runtime — id → callable check registry.
+
+Plan §5.4.1 / §11. The :class:`~capa.experiment.profiles.base.PreflightCheck`
+schema declares *what* should be checked; this module is the registry that
+maps each ``id`` to a concrete callable. The engine resolves the active
+profile, walks its ``preflight_checks``, runs each callable, and collects
+:class:`~capa.experiment.procedures.base.Problem` entries.
+
+A check function signature:
+
+    async def check(ctx: ProfilePreflightContext) -> Problem | None
+
+Return ``None`` when the check passes; return a :class:`Problem` to surface
+a warning/error. Raising is treated as an unexpected failure (logged and
+recorded as a blocking error problem).
+
+Builtin checks are registered at import time via the :func:`register`
+decorator. Profile authors can register their own checks the same way; the
+plugin runtime imports the profile module which triggers registration.
+"""
+
+from __future__ import annotations
+
+import shutil
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import anyio
+
+from capa.devices.records import ChannelSample
+from capa.experiment.procedures.base import Problem
+from capa.experiment.profiles.base import ChannelRequirement
+
+if TYPE_CHECKING:
+    from capa.channels.registry import ChannelRegistry
+    from capa.core.databus import DataBus
+    from capa.experiment.config import ExperimentConfig
+
+
+@dataclass(slots=True)
+class ProfilePreflightContext:
+    """What a profile preflight check sees.
+
+    Deliberately smaller than :class:`ProcedureContext` — preflight runs
+    *before* the bundle is opened, so there's no writer or executor, only
+    config/registry/databus and an event loop where the check can do
+    short-running observations (e.g. listen for 5 s of mass samples to
+    assess balance stability)."""
+
+    config: ExperimentConfig
+    instruments: ChannelRegistry
+    databus: DataBus
+    profile_metadata: dict[str, Any]
+    """The ``DomainProfileRef.metadata`` dict for the active profile —
+    e.g. CAPA's :class:`CapaPyrolysisMetadata` after model_dump."""
+
+
+CheckFn = Callable[[ProfilePreflightContext], Awaitable[Problem | None]]
+"""Signature of a registered preflight check."""
+
+_REGISTRY: dict[str, CheckFn] = {}
+
+
+def register(check_id: str) -> Callable[[CheckFn], CheckFn]:
+    """Decorator: register a check callable under ``check_id``.
+
+    Re-registration is allowed and replaces the previous binding — useful
+    for tests that want to swap a slow check for a fast stub. Production
+    plugin loading does not re-register a builtin id; collisions there are
+    surfaced by the plugin trust check, not here."""
+
+    def _wrap(fn: CheckFn) -> CheckFn:
+        _REGISTRY[check_id] = fn
+        return fn
+
+    return _wrap
+
+
+def get(check_id: str) -> CheckFn | None:
+    """Look up a registered check. Returns ``None`` if unknown."""
+    return _REGISTRY.get(check_id)
+
+
+def registered_ids() -> tuple[str, ...]:
+    return tuple(sorted(_REGISTRY.keys()))
+
+
+async def run_profile_preflight(
+    ctx: ProfilePreflightContext,
+    check_ids: tuple[str, ...],
+) -> list[Problem]:
+    """Run every check in ``check_ids`` and collect results.
+
+    A missing check id is recorded as a blocking problem so a typo in a
+    profile's ``preflight_checks`` list is surfaced loudly. Exceptions are
+    caught and converted to blocking problems with code
+    ``"profile.check_raised"``.
+    """
+    problems: list[Problem] = []
+    for check_id in check_ids:
+        fn = _REGISTRY.get(check_id)
+        if fn is None:
+            problems.append(
+                Problem(
+                    code="profile.unknown_check",
+                    message=f"profile referenced unknown preflight check {check_id!r}",
+                    severity="error",
+                    blocking=True,
+                )
+            )
+            continue
+        try:
+            result = await fn(ctx)
+        except Exception as exc:
+            problems.append(
+                Problem(
+                    code="profile.check_raised",
+                    message=f"preflight check {check_id!r} raised: {exc}",
+                    severity="error",
+                    blocking=True,
+                    metadata={"error_type": type(exc).__name__},
+                )
+            )
+            continue
+        if result is not None:
+            problems.append(result)
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# Builtin checks — generic + CAPA profile.
+# ---------------------------------------------------------------------------
+
+
+@register("capa.required_channel_mappings")
+@register("cone.required_channel_mappings")
+async def _required_channel_mappings(ctx: ProfilePreflightContext) -> Problem | None:
+    """Verify every required channel group has at least min_count members.
+
+    Both the CAPA and cone profiles register this id (the implementation is
+    identical — both use :attr:`ChannelSpec.metadata['<profile>_group']` /
+    similar markers, validated against :attr:`required_channel_groups`).
+    """
+    profile_id = ctx.config.domain_profile.id if ctx.config.domain_profile else ""
+    group_key = "capa_group" if "capa" in profile_id else "cone_group"
+    required = _resolve_required_groups(profile_id)
+    if not required:
+        return None
+
+    by_group: dict[str, list[str]] = {}
+    for ch in ctx.config.hardware.channels:
+        group = ch.metadata.get(group_key)
+        if not group:
+            continue
+        by_group.setdefault(group, []).append(ch.name)
+
+    missing: list[str] = []
+    for req in required:
+        members = by_group.get(req.group, [])
+        if len(members) < req.min_count:
+            missing.append(f"{req.group} (have {len(members)}, need {req.min_count})")
+
+    if missing:
+        return Problem(
+            code="profile.missing_channel_groups",
+            message="missing required channel groups: " + "; ".join(missing),
+            severity="error",
+            blocking=True,
+            metadata={"missing": missing, "group_key": group_key},
+        )
+    return None
+
+
+@register("capa.atmosphere_consistency")
+async def _atmosphere_consistency(ctx: ProfilePreflightContext) -> Problem | None:
+    """Oxidative / reactive_blend modes must declare a reactive_gas_flow channel."""
+    mode = ctx.profile_metadata.get("atmosphere", {}).get("mode")
+    if mode not in ("oxidative", "reactive_blend"):
+        return None
+    has_reactive = any(
+        ch.metadata.get("capa_group") == "reactive_gas_flow" for ch in ctx.config.hardware.channels
+    )
+    if not has_reactive:
+        return Problem(
+            code="capa.atmosphere_inconsistent",
+            message=(
+                f"atmosphere.mode={mode!r} requires a channel tagged capa_group='reactive_gas_flow'"
+            ),
+            severity="error",
+            blocking=True,
+            metadata={"mode": mode},
+        )
+    return None
+
+
+@register("capa.heater_pv_in_safe_range")
+async def _heater_pv_safe(ctx: ProfilePreflightContext) -> Problem | None:
+    """Heater PV is below a sane startup limit before arming.
+
+    Default limit is 200 °C — a CAPA reactor at room temperature is
+    expected. The limit can be overridden in
+    ``profile_metadata['_safe_arm']['max_heater_pv_c']`` for hot-swap or
+    rapid-cycle workflows."""
+    safe = ctx.profile_metadata.get("_safe_arm", {})
+    limit_c: float = float(safe.get("max_heater_pv_c", 200.0))
+    sample = await _sample_one(ctx, group_key="capa_group", group_value="heater_pv")
+    if sample is None:
+        return Problem(
+            code="capa.heater_pv_silent",
+            message="no heater_pv sample observed within preflight window",
+            severity="warning",
+            blocking=False,
+        )
+    value = float(sample.value)
+    if value > limit_c:
+        return Problem(
+            code="capa.heater_pv_too_hot",
+            message=(
+                f"heater PV is {value:.1f} {sample.unit}, above safe-arm limit "
+                f"{limit_c:.1f} °C; let the reactor cool before arming"
+            ),
+            severity="error",
+            blocking=True,
+            metadata={"observed_c": value, "limit_c": limit_c},
+        )
+    return None
+
+
+@register("capa.carrier_flow_established")
+async def _carrier_flow_established(ctx: ProfilePreflightContext) -> Problem | None:
+    """Carrier flow has been seen at >= target * 0.5 for >=3 s."""
+    target = ctx.profile_metadata.get("atmosphere", {}).get("carrier", {}).get("target_flow_sccm")
+    if not target:
+        return Problem(
+            code="capa.carrier_target_missing",
+            message="atmosphere.carrier.target_flow_sccm not declared",
+            severity="warning",
+            blocking=False,
+        )
+    threshold = float(target) * 0.5
+    samples = await _sample_for(
+        ctx,
+        group_key="capa_group",
+        group_value="carrier_gas_flow",
+        seconds=3.0,
+    )
+    if not samples:
+        # Preflight currently runs before adapter streams open. A silent
+        # channel here is "no data yet" not "device broken" — downgrade to
+        # warning. When dynamic preflight moves into the task group (post
+        # adapter-start), this becomes blocking again.
+        return Problem(
+            code="capa.carrier_silent",
+            message="no carrier_gas_flow samples observed within preflight window",
+            severity="warning",
+            blocking=False,
+        )
+    last_below = [s for s in samples if float(s.value) < threshold]
+    if last_below:
+        return Problem(
+            code="capa.carrier_below_target",
+            message=(
+                f"carrier flow held below {threshold:.2f} sccm for "
+                f"{len(last_below)}/{len(samples)} samples in last 3 s"
+            ),
+            severity="error",
+            blocking=True,
+            metadata={"threshold_sccm": threshold},
+        )
+    return None
+
+
+@register("capa.leak_test_recency")
+async def _leak_test_recency(ctx: ProfilePreflightContext) -> Problem | None:
+
+    leak = ctx.profile_metadata.get("atmosphere", {}).get("leak_check_at")
+    if leak is None:
+        return Problem(
+            code="capa.leak_test_missing",
+            message="atmosphere.leak_check_at is not set; recency cannot be verified",
+            severity="warning",
+            blocking=False,
+        )
+    if isinstance(leak, str):
+        try:
+            leak_dt = datetime.fromisoformat(leak)
+        except ValueError:
+            return Problem(
+                code="capa.leak_test_unparseable",
+                message=f"atmosphere.leak_check_at is not ISO-8601: {leak!r}",
+                severity="warning",
+                blocking=False,
+            )
+    else:
+        leak_dt = leak
+    if leak_dt.tzinfo is None:
+        leak_dt = leak_dt.replace(tzinfo=UTC)
+    age = datetime.now(UTC) - leak_dt
+    window = timedelta(days=int(ctx.profile_metadata.get("_leak_window_days", 7)))
+    if age > window:
+        return Problem(
+            code="capa.leak_test_stale",
+            message=f"leak check is {age.days} days old (>{window.days} day window)",
+            severity="warning",
+            blocking=False,
+            metadata={"age_days": age.days, "window_days": window.days},
+        )
+    return None
+
+
+@register("capa.balance_stability")
+@register("cone.balance_stability")
+async def _balance_stability(ctx: ProfilePreflightContext) -> Problem | None:
+    """When a mass channel is declared, it must report stable for >=5 s."""
+    profile_id = ctx.config.domain_profile.id if ctx.config.domain_profile else ""
+    group_key = "capa_group" if "capa" in profile_id else "cone_group"
+    has_mass = any(ch.metadata.get(group_key) == "mass" for ch in ctx.config.hardware.channels)
+    if not has_mass:
+        return None  # nothing to check
+    samples = await _sample_for(ctx, group_key=group_key, group_value="mass", seconds=5.0)
+    if not samples:
+        return Problem(
+            code="profile.balance_silent",
+            message="no mass samples observed within preflight window",
+            severity="warning",
+            blocking=False,
+        )
+    values = [float(s.value) for s in samples]
+    spread = max(values) - min(values)
+    if spread > 0.05:  # 50 mg
+        return Problem(
+            code="profile.balance_unstable",
+            message=f"mass channel spread is {spread * 1000:.1f} mg over 5 s (>50 mg)",
+            severity="warning",
+            blocking=False,
+            metadata={"spread_g": spread},
+        )
+    return None
+
+
+@register("capa.disk_projection")
+@register("cone.disk_projection")
+async def _disk_projection(ctx: ProfilePreflightContext) -> Problem | None:
+    """Verify the bundle volume has at least 1.5x the projected size free.
+
+    P3 implementation is conservative: assume 1 MB / s + 100 MB headroom over
+    a 30-minute run. Refined in P4/P5 once we have video-stream estimates."""
+
+    runs_root = Path(ctx.config.storage.bundle_root)
+    runs_root = runs_root.resolve() if runs_root.is_absolute() else Path.cwd() / runs_root
+    runs_root.mkdir(parents=True, exist_ok=True)
+    free_bytes = shutil.disk_usage(runs_root).free
+    projected_bytes = int(1_800.0 * 1_024 * 1_024)  # 30 min * 1 MB/s + headroom
+    needed = int(projected_bytes * 1.5)
+    if free_bytes < needed:
+        return Problem(
+            code="profile.disk_low",
+            message=(
+                f"only {free_bytes / 2**30:.1f} GiB free at {runs_root}; "
+                f"need {needed / 2**30:.1f} GiB for 1.5x margin"
+            ),
+            severity="error",
+            blocking=True,
+            metadata={"free_bytes": free_bytes, "needed_bytes": needed},
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _sample_one(
+    ctx: ProfilePreflightContext,
+    *,
+    group_key: str,
+    group_value: str,
+    timeout_s: float = 2.0,
+) -> ChannelSample | None:
+    """Wait up to ``timeout_s`` for one ChannelSample on any channel tagged
+    ``metadata[group_key]==group_value``. Returns ``None`` on timeout."""
+    channel_names = [
+        ch.name for ch in ctx.config.hardware.channels if ch.metadata.get(group_key) == group_value
+    ]
+    if not channel_names:
+        return None
+    sub = ctx.databus.subscribe(name=f"preflight-{group_value}")
+    try:
+        with anyio.move_on_after(timeout_s):
+            async for emission in sub:
+                if isinstance(emission, ChannelSample) and emission.channel in channel_names:
+                    return emission
+    finally:
+        ctx.databus.unsubscribe(sub)
+    return None
+
+
+async def _sample_for(
+    ctx: ProfilePreflightContext,
+    *,
+    group_key: str,
+    group_value: str,
+    seconds: float,
+) -> list[ChannelSample]:
+    """Collect every ChannelSample on the group's channels for ``seconds``."""
+    channel_names = [
+        ch.name for ch in ctx.config.hardware.channels if ch.metadata.get(group_key) == group_value
+    ]
+    out: list[ChannelSample] = []
+    if not channel_names:
+        return out
+    sub = ctx.databus.subscribe(name=f"preflight-collect-{group_value}")
+    try:
+        with anyio.move_on_after(seconds):
+            async for emission in sub:
+                if isinstance(emission, ChannelSample) and emission.channel in channel_names:
+                    out.append(emission)
+    finally:
+        ctx.databus.unsubscribe(sub)
+    return out
+
+
+def _resolve_required_groups(profile_id: str) -> tuple[ChannelRequirement, ...]:
+    """Defer-import the profile module and return its required_channel_groups.
+
+    Avoids a top-level import cycle (the profile modules already import from
+    profiles.base; runtime.py is imported by the engine which imports the
+    profile module too)."""
+    if "capa_pyrolysis" in profile_id:
+        from capa.experiment.profiles.capa_pyrolysis import REQUIRED_CHANNEL_GROUPS  # noqa: PLC0415
+
+        return REQUIRED_CHANNEL_GROUPS
+    if "cone_calorimeter" in profile_id:
+        from capa.experiment.profiles.cone_calorimeter import (  # noqa: PLC0415
+            REQUIRED_CHANNEL_GROUPS,
+        )
+
+        return REQUIRED_CHANNEL_GROUPS
+    return ()
+
+
+__all__ = [
+    "CheckFn",
+    "ProfilePreflightContext",
+    "get",
+    "register",
+    "registered_ids",
+    "run_profile_preflight",
+]

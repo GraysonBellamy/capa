@@ -1,0 +1,196 @@
+# Cone-calorimeter-shaped sim hardware profile.
+#
+# Provides every channel group required by capa.profiles.cone_calorimeter:
+# mass, heater_setpoint, heater_pv, exhaust_flow, oxygen, thermocouples,
+# heat_flux_gauge.
+
+name = "sim_cone"
+
+[[devices]]
+name = "heater"
+adapter = "capa.devices.sim.watlow_sim"
+
+[[devices]]
+name = "exhaust_mfc"
+adapter = "capa.devices.sim.alicat_sim"
+
+[[devices]]
+name = "balance"
+adapter = "capa.devices.sim.sartorius_sim"
+
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.sim.nidaq_polled_sim"
+
+# --- Channels: heater ---
+
+[[channels]]
+name = "heater.pv"
+kind = "process_var"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.metadata]
+cone_group = "heater_pv"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "process_value"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "heater.setpoint"
+kind = "setpoint"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.metadata]
+cone_group = "heater_setpoint"
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "setpoint"
+instance = 1
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+# --- Channel: exhaust flow ---
+
+[[channels]]
+name = "exhaust.flow"
+kind = "mfc_flow"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+[channels.metadata]
+cone_group = "exhaust_flow"
+[channels.source]
+source = "alicat_frame_field"
+device = "exhaust_mfc"
+field = "Mass_Flow"
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"
+
+# --- Channel: mass ---
+
+[[channels]]
+name = "balance.mass"
+kind = "mass"
+unit = "g"
+derived_unit = "g"
+plot_group = "mass"
+[channels.metadata]
+cone_group = "mass"
+[channels.source]
+source = "sartorius_reading"
+device = "balance"
+field = "value"
+[channels.calibration]
+kind = "identity"
+input_unit = "g"
+output_unit = "g"
+
+# --- Channels: thermocouples ---
+
+[[channels]]
+name = "TC_top_1"
+kind = "tc"
+unit = "K"
+derived_unit = "K"
+plot_group = "temperatures"
+[channels.metadata]
+cone_group = "thermocouples"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "tc_task"
+field = "TC_top_1"
+[channels.calibration]
+kind = "identity"
+input_unit = "K"
+output_unit = "K"
+
+[[channels]]
+name = "TC_top_2"
+kind = "tc"
+unit = "K"
+derived_unit = "K"
+plot_group = "temperatures"
+[channels.metadata]
+cone_group = "thermocouples"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "tc_task"
+field = "TC_top_2"
+[channels.calibration]
+kind = "identity"
+input_unit = "K"
+output_unit = "K"
+
+# --- Channel: heat-flux gauge (raw mV from Schmidt-Boelter; calibrated to kW/m^2) ---
+
+[[channels]]
+name = "heat_flux_gauge"
+kind = "analog_in"
+unit = "mV"
+derived_unit = "kW/m^2"
+keep_raw = true
+plot_group = "heat_flux"
+[channels.metadata]
+cone_group = "heat_flux_gauge"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "tc_task"
+field = "AI_HFG"
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "mV"
+output_unit = "kW/m^2"
+ref_low_raw = 0.0
+ref_low_value = 0.0
+ref_high_raw = 10.0
+ref_high_value = 100.0
+[channels.calibration.uncertainty]
+kind = "relative"
+value = 0.03
+coverage_factor = 2.0
+method = "manufacturer + reference comparison"
+
+# --- Channel: oxygen analyzer (mV from analyzer; calibrated to %O2) ---
+
+[[channels]]
+name = "O2_analyzer"
+kind = "analog_in"
+unit = "mV"
+derived_unit = "percent"
+keep_raw = true
+plot_group = "gas"
+[channels.metadata]
+cone_group = "oxygen"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "tc_task"
+field = "AI_O2"
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "mV"
+output_unit = "percent"
+ref_low_raw = 0.0
+ref_low_value = 0.0
+ref_high_raw = 10.0
+ref_high_value = 21.0
+[channels.calibration.uncertainty]
+kind = "absolute"
+value = 0.05
+coverage_factor = 2.0

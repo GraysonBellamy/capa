@@ -1,0 +1,17 @@
+# Example plugins.lock fixture (test only; production locks live elsewhere).
+
+version = 1
+
+[[plugins]]
+id = "capa.builtin.recipe_runner"
+package = "capa"
+version = "0.0.0"
+entry_point = "capa.experiment.procedures.builtin:RecipeRunner"
+distribution_hash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+[[plugins]]
+id = "capa.builtin.free_run"
+package = "capa"
+version = "0.0.0"
+entry_point = "capa.experiment.procedures.builtin:FreeRun"
+distribution_hash = "sha256:1111111111111111111111111111111111111111111111111111111111111111"

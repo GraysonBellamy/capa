@@ -1,0 +1,39 @@
+# Free-run experiment against a real Sartorius balance (P2).
+#
+# Records mass at 2 Hz into both ``device_records/sartorius.parquet``
+# (single-value-row library frame) and ``scalars.parquet`` (calibrated
+# ChannelSamples). The bundle's manifest captures the balance identity
+# (model, serial, firmware) at run-start.
+#
+# Run with:
+#
+#   capa validate --strict configs/experiments/sartorius_real_freerun.yaml
+#   capa run --headless     configs/experiments/sartorius_real_freerun.yaml
+#
+# Adjust ``configs/hardware/sartorius_real.toml`` first to match the
+# rig's port + protocol + baud.
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 30.0
+
+calibration_set:
+  name: default
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: SARTORIUS-REAL-001
+  material: none
+  notes: "P2 real-hardware balance free run"
+
+tags:
+  - real
+  - sartorius
+  - freerun
+
+hardware: ../hardware/sartorius_real.toml
