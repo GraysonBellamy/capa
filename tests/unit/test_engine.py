@@ -12,6 +12,7 @@ Asserts:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
@@ -195,7 +196,13 @@ async def test_engine_crashed_when_adapter_raises_during_stream(tmp_path: Path) 
     # but before running, we override _construct_adapters via a subclass.
 
     class _CrashingEngine(ExperimentEngine):
-        async def _producer_task(self, adapter, queue, metrics, producers_alive):  # type: ignore[override]
+        async def _producer_task(
+            self,
+            adapter: Any,
+            queue: Any,
+            metrics: Any,
+            producers_alive: Any,
+        ) -> None:
             raise RuntimeError("synthetic adapter crash")
 
     crashing = _CrashingEngine()

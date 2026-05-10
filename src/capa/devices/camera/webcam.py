@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import sys
 import time
 from collections.abc import AsyncIterator
@@ -42,6 +43,17 @@ from PIL import Image
 
 from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
+from capa.devices._helpers import (
+    make_accepted_result,
+    make_not_open_result,
+    reject_unless_authorized,
+)
+from capa.devices.adapter import CommandResult, DeviceCommand
+from capa.devices.camera._uvc import (
+    AUTO_VERB_TO_PROPERTY,
+    PROPERTY_BY_VERB,
+    UvcController,
+)
 from capa.devices.camera.base import (
     CameraCapability,
     CameraEvent,
@@ -50,6 +62,21 @@ from capa.devices.camera.base import (
     CameraSpec,
     FrameReceipt,
     make_stream_pair,
+)
+
+_BASE_CAPABILITIES: frozenset[CameraCapability] = frozenset(
+    {
+        CameraCapability.SUPPORTS_DISCOVERY,
+        CameraCapability.SERIAL_SELECT,
+        CameraCapability.MODEL_HINT,
+        CameraCapability.LIVE_PREVIEW,
+        # STREAM_FORMAT is always supported — PyAV reopens the input with
+        # the new resolution/framerate on the next start_recording().
+        # UVC control flags are added at open() time after duvc-ctl probes
+        # the device; off Windows / on cameras with no controllable UVC
+        # properties they stay absent.
+        CameraCapability.STREAM_FORMAT,
+    }
 )
 
 DEFAULT_CODEC = "libx264"
@@ -130,19 +157,17 @@ class WebcamAdapter:
         "_pix_fmt",
         "_preview_recv",
         "_preview_send",
+        "_previewing",
         "_recording",
+        "_resolution_fps_caps",
         "_spec",
         "_started_t_mono_ns",
+        "_supported_resolutions",
+        "_uvc",
         "_width",
+        "capabilities",
     )
 
-    capabilities: frozenset[CameraCapability] = frozenset(
-        {
-            CameraCapability.SUPPORTS_DISCOVERY,
-            CameraCapability.SERIAL_SELECT,
-            CameraCapability.LIVE_PREVIEW,
-        }
-    )
     kind: Literal["visible"] = "visible"
 
     def __init__(
@@ -174,6 +199,7 @@ class WebcamAdapter:
         platform_fmt, platform_url = _platform_default_format()
         self._input_url = input_url or platform_url
         self._input_format = input_format or platform_fmt
+        self.capabilities = _BASE_CAPABILITIES
         self._info = CameraInfo(
             adapter="webcam",
             name=spec.name,
@@ -182,8 +208,14 @@ class WebcamAdapter:
             transport="usb",
             capabilities=tuple(c.name for c in self.capabilities if c.name is not None),
         )
-        self._open = False
-        self._recording = False
+        self._uvc: UvcController | None = None
+        # Populated by :meth:`open` on Windows (dshow). Empty everywhere else;
+        # the UI falls back to a static set when nothing was probed.
+        self._supported_resolutions: list[tuple[int, int]] = []
+        self._resolution_fps_caps: dict[tuple[int, int], float] = {}
+        self._open: bool = False
+        self._recording: bool = False
+        self._previewing: bool = False
         self._frame_count = 0
         self._dropped_frames = 0
         self._file_size = 0
@@ -256,6 +288,33 @@ class WebcamAdapter:
         """
         return self._info
 
+    @property
+    def supported_resolutions(self) -> list[tuple[int, int]]:
+        """``(width, height)`` pairs the dshow input enumerated at open-time.
+
+        Empty when probing was not run (non-Windows, non-dshow, or the camera
+        was opened in a context that skipped open()). UI code uses this to
+        rebuild a resolution selector from real device data; an empty list
+        signals "fall back to a static set"."""
+        return list(self._supported_resolutions)
+
+    def max_fps_for_resolution(self, width: int, height: int) -> float | None:
+        """Largest frame rate the device advertised for ``(width, height)``
+        at open-time, or ``None`` if the probe never saw that resolution
+        (or never saw an fps annotation alongside it). UI code uses this
+        to cap the framerate spinbox so operators can't request 60 fps on a
+        sensor that maxes out at 30."""
+        return self._resolution_fps_caps.get((int(width), int(height)))
+
+    @property
+    def resolution_hint(self) -> tuple[int, int]:
+        """``(width, height)`` currently configured for the next start_recording.
+
+        Public read-only view of the configured size — used by the manual-
+        control card to preselect the matching combo entry without poking
+        :attr:`_width` / :attr:`_height` directly."""
+        return (self._width, self._height)
+
     # ----------------------------------------------------------- protocol API
 
     async def discover(self) -> tuple[CameraInfo, ...]:
@@ -285,15 +344,60 @@ class WebcamAdapter:
                     transport=self._info.transport,
                     capabilities=self._info.capabilities,
                 )
+        # On Windows, probe duvc-ctl for UVC control surface. The controller
+        # holds a separate DirectShow handle that does NOT compete with PyAV
+        # for the capture pin — IAMCameraControl / IAMVideoProcAmp can be
+        # queried while another graph renders. Off Windows (or when duvc-ctl
+        # cannot match a device) the controller stays None and only the
+        # base capability flags survive.
+        if sys.platform == "win32":
+            controller = await UvcController.find(
+                model_hint=self._spec.model_hint,
+                serial=self._spec.serial,
+            )
+            if controller is not None:
+                probed_caps = await controller.probe_capabilities()
+                if probed_caps:
+                    self._uvc = controller
+                    self.capabilities = self.capabilities | probed_caps
+                    # Refresh CameraInfo so the manifest reflects the live
+                    # capability set (was frozen with _BASE_CAPABILITIES).
+                    self._info = CameraInfo(
+                        adapter=self._info.adapter,
+                        name=self._info.name,
+                        model=self._info.model,
+                        serial=self._info.serial,
+                        transport=self._info.transport,
+                        capabilities=tuple(c.name for c in self.capabilities if c.name is not None),
+                    )
+                else:
+                    controller.close()
+        # Enumerate supported (width,height) pairs via PyAV's dshow
+        # list_options output. duvc-ctl does not expose IAMStreamConfig,
+        # so this is the only path on Windows. The probe opens + closes
+        # the dshow filter graph briefly; subsequent av.open calls absorb
+        # the DirectShow release latency via :meth:`_open_input_with_retry`.
+        if sys.platform == "win32" and self._input_format == "dshow":
+            resolutions, fps_caps = await anyio.to_thread.run_sync(
+                _probe_dshow_format_info_sync, self._input_url
+            )
+            if resolutions:
+                self._supported_resolutions = resolutions
+                self._resolution_fps_caps = fps_caps
         self._open = True
         return self._info
 
     async def close(self) -> None:
         if self._recording:
             await self.stop_recording()
+        if self._previewing:
+            await self.stop_preview()
         await self._frame_send.aclose()
         await self._preview_send.aclose()
         await self._event_send.aclose()
+        if self._uvc is not None:
+            self._uvc.close()
+            self._uvc = None
         self._open = False
 
     async def start_recording(self, output_path: Path) -> None:
@@ -313,6 +417,52 @@ class WebcamAdapter:
         await self._emit_event(
             kind="recording_started",
             message=f"path={output_path} codec={self._codec}",
+            severity="info",
+        )
+
+    async def start_preview(self) -> None:
+        """Begin emitting preview frames *without* opening the encoder.
+
+        Decoupled from :meth:`start_recording` so the manual-control UI can
+        show a live tile while the operator adjusts UVC settings between
+        runs. Mutually exclusive with recording: while the engine is
+        actively recording, the recording pump owns the input container and
+        already emits previews — calling ``start_preview`` then is a
+        no-op (idempotent). When recording is *not* active, the consumer
+        is expected to drive :meth:`run_preview_pump` on its own task to
+        actually source frames; this method only flips the state flag and
+        resets the throttle timestamp.
+
+        Idempotent against re-entry. Requires :meth:`open` to have
+        completed (the V4L2 / DirectShow identity probe lives there).
+        """
+        if not self._open:
+            raise AdapterError("WebcamAdapter.start_preview requires open()")
+        if self._previewing:
+            return
+        self._previewing = True
+        # Reset the 2 Hz throttle so the first preview frame fires
+        # immediately instead of waiting up to 500 ms.
+        self._last_preview_t_mono_ns = None
+        await self._emit_event(
+            kind="preview_started",
+            message=f"resolution={self._width}x{self._height}",
+            severity="info",
+        )
+
+    async def stop_preview(self) -> None:
+        """Flip ``_previewing`` off. The consumer task driving
+        :meth:`run_preview_pump` should observe the flag and exit naturally
+        within one decoder iteration (~33 ms at 30 fps).
+
+        Idempotent: a second call against a not-previewing adapter is a
+        no-op, mirroring :meth:`stop_recording`."""
+        if not self._previewing:
+            return
+        self._previewing = False
+        await self._emit_event(
+            kind="preview_stopped",
+            message="",
             severity="info",
         )
 
@@ -354,6 +504,139 @@ class WebcamAdapter:
 
     def event_stream(self) -> AsyncIterator[CameraEvent]:
         return _drain_stream(self._event_recv)
+
+    async def command(self, cmd: DeviceCommand) -> CommandResult:
+        """Dispatch a :class:`DeviceCommand` to the right typed verb.
+
+        Verbs (gated on capability flags populated by the open() probe):
+
+        * **STREAM_FORMAT** — ``set_resolution`` ``{"width", "height"}``,
+          ``set_framerate`` ``{"fps"}``. Apply on the *next* start_recording;
+          rejected during an active recording.
+        * **EXPOSURE_CONTROL** — ``set_exposure`` ``{"value"}``,
+          ``set_auto_exposure`` ``{"enable"}``.
+        * **FOCUS_CONTROL** — ``set_focus`` ``{"value"}``,
+          ``set_auto_focus`` ``{"enable"}``.
+        * **ZOOM_CONTROL** — ``set_zoom`` ``{"value"}``,
+          ``set_digital_zoom`` ``{"value"}``.
+        * **WB_CONTROL** — ``set_white_balance`` ``{"value"}``,
+          ``set_auto_white_balance`` ``{"enable"}``.
+        * **PAN_TILT_CONTROL** — ``set_pan`` ``{"value"}``,
+          ``set_tilt`` ``{"value"}``.
+        * **IMAGE_ADJUST** — ``set_brightness`` / ``_contrast`` /
+          ``_saturation`` / ``_sharpness`` / ``_gamma`` / ``_hue`` /
+          ``_gain`` / ``_backlight_compensation`` (all ``{"value"}``).
+
+        Authorization gate → open-state gate → recording-state gate →
+        capability/verb-table dispatch. Rejections preserve ordering so
+        the most informative reason surfaces first.
+        """
+        rejection = reject_unless_authorized(
+            cmd, adapter_id="webcam", device_name=self._spec.name, clock=self._clock
+        )
+        if rejection is not None:
+            return rejection
+        if not self._open:
+            return make_not_open_result(
+                adapter_id="webcam", device_name=self._spec.name, clock=self._clock
+            )
+
+        try:
+            detail = await self._dispatch_command(cmd)
+        except AdapterError as exc:
+            return CommandResult(
+                accepted=False,
+                detail=str(exc),
+                t_mono_ns=self._clock.t_mono_ns(),
+                t_utc=datetime.now(UTC),
+            )
+        if detail is None:
+            return CommandResult(
+                accepted=False,
+                detail=f"webcam {self._spec.name!r}: unknown verb {cmd.kind!r}",
+                t_mono_ns=self._clock.t_mono_ns(),
+                t_utc=datetime.now(UTC),
+            )
+        return make_accepted_result(detail=detail, clock=self._clock)
+
+    async def _dispatch_command(self, cmd: DeviceCommand) -> str | None:
+        """Route ``cmd.kind`` onto typed implementations.
+
+        Returns the success detail string, or ``None`` when the verb isn't
+        recognized (handled at the call site as a not-accepted result).
+        Raises :class:`AdapterError` for verb-level rejections (capability
+        not advertised, recording in progress, UVC set failure) — caught
+        by :meth:`command` and rendered as ``accepted=False``.
+        """
+        kind = cmd.kind
+
+        # ---- STREAM_FORMAT ----
+        if kind == "set_resolution":
+            if CameraCapability.STREAM_FORMAT not in self.capabilities:
+                raise AdapterError(f"webcam {self._spec.name!r}: STREAM_FORMAT not advertised")
+            if self._recording:
+                raise AdapterError(
+                    f"webcam {self._spec.name!r}: set_resolution refused "
+                    "during recording (applies to the next start_recording)"
+                )
+            width = int(cmd.payload["width"])
+            height = int(cmd.payload["height"])
+            if width <= 0 or height <= 0:
+                raise AdapterError(
+                    f"webcam {self._spec.name!r}: set_resolution width/height must be > 0"
+                )
+            self._width = width
+            self._height = height
+            return f"set_resolution width={width} height={height}"
+        if kind == "set_framerate":
+            if CameraCapability.STREAM_FORMAT not in self.capabilities:
+                raise AdapterError(f"webcam {self._spec.name!r}: STREAM_FORMAT not advertised")
+            if self._recording:
+                raise AdapterError(
+                    f"webcam {self._spec.name!r}: set_framerate refused "
+                    "during recording (applies to the next start_recording)"
+                )
+            fps = float(cmd.payload["fps"])
+            if fps <= 0:
+                raise AdapterError(f"webcam {self._spec.name!r}: set_framerate fps must be > 0")
+            self._fps = fps
+            return f"set_framerate fps={fps}"
+
+        # ---- UVC numeric set ----
+        if kind in PROPERTY_BY_VERB:
+            if self._uvc is None:
+                raise AdapterError(
+                    f"webcam {self._spec.name!r}: UVC controls unavailable "
+                    "(no duvc-ctl device match)"
+                )
+            prop = PROPERTY_BY_VERB[kind]
+            if not self._uvc.supports(prop):
+                raise AdapterError(
+                    f"webcam {self._spec.name!r}: device does not support "
+                    f"{prop.name} ({prop.group.value} property)"
+                )
+            value = int(cmd.payload["value"])
+            await self._uvc.set_value(prop, value)
+            return f"{kind} value={value}"
+
+        # ---- UVC auto-mode toggle ----
+        if kind in AUTO_VERB_TO_PROPERTY:
+            if self._uvc is None:
+                raise AdapterError(
+                    f"webcam {self._spec.name!r}: UVC controls unavailable "
+                    "(no duvc-ctl device match)"
+                )
+            prop = AUTO_VERB_TO_PROPERTY[kind]
+            if not self._uvc.supports(prop):
+                raise AdapterError(
+                    f"webcam {self._spec.name!r}: device does not support "
+                    f"{prop.name} ({prop.group.value} property)"
+                )
+            enable = bool(cmd.payload["enable"])
+            await self._uvc.set_auto(prop, enable)
+            return f"{kind} enable={enable}"
+
+        return None
 
     # ----------------------------------------------------------- frame ingest
 
@@ -580,6 +863,98 @@ class WebcamAdapter:
         finally:
             await anyio.to_thread.run_sync(in_container.close)
 
+    async def run_preview_pump(self) -> None:
+        """Drive the input container for preview-only emission.
+
+        Parallel to :meth:`run_pump` but runs while ``_previewing`` is set
+        and writes nothing to disk — frames are JPEG-thumbnailed at the
+        same 2 Hz cadence as the recording-mode preview and pushed onto
+        ``_preview_send``.
+
+        Manual-control owns this task; the engine still uses
+        :meth:`run_pump` for in-run frames. The two are mutually
+        exclusive at the lifecycle level: cards stop preview before the
+        engine acquires the camera (see ``WebcamCard._on_engine_state``),
+        and :meth:`start_preview` no-ops while ``_recording`` is set, so
+        we never end up with two pumps fighting for the same UVC pin.
+
+        Exits on ``stop_preview`` (the ``while self._previewing`` loop
+        observes the flag flip within one decoder iteration ≈ 33 ms at
+        30 fps) or on a hard cancellation from the surrounding task.
+        ``av.open`` failures (camera already in use by another process)
+        surface as :class:`AdapterError`; transient I/O errors on Windows
+        DirectShow are retried inside :meth:`_open_input_with_retry`.
+        """
+        if not self._previewing:
+            raise AdapterError("run_preview_pump requires start_preview()")
+        in_container = await self._open_input_with_retry()
+        try:
+            in_stream = next(s for s in in_container.streams if s.type == "video")
+            decoder = in_container.decode(in_stream)
+            while self._previewing:
+                frame = await anyio.to_thread.run_sync(_advance_decoder, decoder)
+                # Same race-window guard as run_pump: ``stop_preview`` may
+                # flip the flag while the decode worker was running; bail
+                # before the precondition check in :meth:`push_preview_frame`
+                # raises.
+                if frame is None or not self._previewing:
+                    break
+                rgb = await anyio.to_thread.run_sync(_reformat_to_rgb24, frame)
+                # ``push_preview_frame`` re-checks ``_previewing`` itself, so
+                # a flag flip during the reformat-thread yield raises an
+                # AdapterError in the pump task; the surrounding
+                # :func:`_run_preview_pump_safe` swallows it. One stale
+                # frame's worth of work is acceptable for the simpler
+                # loop structure.
+                await self.push_preview_frame(rgb)
+        finally:
+            await anyio.to_thread.run_sync(in_container.close)
+
+    async def push_preview_frame(self, frame: np.ndarray) -> None:
+        """JPEG-thumbnail ``frame`` and push onto the preview stream.
+
+        Used by :meth:`run_preview_pump` (the production path) and by
+        tests that drive frames directly without opening a real input
+        container. The 2 Hz throttle is shared with :meth:`push_frame`'s
+        recording-mode preview generation — switching from preview to
+        recording back to preview re-uses ``_last_preview_t_mono_ns``
+        so the consumer sees a smooth 2 Hz cadence across the transition.
+
+        DROP_OLDEST is enforced upstream by ``_preview_send``'s capacity
+        of 2; ``send_nowait`` discards on backpressure rather than
+        blocking the pump task, which keeps the decoder draining the
+        UVC ring buffer at hardware rate.
+        """
+        if not self._previewing:
+            raise AdapterError("push_preview_frame requires start_preview()")
+        preview_bytes = await anyio.to_thread.run_sync(self._maybe_encode_preview, frame)
+        if preview_bytes is None:
+            return
+        with contextlib.suppress(anyio.WouldBlock):
+            self._preview_send.send_nowait(preview_bytes)
+
+    def _maybe_encode_preview(self, frame: np.ndarray) -> bytes | None:
+        """Apply the 2 Hz throttle + JPEG-encode the thumbnail.
+
+        Returns ``None`` when the throttle hasn't elapsed (no encode
+        cost paid on the throttled tick). Worker-thread-callable —
+        :meth:`push_preview_frame` wraps it in
+        :func:`anyio.to_thread.run_sync`.
+        """
+        if frame.ndim != 3 or frame.shape[2] != 3 or frame.dtype != np.uint8:
+            raise AdapterError(
+                f"push_preview_frame expects HxWx3 uint8 ndarray; "
+                f"got shape={frame.shape} dtype={frame.dtype}"
+            )
+        t_mono_ns = self._clock.t_mono_ns()
+        if (
+            self._last_preview_t_mono_ns is not None
+            and t_mono_ns - self._last_preview_t_mono_ns < PREVIEW_INTERVAL_NS
+        ):
+            return None
+        self._last_preview_t_mono_ns = t_mono_ns
+        return _encode_preview_jpeg(frame)
+
     # -------------------------------------------------------------- internals
 
     def _open_encoder(self) -> None:
@@ -659,7 +1034,7 @@ def _probe_v4l2_info(device_path: str) -> V4L2Probe:
     empty = V4L2Probe(card_name=None, serial=None, bus_info=None)
     if sys.platform != "linux":
         return empty
-    if not device_path.startswith("/dev/video"):
+    if not device_path.startswith("/dev/video"):  # type: ignore[unreachable]
         return empty
     node = device_path.rsplit("/", 1)[-1]  # "video4"
     sysfs_root = Path("/sys/class/video4linux") / node
@@ -689,6 +1064,81 @@ def _probe_v4l2_info(device_path: str) -> V4L2Probe:
         pass
 
     return V4L2Probe(card_name=card_name, serial=serial, bus_info=bus_info)
+
+
+_DSHOW_MAX_FORMAT_RE: re.Pattern[str] = re.compile(
+    r"\bmax s=(\d+)x(\d+)\s+fps=([\d.]+)", re.IGNORECASE
+)
+_DSHOW_MIN_FORMAT_RE: re.Pattern[str] = re.compile(
+    r"\bmin s=(\d+)x(\d+)\s+fps=([\d.]+)", re.IGNORECASE
+)
+_DSHOW_MAX_SIZE_RE: re.Pattern[str] = re.compile(r"\bmax s=(\d+)x(\d+)\b", re.IGNORECASE)
+_DSHOW_MIN_SIZE_RE: re.Pattern[str] = re.compile(r"\bmin s=(\d+)x(\d+)\b", re.IGNORECASE)
+
+
+def _probe_dshow_format_info_sync(
+    input_url: str,
+) -> tuple[list[tuple[int, int]], dict[tuple[int, int], float]]:
+    """Enumerate ``(width, height)`` pairs and per-resolution max fps caps.
+
+    FFmpeg's dshow demuxer prints the device's pin formats when opened with
+    ``options={"list_options": "true"}`` — the call always fails with the
+    expected ``Immediate exit requested``, but the format dump lands on the
+    libav log channel first. We capture those lines via
+    :func:`av.logging.Capture` and parse the ``max s=WxH fps=NN.NNN`` tail
+    of each ``pixel_format=…`` line. Multiple pixel formats per resolution
+    collapse to the highest reported fps for that size.
+
+    Uses ``Capture(local=False)`` because this helper is invoked through
+    :func:`anyio.to_thread.run_sync`; the libav log callback fires from the
+    worker thread, and ``local=True`` would only route logs back to the
+    constructing thread's id. Restores the prior log level on exit so the
+    rest of capa's PyAV usage stays silent.
+
+    Returns ``([], {})`` on any failure (PyAV missing, non-Windows path,
+    parse mismatch). Callers fall back to a static resolution set and an
+    uncapped fps spinbox when nothing was probed.
+    """
+    old_level = av.logging.get_level()
+    av.logging.set_level(av.logging.VERBOSE)
+    try:
+        with av.logging.Capture(local=False) as logs, contextlib.suppress(Exception):
+            container = av.open(input_url, format="dshow", options={"list_options": "true"})
+            container.close()
+    finally:
+        av.logging.set_level(old_level)
+
+    seen: set[tuple[int, int]] = set()
+    resolutions: list[tuple[int, int]] = []
+    fps_caps: dict[tuple[int, int], float] = {}
+    for entry in logs:
+        message = entry[2] if len(entry) >= 3 else ""
+        size_w: int | None = None
+        size_h: int | None = None
+        fps_value: float | None = None
+        fmt_match = _DSHOW_MAX_FORMAT_RE.search(message) or _DSHOW_MIN_FORMAT_RE.search(message)
+        if fmt_match is not None:
+            size_w = int(fmt_match.group(1))
+            size_h = int(fmt_match.group(2))
+            with contextlib.suppress(ValueError):
+                fps_value = float(fmt_match.group(3))
+        else:
+            size_match = _DSHOW_MAX_SIZE_RE.search(message) or _DSHOW_MIN_SIZE_RE.search(message)
+            if size_match is not None:
+                size_w = int(size_match.group(1))
+                size_h = int(size_match.group(2))
+        if size_w is None or size_h is None:
+            continue
+        wh = (size_w, size_h)
+        if wh not in seen:
+            seen.add(wh)
+            resolutions.append(wh)
+        if fps_value is not None and fps_value > 0:
+            existing = fps_caps.get(wh)
+            if existing is None or fps_value > existing:
+                fps_caps[wh] = fps_value
+    resolutions.sort(key=lambda wh: (wh[0] * wh[1], wh[0]))
+    return resolutions, fps_caps
 
 
 def _is_transient_open_error(exc: BaseException) -> bool:

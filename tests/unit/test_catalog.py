@@ -36,8 +36,8 @@ def _make_manifest(
         started_utc=started_utc or datetime(2026, 5, 7, 12, 0, 0, tzinfo=UTC),
         ended_utc=ended_utc,
         started_mono_ns_anchor=0,
-        run_status=run_status,  # type: ignore[arg-type]
-        bundle_status=bundle_status,  # type: ignore[arg-type]
+        run_status=run_status,
+        bundle_status=bundle_status,
         operator=OperatorBlock(id=operator_id, display_name="A. Researcher"),
         sample=SampleBlock(id=sample_id),
         procedure=ProcedureBlock(id=procedure_id, version="0.1"),

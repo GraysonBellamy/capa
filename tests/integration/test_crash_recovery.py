@@ -174,4 +174,4 @@ class TestIllegalCombinations:
         with pytest.raises(FinalizeError):
             # ``run_status="running"`` combined with bundle going to sealed
             # is illegal per is_legal_finalize_combination.
-            finalize_in_place(bundle, run_status="running")  # type: ignore[arg-type]
+            finalize_in_place(bundle, run_status="running")

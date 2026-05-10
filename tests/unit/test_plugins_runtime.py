@@ -41,12 +41,12 @@ class _GoodProc:
     version = "1.0"
     config_model = _GoodConfig
     required_capabilities: tuple[str, ...] = ()
-    required_channels: tuple = ()
+    required_channels: tuple[str, ...] = ()
 
-    async def preflight(self, ctx):
+    async def preflight(self, ctx: object) -> list[str]:
         return []
 
-    async def run(self, ctx):
+    async def run(self, ctx: object) -> None:
         return None
 
 
@@ -70,12 +70,12 @@ def test_check_procedure_class_rejects_non_basemodel_config() -> None:
         version = "1"
         config_model = dict  # not a BaseModel
         required_capabilities: tuple[str, ...] = ()
-        required_channels: tuple = ()
+        required_channels: tuple[str, ...] = ()
 
-        async def preflight(self, ctx):
+        async def preflight(self, ctx: object) -> list[str]:
             return []
 
-        async def run(self, ctx):
+        async def run(self, ctx: object) -> None:
             return None
 
     with pytest.raises(PluginTrustError, match="BaseModel"):
@@ -89,12 +89,12 @@ def test_check_procedure_class_rejects_non_async_methods() -> None:
         version = "1"
         config_model = _GoodConfig
         required_capabilities: tuple[str, ...] = ()
-        required_channels: tuple = ()
+        required_channels: tuple[str, ...] = ()
 
-        def preflight(self, ctx):
+        def preflight(self, ctx: object) -> list[str]:
             return []
 
-        async def run(self, ctx):
+        async def run(self, ctx: object) -> None:
             return None
 
     with pytest.raises(PluginTrustError, match="coroutine"):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -17,7 +18,7 @@ from capa.experiment.profiles.cone_calorimeter import (
 NOW = datetime.now(UTC)
 
 
-def _good_metadata() -> dict:
+def _good_metadata() -> dict[str, Any]:
     return {
         "specimen": {
             "id": "S073",

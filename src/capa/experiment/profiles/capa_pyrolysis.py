@@ -156,9 +156,12 @@ class PurgeGas(BaseModel):
 
     supplier: str | None = None
     cylinder_lot: str | None = None
-    target_flow_sccm: float = Field(gt=0)
+    target_flow_sccm: float = Field(ge=0)
     """Target purge flow at standard conditions. The actual MFC channel is
-    the source of truth; this is the operator's intended setpoint."""
+    the source of truth; this is the operator's intended setpoint. Set to
+    ``0`` for runs where the purge gas is wired but intentionally not flowed
+    — the ``capa.purge_flow_established`` preflight check treats explicit
+    zero as opt-out and skips verification."""
 
 
 class ReactiveGas(BaseModel):

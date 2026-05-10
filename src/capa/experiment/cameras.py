@@ -42,7 +42,7 @@ from capa.devices.camera.base import (
 )
 from capa.experiment.config import ExperimentConfig
 from capa.experiment.procedures.base import Problem
-from capa.storage.bundle import RunBundleWriter
+from capa.storage.writer_thread import WriterThread
 
 
 class CameraSetupError(CapaError):
@@ -362,7 +362,7 @@ def disk_space_preflight_problems(
 async def camera_task(
     camera: Camera,
     *,
-    writer: RunBundleWriter,
+    writer_thread: WriterThread,
     output_path: Path,
     clock: RunClock,
     external_stop: anyio.Event,
@@ -413,11 +413,11 @@ async def camera_task(
         )
 
         async with anyio.create_task_group() as tg:
-            tg.start_soon(_drain_frames, camera, writer, logger)
+            tg.start_soon(_drain_frames, camera, writer_thread, logger)
             tg.start_soon(
                 _drain_events,
                 camera,
-                writer,
+                writer_thread,
                 clock,
                 spec,
                 on_failure_callback,
@@ -482,13 +482,13 @@ async def _run_pump_then_signal(
 
 async def _drain_frames(
     camera: Camera,
-    writer: RunBundleWriter,
+    writer_thread: WriterThread,
     logger: structlog.stdlib.BoundLogger,
 ) -> None:
     """Pump frame receipts into the bundle writer's frame-index sink."""
     try:
         async for receipt in camera.frame_stream():
-            writer.record_frame(receipt)
+            await writer_thread.record_frame(receipt)
     except anyio.get_cancelled_exc_class():
         raise
     except Exception as exc:
@@ -497,7 +497,7 @@ async def _drain_frames(
 
 async def _drain_events(
     camera: Camera,
-    writer: RunBundleWriter,
+    writer_thread: WriterThread,
     clock: RunClock,
     spec: CameraSpec,
     on_failure_callback: Callable[[CameraSpec, CameraEvent], Any] | None,
@@ -516,7 +516,7 @@ async def _drain_events(
     """
     try:
         async for event in camera.event_stream():
-            writer.write_event(
+            await writer_thread.write_event(
                 kind=f"camera.{event.kind}",
                 message=event.message,
                 severity=event.severity,

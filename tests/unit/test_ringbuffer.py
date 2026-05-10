@@ -118,8 +118,8 @@ class TestChannelRingBuffer:
 
     def test_bool_value_collapses_to_float(self) -> None:
         buf = ChannelRingBuffer(capacity=4, decimate_to_hz=0)
-        buf.push(_sample("ch", t_mono_ns=1, value=True))  # type: ignore[arg-type]
-        buf.push(_sample("ch", t_mono_ns=2, value=False))  # type: ignore[arg-type]
+        buf.push(_sample("ch", t_mono_ns=1, value=True))
+        buf.push(_sample("ch", t_mono_ns=2, value=False))
         _, v = buf.snapshot()
         assert list(v) == [1.0, 0.0]
 

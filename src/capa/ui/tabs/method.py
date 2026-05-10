@@ -19,34 +19,33 @@ multi-axis plots.
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pyqtgraph as pg
 import tomli_w
-import tomllib
-from PyQt6.QtCore import QItemSelectionModel, Qt
-from PyQt6.QtWidgets import (
+from pydantic import ValidationError
+from PySide6.QtCore import QItemSelectionModel, Qt, Signal
+from PySide6.QtWidgets import (
     QFileDialog,
-    QHBoxLayout,
     QHeaderView,
+    QLabel,
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QTableView,
     QToolBar,
     QVBoxLayout,
     QWidget,
 )
-from pydantic import BaseModel, ValidationError
 
 from capa.experiment.method import (
     AcquireStep,
-    AlarmOverride,
     ChannelRef,
     CustomStep,
-    EndCondition,
     HoldStep,
     Method,
     PromptStep,
@@ -128,6 +127,11 @@ class MethodTab(QWidget):
     own model state; it does not reach into the controller or live run
     state. Methods are loaded/saved via :class:`QFileDialog`."""
 
+    methodChanged = Signal()
+    """Emitted whenever the displayed method changes (load, clear, or
+    open). Lets the main window mirror the current method name in the
+    tab title without coupling MethodTab to its parent."""
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._method_path: Path | None = None
@@ -156,6 +160,18 @@ class MethodTab(QWidget):
         self._add_button.setMenu(self._add_menu)
         self._toolbar.addWidget(self._add_button)
         self._toolbar.addAction("Delete Step", self._on_delete_step)
+
+        # Right-aligned "source" label. Shows where the current method came
+        # from: a file path (Open or auto-loaded from an experiment), or
+        # ``no method`` when the tab is empty. A spacer eats the slack so
+        # the label hugs the right edge.
+        spacer = QWidget(self._toolbar)
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._toolbar.addWidget(spacer)
+        self._source_label = QLabel("no method", self._toolbar)
+        self._source_label.setContentsMargins(0, 0, 8, 0)
+        self._toolbar.addWidget(self._source_label)
+
         outer.addWidget(self._toolbar)
 
         # Top half: table + detail panel.
@@ -170,7 +186,9 @@ class MethodTab(QWidget):
         if header is not None:
             header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
             header.setStretchLastSection(True)
-        self._table.selectionModel().selectionChanged.connect(self._on_row_changed)
+        selection_model = self._table.selectionModel()
+        if selection_model is not None:
+            selection_model.selectionChanged.connect(self._on_row_changed)
         self._model.dataChanged.connect(self._on_table_changed)
         self._model.modelReset.connect(self._on_table_changed)
         self._model.rowsInserted.connect(self._on_table_changed)
@@ -221,6 +239,33 @@ class MethodTab(QWidget):
         self._reset_detail()
         if self._model.rowCount() > 0:
             self._select_row(0)
+        self._refresh_source_label()
+        self.methodChanged.emit()
+
+    def clear(self) -> None:
+        """Reset to the empty/untitled state.
+
+        Called by the main window when an experiment is loaded that has
+        no ``method:`` attached (free runs). Mirrors the rest of the
+        config-load flow: the displayed state must agree with the loaded
+        experiment, even if that means dropping prior in-progress edits."""
+        self._method_name = "untitled"
+        self._method_description = ""
+        self._method_path = None
+        self._model.set_steps(())
+        self._reset_detail()
+        self._refresh_source_label()
+        self.methodChanged.emit()
+
+    def current_method_name(self) -> str:
+        """Name of the currently displayed method, or ``"untitled"`` when
+        none is loaded. Used by the main window to decorate the tab title."""
+        return self._method_name
+
+    def has_method(self) -> bool:
+        """``True`` when the tab has at least one step. Free-run / cleared
+        state returns ``False``."""
+        return self._model.rowCount() > 0
 
     # ------------------------------------------------------------------ slots
 
@@ -263,6 +308,7 @@ class MethodTab(QWidget):
         err = self._save_to(path)
         if err is None:
             self._method_path = path
+            self._refresh_source_label()
         else:
             self._show_save_error(err)
 
@@ -350,7 +396,7 @@ class MethodTab(QWidget):
                 # Re-inject the discriminator so model_validate dispatches
                 # back to the right subclass (the form hides ``kind``).
                 values["kind"] = step.kind
-                new_step = cast(Step, step_cls.model_validate(values))
+                new_step = step_cls.model_validate(values)
             except ValidationError:
                 form.validate()  # paints inline errors; do not write back.
                 return
@@ -368,8 +414,6 @@ class MethodTab(QWidget):
 
     def _current_row(self) -> int | None:
         sel = self._table.selectionModel()
-        if sel is None:
-            return None
         idx = sel.currentIndex()
         if not idx.isValid():
             return None
@@ -377,8 +421,6 @@ class MethodTab(QWidget):
 
     def _select_row(self, row: int) -> None:
         sel = self._table.selectionModel()
-        if sel is None:
-            return
         idx = self._model.index(row, 0)
         sel.setCurrentIndex(
             idx,
@@ -409,6 +451,24 @@ class MethodTab(QWidget):
 
     def _render_graph(self) -> None:
         render_method_graph(self._plot, self._model.steps())
+
+    def _refresh_source_label(self) -> None:
+        """Update the right-aligned toolbar label so the operator can see
+        at a glance where the current method came from."""
+        if not self.has_method():
+            self._source_label.setText("no method")
+            self._source_label.setToolTip("")
+            return
+        if self._method_path is not None:
+            try:
+                display = self._method_path.relative_to(Path.cwd()).as_posix()
+            except ValueError:
+                display = self._method_path.name
+            self._source_label.setText(f"source: {display}")
+            self._source_label.setToolTip(str(self._method_path))
+        else:
+            self._source_label.setText(f"{self._method_name} (unsaved)")
+            self._source_label.setToolTip("")
 
 
 __all__ = ["MethodTab"]

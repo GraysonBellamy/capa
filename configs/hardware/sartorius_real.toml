@@ -12,7 +12,7 @@ protocol = "xbpi"
 baudrate = 19200
 src_sbn = 1
 dst_sbn = 9
-rate_hz = 2.0
+rate_hz = 50.0
 auto_reconnect = true
 snapshot_period_s = 30.0
 

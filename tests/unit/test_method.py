@@ -34,6 +34,7 @@ class TestSteps:
             value=1.0,
             end_condition=EndCondition(channel="heater.pv", op=">=", value=400),
         )
+        assert step.end_condition is not None
         assert step.end_condition.channel == "heater.pv"
 
     def test_ramp_requires_rate_or_duration(self) -> None:

@@ -27,9 +27,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Final
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import (
     QDockWidget,
     QFrame,
     QGridLayout,
@@ -130,7 +130,7 @@ class _PreviewTile(QFrame):
     def update_preview(self, jpeg: bytes) -> None:
         """Render ``jpeg`` into the tile. Empty / undecodable bytes are
         silently ignored — the engine's drain task already logged it."""
-        image = QImage.fromData(jpeg, "JPEG")
+        image = QImage.fromData(jpeg)
         if image.isNull():
             return
         pixmap = QPixmap.fromImage(image)
@@ -262,7 +262,7 @@ class CameraPreviewDock(QDockWidget):
     def note_event(self, event: object) -> None:
         """Connected to ``RunController.camera_event_received``.
 
-        Accepts ``object`` because that's what the underlying ``pyqtSignal
+        Accepts ``object`` because that's what the underlying ``Signal
         (object)`` delivers; defensively narrows to :class:`CameraEvent`
         and routes to the matching tile by ``event.name``. Unknown camera
         names (config reloaded mid-stream, etc.) are ignored.

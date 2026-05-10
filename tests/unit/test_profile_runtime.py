@@ -53,7 +53,7 @@ def test_register_default_category_is_static() -> None:
         assert get_category("test.runtime.default_category") == "static"
     finally:
         # Clean up to avoid leaking into other tests.
-        from capa.experiment.profiles.runtime import _REGISTRY  # noqa: PLC0415
+        from capa.experiment.profiles.runtime import _REGISTRY
 
         _REGISTRY.pop("test.runtime.default_category", None)
 
@@ -66,7 +66,7 @@ def test_register_dynamic_category_is_recorded() -> None:
     try:
         assert get_category("test.runtime.dynamic_marker") == "dynamic"
     finally:
-        from capa.experiment.profiles.runtime import _REGISTRY  # noqa: PLC0415
+        from capa.experiment.profiles.runtime import _REGISTRY
 
         _REGISTRY.pop("test.runtime.dynamic_marker", None)
 
@@ -99,7 +99,7 @@ async def test_purge_silent_warns_before_adapters_started() -> None:
     """Pre-adapter-start, a silent purge-flow channel is a warning, not
     blocking. Mirrors the legacy behavior so plugin-registered checks that
     reuse ``ProfilePreflightContext`` keep working."""
-    from capa.experiment.profiles.runtime import _purge_flow_established  # noqa: PLC0415
+    from capa.experiment.profiles.runtime import _purge_flow_established
 
     ctx = _ctx(adapters_started=False)
     ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_sccm": 100.0}}}
@@ -112,10 +112,23 @@ async def test_purge_silent_warns_before_adapters_started() -> None:
 
 
 @pytest.mark.anyio
+async def test_purge_zero_target_is_explicit_optout() -> None:
+    """target_flow_sccm == 0 declares a no-flow run; the check should
+    no-op even when adapters are started and no samples arrive."""
+    from capa.experiment.profiles.runtime import _purge_flow_established
+
+    ctx = _ctx(adapters_started=True)
+    ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_sccm": 0.0}}}
+
+    problem = await _purge_flow_established(ctx)
+    assert problem is None
+
+
+@pytest.mark.anyio
 async def test_purge_silent_blocks_after_adapters_started() -> None:
     """Post-adapter-start, a silent purge-flow channel is a blocking
     error — the device should be streaming and isn't."""
-    from capa.experiment.profiles.runtime import _purge_flow_established  # noqa: PLC0415
+    from capa.experiment.profiles.runtime import _purge_flow_established
 
     ctx = _ctx(adapters_started=True)
     ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_sccm": 100.0}}}
@@ -129,7 +142,7 @@ async def test_purge_silent_blocks_after_adapters_started() -> None:
 
 @pytest.mark.anyio
 async def test_heater_pv_silent_blocks_after_adapters_started() -> None:
-    from capa.experiment.profiles.runtime import _heater_pv_safe  # noqa: PLC0415
+    from capa.experiment.profiles.runtime import _heater_pv_safe
 
     ctx = _ctx(adapters_started=True)
 
@@ -138,5 +151,3 @@ async def test_heater_pv_silent_blocks_after_adapters_started() -> None:
     assert problem.code == "capa.heater_pv_silent"
     assert problem.severity == "error"
     assert problem.blocking is True
-
-

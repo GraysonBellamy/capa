@@ -15,9 +15,9 @@ from __future__ import annotations
 import time
 from typing import Final
 
-from PyQt6.QtCore import QSize, QTimer
-from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QSize, QTimer
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,

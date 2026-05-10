@@ -64,6 +64,114 @@ def _solid_frame(width: int, height: int, color: tuple[int, int, int]) -> np.nda
     return arr
 
 
+class TestWebcamPreviewMode:
+    """Preview-mode lifecycle is decoupled from recording: ``start_preview`` /
+    ``stop_preview`` toggle a separate state flag, ``push_preview_frame`` emits
+    JPEGs onto ``preview_stream`` without touching the encoder. The manual-
+    control card drives this between runs so settings changes are visible
+    on a live tile."""
+
+    async def test_start_preview_requires_open(self) -> None:
+        cam = _make()
+        with pytest.raises(AdapterError, match="requires open"):
+            await cam.start_preview()
+
+    async def test_start_stop_preview_idempotent(self) -> None:
+        cam = _make()
+        await cam.open()
+        try:
+            assert bool(cam._previewing) is False
+            await cam.start_preview()
+            await cam.start_preview()  # second call no-op
+            assert bool(cam._previewing) is True
+            await cam.stop_preview()
+            await cam.stop_preview()  # second call no-op
+            assert bool(cam._previewing) is False
+        finally:
+            await cam.close()
+
+    async def test_push_preview_frame_requires_start_preview(self) -> None:
+        cam = _make()
+        await cam.open()
+        try:
+            frame = _solid_frame(64, 48, (255, 0, 0))
+            with pytest.raises(AdapterError, match="requires start_preview"):
+                await cam.push_preview_frame(frame)
+        finally:
+            await cam.close()
+
+    async def test_push_preview_frame_emits_jpeg(self) -> None:
+        cam = _make()
+        await cam.open()
+        try:
+            await cam.start_preview()
+            frame = _solid_frame(64, 48, (255, 0, 0))
+            await cam.push_preview_frame(frame)
+            # Drain one JPEG off the preview stream — should be a non-empty
+            # bytes payload starting with the JPEG SOI marker (FFD8).
+            stream = cam.preview_stream()
+            jpeg_bytes = await stream.__anext__()
+            assert isinstance(jpeg_bytes, bytes)
+            assert jpeg_bytes[:2] == b"\xff\xd8", f"expected JPEG SOI; got {jpeg_bytes[:2]!r}"
+        finally:
+            await cam.close()
+
+    async def test_preview_throttle_drops_within_500ms(self) -> None:
+        """Two pushes within the 2 Hz window should produce exactly one
+        emission. The throttle uses RunClock.t_mono_ns() so a real wall-clock
+        race doesn't matter — back-to-back pushes are always inside the
+        same nanosecond bucket."""
+        cam = _make()
+        await cam.open()
+        try:
+            await cam.start_preview()
+            frame = _solid_frame(64, 48, (255, 0, 0))
+            await cam.push_preview_frame(frame)
+            await cam.push_preview_frame(frame)  # throttled
+            stream = cam.preview_stream()
+            # First receive must succeed; second receive must timeout
+            # within a short window (no second frame queued).
+            import anyio
+
+            jpeg = await stream.__anext__()
+            assert jpeg[:2] == b"\xff\xd8"
+            with anyio.move_on_after(0.05) as scope:
+                await stream.__anext__()
+            assert scope.cancelled_caught, (
+                "expected throttle to suppress the second preview emission"
+            )
+        finally:
+            await cam.close()
+
+    async def test_close_stops_preview(self) -> None:
+        cam = _make()
+        await cam.open()
+        await cam.start_preview()
+        assert cam._previewing is True
+        await cam.close()
+        assert cam._previewing is False
+
+    async def test_preview_independent_of_recording(self, tmp_path: Path) -> None:
+        """Recording uses its own pump (``run_pump`` + ``push_frame``); preview
+        uses ``run_preview_pump`` + ``push_preview_frame``. The two flags are
+        independent and don't interact through the encoder path."""
+        cam = _make()
+        await cam.open()
+        try:
+            await cam.start_preview()
+            await cam.start_recording(tmp_path / "preview_indep.mkv")
+            # Both flags set.
+            assert cam._previewing is True
+            assert cam._recording is True
+            await cam.stop_recording()
+            # Preview unaffected by stop_recording.
+            assert cam._previewing is True
+            await cam.stop_preview()
+            assert cam._previewing is False
+        finally:
+            await cam.close()
+
+
 class TestWebcamLifecycle:
     async def test_kind_mismatch_rejected(self) -> None:
         ir_spec = CameraSpec.model_validate({"name": "x", "adapter": "y", "kind": "ir"})
@@ -101,7 +209,7 @@ class TestWebcamRecording:
         assert out.stat().st_size > 0
         # PyAV must be able to read what we wrote.
         with av.open(str(out)) as container:
-            stream = next(s for s in container.streams if s.type == "video")
+            stream = container.streams.video[0]
             assert stream.width == 64
             assert stream.height == 48
             decoded = list(container.decode(stream))
@@ -261,7 +369,7 @@ class TestV4L2IdentityProbe:
                 bus_info="3-6.2",
             ),
         )
-        monkeypatch.setattr(webcam_module.sys, "platform", "linux")
+        monkeypatch.setattr("capa.devices.camera.webcam.sys.platform", "linux")
         cam = WebcamAdapter(
             spec=_spec(),
             clock=RunClock.now(),
@@ -281,7 +389,7 @@ class TestV4L2IdentityProbe:
             "_probe_v4l2_info",
             lambda _path: webcam_module.V4L2Probe(card_name=None, serial=None, bus_info=None),
         )
-        monkeypatch.setattr(webcam_module.sys, "platform", "linux")
+        monkeypatch.setattr("capa.devices.camera.webcam.sys.platform", "linux")
         spec = _spec()
         spec_with_hint = CameraSpec.model_validate(
             {**spec.model_dump(), "model_hint": "fallback-model", "serial": "fallback-serial"}
@@ -307,7 +415,7 @@ class TestV4L2IdentityProbe:
             return webcam_module.V4L2Probe(card_name="X", serial="Y", bus_info=None)
 
         monkeypatch.setattr(webcam_module, "_probe_v4l2_info", _spy)
-        monkeypatch.setattr(webcam_module.sys, "platform", "darwin")
+        monkeypatch.setattr("capa.devices.camera.webcam.sys.platform", "darwin")
         cam = WebcamAdapter(
             spec=_spec(),
             clock=RunClock.now(),
@@ -425,7 +533,7 @@ class TestPushFrameOffLoop:
         original_run_sync = anyio.to_thread.run_sync
         offloaded: list[str] = []
 
-        async def _spy(func, *args, **kwargs):
+        async def _spy(func: Any, *args: Any, **kwargs: Any) -> Any:
             offloaded.append(getattr(func, "__name__", repr(func)))
             return await original_run_sync(func, *args, **kwargs)
 
@@ -658,7 +766,9 @@ class TestPreviewEncoding:
 class TestOpenInputRetry:
     """``_open_input_with_retry`` recovers from transient ``[Errno 5]``."""
 
-    async def test_transient_errno5_then_success(self, monkeypatch, tmp_path):
+    async def test_transient_errno5_then_success(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Two transient EIO failures, then a working open. Backoff sleeps
         are stubbed so the test runs in milliseconds."""
         from capa.devices.camera import webcam as webcam_mod
@@ -669,7 +779,7 @@ class TestOpenInputRetry:
         attempts = {"n": 0}
         sentinel = object()
 
-        def _fake_av_open():
+        def _fake_av_open() -> object:
             attempts["n"] += 1
             if attempts["n"] <= 2:
                 raise OSError(5, "I/O error: device busy (DirectShow)")
@@ -682,8 +792,8 @@ class TestOpenInputRetry:
 
         # Patch ``av.open`` (called via ``anyio.to_thread.run_sync``) and
         # the backoff to keep the test fast.
-        monkeypatch.setattr(webcam_mod.av, "open", lambda *a, **kw: _fake_av_open())
-        monkeypatch.setattr(webcam_mod.anyio, "sleep", _no_sleep)
+        monkeypatch.setattr("capa.devices.camera.webcam.av.open", lambda *a, **kw: _fake_av_open())
+        monkeypatch.setattr("capa.devices.camera.webcam.anyio.sleep", _no_sleep)
 
         result = await cam._open_input_with_retry()
         assert result is sentinel
@@ -692,21 +802,119 @@ class TestOpenInputRetry:
         assert sleeps == list(webcam_mod.OPEN_RETRY_DELAYS_S[:2])
         await cam.close()
 
-    async def test_non_transient_errno_propagates_immediately(self, monkeypatch):
+    async def test_non_transient_errno_propagates_immediately(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """ENOENT (missing device) is not transient; surface it on attempt 1."""
-        from capa.devices.camera import webcam as webcam_mod
-
         cam = _make(codec="mpeg4")
         await cam.open()
 
         attempts = {"n": 0}
 
-        def _fake_av_open():
+        def _fake_av_open() -> None:
             attempts["n"] += 1
             raise OSError(2, "No such file or directory")
 
-        monkeypatch.setattr(webcam_mod.av, "open", lambda *a, **kw: _fake_av_open())
+        monkeypatch.setattr("capa.devices.camera.webcam.av.open", lambda *a, **kw: _fake_av_open())
         with pytest.raises(OSError):
             await cam._open_input_with_retry()
         assert attempts["n"] == 1
         await cam.close()
+
+
+class TestDshowFormatInfoProbe:
+    """``_probe_dshow_format_info_sync`` opens the dshow input with
+    ``list_options=true``, captures FFmpeg's log output, and parses the
+    ``max s=WxH fps=NN`` tails into a sorted, deduped resolution list
+    plus a per-resolution fps cap dict. Failures (PyAV refuses, no
+    parseable lines) collapse to ``([], {})`` so callers can fall back
+    to a static set and an uncapped fps spinbox.
+    """
+
+    def test_returns_empty_when_av_open_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from capa.devices.camera.webcam import _probe_dshow_format_info_sync
+
+        def _boom(*_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("simulated dshow failure")
+
+        monkeypatch.setattr("capa.devices.camera.webcam.av.open", _boom)
+        # No matching log lines means an empty parse result, regardless
+        # of whether av.open succeeded or failed.
+        result = _probe_dshow_format_info_sync("video=Whatever")
+        assert result == ([], {})
+
+    def test_parses_max_lines_into_sorted_unique_pairs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Resolution list is sorted by area, deduped across pixel formats;
+        the fps dict holds the highest reported max-fps per resolution."""
+        from capa.devices.camera import webcam as webcam_mod
+
+        class _FakeContainer:
+            def close(self) -> None: ...
+
+        monkeypatch.setattr(webcam_mod.av, "open", lambda *a, **kw: _FakeContainer())
+
+        fake_log_entries = [
+            (0, "dshow", "  pixel_format=yuyv422  min s=1920x1080 fps=5 max s=1920x1080 fps=15"),
+            (0, "dshow", "  pixel_format=mjpeg    min s=1920x1080 fps=5 max s=1920x1080 fps=30"),
+            (0, "dshow", "  pixel_format=mjpeg    min s=640x480 fps=5 max s=640x480 fps=30"),
+            (0, "dshow", "  pixel_format=mjpeg    min s=1280x720 fps=5 max s=1280x720 fps=30"),
+            (0, "dshow", "  pixel_format=yuyv422  min s=640x480 fps=5 max s=640x480 fps=30"),
+            (0, "dshow", "  no resolution here"),
+        ]
+
+        class _FakeCapture:
+            def __init__(self, *_args: object, **_kwargs: object) -> None: ...
+
+            def __enter__(self) -> list[tuple[int, str, str]]:
+                return fake_log_entries
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+        import av.logging as _av_log
+
+        monkeypatch.setattr(_av_log, "Capture", _FakeCapture)
+        monkeypatch.setattr(_av_log, "set_level", lambda _level: None)
+        monkeypatch.setattr(_av_log, "get_level", lambda: None)
+
+        resolutions, fps_caps = webcam_mod._probe_dshow_format_info_sync("video=Whatever")
+        assert resolutions == [(640, 480), (1280, 720), (1920, 1080)]
+        # 1920x1080 had two pixel formats (15 and 30); the higher wins.
+        assert fps_caps == {(640, 480): 30.0, (1280, 720): 30.0, (1920, 1080): 30.0}
+
+    def test_falls_back_to_min_when_max_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When a log line has only ``min s=WxH`` (no ``max s=``), the
+        resolution still surfaces — fps_caps stays empty for it."""
+        from capa.devices.camera import webcam as webcam_mod
+
+        class _FakeContainer:
+            def close(self) -> None: ...
+
+        monkeypatch.setattr(webcam_mod.av, "open", lambda *a, **kw: _FakeContainer())
+
+        fake_log_entries = [
+            # No "max s=" — only "min s=", fps annotation present but lives
+            # on the min side (which we still capture for cap purposes).
+            (0, "dshow", "  pixel_format=yuyv422  min s=1280x720 fps=10"),
+        ]
+
+        class _FakeCapture:
+            def __init__(self, *_args: object, **_kwargs: object) -> None: ...
+
+            def __enter__(self) -> list[tuple[int, str, str]]:
+                return fake_log_entries
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+        import av.logging as _av_log
+
+        monkeypatch.setattr(_av_log, "Capture", _FakeCapture)
+        monkeypatch.setattr(_av_log, "set_level", lambda _level: None)
+        monkeypatch.setattr(_av_log, "get_level", lambda: None)
+
+        resolutions, fps_caps = webcam_mod._probe_dshow_format_info_sync("video=X")
+        assert resolutions == [(1280, 720)]
+        assert fps_caps == {(1280, 720): 10.0}

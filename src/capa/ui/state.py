@@ -30,13 +30,14 @@ from typing import TYPE_CHECKING, Final
 
 import anyio
 import structlog
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from capa.core.backpressure import BackpressurePolicy
 from capa.core.plugins_lock import PluginsLock
 from capa.core.ringbuffer import RingBufferRegistry
 from capa.devices.camera.base import CameraEvent
 from capa.devices.records import ChannelSample, DeviceEvent
+from capa.devices.registry import DeviceRegistry
 from capa.experiment.config import ExperimentConfig
 from capa.experiment.engine import (
     AbortMode,
@@ -45,6 +46,7 @@ from capa.experiment.engine import (
     ExperimentEngine,
 )
 from capa.storage.catalog import RunCatalog
+from capa.ui.async_util import schedule_bg
 
 if TYPE_CHECKING:
     from capa.core.databus import Subscription
@@ -72,19 +74,29 @@ class RunController(QObject):
       finished engine until the next :meth:`start`.
     """
 
-    state_changed = pyqtSignal(object)
-    event_received = pyqtSignal(object)
-    preview_received = pyqtSignal(str, bytes)
+    state_changed = Signal(object)
+    event_received = Signal(object)
+    preview_received = Signal(str, bytes)
     """``(camera_name, jpeg_bytes)`` — emitted by the engine's per-camera
     preview drain task at the adapter's throttled cadence (plan §10.2; ~2 Hz
     for ``WebcamAdapter``). The Qt main thread is the asyncio loop under
     ``qasync``, so this fires from the same thread the dock receives on."""
-    camera_event_received = pyqtSignal(object)
+    camera_event_received = Signal(object)
     """``CameraEvent`` — emitted alongside the durable write to
     ``events.sqlite`` so the camera-preview dock can reflect
     ``pump_warning`` (drops counter + red border) and ``pump_failed``
     (failed border) live. Routed by ``event.name``."""
-    run_finished = pyqtSignal(object)
+    run_finished = Signal(object)
+    manual_event = Signal(object)
+    """``DeviceEvent`` — synthesized by the manual control panel on each
+    command dispatch (accepted or rejected) so the events dock reflects
+    out-of-run operator actions alongside engine-driven events. Distinct
+    from :attr:`event_received` because manual events are not bundle-backed
+    (no run is open when they fire) — they exist for live audit only."""
+    registry_changed = Signal(object)
+    """``DeviceRegistry | None`` — fired when the registry is swapped on
+    config-load or cleared on aclose. Consumers (manual control dock)
+    rebind their adapter views to the new registry."""
 
     def __init__(
         self,
@@ -108,6 +120,13 @@ class RunController(QObject):
         self._task: asyncio.Task[None] | None = None
         self._buffers: RingBufferRegistry = RingBufferRegistry()
         self._last_result: EngineResult | None = None
+        # DeviceRegistry — long-lived adapter pool shared between the engine
+        # (start/stop sampling) and the manual control panel (command()
+        # dispatch and one-shot reads). Constructed on each config-load and
+        # closed on the next config-load or on app-quit. Plan §5.2 separates
+        # open/close from start/stop; this is the open/close owner.
+        self._device_registry: DeviceRegistry | None = None
+        self._active_config: ExperimentConfig | None = None
 
     # ------------------------------------------------------------------ properties
 
@@ -138,6 +157,61 @@ class RunController(QObject):
         """``True`` while a run is between Start and the SEALED/FAILED
         terminal state."""
         return self._task is not None and not self._task.done()
+
+    @property
+    def device_registry(self) -> DeviceRegistry | None:
+        """Live :class:`DeviceRegistry` bound to the currently-loaded config,
+        or ``None`` if no config is loaded. Consumers (manual control dock)
+        use this to acquire adapters between runs."""
+        return self._device_registry
+
+    @property
+    def active_config(self) -> ExperimentConfig | None:
+        """The :class:`ExperimentConfig` most recently passed to
+        :meth:`set_active_config`. ``None`` before any config-load."""
+        return self._active_config
+
+    # ------------------------------------------------------------------ config lifecycle
+
+    def set_active_config(self, config: ExperimentConfig) -> None:
+        """Bind a freshly-loaded config: construct a new
+        :class:`DeviceRegistry` and schedule the old one's close.
+
+        Called from :class:`MainWindow` on every config-load. The old
+        registry's :meth:`DeviceRegistry.aclose` is scheduled as a
+        fire-and-forget task on the event loop so the UI does not block
+        while serial ports release. A new registry is installed
+        synchronously so the manual control dock can rebind immediately.
+        """
+        old_registry = self._device_registry
+        new_registry = DeviceRegistry(config)
+        self._active_config = config
+        self._device_registry = new_registry
+        self.registry_changed.emit(new_registry)
+        if old_registry is not None:
+            # Fire-and-forget; the registry's aclose is best-effort and
+            # logs its own failures. Cannot await here — Qt slot is sync.
+            # schedule_bg returns None when no loop is running (tests),
+            # in which case the adapters are GC'd without an explicit close.
+            schedule_bg(old_registry.aclose())
+
+    async def aclose_registry(self) -> None:
+        """Close the active registry and clear the binding. Used by
+        :class:`MainWindow.closeEvent` to release serial ports cleanly on
+        app-quit. Safe to call when no registry is bound."""
+        old = self._device_registry
+        self._device_registry = None
+        self._active_config = None
+        self.registry_changed.emit(None)
+        if old is not None:
+            await old.aclose()
+
+    def emit_manual_event(self, event: DeviceEvent) -> None:
+        """Surface a manual-command :class:`DeviceEvent` to the events
+        dock. The manual control panel calls this after each dispatch
+        (success or failure) so out-of-run operator actions appear in the
+        same audit surface as engine-driven events."""
+        self.manual_event.emit(event)
 
     # ------------------------------------------------------------------ control
 
@@ -172,7 +246,15 @@ class RunController(QObject):
         for ch in config.hardware.channels:
             self._buffers.register(ch.name, decimate_to_hz=ch.decimate_to_hz)
 
-        engine = ExperimentEngine(on_state_changed=self._emit_state)
+        # Pass the registry through to the engine when one is bound (the
+        # config-load path always binds one before start()). The engine
+        # borrows: it acquires/starts/stops, but does NOT close the
+        # connections — that's the registry owner's job. Cleared at
+        # config-reload or app-quit via aclose_registry().
+        engine = ExperimentEngine(
+            on_state_changed=self._emit_state,
+            device_registry=self._device_registry,
+        )
         engine.preview_callback = self._emit_preview
         engine.camera_event_callback = self._emit_camera_event
         self._engine = engine

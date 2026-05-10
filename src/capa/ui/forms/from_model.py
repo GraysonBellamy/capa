@@ -23,11 +23,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QFormLayout, QLabel, QWidget
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QFormLayout, QLabel, QWidget
 
 from capa.ui.forms.widgets import FieldWidget, build_field_widget
 
@@ -51,7 +51,7 @@ class ModelForm(QWidget):
     inner :class:`FieldWidget` instances and re-emits their changes
     coalesced as :attr:`valuesChanged`."""
 
-    valuesChanged = pyqtSignal()
+    valuesChanged = Signal()
 
     def __init__(
         self,
@@ -75,7 +75,7 @@ class ModelForm(QWidget):
             if info.description:
                 label.setToolTip(info.description)
             layout.addRow(label, widget)
-            widget.valueChanged.connect(self.valuesChanged)  # type: ignore[arg-type]
+            widget.valueChanged.connect(self.valuesChanged)
             self._fields[name] = widget
 
         self.set_values(self._defaults_dict())
@@ -123,10 +123,10 @@ class ModelForm(QWidget):
             for err in errors:
                 loc = err.get("loc", ())
                 if loc and isinstance(loc[0], str):
-                    widget = self._fields.get(loc[0])
-                    if widget is not None:
-                        widget.set_error(err.get("msg", "invalid"))
-            return list(errors)
+                    target = self._fields.get(loc[0])
+                    if target is not None:
+                        target.set_error(err.get("msg", "invalid"))
+            return [dict(err) for err in errors]
         return []
 
     # ---------------------------------------------------------------- internals

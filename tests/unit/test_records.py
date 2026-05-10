@@ -153,15 +153,15 @@ class TestAdapterContract:
 
     def test_lifecycle_state_machine(self) -> None:
         life = AdapterLifecycle()
-        assert life.state == "closed"
+        assert str(life.state) == "closed"
         life.open()
-        assert life.state == "open"
+        assert str(life.state) == "open"
         life.start()
-        assert life.state == "running"
+        assert str(life.state) == "running"
         life.stop()
-        assert life.state == "open"
+        assert str(life.state) == "open"
         life.close()
-        assert life.state == "closed"
+        assert str(life.state) == "closed"
 
     def test_lifecycle_start_without_open_raises(self) -> None:
         life = AdapterLifecycle()

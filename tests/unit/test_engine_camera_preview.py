@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import structlog
@@ -125,9 +125,22 @@ class TestLivePreviewGate:
         assert CameraCapability.LIVE_PREVIEW not in FlirIrSim.capabilities
 
     def test_webcam_advertises_live_preview(self) -> None:
+        # WebcamAdapter.capabilities is now an instance attribute (the
+        # set is augmented at open() with duvc-ctl-probed UVC controls).
+        # Construct a stub instance to read the baseline set.
+        from capa.core.clock import RunClock
+        from capa.devices.camera.base import CameraSpec
         from capa.devices.camera.webcam import WebcamAdapter
 
-        assert CameraCapability.LIVE_PREVIEW in WebcamAdapter.capabilities
+        spec = CameraSpec.model_validate(
+            {
+                "name": "x",
+                "adapter": "capa.devices.camera.webcam",
+                "kind": "visible",
+            }
+        )
+        cam = WebcamAdapter(spec=spec, clock=RunClock.now())
+        assert CameraCapability.LIVE_PREVIEW in cam.capabilities
 
 
 class TestPreviewCallbackOnEngine:
@@ -178,7 +191,7 @@ def _camera_event(name: str, kind: str, severity: str = "info") -> CameraEvent:
         t_utc=datetime.now(UTC),
         kind=kind,
         message="",
-        severity=severity,  # type: ignore[arg-type]
+        severity=severity,
     )
 
 
@@ -229,9 +242,10 @@ class TestDrainEventsCallback:
         ]
         cam = _FakeEventCamera(spec=spec, events=events_in)
 
-        # ``writer.write_event`` is what the durable side calls; we just
-        # need it to accept arbitrary kwargs without crashing.
+        # ``writer_thread.write_event`` is what the durable side awaits; we
+        # just need an awaitable that accepts arbitrary kwargs.
         writer = MagicMock()
+        writer.write_event = AsyncMock()
 
         from capa.core.clock import RunClock
 
@@ -267,6 +281,7 @@ class TestDrainEventsCallback:
             spec=spec, events=[_camera_event("visible_cam0", "recording_started")]
         )
         writer = MagicMock()
+        writer.write_event = AsyncMock()
 
         from capa.core.clock import RunClock
 
@@ -299,6 +314,7 @@ class TestDrainEventsCallback:
         ]
         cam = _FakeEventCamera(spec=spec, events=events_in)
         writer = MagicMock()
+        writer.write_event = AsyncMock()
 
         seen: list[str] = []
 

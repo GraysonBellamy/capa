@@ -23,7 +23,7 @@ from collections.abc import Iterable
 from typing import Any
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt
+from PySide6.QtCore import Qt
 
 from capa.experiment.method import (
     HoldStep,

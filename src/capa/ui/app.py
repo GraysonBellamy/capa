@@ -19,7 +19,7 @@ from pathlib import Path
 
 import qasync
 import structlog
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 
 from capa.core.errors import CapaError
 from capa.core.logging import configure_pre_run_logging

@@ -70,12 +70,10 @@ from capa.core.plugins_lock import PluginsLock
 from capa.core.plugins_runtime import ProcedureRegistry, resolve_mode
 from capa.devices.camera.base import Camera, CameraEvent
 from capa.devices.records import (
-    ChannelSample,
     DeviceEmission,
     DeviceEvent,
-    DeviceSnapshot,
-    SourceRecord,
 )
+from capa.devices.registry import DeviceRegistry
 from capa.experiment.authorization import Authorization
 from capa.experiment.cameras import (
     camera_output_path,
@@ -93,6 +91,8 @@ from capa.experiment.procedures.base import (
 )
 from capa.experiment.profiles.runtime import (
     Category as ProfileCheckCategory,
+)
+from capa.experiment.profiles.runtime import (
     ProfilePreflightContext,
     filter_by_category,
     run_profile_preflight,
@@ -101,6 +101,7 @@ from capa.storage.bundle import RunBundleWriter
 from capa.storage.catalog import RunCatalog
 from capa.storage.finalize import FinalizeResult
 from capa.storage.manifest import BundleManifest
+from capa.storage.writer_thread import WriterThread, WriterThreadError
 
 ENGINE_VERSION: Final[str] = "0.1.0-p0c"
 """Plan §13.1: engine code revision marker mirrored into
@@ -253,6 +254,7 @@ class ExperimentEngine:
         "_cameras",
         "_clock",
         "_databus",
+        "_device_registry",
         "_enable_ingest",
         "_external_stop",
         "_ingest_server",
@@ -260,6 +262,7 @@ class ExperimentEngine:
         "_logger",
         "_method_executor",
         "_metrics",
+        "_owns_device_registry",
         "_plugin_mode",
         "_preview_callback",
         "_procedure",
@@ -269,6 +272,7 @@ class ExperimentEngine:
         "_state",
         "_state_callback",
         "_writer",
+        "_writer_thread",
     )
 
     def __init__(
@@ -279,6 +283,7 @@ class ExperimentEngine:
         procedure_registry: ProcedureRegistry | None = None,
         plugin_mode: str | None = None,
         enable_ingest: bool = False,
+        device_registry: DeviceRegistry | None = None,
     ) -> None:
         self._adapters: list[Any] = []
         self._adapter_by_device: dict[str, Any] = {}
@@ -303,12 +308,19 @@ class ExperimentEngine:
         self._run_id: str | None = None
         self._runs_root: Path | None = None
         self._writer: RunBundleWriter | None = None
+        self._writer_thread: WriterThread | None = None
         self._authorization: Authorization | None = None
         self._state: EngineState = EngineState.IDLE
         self._state_callback: StateCallback | None = on_state_changed
         self._abort_mode: AbortMode | None = None
         self._preview_callback: Callable[[str, bytes], None] | None = None
         self._camera_event_callback: Callable[[CameraEvent], None] | None = None
+        # Device registry — borrow (shared with the UI manual control panel)
+        # or own (CLI path, tests, anyone passing None). Owning means we
+        # close every adapter on run finalize; borrowing means we only
+        # stop() sampling and leave connections open for the next caller.
+        self._device_registry: DeviceRegistry | None = device_registry
+        self._owns_device_registry: bool = device_registry is None
 
     # ------------------------------------------------------------------ properties
 
@@ -347,7 +359,7 @@ class ExperimentEngine:
 
         Signature is ``(camera_name, jpeg_bytes) -> None``. The callback is
         invoked from the engine's asyncio loop; with ``qasync`` that loop
-        runs on Qt's main thread, so a ``pyqtSignal.emit`` is safe to call
+        runs on Qt's main thread, so a ``Signal.emit`` is safe to call
         directly without ``QueuedConnection``.
         """
         return self._preview_callback
@@ -366,7 +378,7 @@ class ExperimentEngine:
 
         Threading mirrors :attr:`preview_callback`: invoked from the
         engine's asyncio loop, which under ``qasync`` runs on Qt's main
-        thread, so a ``pyqtSignal.emit`` is safe without
+        thread, so a ``Signal.emit`` is safe without
         ``QueuedConnection``.
         """
         return self._camera_event_callback
@@ -533,6 +545,20 @@ class ExperimentEngine:
             else:
                 self._logger = structlog.get_logger("capa")
 
+            # Spawn the writer thread *before* anything tries to record into
+            # the bundle. From this point on the writer's sinks are owned by
+            # one thread only; every record goes through ``self._writer_thread``
+            # (preflight events, watchdog events, fanout emissions, camera
+            # frames). PyArrow's stream writer is not documented as
+            # thread-safe, so this discipline matters even though most calls
+            # serialize via the inbox queue anyway.
+            self._writer_thread = WriterThread(
+                self._writer,
+                metrics=self._metrics.writer("bundle"),
+                logger=self._logger.bind(component="writer_thread"),
+            )
+            self._writer_thread.start()
+
             self._clock = RunClock.now()
             # Reflect the captured anchor in the manifest. Re-write via
             # internal hook so the on-disk manifest matches reality.
@@ -552,17 +578,33 @@ class ExperimentEngine:
                 manifest = BundleManifest.read(bundle_path / "manifest.json")
                 catalog.insert_run_at_open(manifest, bundle_path=bundle_path)
 
-            # Construct adapters.
-            self._adapters = _construct_adapters(config)
+            # Acquire adapters via the DeviceRegistry. Borrowing path (UI):
+            # the registry is shared with the manual control panel and
+            # devices may already be open from start-of-day prep — open()
+            # is idempotent, so acquire_all_devices is a no-op on those.
+            # Owning path (CLI / tests): a fresh registry is constructed
+            # here and closed in the finally block.
+            if self._device_registry is None:
+                self._device_registry = DeviceRegistry(config)
+                self._owns_device_registry = True
+            adapters_by_name = await self._device_registry.acquire_all_devices()
+            self._adapters = list(adapters_by_name.values())
+            self._adapter_by_device = dict(adapters_by_name)
             for adapter in self._adapters:
                 if hasattr(adapter, "configure_channels"):
                     adapter.configure_channels(list(config.hardware.channels))
-            self._adapter_by_device = {a.name: a for a in self._adapters if hasattr(a, "name")}
 
             # Construct cameras (plan §12). Cameras are peers of devices
             # but live in their own list because their lifecycle and
             # emissions differ — they own their own output containers and
             # emit FrameReceipts rather than ChannelSamples.
+            #
+            # Cameras are NOT routed through the registry because frame
+            # timestamps must anchor to *run-start* (self._clock), while
+            # the registry's clock is anchored to MainWindow construction
+            # — sharing the camera handle would mis-anchor frame t_mono_ns.
+            # The manual control panel constructs its own camera handle
+            # when needed and releases it before a run starts.
             self._cameras = construct_cameras(config, clock=self._clock)
             self._adapter_by_camera = {c.spec.name: c for c in self._cameras}
 
@@ -593,12 +635,12 @@ class ExperimentEngine:
                 disk_problems = disk_space_preflight_problems(
                     config, bundle_root=self._writer.bundle_path
                 )
-                self._handle_preflight_problems(disk_problems, source="camera_disk")
+                await self._handle_preflight_problems(disk_problems, source="camera_disk")
 
             # Procedure preflight — collect Problem records, refuse on any
             # blocking entry. Plan §11.
             problems = await self._procedure.preflight(self._build_context())
-            self._handle_preflight_problems(problems, source="procedure")
+            await self._handle_preflight_problems(problems, source="procedure")
 
             # Profile preflight (static phase) — config / filesystem checks
             # that don't need live data. Plan §5.4.1. The dynamic phase runs
@@ -661,9 +703,26 @@ class ExperimentEngine:
                     run_status=run_status,
                     exit_reason=exit_reason,
                 )
+            # Drain and stop the writer thread *before* the writer's sinks
+            # are closed by finalize() — otherwise in-flight items would
+            # have no destination. Errors here are logged but don't
+            # prevent finalize (the per-flush fsync means whatever made
+            # it to disk is already durable).
+            writer_thread_snapshot: dict[str, float] | None = None
+            if self._writer_thread is not None:
+                writer_thread_snapshot = self._writer_thread.snapshot()
+                try:
+                    self._writer_thread.close()
+                except WriterThreadError as exc:
+                    if self._logger is not None:
+                        self._logger.error("engine.writer_thread.close_failed", error=str(exc))
+                self._writer_thread = None
+
             try:
                 if self._writer is not None and self._writer.is_open:
                     queue_health = self._metrics.snapshot_for_manifest()
+                    if writer_thread_snapshot is not None:
+                        queue_health["queue.writer-inbox"] = writer_thread_snapshot
                     if not self._writer.is_finalized:
                         equipment_blocks = self._collect_equipment_blocks(config)
                         camera_blocks = self._collect_camera_blocks(config)
@@ -706,15 +765,29 @@ class ExperimentEngine:
                             self._logger.warning("engine.ingest.stop_failed", error=str(exc))
                 # Adapter cleanup. Best-effort: a misbehaving adapter must
                 # not prevent us returning a sealed bundle.
+                #
+                # Sampling stop is always our responsibility (we called
+                # start()). Connection close is only ours when we own the
+                # registry — borrowing means the UI panel keeps adapters
+                # open for between-run manual ops. The registry's aclose()
+                # walks every cached adapter and closes in parallel.
                 for adapter in self._adapters:
                     try:
                         await adapter.stop()
-                        await adapter.close()
                     except Exception as exc:
                         if self._logger is not None:
                             self._logger.warning(
-                                "engine.adapter.cleanup_failed",
+                                "engine.adapter.stop_failed",
                                 adapter=getattr(adapter, "name", "?"),
+                                error=str(exc),
+                            )
+                if self._owns_device_registry and self._device_registry is not None:
+                    try:
+                        await self._device_registry.aclose()
+                    except Exception as exc:
+                        if self._logger is not None:
+                            self._logger.warning(
+                                "engine.registry.aclose_failed",
                                 error=str(exc),
                             )
 
@@ -862,7 +935,7 @@ class ExperimentEngine:
         except Exception as exc:
             raise ProcedureError(f"failed to instantiate procedure {plugin_id!r}: {exc}") from exc
 
-    def _handle_preflight_problems(
+    async def _handle_preflight_problems(
         self,
         problems: list[Problem],
         *,
@@ -874,14 +947,14 @@ class ExperimentEngine:
         run was warned about. Blocking problems escalate to a
         :class:`ProcedureError` that the engine's outer ``except`` converts
         into a clean refusal."""
-        assert self._writer is not None
+        assert self._writer_thread is not None
         assert self._clock is not None
         assert self._logger is not None
         if not problems:
             return
         for p in problems:
             severity = p.severity if not p.blocking else "error"
-            self._writer.write_event(
+            await self._writer_thread.write_event(
                 kind=f"preflight.{source}.problem",
                 message=f"[{p.code}] {p.message}",
                 severity=severity,
@@ -932,7 +1005,7 @@ class ExperimentEngine:
             adapters_started=adapters_started,
         )
         problems = await run_profile_preflight(ctx, check_ids)
-        self._handle_preflight_problems(problems, source=f"profile.{category}")
+        await self._handle_preflight_problems(problems, source=f"profile.{category}")
 
     async def _run_task_group(self, config: ExperimentConfig) -> str:
         """Spawn producer + fan-out + procedure tasks. Return the
@@ -1098,6 +1171,7 @@ class ExperimentEngine:
         misclassified.
         """
         assert self._writer is not None
+        assert self._writer_thread is not None
         assert self._clock is not None
         assert self._logger is not None
         assert self._run_id is not None
@@ -1118,7 +1192,7 @@ class ExperimentEngine:
 
         await camera_task(
             camera,
-            writer=self._writer,
+            writer_thread=self._writer_thread,
             output_path=output_path,
             clock=self._clock,
             external_stop=cameras_stop,
@@ -1133,30 +1207,22 @@ class ExperimentEngine:
         queue: BoundedQueue[DeviceEmission],
     ) -> None:
         """Drain ``queue`` and route each emission. Exits when the queue is
-        closed *and* empty."""
-        assert self._writer is not None
-        writer_metrics = self._metrics.writer("bundle")
+        closed *and* empty.
+
+        Submission to the writer thread is non-blocking in the steady state;
+        a full inbox transparently switches to a blocking put off-loop so
+        the loop yields while waiting for space. Writer latency is observed
+        inside the writer thread itself — see :class:`WriterThread`.
+        """
+        assert self._writer_thread is not None
         while True:
             try:
                 emission = await queue.get()
             except RuntimeError:
                 # Queue closed and empty. Normal termination.
                 return
-            with writer_metrics.time_write():
-                self._route_emission(emission)
+            await self._writer_thread.submit(emission)
             await self._databus.publish(emission)
-
-    def _route_emission(self, emission: DeviceEmission) -> None:
-        assert self._writer is not None
-        match emission:
-            case ChannelSample():
-                self._writer.record_sample(emission)
-            case SourceRecord():
-                self._writer.record_source(emission)
-            case DeviceEvent():
-                self._writer.record_event(emission)
-            case DeviceSnapshot():
-                self._writer.record_snapshot(emission)
 
     async def _procedure_task(self, procedure_completed: anyio.Event) -> None:
         assert self._procedure is not None
@@ -1180,7 +1246,7 @@ class ExperimentEngine:
         socket_path = self._writer.bundle_path / ".ingest.sock"
 
         async def _sink(event: dict[str, Any]) -> None:
-            assert self._writer is not None and self._clock is not None
+            assert self._writer_thread is not None and self._clock is not None
             t_mono = event.get("t_mono_ns_anchor")
             if not isinstance(t_mono, int):
                 t_mono = self._clock.t_mono_ns()
@@ -1189,7 +1255,7 @@ class ExperimentEngine:
             if channel:
                 metadata["channel"] = channel
             metadata["source"] = "ingest"
-            self._writer.write_event(
+            await self._writer_thread.write_event(
                 kind=event["kind"],
                 message=event.get("message", ""),
                 severity=event.get("severity", "info"),
@@ -1223,7 +1289,7 @@ class ExperimentEngine:
         actions (``abort_run`` / ``safe_shutdown`` / ``warn``).
         """
         assert self._logger is not None
-        assert self._writer is not None
+        assert self._writer_thread is not None
         # Filter to adapters that opted into the watchdog hook.
         targets = [a for a in self._adapters if hasattr(a, "watchdog_state")]
         if not targets:
@@ -1258,7 +1324,7 @@ class ExperimentEngine:
                         last_t_mono_ns=state.last_t_mono_ns,
                         expected_period_ns=state.expected_period_ns,
                     )
-                    self._writer.record_event(
+                    await self._writer_thread.record_event(
                         DeviceEvent(
                             adapter="engine.watchdog",
                             device=state.device,

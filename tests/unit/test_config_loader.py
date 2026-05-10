@@ -66,3 +66,50 @@ def test_load_external_ref_resolves_relative(tmp_path: Path) -> None:
     (tmp_path / "hw.toml").write_text(_HARDWARE_TOML, encoding="utf-8")
     ec = ExperimentConfig.load(sub / "exp.toml")
     assert ec.hardware.name == "tiny"
+
+
+def test_method_source_path_preserved_for_string_ref(configs_dir: Path) -> None:
+    """When ``method:`` is a string ref, ``method_source_path`` must hold
+    the resolved path so the UI can write edits back to the original
+    file. The path must be absolute (resolved) so it survives a later cwd
+    change in a long-running session."""
+    ec = ExperimentConfig.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+    assert ec.method is not None
+    assert ec.method_source_path is not None
+    assert ec.method_source_path.is_absolute()
+    assert ec.method_source_path.name == "sim_capa_pyrolysis.method.toml"
+
+
+def test_method_source_path_none_for_freerun(configs_dir: Path) -> None:
+    """Free-run experiments declare no method; ``method_source_path`` must
+    stay ``None`` so the UI knows there's nothing to load."""
+    ec = ExperimentConfig.load(configs_dir / "experiments" / "sim_freerun.yaml")
+    assert ec.method is None
+    assert ec.method_source_path is None
+
+
+_INLINE_METHOD_TOML = """
+procedure = { id = "capa.builtin.recipe_runner" }
+calibration_set = { name = "default" }
+operator = { id = "abr" }
+sample = { id = "S-1" }
+hardware = "hardware.toml"
+
+[method]
+name = "inline"
+description = ""
+[[method.steps]]
+kind = "wait"
+duration_s = 1.0
+"""
+
+
+def test_method_source_path_none_for_inlined_method(tmp_path: Path) -> None:
+    """A method written directly into the experiment file has no source
+    path — distinguishing inline from referenced is what tells the UI
+    whether Save should target an external file or behave like Save-As."""
+    (tmp_path / "experiment.toml").write_text(_INLINE_METHOD_TOML, encoding="utf-8")
+    (tmp_path / "hardware.toml").write_text(_HARDWARE_TOML, encoding="utf-8")
+    ec = ExperimentConfig.load(tmp_path / "experiment.toml")
+    assert ec.method is not None
+    assert ec.method_source_path is None

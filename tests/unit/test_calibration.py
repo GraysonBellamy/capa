@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from capa.channels.calibration import (
@@ -190,7 +192,7 @@ class TestPiecewise:
 class TestCustomCallable:
     HASH = "sha256:" + "a" * 64
 
-    def _make_kwargs(self) -> dict:
+    def _make_kwargs(self) -> dict[str, Any]:
         return dict(
             input_unit="V",
             output_unit="K",

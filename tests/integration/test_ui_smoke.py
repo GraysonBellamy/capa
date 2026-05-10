@@ -25,6 +25,7 @@ What's *not* covered (deferred):
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
@@ -96,7 +97,7 @@ def _make_config(
 
 @pytest.mark.anyio
 async def test_run_controller_run_completes_and_populates_buffers(
-    qapp,
+    qapp: Any,
     tmp_path: Path,
 ) -> None:
     config = _make_config(sample_id="CTRL-1", duration_s=0.15, channels=2)
@@ -137,7 +138,7 @@ async def test_run_controller_run_completes_and_populates_buffers(
 
 @pytest.mark.anyio
 async def test_run_controller_abort_sets_aborted_status(
-    qapp,
+    qapp: Any,
     tmp_path: Path,
 ) -> None:
     """request_abort() flows through to the engine and produces an aborted
@@ -170,7 +171,7 @@ async def test_run_controller_abort_sets_aborted_status(
 
 
 def test_run_controller_request_abort_with_no_active_run_is_noop(
-    qapp,
+    qapp: Any,
     tmp_path: Path,
 ) -> None:
     controller = RunController(runs_root=tmp_path)
@@ -184,7 +185,7 @@ def test_run_controller_request_abort_with_no_active_run_is_noop(
 # ---------------------------------------------------------------------------
 
 
-def test_main_window_renders_with_initial_config(qtbot, tmp_path: Path) -> None:
+def test_main_window_renders_with_initial_config(qtbot: Any, tmp_path: Path) -> None:
     from capa.ui.main_window import MainWindow
 
     config = _make_config(sample_id="WIN-1", duration_s=0.1, channels=2)
@@ -201,9 +202,6 @@ def test_main_window_renders_with_initial_config(qtbot, tmp_path: Path) -> None:
     # Setup tab populated.
     setup = window.setup_tab
     assert setup is not None
-    # Tree has the experiment root + device + 2 channels under it.
-    tree = setup.findChild(type(window).__bases__[0].__bases__[0], "")
-
     # Numerics dock attached.
     nd = window.numerics_dock
     assert nd is not None
@@ -222,7 +220,7 @@ def test_main_window_renders_with_initial_config(qtbot, tmp_path: Path) -> None:
     window.close()
 
 
-def test_main_window_open_dialog_path_handling(qtbot, tmp_path: Path) -> None:
+def test_main_window_open_dialog_path_handling(qtbot: Any, tmp_path: Path) -> None:
     """Constructing MainWindow with no initial config leaves Start disabled
     until a config loads."""
     from capa.ui.main_window import MainWindow

@@ -4,6 +4,8 @@ lifecycle, and command authorization gates.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from capa.channels.calibration import Identity, LinearTwoPoint, UncertaintySpec
@@ -27,7 +29,7 @@ from capa.devices.sim.watlow_sim import WatlowSim
 pytestmark = pytest.mark.anyio
 
 
-def _split(emissions: list) -> tuple[list[SourceRecord], list[ChannelSample]]:
+def _split(emissions: list[Any]) -> tuple[list[SourceRecord], list[ChannelSample]]:
     return (
         [e for e in emissions if isinstance(e, SourceRecord)],
         [e for e in emissions if isinstance(e, ChannelSample)],

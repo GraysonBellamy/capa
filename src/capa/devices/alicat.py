@@ -37,7 +37,7 @@ from typing import Any, Final, Literal
 import alicatlib
 from alicatlib.devices.base import Device as AlicatDevice
 from alicatlib.devices.flow_controller import FlowController
-from alicatlib.devices.models import DeviceInfo
+from alicatlib.devices.models import DeviceInfo, StpNtpMode, TimeUnit, TotalizerId
 from alicatlib.devices.pressure_controller import PressureController
 from alicatlib.errors import AlicatError
 from alicatlib.manager import DeviceResult
@@ -227,6 +227,9 @@ class AlicatAdapter:
             Capability.HAS_TARE,
             Capability.HAS_GAS_SELECT,
             Capability.READS_PROCESS_VAR,
+            Capability.HAS_PARAMETER_CONFIG,
+            Capability.HAS_DISPLAY_CONTROL,
+            Capability.HAS_TOTALIZER,
         }
         if params.auto_reconnect:
             flags.add(Capability.SUPPORTS_AUTO_RECONNECT)
@@ -259,13 +262,15 @@ class AlicatAdapter:
         """Refine :attr:`capabilities` from the library's probed
         :class:`alicatlib.DeviceInfo`.
 
-        Adds :class:`Capability.HAS_SETPOINT` when the device is a controller
-        (the ``setpoint`` method only exists on the controller mixin). Called
-        from :meth:`open` after identification.
+        Adds :class:`Capability.HAS_SETPOINT` and
+        :class:`Capability.HAS_VALVE_HOLD` when the device is a controller
+        (the ``setpoint`` method and the valve-hold mixin only exist on the
+        controller subclasses). Called from :meth:`open` after identification.
         """
         flags = set(self.capabilities)
         if isinstance(device, FlowController | PressureController):
             flags.add(Capability.HAS_SETPOINT)
+            flags.add(Capability.HAS_VALVE_HOLD)
         self.capabilities = frozenset(flags)
 
     @property
@@ -432,29 +437,69 @@ class AlicatAdapter:
 
         Recognized ``cmd.kind`` values:
 
+        Setpoint & gas:
+
         * ``"set_setpoint"`` / ``"set_flow_setpoint"`` — payload
-          ``{"value": float, "unit": str | None}``. Requires a controller.
-        * ``"set_gas"`` — payload ``{"gas": str | int}``.
+          ``{"value": float, "unit": str | None}``. Controller-only.
+        * ``"set_gas"`` — payload ``{"gas": str | int, "save": bool = False}``.
+
+        Tares:
+
         * ``"tare"`` / ``"tare_flow"`` — no payload.
         * ``"tare_absolute_pressure"`` / ``"tare_gauge_pressure"`` — no payload.
+
+        Engineering / reference config (V10 10v05+):
+
+        * ``"set_units"`` — payload
+          ``{"statistic": str|int, "unit": str|int,
+             "apply_to_group": bool = False,
+             "override_special_rules": bool = False}``.
+        * ``"set_zero_band"`` — payload ``{"zero_band": float}``.
+        * ``"set_stp_pressure"`` — payload
+          ``{"mode": "S"|"N", "pressure": float, "unit_code": int | None}``.
+        * ``"set_stp_temperature"`` — payload
+          ``{"mode": "S"|"N", "temperature": float, "unit_code": int | None}``.
+
+        Controller config:
+
+        * ``"set_setpoint_source"`` — payload ``{"mode": "S"|"A"|"U", "save": bool = False}``.
+        * ``"set_loop_variable"`` — payload ``{"variable": str | int}``.
+        * ``"set_ramp_rate"`` — payload ``{"max_ramp": float, "time_unit": int | str}``.
+        * ``"set_deadband"`` — payload ``{"deadband": float, "save": bool = False}``.
+        * ``"set_auto_tare"`` — payload ``{"enable": bool, "delay_s": float | None}``.
+        * ``"set_power_up_tare"`` — payload ``{"enable": bool}``.
+
+        Display:
+
+        * ``"blink_display"`` — payload ``{"duration_s": int | None}``.
+        * ``"lock_display"`` / ``"unlock_display"`` — no payload.
+
+        Valve hold (controller-only):
+
+        * ``"hold_valves"`` — no payload.
+        * ``"hold_valves_closed"`` — no payload (DESTRUCTIVE; CAPA's auth gate
+          covers the library's confirm gate).
+        * ``"cancel_valve_hold"`` — no payload.
+
+        Totalizer (flow devices only):
+
+        * ``"totalizer_reset"`` — payload ``{"totalizer": int = 1}`` (DESTRUCTIVE).
+        * ``"totalizer_reset_peak"`` — payload ``{"totalizer": int = 1}`` (DESTRUCTIVE).
+        * ``"totalizer_save"`` — payload ``{"enable": bool | None, "save": bool | None}``.
         """
         assert self._device is not None
         kind = cmd.kind
         if kind in ("set_setpoint", "set_flow_setpoint"):
-            if not isinstance(self._device, FlowController | PressureController):
-                raise AdapterError(
-                    f"alicat {self.name!r}: set_setpoint requires a controller, "
-                    f"this device is a meter",
-                    device=self.name,
-                )
+            controller = self._require_controller(kind)
             value = float(cmd.payload["value"])
             unit_arg = cmd.payload.get("unit")
-            state = await self._device.setpoint(value=value, unit=unit_arg)
+            state = await controller.setpoint(value=value, unit=unit_arg)
             return f"set_setpoint value={value} -> {state.current!r}"
         if kind == "set_gas":
             gas = cmd.payload["gas"]
-            await self._device.gas(gas)
-            return f"set_gas gas={gas!r}"
+            gas_save = bool(cmd.payload.get("save", False))
+            await self._device.gas(gas, save=gas_save)
+            return f"set_gas gas={gas!r} save={gas_save}"
         if kind in ("tare", "tare_flow"):
             await self._device.tare_flow()
             return "tare_flow"
@@ -464,10 +509,146 @@ class AlicatAdapter:
         if kind == "tare_gauge_pressure":
             await self._device.tare_gauge_pressure()
             return "tare_gauge_pressure"
+
+        # ------------------ engineering / reference config
+
+        if kind == "set_units":
+            statistic = cmd.payload["statistic"]
+            unit = cmd.payload["unit"]
+            apply_to_group = bool(cmd.payload.get("apply_to_group", False))
+            override = bool(cmd.payload.get("override_special_rules", False))
+            await self._device.engineering_units(
+                statistic,
+                unit,
+                apply_to_group=apply_to_group,
+                override_special_rules=override,
+            )
+            return f"set_units stat={statistic!r} unit={unit!r}"
+        if kind == "set_zero_band":
+            zero_band = float(cmd.payload["zero_band"])
+            await self._device.zero_band(zero_band)
+            return f"set_zero_band={zero_band}"
+        if kind == "set_stp_pressure":
+            mode = StpNtpMode(cmd.payload["mode"])
+            pressure = float(cmd.payload["pressure"])
+            unit_code = cmd.payload.get("unit_code")
+            await self._device.stp_ntp_pressure(mode, pressure=pressure, unit_code=unit_code)
+            return f"set_stp_pressure mode={mode.value} pressure={pressure}"
+        if kind == "set_stp_temperature":
+            mode = StpNtpMode(cmd.payload["mode"])
+            temperature = float(cmd.payload["temperature"])
+            unit_code = cmd.payload.get("unit_code")
+            await self._device.stp_ntp_temperature(
+                mode, temperature=temperature, unit_code=unit_code
+            )
+            return f"set_stp_temperature mode={mode.value} temperature={temperature}"
+
+        # ------------------ controller config
+
+        if kind == "set_setpoint_source":
+            controller = self._require_controller(kind)
+            sp_mode = cmd.payload["mode"]
+            sp_save: bool | None = cmd.payload.get("save")
+            result = await controller.setpoint_source(sp_mode, save=sp_save)
+            return f"set_setpoint_source mode={result!r}"
+        if kind == "set_loop_variable":
+            controller = self._require_controller(kind)
+            variable = cmd.payload["variable"]
+            await controller.loop_control_variable(variable)
+            return f"set_loop_variable variable={variable!r}"
+        if kind == "set_ramp_rate":
+            controller = self._require_controller(kind)
+            max_ramp = float(cmd.payload["max_ramp"])
+            time_unit_arg = cmd.payload["time_unit"]
+            time_unit = (
+                TimeUnit[time_unit_arg.upper()]
+                if isinstance(time_unit_arg, str)
+                else TimeUnit(int(time_unit_arg))
+            )
+            await controller.ramp_rate(max_ramp, time_unit=time_unit)
+            return f"set_ramp_rate max={max_ramp} unit={time_unit.name}"
+        if kind == "set_deadband":
+            controller = self._require_controller(kind)
+            deadband = float(cmd.payload["deadband"])
+            db_save: bool | None = cmd.payload.get("save")
+            await controller.deadband_limit(deadband, save=db_save)
+            return f"set_deadband={deadband}"
+        if kind == "set_auto_tare":
+            controller = self._require_controller(kind)
+            enable = bool(cmd.payload["enable"])
+            delay_s = cmd.payload.get("delay_s")
+            await controller.auto_tare(enable, delay_s=delay_s)
+            return f"set_auto_tare enable={enable} delay_s={delay_s}"
+        if kind == "set_power_up_tare":
+            enable = bool(cmd.payload["enable"])
+            await self._device.power_up_tare(enable)
+            return f"set_power_up_tare enable={enable}"
+
+        # ------------------ display
+
+        if kind == "blink_display":
+            duration_s = cmd.payload.get("duration_s")
+            await self._device.blink_display(duration_s)
+            return f"blink_display duration_s={duration_s}"
+        if kind == "lock_display":
+            await self._device.lock_display()
+            return "lock_display"
+        if kind == "unlock_display":
+            await self._device.unlock_display()
+            return "unlock_display"
+
+        # ------------------ valve hold (controller-only)
+
+        if kind == "hold_valves":
+            controller = self._require_controller(kind)
+            await controller.hold_valves()
+            return "hold_valves"
+        if kind == "hold_valves_closed":
+            controller = self._require_controller(kind)
+            # CAPA's authorization gate already accepted; pass library confirm.
+            await controller.hold_valves_closed(confirm=True)
+            return "hold_valves_closed"
+        if kind == "cancel_valve_hold":
+            controller = self._require_controller(kind)
+            await controller.cancel_valve_hold()
+            return "cancel_valve_hold"
+
+        # ------------------ totalizer
+
+        if kind == "totalizer_reset":
+            totalizer = TotalizerId(int(cmd.payload.get("totalizer", 1)))
+            await self._device.totalizer_reset(totalizer, confirm=True)
+            return f"totalizer_reset totalizer={totalizer.value}"
+        if kind == "totalizer_reset_peak":
+            totalizer = TotalizerId(int(cmd.payload.get("totalizer", 1)))
+            await self._device.totalizer_reset_peak(totalizer, confirm=True)
+            return f"totalizer_reset_peak totalizer={totalizer.value}"
+        if kind == "totalizer_save":
+            tot_enable: bool | None = cmd.payload.get("enable")
+            tot_save: bool | None = cmd.payload.get("save")
+            await self._device.totalizer_save(tot_enable, save=tot_save)
+            return f"totalizer_save enable={tot_enable} save={tot_save}"
+
         raise AdapterError(
             f"alicat {self.name!r}: unknown command kind {kind!r}",
             device=self.name,
         )
+
+    def _require_controller(self, kind: str) -> FlowController | PressureController:
+        """Reject controller-only ``kind`` on a meter device, return the
+        narrowed device handle.
+
+        The ``isinstance`` check runs *here* (not at dispatch sites) so mypy
+        can see the narrowed return type — a bare ``None`` return would force
+        every caller to ``cast`` or repeat the check.
+        """
+        if not isinstance(self._device, FlowController | PressureController):
+            raise AdapterError(
+                f"alicat {self.name!r}: command {kind!r} requires a controller, "
+                f"this device is a meter",
+                device=self.name,
+            )
+        return self._device
 
     # Typed helpers — IDE-friendly parallels to ``.command()``.
     async def set_setpoint(
@@ -525,6 +706,171 @@ class AlicatAdapter:
                 confirmed_by=confirmed_by,
             )
         )
+
+    async def set_units(
+        self,
+        statistic: str | int,
+        unit: str | int,
+        *,
+        issued_by: str,
+        apply_to_group: bool = False,
+        override_special_rules: bool = False,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Set the engineering unit for one statistic (``DCU``)."""
+        return await self.command(
+            DeviceCommand(
+                kind="set_units",
+                target=str(statistic),
+                payload={
+                    "statistic": statistic,
+                    "unit": unit,
+                    "apply_to_group": apply_to_group,
+                    "override_special_rules": override_special_rules,
+                },
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def hold_valves(
+        self,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Hold valve(s) at their current drive position (``HP``)."""
+        return await self.command(
+            DeviceCommand(
+                kind="hold_valves",
+                payload={},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def hold_valves_closed(
+        self,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Force valve(s) closed immediately (``HC``). Destructive — interrupts
+        closed-loop control. Best wired to a discrete UI confirmation rather
+        than a method step."""
+        return await self.command(
+            DeviceCommand(
+                kind="hold_valves_closed",
+                payload={},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def cancel_valve_hold(
+        self,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Cancel any active valve hold and resume closed-loop control."""
+        return await self.command(
+            DeviceCommand(
+                kind="cancel_valve_hold",
+                payload={},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def totalizer_reset(
+        self,
+        *,
+        issued_by: str,
+        totalizer: int = 1,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Reset a totalizer's accumulated count. Destructive."""
+        return await self.command(
+            DeviceCommand(
+                kind="totalizer_reset",
+                payload={"totalizer": totalizer},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def lock_display(
+        self,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Lock the front-panel display (``L``)."""
+        return await self.command(
+            DeviceCommand(
+                kind="lock_display",
+                payload={},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def unlock_display(
+        self,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Unlock the front-panel display (``U``). Always callable as a
+        safety escape, even on devices that don't advertise
+        :class:`Capability.HAS_DISPLAY_CONTROL`."""
+        return await self.command(
+            DeviceCommand(
+                kind="unlock_display",
+                payload={},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    # ------------------------------------------------------------------ read-only helpers
+    #
+    # No authorization gate — these are pure reads. The manual control panel
+    # uses these to render the current device state next to its set / write
+    # buttons.
+
+    async def read_gas_list(self) -> Mapping[int, str]:
+        """List the gases the device knows about (``GL``).
+
+        Returns a mapping of wire code → label. Custom mixtures occupy slots
+        236..255 with operator-defined labels.
+        """
+        if self._device is None:
+            raise AdapterError(
+                f"alicat {self.name!r} read_gas_list() requires open() first",
+                device=self.name,
+            )
+        try:
+            return await self._device.gas_list()
+        except AlicatError as exc:
+            raise AdapterError(
+                f"alicat {self.name!r} read_gas_list failed: {exc}", device=self.name
+            ) from exc
 
     # ------------------------------------------------------------------ helpers
 

@@ -34,7 +34,7 @@ import anyio
 import sartoriuslib
 from pydantic import BaseModel, ConfigDict, Field
 from sartoriuslib.devices.balance import Balance
-from sartoriuslib.devices.models import DeviceInfo, Reading
+from sartoriuslib.devices.models import CalRecord, DeviceInfo, Reading
 from sartoriuslib.errors import SartoriusError
 from sartoriuslib.manager import DeviceResult
 from sartoriuslib.protocol.base import ProtocolKind
@@ -267,6 +267,8 @@ class SartoriusAdapter:
             Capability.HAS_TARE,
             Capability.HAS_ZERO,
             Capability.EMITS_STABILITY_FLAG,
+            Capability.HAS_INTERNAL_CAL,
+            Capability.HAS_PARAMETER_CONFIG,
         }
         if params.auto_reconnect:
             flags.add(Capability.SUPPORTS_AUTO_RECONNECT)
@@ -457,8 +459,23 @@ class SartoriusAdapter:
 
         Recognized ``cmd.kind`` values:
 
+        Stateful (no library confirm needed):
+
         * ``"tare"`` — combined-tare (xBPI ``0x14`` / SBI ``ESC T``).
         * ``"zero"`` — zero command (xBPI ``0x18``).
+
+        Persistent / dangerous (CAPA's authorization gate covers the library's
+        own ``confirm=True`` gate; we always pass it through here since
+        ``reject_unless_authorized`` already accepted the command):
+
+        * ``"internal_adjust"`` — payload ``{"cal_type": int | None}``.
+        * ``"set_filter_mode"`` — payload ``{"mode": str | int}``.
+        * ``"set_display_unit"`` — payload ``{"unit": str | int}``.
+        * ``"set_auto_zero"`` — payload ``{"mode": str | int}``.
+        * ``"set_isocal_mode"`` — payload ``{"mode": str | int}`` (Cubis only).
+        * ``"set_tare_behavior"`` — payload ``{"mode": str | int}``.
+        * ``"save_menu"`` — persist current menu to EEPROM.
+        * ``"reload_menu"`` — reload saved menu from EEPROM.
         """
         assert self._balance is not None
         kind = cmd.kind
@@ -468,6 +485,36 @@ class SartoriusAdapter:
         if kind == "zero":
             await self._balance.zero()
             return "zero"
+        if kind == "internal_adjust":
+            cal_type = cmd.payload.get("cal_type")
+            await self._balance.internal_adjust(cal_type=cal_type, confirm=True)
+            return f"internal_adjust cal_type={cal_type if cal_type is not None else 'default'}"
+        if kind == "set_filter_mode":
+            mode = cmd.payload["mode"]
+            await self._balance.set_filter_mode(mode, confirm=True)
+            return f"set_filter_mode mode={mode!r}"
+        if kind == "set_display_unit":
+            unit = cmd.payload["unit"]
+            await self._balance.set_display_unit(unit, confirm=True)
+            return f"set_display_unit unit={unit!r}"
+        if kind == "set_auto_zero":
+            mode = cmd.payload["mode"]
+            await self._balance.set_auto_zero(mode, confirm=True)
+            return f"set_auto_zero mode={mode!r}"
+        if kind == "set_isocal_mode":
+            mode = cmd.payload["mode"]
+            await self._balance.set_isocal_mode(mode, confirm=True)
+            return f"set_isocal_mode mode={mode!r}"
+        if kind == "set_tare_behavior":
+            mode = cmd.payload["mode"]
+            await self._balance.set_tare_behavior(mode, confirm=True)
+            return f"set_tare_behavior mode={mode!r}"
+        if kind == "save_menu":
+            await self._balance.save_menu(confirm=True)
+            return "save_menu"
+        if kind == "reload_menu":
+            await self._balance.reload_menu(confirm=True)
+            return "reload_menu"
         raise AdapterError(
             f"sartorius {self.name!r}: unknown command kind {kind!r}",
             device=self.name,
@@ -507,6 +554,133 @@ class SartoriusAdapter:
             )
         )
 
+    async def internal_adjust(
+        self,
+        *,
+        issued_by: str,
+        cal_type: int | None = None,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Run the balance's internal calibration / adjustment routine.
+
+        The Sartorius motorized internal weight is the canonical
+        start-of-day calibration; ``cal_type`` selects an external /
+        linearization variant (``0x70..0x7B``). Most callers pass
+        ``cal_type=None`` and accept the library default.
+        """
+        return await self.command(
+            DeviceCommand(
+                kind="internal_adjust",
+                payload={"cal_type": cal_type},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def set_filter_mode(
+        self,
+        mode: str | int,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Write parameter ``p01`` (filter mode). Persists to EEPROM only after
+        a subsequent ``save_menu`` — this call writes to the runtime menu."""
+        return await self.command(
+            DeviceCommand(
+                kind="set_filter_mode",
+                target="filter_mode",
+                payload={"mode": mode},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def set_display_unit(
+        self,
+        unit: str | int,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Write parameter ``p07`` (display unit)."""
+        return await self.command(
+            DeviceCommand(
+                kind="set_display_unit",
+                target="display_unit",
+                payload={"unit": unit},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def set_auto_zero(
+        self,
+        mode: str | int,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Write parameter ``p06`` (auto-zero tracking)."""
+        return await self.command(
+            DeviceCommand(
+                kind="set_auto_zero",
+                target="auto_zero",
+                payload={"mode": mode},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def save_menu(
+        self,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Persist the runtime menu to EEPROM (xBPI ``0x47``).
+
+        Plan §9 audit: a single ``save_menu`` may persist many prior
+        parameter writes, so the audit trail captures the save as a
+        distinct authorized event.
+        """
+        return await self.command(
+            DeviceCommand(
+                kind="save_menu",
+                payload={},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def reload_menu(
+        self,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Reload the saved menu from EEPROM (xBPI ``0x46``)."""
+        return await self.command(
+            DeviceCommand(
+                kind="reload_menu",
+                payload={},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
     async def read_mass(self) -> Reading:
         """Read the current net weight (no authorization gate — read-only)."""
         if self._balance is None:
@@ -519,6 +693,25 @@ class SartoriusAdapter:
         except SartoriusError as exc:
             raise AdapterError(
                 f"sartorius {self.name!r} read_mass failed: {exc}", device=self.name
+            ) from exc
+
+    async def read_last_cal_record(self) -> CalRecord:
+        """Read the last-calibration snapshot (no authorization gate — read-only).
+
+        Used by the manual-control panel to display when the balance was last
+        calibrated and what the result was.
+        """
+        if self._balance is None:
+            raise AdapterError(
+                f"sartorius {self.name!r} read_last_cal_record() requires open() first",
+                device=self.name,
+            )
+        try:
+            return await self._balance.last_cal_record()
+        except SartoriusError as exc:
+            raise AdapterError(
+                f"sartorius {self.name!r} read_last_cal_record failed: {exc}",
+                device=self.name,
             ) from exc
 
     # ------------------------------------------------------------------ helpers

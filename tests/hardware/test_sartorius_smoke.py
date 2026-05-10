@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pyarrow.parquet as pq
@@ -45,7 +46,7 @@ pytestmark = [
 ]
 
 
-def _sartorius_params() -> dict[str, object]:
+def _sartorius_params() -> dict[str, Any]:
     port = os.environ.get("CAPA_TEST_SARTORIUS_PORT")
     if port is None:
         pytest.skip("CAPA_TEST_SARTORIUS_PORT not set")

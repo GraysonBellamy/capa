@@ -46,6 +46,12 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 
 from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
+from capa.devices._helpers import (
+    make_accepted_result,
+    make_not_open_result,
+    reject_unless_authorized,
+)
+from capa.devices.adapter import CommandResult, DeviceCommand
 from capa.devices.camera.base import (
     CameraCapability,
     CameraEvent,
@@ -87,7 +93,12 @@ class FlirIrSim:
     """
 
     __slots__ = (
+        "_atmospheric_temp_c",
+        "_atmospheric_transmission",
+        "_auto_nuc_interval_s",
         "_clock",
+        "_distance_m",
+        "_emissivity",
         "_event_recv",
         "_event_send",
         "_file",
@@ -101,15 +112,21 @@ class FlirIrSim:
         "_info",
         "_last_frame_t_mono_ns",
         "_meta_path",
+        "_nuc_count",
         "_open",
         "_output_path",
+        "_preview_palette",
         "_preview_recv",
         "_preview_send",
         "_recording",
+        "_reflected_temp_c",
+        "_relative_humidity",
+        "_remote_palette",
         "_serial",
         "_spec",
         "_started_t_mono_ns",
         "_stream_anchor_mono_ns",
+        "_temperature_range_index",
         "_width",
     )
 
@@ -120,9 +137,47 @@ class FlirIrSim:
             CameraCapability.SUPPORTS_DISCOVERY,
             CameraCapability.MODEL_HINT,
             CameraCapability.SERIAL_SELECT,
+            # Control-surface flags — sim mirrors the real FlirIrAdapter so
+            # recipes / UI panels can be developed against the sim without an
+            # SDK install. Verb table mirrors capa-flir's _dispatch_command.
+            CameraCapability.NUC_TRIGGER,
+            CameraCapability.RADIOMETRIC_PARAMS,
+            CameraCapability.TEMPERATURE_RANGE_SELECT,
+            CameraCapability.AUTO_NUC_INTERVAL,
+            CameraCapability.REMOTE_PALETTE,
         }
     )
     kind: Literal["ir"] = "ir"
+
+    TEMPERATURE_RANGES: tuple[str, ...] = ("low", "high")
+    """Sim camera reports two ranges. ``set_temperature_range`` validates
+    the index against this list."""
+
+    REMOTE_PALETTES: tuple[str, ...] = ("iron", "rainbow", "bw", "arctic", "lava")
+    """Sim camera-side palette names. Distinct from the preview-side preset
+    list — :attr:`PREVIEW_PALETTE_PRESETS` mirrors capa-flir's
+    ``PALETTE_PRESET_NAMES``."""
+
+    PREVIEW_PALETTE_PRESETS: frozenset[str] = frozenset(
+        {
+            "arctic",
+            "blackhot",
+            "bw",
+            "coldest",
+            "color_wheel_redhot",
+            "color_wheel_12",
+            "color_wheel_6",
+            "double_rainbow_2",
+            "hottest",
+            "iron",
+            "lava",
+            "rainbow",
+            "rain_hc",
+            "whitehot",
+        }
+    )
+    """Mirrors capa-flir's ``_atlas._cdef.PALETTE_PRESET_NAMES`` keys so a
+    recipe targeting the real adapter validates the same way against sim."""
 
     def __init__(
         self,
@@ -164,6 +219,21 @@ class FlirIrSim:
         self._output_path: Path | None = None
         self._meta_path: Path | None = None
         self._file: Any = None  # binary file handle
+
+        # Radiometric / control-surface state. Defaults match the typical
+        # "human room" values a fresh FLIR camera reports out of the box;
+        # recipes override per-experiment via DeviceCommand verbs.
+        self._emissivity: float = 0.95
+        self._atmospheric_temp_c: float = 20.0
+        self._atmospheric_transmission: float = 1.0
+        self._reflected_temp_c: float = 20.0
+        self._distance_m: float = 1.0
+        self._relative_humidity: float = 0.5
+        self._temperature_range_index: int = 0
+        self._auto_nuc_interval_s: int = 0
+        self._remote_palette: str = "iron"
+        self._preview_palette: str = "iron"
+        self._nuc_count: int = 0
 
         self._frame_send: MemoryObjectSendStream[FrameReceipt]
         self._frame_recv: MemoryObjectReceiveStream[FrameReceipt]
@@ -298,6 +368,129 @@ class FlirIrSim:
 
     def event_stream(self) -> AsyncIterator[CameraEvent]:
         return _drain_stream(self._event_recv)
+
+    # ----------------------------------------------------------- command surface
+
+    async def command(self, cmd: DeviceCommand) -> CommandResult:
+        """§9 authorization-gated dispatcher onto the typed sim state.
+
+        Verb table is kept in lockstep with
+        :class:`capa_flir.flir_ir.FlirIrAdapter._dispatch_command` so a
+        recipe targeting the real camera validates identically against the
+        sim. Discrepancies between the two surfaces should be considered
+        bugs, not divergence: the deferred-control-surface handoff calls
+        out sim parity as required for recipe portability.
+        """
+        clock = self._clock
+        rejection = reject_unless_authorized(
+            cmd, adapter_id="flir_ir_sim", device_name=self._spec.name, clock=clock
+        )
+        if rejection is not None:
+            return rejection
+        if not self._open:
+            return make_not_open_result(
+                adapter_id="flir_ir_sim", device_name=self._spec.name, clock=clock
+            )
+        try:
+            detail = await self._dispatch_command(cmd)
+        except (AdapterError, ValueError, KeyError) as exc:
+            return CommandResult(
+                accepted=False,
+                detail=f"{cmd.kind!r}: {exc}",
+                t_mono_ns=clock.t_mono_ns(),
+                t_utc=datetime.now(UTC),
+            )
+        return make_accepted_result(detail=detail, clock=clock)
+
+    async def _dispatch_command(self, cmd: DeviceCommand) -> str:
+        """Map ``cmd.kind`` → sim state mutation. Raises on unknown verbs and
+        on payload validation failures so :meth:`command` wraps the error
+        into a rejected :class:`CommandResult`."""
+        kind = cmd.kind
+        payload = cmd.payload
+        if kind == "trigger_nuc":
+            if self._recording:
+                raise AdapterError(
+                    "trigger_nuc forbidden during recording (calibration discontinuity)"
+                )
+            self._nuc_count += 1
+            await self._emit_event(kind="nuc_triggered", message="", severity="info")
+            return "trigger_nuc"
+        if kind == "set_emissivity":
+            value = float(payload["emissivity"])
+            if not (0.001 <= value <= 1.0):
+                raise ValueError(f"emissivity must be in [0.001, 1.0]; got {value}")
+            self._emissivity = value
+            return f"set_emissivity emissivity={value}"
+        if kind == "set_temperature_range":
+            if self._recording:
+                raise AdapterError("set_temperature_range forbidden during recording")
+            index = int(payload["index"])
+            if index < 0:
+                raise ValueError(f"temperature-range index must be >= 0; got {index}")
+            if index >= len(self.TEMPERATURE_RANGES):
+                raise ValueError(
+                    f"temperature-range index {index} out of bounds; sim reports "
+                    f"{len(self.TEMPERATURE_RANGES)} range(s)"
+                )
+            self._temperature_range_index = index
+            return f"set_temperature_range index={index}"
+        if kind == "set_atmospheric_temp":
+            celsius = float(payload["temperature_c"])
+            self._atmospheric_temp_c = celsius
+            return f"set_atmospheric_temp temperature_c={celsius}"
+        if kind == "set_reflected_temp":
+            celsius = float(payload["temperature_c"])
+            self._reflected_temp_c = celsius
+            return f"set_reflected_temp temperature_c={celsius}"
+        if kind == "set_distance_m":
+            distance = float(payload["distance_m"])
+            if distance <= 0:
+                raise ValueError(f"object distance must be > 0 meters; got {distance}")
+            self._distance_m = distance
+            return f"set_distance_m distance_m={distance}"
+        if kind == "set_relative_humidity":
+            fraction = float(payload["relative_humidity"])
+            if not (0.0 <= fraction <= 1.0):
+                # SDK uses fraction; per-image API uses percent — mirror the
+                # real adapter's wording so the same misuse looks the same here.
+                raise ValueError(
+                    f"relative humidity must be a fraction in [0, 1]; got {fraction} "
+                    "(SDK uses fraction; per-image API uses percent — don't confuse them)"
+                )
+            self._relative_humidity = fraction
+            return f"set_relative_humidity relative_humidity={fraction}"
+        if kind == "set_atmospheric_transmission":
+            value = float(payload["transmission"])
+            if not (0.0 <= value <= 1.0):
+                raise ValueError(f"atmospheric transmission must be in [0, 1]; got {value}")
+            self._atmospheric_transmission = value
+            return f"set_atmospheric_transmission transmission={value}"
+        if kind == "set_auto_nuc_interval":
+            seconds = int(payload["seconds"])
+            if seconds < 0:
+                raise ValueError(f"auto-NUC interval must be >= 0; got {seconds}")
+            self._auto_nuc_interval_s = seconds
+            return f"set_auto_nuc_interval seconds={seconds}"
+        if kind == "set_remote_palette":
+            name = str(payload["palette"])
+            if name not in self.REMOTE_PALETTES:
+                raise ValueError(
+                    f"unknown remote palette {name!r}; expected one of "
+                    f"{sorted(self.REMOTE_PALETTES)}"
+                )
+            self._remote_palette = name
+            return f"set_remote_palette palette={name!r}"
+        if kind == "set_preview_palette":
+            name = str(payload["palette"])
+            if name not in self.PREVIEW_PALETTE_PRESETS:
+                raise ValueError(
+                    f"unknown preview palette {name!r}; expected one of "
+                    f"{sorted(self.PREVIEW_PALETTE_PRESETS)}"
+                )
+            self._preview_palette = name
+            return f"set_preview_palette palette={name!r}"
+        raise AdapterError(f"unknown camera command kind={kind!r}")
 
     # ----------------------------------------------------------- pump driver
 

@@ -64,27 +64,26 @@ def _operator_id() -> str:
 def _tc_channels() -> tuple[dict[str, object], ...]:
     """Two K-type thermocouples with built-in CJC, °C output."""
     mod = _module_name()
-    # ThermocoupleType.K=10073, CJCSource.BUILT_IN=10200, TemperatureUnits.DEG_C=10143
     return (
         {
             "kind": "thermocouple",
             "physical_channel": f"{mod}/ai0",
             "name": "TC_top_1",
-            "thermocouple_type": 10073,
+            "thermocouple_type": "K",
             "min_val": 0.0,
             "max_val": 1000.0,
-            "cjc_source": 10200,
-            "units": 10143,
+            "cjc_source": "BUILT_IN",
+            "units": "DEG_C",
         },
         {
             "kind": "thermocouple",
             "physical_channel": f"{mod}/ai1",
             "name": "TC_top_2",
-            "thermocouple_type": 10073,
+            "thermocouple_type": "K",
             "min_val": 0.0,
             "max_val": 1000.0,
-            "cjc_source": 10200,
-            "units": 10143,
+            "cjc_source": "BUILT_IN",
+            "units": "DEG_C",
         },
     )
 

@@ -112,7 +112,7 @@ def _make_ctx(
         logger=structlog.get_logger("test"),
         external_stop=stop,
         instruments=instruments,
-        adapters={"heater": adapter},
+        adapters={"heater": adapter},  # type: ignore[dict-item]
         authorization=Authorization(operator_id="abr", run_id="r1"),
         metadata={},
     )

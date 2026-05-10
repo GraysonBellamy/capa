@@ -30,6 +30,8 @@ import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from capa.devices.adapter import CommandResult, DeviceCommand
+
 
 class CameraCapability(Flag):
     """Camera capability flags. Used by the UI to gate widgets and by the
@@ -40,7 +42,9 @@ class CameraCapability(Flag):
     RADIOMETRIC = auto()
     """Camera produces radiometric (per-pixel temperature) frames. IR-only."""
     PALETTE = auto()
-    """Camera supports a configurable color palette (IR families)."""
+    """Camera supports a configurable color palette (IR families). The
+    preview-side palette — the live JPEG the dashboard shows. Distinct from
+    REMOTE_PALETTE (camera onboard display)."""
     MEASUREMENT_SHAPES = auto()
     """Camera supports on-image measurement shapes (spotmeters, boxes, etc.)."""
     SUPPORTS_DISCOVERY = auto()
@@ -51,6 +55,63 @@ class CameraCapability(Flag):
     """Adapter honors :attr:`CameraSpec.serial` for exact-match selection."""
     LIVE_PREVIEW = auto()
     """Adapter pumps preview frames onto :meth:`Camera.preview_stream`."""
+
+    # ---- Control-surface flags (capa-flir Phase 4) ----
+    NUC_TRIGGER = auto()
+    """Adapter exposes a one-shot NUC / flat-field correction trigger
+    (``ACS_Remote_Calibration_nuc_executeSync`` in the FLIR Atlas SDK)."""
+    RADIOMETRIC_PARAMS = auto()
+    """Adapter exposes the bundled radiometric kit — emissivity, atmospheric
+    temperature/transmission, reflected temperature, object distance, relative
+    humidity. The Atlas SDK ships these together; capa exposes them as one
+    flag for the same reason."""
+    TEMPERATURE_RANGE_SELECT = auto()
+    """Adapter exposes camera temperature-range enumeration and selection
+    (``ACS_Remote_TemperatureRange_*``). Switching ranges typically forces a
+    multi-second recalibration; the adapter is responsible for refusing the
+    operation while a recording is in progress."""
+    AUTO_NUC_INTERVAL = auto()
+    """Adapter exposes the camera's auto-NUC scheduler interval (seconds).
+    ``0`` means disabled."""
+    REMOTE_PALETTE = auto()
+    """Adapter exposes camera-side display palette selection
+    (``ACS_Remote_Palette_*``). Distinct from PALETTE, which means
+    "preview-side palette is configurable"."""
+
+    # ---- UVC control-surface flags (visible-camera control via duvc-ctl) ----
+    EXPOSURE_CONTROL = auto()
+    """Adapter exposes UVC exposure control: ``set_exposure`` (manual µs) and
+    ``set_auto_exposure`` (auto/manual mode). UVC exposure is logged as
+    2**(value) seconds; capa passes the raw int through to duvc-ctl."""
+    FOCUS_CONTROL = auto()
+    """Adapter exposes UVC focus control: ``set_focus`` (lens distance, raw
+    units) and ``set_auto_focus`` (continuous-AF on/off). Cameras without a
+    motorized lens (typical fixed-focus laptops) don't advertise this."""
+    ZOOM_CONTROL = auto()
+    """Adapter exposes UVC optical zoom (``set_zoom``) and/or digital zoom
+    (``set_digital_zoom``). Distinct verbs because optical zoom rejects
+    when the camera has none and silently falling back to digital would
+    mislead the operator."""
+    WB_CONTROL = auto()
+    """Adapter exposes UVC white-balance control: ``set_white_balance``
+    (color temperature K, raw int) and ``set_auto_white_balance`` (AWB
+    on/off)."""
+    PAN_TILT_CONTROL = auto()
+    """Adapter exposes UVC pan / tilt control (PTZ cameras only):
+    ``set_pan``, ``set_tilt``. Logitech PTZ Pro 2, BRIO 4K (limited),
+    etc. Fixed cameras (C920/C930e) reject."""
+    IMAGE_ADJUST = auto()
+    """Adapter exposes UVC image-adjustment verbs: ``set_brightness``,
+    ``set_contrast``, ``set_saturation``, ``set_sharpness``, ``set_gamma``,
+    ``set_hue``, ``set_gain``, ``set_backlight_compensation``. Grouped
+    under one flag because nearly every UVC device supports at least
+    Brightness + Contrast; finer per-property gating is by probing each
+    property's :class:`PropRange` at adapter ``open()``."""
+    STREAM_FORMAT = auto()
+    """Adapter exposes stream-format selection: ``set_resolution`` and
+    ``set_framerate``. These are PyAV ``av.open()`` options (not UVC
+    properties), so they require reopening the capture pipeline and are
+    refused mid-recording."""
 
 
 CameraTransport = Literal["usb", "ethernet", "file", "loopback"]
@@ -310,6 +371,19 @@ class Camera(Protocol):
     def event_stream(self) -> AsyncIterator[CameraEvent]:
         """Async iterator of discrete camera events. Drained into
         ``events.sqlite``."""
+        ...
+
+    async def command(self, cmd: DeviceCommand) -> CommandResult:
+        """Issue a generic command. Same contract as
+        :meth:`~capa.devices.adapter.DeviceAdapter.command`: the adapter
+        applies the §9 authorization gate, dispatches ``cmd.kind`` onto its
+        typed methods, and returns a :class:`CommandResult` with
+        ``accepted`` reflecting acceptance.
+
+        Adapters that expose no control verbs (e.g. the visible-camera
+        adapter) gate-and-reject — they must still implement the method so
+        the Protocol surface stays uniform across visible and IR families.
+        """
         ...
 
 

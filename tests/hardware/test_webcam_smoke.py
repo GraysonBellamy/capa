@@ -18,7 +18,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pyarrow.parquet as pq
@@ -60,11 +62,7 @@ def _input_format() -> str:
     override = os.environ.get("CAPA_TEST_WEBCAM_INPUT_FORMAT")
     if override:
         return override
-    if sys.platform == "win32":
-        return "dshow"
-    if sys.platform == "darwin":
-        return "avfoundation"
-    return "v4l2"
+    return {"win32": "dshow", "darwin": "avfoundation"}.get(sys.platform, "v4l2")
 
 
 def _operator_id() -> str:
@@ -92,7 +90,7 @@ def _spec(device: str, name: str = "visible_cam0") -> CameraSpec:
 
 
 @pytest.fixture(autouse=True)
-def _release_dshow_handle_between_tests():
+def _release_dshow_handle_between_tests() -> Iterator[None]:
     """Force PyAV refcount cleanup between Windows webcam tests.
 
     The production ``WebcamAdapter._open_input_with_retry`` now handles the
@@ -116,7 +114,8 @@ class TestRealWebcam:
         spec = _spec(device)
         output = tmp_path / "video" / f"{spec.name}.mkv"
         output.parent.mkdir(parents=True, exist_ok=True)
-        cam = WebcamAdapter.from_params(spec=spec, clock=clock, **spec.params)
+        params: dict[str, Any] = dict(spec.params)
+        cam = WebcamAdapter.from_params(spec=spec, clock=clock, **params)
         await cam.open()
         try:
             await cam.start_recording(output)

@@ -16,6 +16,7 @@ import itertools
 import struct
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -38,8 +39,8 @@ from capa.experiment.config import HardwareProfile
 pytestmark = pytest.mark.anyio
 
 
-def _spec(name: str = "ir_cam0", **overrides: object) -> CameraSpec:
-    base = {
+def _spec(name: str = "ir_cam0", **overrides: Any) -> CameraSpec:
+    base: dict[str, Any] = {
         "name": name,
         "adapter": "capa.devices.sim.flir_ir_sim",
         "kind": "ir",
@@ -48,7 +49,7 @@ def _spec(name: str = "ir_cam0", **overrides: object) -> CameraSpec:
     return CameraSpec.model_validate(base)
 
 
-def _make_sim(tmp_path: Path, **kwargs: object) -> FlirIrSim:
+def _make_sim(tmp_path: Path, **kwargs: Any) -> FlirIrSim:
     spec = _spec()
     clock = RunClock.now()
     return FlirIrSim(spec=spec, clock=clock, **kwargs)

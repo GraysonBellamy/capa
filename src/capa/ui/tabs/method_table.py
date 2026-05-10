@@ -18,9 +18,9 @@ mutate, since :class:`~capa.experiment.method.Step` subclasses are
 
 from __future__ import annotations
 
-from typing import Any, Final
+from typing import Any, Final, assert_never
 
-from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
 
 from capa.experiment.method import (
     AcquireStep,
@@ -71,7 +71,7 @@ def _summary(step: Step) -> str:
         return "shutdown"
     if isinstance(step, CustomStep):
         return f"custom: {step.handler_id}"
-    return "—"
+    assert_never(step)
 
 
 def _target_name(step: Step) -> str:
@@ -96,15 +96,21 @@ class MethodTableModel(QAbstractTableModel):
 
     # ----------------------------------------------------------- Qt overrides
 
-    def rowCount(self, parent: QModelIndex | None = None) -> int:  # noqa: N802 - Qt
+    def rowCount(  # noqa: N802 - Qt
+        self,
+        parent: QModelIndex | QPersistentModelIndex | None = None,
+    ) -> int:
         return 0 if parent is not None and parent.isValid() else len(self._steps)
 
-    def columnCount(self, parent: QModelIndex | None = None) -> int:  # noqa: N802 - Qt
+    def columnCount(  # noqa: N802 - Qt
+        self,
+        parent: QModelIndex | QPersistentModelIndex | None = None,
+    ) -> int:
         return 0 if parent is not None and parent.isValid() else len(_HEADERS)
 
-    def data(  # noqa: PLR0911 - one branch per column is the clearest shape
+    def data(
         self,
-        index: QModelIndex,
+        index: QModelIndex | QPersistentModelIndex,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> Any:
         if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:

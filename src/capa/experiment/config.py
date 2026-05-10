@@ -257,6 +257,10 @@ class ExperimentConfig(BaseModel):
     """Optional :class:`~capa.experiment.method.Method`. Free runs have no
     method. Typed as ``Any`` here to keep the import surface small; validated
     in :meth:`load`."""
+    method_source_path: Path | None = None
+    """Original method file path when ``method:`` was a string ref in the
+    experiment YAML. ``None`` when the method was inlined or absent. The UI
+    uses this so editing an auto-loaded method writes back to its source file."""
     procedure: ProcedureRef
     domain_profile: DomainProfileRef | None = None
     calibration_set: CalibrationSetRef
@@ -351,7 +355,10 @@ def _resolve_external_refs(data: dict[str, Any], base_dir: Path) -> dict[str, An
             ref_path = Path(ref)
             if not ref_path.is_absolute():
                 ref_path = base_dir / ref_path
+            ref_path = ref_path.resolve()
             out[key] = _load_structured_file(ref_path)
+            if key == "method":
+                out["method_source_path"] = ref_path
     return out
 
 

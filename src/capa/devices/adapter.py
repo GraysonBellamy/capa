@@ -47,6 +47,23 @@ class Capability(Flag):
     """Adapter retries transient connection errors silently and surfaces them
     as a watchdog metric instead of failing the run. Informational; gated by
     the per-adapter ``auto_reconnect`` parameter."""
+    HAS_INTERNAL_CAL = auto()
+    """Adapter exposes a device-driven internal calibration / adjustment
+    routine (Sartorius IsoCAL / motorized calibration weight). Manual-override
+    territory: never call mid-run."""
+    HAS_PARAMETER_CONFIG = auto()
+    """Adapter exposes typed get/set of device parameters (filter mode,
+    display unit, auto-zero, etc.) that may persist to EEPROM. The UI uses
+    this to gate a parameters panel."""
+    HAS_TOTALIZER = auto()
+    """Adapter exposes a flow totalizer with reset / configure verbs (Alicat
+    flow devices, V10 firmware)."""
+    HAS_VALVE_HOLD = auto()
+    """Adapter exposes valve-hold control (Alicat controllers): hold at
+    current drive, hold closed, cancel hold."""
+    HAS_DISPLAY_CONTROL = auto()
+    """Adapter exposes front-panel display control (lock/unlock, blink).
+    Unlock is always callable as a safety escape."""
 
 
 class DeviceCommand(BaseModel):

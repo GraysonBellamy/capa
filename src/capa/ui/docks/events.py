@@ -8,9 +8,9 @@ later. Auto-scrolls to the bottom unless the operator has scrolled away.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont, QStandardItem, QStandardItemModel
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QFont, QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import (
     QDockWidget,
     QListView,
     QWidget,

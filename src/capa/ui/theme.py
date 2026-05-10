@@ -3,7 +3,7 @@ here so a future Simple/Expert mode preset (P6) can override one place."""
 
 from __future__ import annotations
 
-from PyQt6.QtGui import QColor, QFont, QFontDatabase
+from PySide6.QtGui import QColor, QFont, QFontDatabase
 
 # Status colors used across the run header, status bar pills, and event
 # severity rendering.

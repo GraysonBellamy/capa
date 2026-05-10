@@ -252,7 +252,7 @@ def _make_adapter(
         rate_hz=rate_hz,
         snapshot_period_s=snapshot_period_s,
         auto_reconnect=auto_reconnect,
-        controller_factory=factory,  # type: ignore[arg-type]
+        controller_factory=factory,
     )
     adapter.configure_channels(_channels_for_heater())
     return adapter, stub
@@ -379,7 +379,7 @@ class TestLifecycle:
             name="heater",
             port="fake://test",
             identify_on_open=False,
-            controller_factory=factory,  # type: ignore[arg-type]
+            controller_factory=factory,
         )
         await adapter.open()
         assert stub.identify_calls == 0
@@ -498,7 +498,7 @@ class TestStreaming:
             parameters=("process_value",),
             rate_hz=100.0,
             snapshot_period_s=1e6,
-            controller_factory=factory,  # type: ignore[arg-type]
+            controller_factory=factory,
         )
         adapter.configure_channels([channel])
         await adapter.open()
@@ -543,7 +543,7 @@ class TestStreaming:
             port="fake://test",
             rate_hz=100.0,
             snapshot_period_s=0.001,  # fire on nearly every tick
-            controller_factory=factory,  # type: ignore[arg-type]
+            controller_factory=factory,
         )
         adapter.configure_channels(_channels_for_heater())
         await adapter.open()
@@ -573,7 +573,7 @@ class TestStreaming:
             rate_hz=100.0,
             snapshot_period_s=1e6,
             auto_reconnect=True,
-            controller_factory=factory,  # type: ignore[arg-type]
+            controller_factory=factory,
         )
         adapter.configure_channels(_channels_for_heater())
         await adapter.open()
@@ -602,7 +602,7 @@ class TestStreaming:
             rate_hz=100.0,
             snapshot_period_s=1e6,
             auto_reconnect=False,
-            controller_factory=factory,  # type: ignore[arg-type]
+            controller_factory=factory,
         )
         adapter.configure_channels(_channels_for_heater())
         await adapter.open()

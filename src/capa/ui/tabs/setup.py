@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import json
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtWidgets import (
     QHBoxLayout,
+    QMenu,
     QPlainTextEdit,
     QSplitter,
     QTreeWidget,
@@ -29,7 +30,16 @@ class SetupTab(QWidget):
     """Two-pane layout: device/channel tree on the left, JSON detail on the
     right. Channels are nested under their owning device when the binding
     declares a device; otherwise they hang off a synthetic "(unbound)"
-    parent."""
+    parent.
+
+    Right-clicking a device row emits :attr:`device_action_requested` with
+    the device name. :class:`MainWindow` listens for that signal and reveals
+    the device's manual control card.
+    """
+
+    device_action_requested = Signal(str)
+    """Emitted when the operator chooses "Open Manual Control" from the
+    right-click menu on a device row. Argument is the device name."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -46,6 +56,8 @@ class SetupTab(QWidget):
         self._tree.setColumnWidth(0, 240)
         self._tree.setRootIsDecorated(True)
         self._tree.itemSelectionChanged.connect(self._on_selection_changed)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._on_context_menu)
         splitter.addWidget(self._tree)
 
         self._detail = QPlainTextEdit(self)
@@ -96,6 +108,26 @@ class SetupTab(QWidget):
         self._config = None
 
     # ------------------------------------------------------------------ internal
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        item = self._tree.itemAt(pos)
+        if item is None:
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not (isinstance(data, tuple) and len(data) == 2):
+            return
+        kind, name = data
+        if kind != "device" or not name:
+            return
+        menu = QMenu(self._tree)
+        action = menu.addAction("Open Manual Control")
+        # ``viewport()`` is the actual interactive surface; the
+        # customContextMenuRequested coordinate is relative to it.
+        viewport = self._tree.viewport()
+        global_pos = viewport.mapToGlobal(pos) if viewport is not None else pos
+        chosen = menu.exec(global_pos)
+        if chosen is action:
+            self.device_action_requested.emit(name)
 
     def _on_selection_changed(self) -> None:
         items = self._tree.selectedItems()

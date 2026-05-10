@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-`capa` is a single-rig, single-operator control and DAQ application written in Python with a PyQt6 GUI. It drives a heterogeneous instrument set (NI-DAQ, Watlow temperature controllers, Alicat mass-flow controllers, Sartorius balances, USB and IR thermal cameras) through the existing async-first device libraries (`nidaqlib`, `watlowlib`, `alicatlib`, `sartoriuslib`), records every run as a self-contained on-disk bundle, and supports research workflows (calibrations, custom routines) as first-class plugins rather than one-off UI hacks.
+`capa` is a single-rig, single-operator control and DAQ application written in Python with a PySide6 GUI. It drives a heterogeneous instrument set (NI-DAQ, Watlow temperature controllers, Alicat mass-flow controllers, Sartorius balances, USB and IR thermal cameras) through the existing async-first device libraries (`nidaqlib`, `watlowlib`, `alicatlib`, `sartoriuslib`), records every run as a self-contained on-disk bundle, and supports research workflows (calibrations, custom routines) as first-class plugins rather than one-off UI hacks.
 
 Sample rates are modest (3–60 Hz per device); the dominant I/O concern is video, not analog throughput. The architecture is therefore optimized for **reproducibility, extensibility, and operational clarity** over raw bandwidth — with explicit escape hatches for the cases that need it (high-rate NI DAQ via TDMS, native-format radiometric IR via the FLIR Atlas SDK).
 
@@ -50,7 +50,7 @@ These are the assumed working conditions; the architecture is sized for them, no
 |----------------------|-----------------------------------------|---------------------------------------------------------------------------|
 | Language             | Python 3.12 / 3.13                      | Matches device libraries; modern typing, `match`, `ExceptionGroup`; stay below Python 3.14 until `qasync` supports it |
 | Async runtime        | AnyIO (asyncio backend by default)      | Every device library is built on AnyIO; consistent task-group semantics   |
-| GUI                  | PyQt6 + `qasync`                        | Mature dock framework; well-trodden asyncio bridge                        |
+| GUI                  | PySide6 + `qasync`                        | Mature dock framework; well-trodden asyncio bridge                        |
 | Plotting             | PyQtGraph                               | Only library that handles 60-Hz live updates without sweat                |
 | Data validation      | Pydantic v2                             | Auto-validation; auto-form generation; YAML/TOML-friendly                 |
 | Units                | `pint` + UCUM-aligned vocabulary        | Dimensional analysis at config-load; catches kPa/psi-class errors before a run |
@@ -69,7 +69,7 @@ These are the assumed working conditions; the architecture is sized for them, no
 | Packaging            | uv + `pyproject.toml` (committed `uv.lock`) | Matches existing library tooling; lockfile is provenance for the bundle |
 | Lint / format        | `ruff` (single tool, replaces black + flake8 + isort) | One tool, fast, deterministic                                  |
 | Type checking        | `mypy --strict` (or `pyright` in CI)    | Pydantic v2 + strict typing pays for itself across a long-lived codebase  |
-| GUI testing          | `pytest-qt` with `qasync` integration   | The standard for PyQt6 + asyncio test harnesses                           |
+| GUI testing          | `pytest-qt` with `qasync` integration   | The standard for PySide6 + asyncio test harnesses                           |
 | Versioning           | `setuptools-scm` (git tag → `__version__`) | App version embedded in every bundle without manual bumps              |
 
 **On the choice of Parquet+SQLite over HDF5:** for a long-lived multi-researcher artifact, the Parquet ecosystem (DuckDB, Polars, Arrow, Spark, Julia, R) is materially richer than HDF5's, the file-per-concern layout is more crash-tolerant, and FLIR's native radiometric format preserves vendor metadata that float32 transcoding loses. HDF5 remains an option later for archival merge — see §16.
@@ -80,7 +80,7 @@ These are the assumed working conditions; the architecture is sized for them, no
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ UI Layer  (PyQt6, main thread, qasync event loop)              │
+│ UI Layer  (PySide6, main thread, qasync event loop)              │
 │   Tabs: Setup · Method · Run · Review                          │
 │   Docks: Numerics · Events · Notes · Camera previews           │
 │   Talks to engine via typed Command/Event API. Owns no I/O.    │

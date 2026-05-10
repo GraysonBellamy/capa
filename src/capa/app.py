@@ -283,7 +283,7 @@ def run(
         # GUI dispatch — the qasync bootstrap owns its own event loop and
         # catalog; the config path is forwarded so the operator opens with
         # something already loaded. Lazy-imported so headless paths
-        # (validate, catalog list) don't pay the PyQt6 startup cost.
+        # (validate, catalog list) don't pay the PySide6 startup cost.
         from capa.ui.app import run_gui  # noqa: PLC0415 — intentionally lazy
 
         rc = run_gui(
@@ -363,7 +363,7 @@ def gui(
 ) -> None:
     """Launch the GUI. Loads the optional config if provided; otherwise
     opens empty and the operator picks a config via File > Open."""
-    from capa.ui.app import run_gui  # noqa: PLC0415 — lazy PyQt6 import
+    from capa.ui.app import run_gui  # noqa: PLC0415 — lazy PySide6 import
 
     root = _resolve_runs_root(runs_root)
     root.mkdir(parents=True, exist_ok=True)

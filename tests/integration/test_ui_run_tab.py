@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from capa.channels.calibration import Identity
 from capa.channels.spec import ChannelSpec, WatlowParameter
@@ -85,9 +85,9 @@ class _FakeController(QObject):
     motivated the ``QTimer.singleShot(0, ...)`` defer.
     """
 
-    state_changed = pyqtSignal(object)
-    event_received = pyqtSignal(object)
-    run_finished = pyqtSignal(object)
+    state_changed = Signal(object)
+    event_received = Signal(object)
+    run_finished = Signal(object)
 
     def __init__(self, *, channels: tuple[str, ...]) -> None:
         super().__init__()
@@ -123,7 +123,7 @@ def test_plot_pane_rebound_to_controller_buffers_on_running(
     :meth:`load_config` with :attr:`RunController.buffers` once the
     engine reaches ``RUNNING`` — otherwise the live plot stays bound to
     a registry that no producer ever writes to (the §6 inline fix)."""
-    tab = RunTab(controller=fake_controller)
+    tab = RunTab(controller=fake_controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
     tab.load_config(_config())
 
@@ -152,7 +152,7 @@ def test_start_button_reenables_after_seal_via_singleshot(
     ``QTimer.singleShot(0, ...)`` defer, the button re-enables on the
     next event-loop tick.
     """
-    tab = RunTab(controller=fake_controller)
+    tab = RunTab(controller=fake_controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
     tab.load_config(_config())
 

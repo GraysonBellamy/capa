@@ -48,7 +48,9 @@ pytestmark = pytest.mark.anyio
 class StubBalance:
     """Minimal duck-type of :class:`sartoriuslib.devices.balance.Balance`.
 
-    The adapter only calls ``poll()``, ``tare()``, ``zero()``, and ``close()``.
+    Records every public-API call the adapter makes so tests can assert
+    dispatch behaviour, including the new parameter-config / internal-cal
+    surface.
     """
 
     def __init__(
@@ -68,6 +70,18 @@ class StubBalance:
         self.zero_calls = 0
         self.close_calls = 0
         self.raise_on_poll: BaseException | None = None
+        # Extended-control surface trackers (P3.5 — manual control panel
+        # pathway). Each list captures the *kwargs the adapter forwarded* so
+        # tests can assert both payload mapping and ``confirm=True`` pass-through.
+        self.internal_adjust_calls: list[dict[str, Any]] = []
+        self.set_filter_mode_calls: list[dict[str, Any]] = []
+        self.set_display_unit_calls: list[dict[str, Any]] = []
+        self.set_auto_zero_calls: list[dict[str, Any]] = []
+        self.set_isocal_mode_calls: list[dict[str, Any]] = []
+        self.set_tare_behavior_calls: list[dict[str, Any]] = []
+        self.save_menu_calls: list[dict[str, Any]] = []
+        self.reload_menu_calls: list[dict[str, Any]] = []
+        self.last_cal_record_calls = 0
 
         info = MagicMock()
         info.model = "MSE1203S"
@@ -108,6 +122,34 @@ class StubBalance:
 
     async def zero(self) -> None:
         self.zero_calls += 1
+
+    async def internal_adjust(self, *, cal_type: int | None = None, confirm: bool = False) -> None:
+        self.internal_adjust_calls.append({"cal_type": cal_type, "confirm": confirm})
+
+    async def set_filter_mode(self, mode: Any, *, confirm: bool = False) -> None:
+        self.set_filter_mode_calls.append({"mode": mode, "confirm": confirm})
+
+    async def set_display_unit(self, unit: Any, *, confirm: bool = False) -> None:
+        self.set_display_unit_calls.append({"unit": unit, "confirm": confirm})
+
+    async def set_auto_zero(self, mode: Any, *, confirm: bool = False) -> None:
+        self.set_auto_zero_calls.append({"mode": mode, "confirm": confirm})
+
+    async def set_isocal_mode(self, mode: Any, *, confirm: bool = False) -> None:
+        self.set_isocal_mode_calls.append({"mode": mode, "confirm": confirm})
+
+    async def set_tare_behavior(self, mode: Any, *, confirm: bool = False) -> None:
+        self.set_tare_behavior_calls.append({"mode": mode, "confirm": confirm})
+
+    async def save_menu(self, *, confirm: bool = False) -> None:
+        self.save_menu_calls.append({"confirm": confirm})
+
+    async def reload_menu(self, *, confirm: bool = False) -> None:
+        self.reload_menu_calls.append({"confirm": confirm})
+
+    async def last_cal_record(self) -> Any:
+        self.last_cal_record_calls += 1
+        return MagicMock(name="cal_record")
 
     async def close(self) -> None:
         self.close_calls += 1
@@ -152,7 +194,7 @@ def _make_adapter(
         rate_hz=rate_hz,
         snapshot_period_s=snapshot_period_s,
         auto_reconnect=auto_reconnect,
-        balance_factory=factory,  # type: ignore[arg-type]
+        balance_factory=factory,
     )
     adapter.configure_channels(_channels_for_balance())
     return adapter, stub
@@ -310,6 +352,150 @@ class TestAuthorization:
 
 
 # ---------------------------------------------------------------------------
+# Extended control surface — internal cal, parameter writes, EEPROM persist
+# ---------------------------------------------------------------------------
+
+
+class TestControlSurfaceCapabilities:
+    def test_advertises_internal_cal_and_parameter_config(self) -> None:
+        a = SartoriusAdapter(name="bal", port="/dev/null", auto_reconnect=False)
+        assert CapaCapability.HAS_INTERNAL_CAL in a.capabilities
+        assert CapaCapability.HAS_PARAMETER_CONFIG in a.capabilities
+
+
+class TestInternalAdjust:
+    async def test_default_cal_type_passes_none(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            result = await adapter.internal_adjust(issued_by="alice", confirmed_by="alice")
+            assert result.accepted is True
+            assert len(stub.internal_adjust_calls) == 1
+            assert stub.internal_adjust_calls[0]["cal_type"] is None
+            # CAPA's authorization gate covers the library's confirm gate.
+            assert stub.internal_adjust_calls[0]["confirm"] is True
+        finally:
+            await adapter.close()
+
+    async def test_custom_cal_type(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            result = await adapter.internal_adjust(
+                issued_by="alice", cal_type=0x71, confirmed_by="alice"
+            )
+            assert result.accepted is True
+            assert stub.internal_adjust_calls[0]["cal_type"] == 0x71
+        finally:
+            await adapter.close()
+
+    async def test_refused_without_authorization(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            result = await adapter.internal_adjust(issued_by="alice")
+            assert result.accepted is False
+            # Library never reached.
+            assert stub.internal_adjust_calls == []
+        finally:
+            await adapter.close()
+
+
+class TestParameterWrites:
+    async def test_set_filter_mode_forwards_payload(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            result = await adapter.set_filter_mode(
+                "very stable", issued_by="alice", confirmed_by="alice"
+            )
+            assert result.accepted is True
+            assert stub.set_filter_mode_calls == [{"mode": "very stable", "confirm": True}]
+        finally:
+            await adapter.close()
+
+    async def test_set_display_unit_int_payload(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            result = await adapter.set_display_unit(2, issued_by="alice", authorization_id="run-1")
+            assert result.accepted is True
+            assert stub.set_display_unit_calls == [{"unit": 2, "confirm": True}]
+        finally:
+            await adapter.close()
+
+    async def test_set_auto_zero(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            result = await adapter.set_auto_zero("off", issued_by="alice", authorization_id="run-1")
+            assert result.accepted is True
+            assert stub.set_auto_zero_calls == [{"mode": "off", "confirm": True}]
+        finally:
+            await adapter.close()
+
+
+class TestMenuPersistence:
+    async def test_save_menu(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            result = await adapter.save_menu(issued_by="alice", confirmed_by="alice")
+            assert result.accepted is True
+            assert stub.save_menu_calls == [{"confirm": True}]
+        finally:
+            await adapter.close()
+
+    async def test_reload_menu(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            result = await adapter.reload_menu(issued_by="alice", confirmed_by="alice")
+            assert result.accepted is True
+            assert stub.reload_menu_calls == [{"confirm": True}]
+        finally:
+            await adapter.close()
+
+
+class TestReadOnlyHelpers:
+    async def test_read_last_cal_record_no_auth_required(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            # Pure read — no authorization needed (mirrors ``read_mass``).
+            cal = await adapter.read_last_cal_record()
+            assert cal is not None
+            assert stub.last_cal_record_calls == 1
+        finally:
+            await adapter.close()
+
+    async def test_read_last_cal_record_requires_open(self) -> None:
+        adapter = SartoriusAdapter(name="bal", port="/dev/null")
+        with pytest.raises(AdapterError, match="requires open"):
+            await adapter.read_last_cal_record()
+
+
+class TestUnknownCommandKind:
+    async def test_unknown_kind_raises(self) -> None:
+        from capa.devices.adapter import DeviceCommand
+
+        adapter, _ = _make_adapter()
+        await adapter.open()
+        try:
+            with pytest.raises(AdapterError, match="unknown command kind"):
+                await adapter.command(
+                    DeviceCommand(
+                        kind="not_a_real_verb",
+                        payload={},
+                        issued_by="alice",
+                        confirmed_by="alice",
+                    )
+                )
+        finally:
+            await adapter.close()
+
+
+# ---------------------------------------------------------------------------
 # Watchdog state
 # ---------------------------------------------------------------------------
 
@@ -381,7 +567,7 @@ class TestColdOpenRetry:
         adapter = SartoriusAdapter(
             name="balance",
             port="fake://stub",
-            balance_factory=factory,  # type: ignore[arg-type]
+            balance_factory=factory,
         )
         await adapter.open()
         try:
@@ -405,7 +591,7 @@ class TestColdOpenRetry:
         adapter = SartoriusAdapter(
             name="balance",
             port="fake://stub",
-            balance_factory=factory,  # type: ignore[arg-type]
+            balance_factory=factory,
         )
         await adapter.open()
         try:
@@ -424,7 +610,7 @@ class TestColdOpenRetry:
         adapter = SartoriusAdapter(
             name="balance",
             port="fake://stub",
-            balance_factory=factory,  # type: ignore[arg-type]
+            balance_factory=factory,
         )
         with pytest.raises(AdapterError, match="checksum mismatch"):
             await adapter.open()
@@ -442,7 +628,7 @@ class TestColdOpenRetry:
         adapter = SartoriusAdapter(
             name="balance",
             port="fake://stub",
-            balance_factory=factory,  # type: ignore[arg-type]
+            balance_factory=factory,
         )
         with pytest.raises(AdapterError, match="frame too short"):
             await adapter.open()

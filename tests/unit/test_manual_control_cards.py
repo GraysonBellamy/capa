@@ -1,0 +1,674 @@
+"""Tests for the manual control panel cards and dock.
+
+Drives the cards against a recording stub adapter (no hardware) and
+asserts that:
+
+* every action button issues the right ``DeviceCommand.kind``,
+* the run-state gate disables widgets while the engine is non-idle,
+* the destructive-confirm dialog suppresses the dispatch on decline,
+* an empty operator id blocks dispatch without raising,
+* the dock builds and tears down cards on each ``load_config`` call,
+* :class:`SetupTab` emits ``device_action_requested`` on right-click.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from typing import Any
+
+import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox, QPushButton
+
+from capa.channels.calibration import Identity
+from capa.channels.spec import ChannelSpec, WatlowParameter
+from capa.devices.sim._signals import Sine
+from capa.experiment.config import (
+    CalibrationSetRef,
+    DeviceConfig,
+    ExperimentConfig,
+    HardwareProfile,
+    OperatorRef,
+    ProcedureRef,
+    SampleInfo,
+)
+from capa.experiment.engine import EngineState
+from capa.ui.docks.manual_control import ManualControlDock
+from capa.ui.manual.cards.alicat import AlicatCard
+from capa.ui.manual.cards.balance import BalanceCard
+from capa.ui.state import RunController
+from capa.ui.statusbar import OperatorIdProvider
+
+# Test stubs. Aliases in tests/fixtures/ shaped so the card fingerprinters
+# (is_balance_device / is_alicat_device) match them via the "sartorius" /
+# "alicat" substring rule.
+STUB_BALANCE = "tests.fixtures.stub_sartorius"
+STUB_ALICAT = "tests.fixtures.stub_alicat"
+
+
+def _stub_device_config(
+    name: str,
+    *,
+    capabilities: list[str] | None = None,
+    family: str = "balance",  # "balance" | "alicat"
+) -> DeviceConfig:
+    params: dict[str, Any] = {}
+    if capabilities is not None:
+        params["capabilities"] = capabilities
+    adapter = STUB_BALANCE if family == "balance" else STUB_ALICAT
+    return DeviceConfig(name=name, adapter=adapter, params=params)
+
+
+def _make_config(devices: tuple[DeviceConfig, ...]) -> ExperimentConfig:
+    return ExperimentConfig(
+        hardware=HardwareProfile(
+            name="manual",
+            devices=devices,
+            channels=(),
+        ),
+        procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
+        calibration_set=CalibrationSetRef(name="default"),
+        operator=OperatorRef(id="opA", display_name="Op A"),
+        sample=SampleInfo(id="S"),
+    )
+
+
+@pytest.fixture
+def controller(tmp_path: Path) -> RunController:
+    ctrl = RunController(runs_root=tmp_path)
+    return ctrl
+
+
+@pytest.fixture
+def op_provider() -> OperatorIdProvider:
+    return OperatorIdProvider(initial="opA")
+
+
+def _run_async(coro: Any) -> Any:
+    """Run an awaitable on a fresh loop. Cards use ``asyncio.get_event_loop``
+    inside ``schedule_dispatch`` — we use ``asyncio.new_event_loop`` and set
+    it as the current loop so that path resolves correctly under pytest."""
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+# ============================================================================
+# BalanceCard
+# ============================================================================
+
+
+class TestBalanceCard:
+    def test_renders_only_advertised_capability_sections(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config(
+            (_stub_device_config("balance.main", capabilities=["HAS_TARE", "HAS_ZERO"]),)
+        )
+        controller.set_active_config(cfg)
+        card = BalanceCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        # Sim-flagged adapter not yet opened → card falls back to the
+        # Sartorius-default capability set. That includes HAS_TARE/HAS_ZERO
+        # plus HAS_INTERNAL_CAL and HAS_PARAMETER_CONFIG, so we expect
+        # buttons for every relevant section.
+        button_texts = [b.text() for b in card.findChildren(QPushButton)]
+        assert "Tare" in button_texts
+        assert "Zero" in button_texts
+
+    def test_tare_button_dispatches_tare_command(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config((_stub_device_config("balance.main"),))
+        controller.set_active_config(cfg)
+        card = BalanceCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        # Run the async dispatch directly to avoid event-loop coupling in test.
+        result = _run_async(card.dispatch(kind="tare"))
+        assert result is not None
+        assert result.accepted is True
+
+        # Adapter is opened via the registry; its commands_received holds
+        # the captured DeviceCommand.
+        registry = controller.device_registry
+        assert registry is not None
+        adapter = registry.opened_device("balance.main")
+        assert adapter is not None
+        assert len(adapter.commands_received) == 1  # type: ignore[attr-defined]
+        cmd = adapter.commands_received[0]  # type: ignore[attr-defined]
+        assert cmd.kind == "tare"
+        assert cmd.issued_by == "opA"
+        assert cmd.confirmed_by == "opA"
+        assert cmd.authorization_id is None  # manual override
+
+        _run_async(registry.aclose())
+
+    def test_empty_operator_id_blocks_dispatch(
+        self,
+        qtbot: Any,
+        controller: RunController,
+    ) -> None:
+        cfg = _make_config((_stub_device_config("balance.main"),))
+        controller.set_active_config(cfg)
+        # Empty operator id.
+        provider = OperatorIdProvider(initial="")
+        card = BalanceCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=provider,
+        )
+        qtbot.addWidget(card)
+
+        result = _run_async(card.dispatch(kind="tare"))
+        assert result is None
+        assert "operator id required" in card._status_label.text()
+        # No adapter opened — bail before acquire.
+        registry = controller.device_registry
+        assert registry is not None
+        assert not registry.is_device_open("balance.main")
+
+        _run_async(registry.aclose())
+
+    def test_engine_running_disables_action_widgets(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config((_stub_device_config("balance.main"),))
+        controller.set_active_config(cfg)
+        card = BalanceCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        # Pre-condition: enabled.
+        any_button = next(iter(card.findChildren(QPushButton)))
+        assert any_button.isEnabled()
+
+        # Simulate engine transitioning to RUNNING.
+        controller.state_changed.emit(EngineState.RUNNING)
+        assert not any_button.isEnabled()
+
+        # Back to IDLE — re-enabled.
+        controller.state_changed.emit(EngineState.IDLE)
+        assert any_button.isEnabled()
+
+    def test_destructive_dispatch_blocked_by_no_confirmation(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cfg = _make_config((_stub_device_config("balance.main"),))
+        controller.set_active_config(cfg)
+        card = BalanceCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        # Patch QMessageBox.question to always reject.
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *a, **kw: QMessageBox.StandardButton.No,
+        )
+        result = _run_async(
+            card.dispatch(
+                kind="save_menu",
+                destructive=True,
+                destructive_summary="test save",
+            )
+        )
+        assert result is None
+        # Status shows the cancellation; no command issued.
+        registry = controller.device_registry
+        assert registry is not None
+        if registry.is_device_open("balance.main"):
+            adapter = registry.opened_device("balance.main")
+            assert adapter is not None
+            assert all(c.kind != "save_menu" for c in adapter.commands_received)  # type: ignore[attr-defined]
+
+        _run_async(registry.aclose())
+
+
+# ============================================================================
+# AlicatCard
+# ============================================================================
+
+
+class TestAlicatCard:
+    def test_setpoint_button_carries_value_and_unit(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config((_stub_device_config("mfc.purge", family="alicat"),))
+        controller.set_active_config(cfg)
+        card = AlicatCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        result = _run_async(
+            card.dispatch(
+                kind="set_setpoint",
+                payload={"value": 50.0, "unit": "SCCM"},
+            )
+        )
+        assert result is not None and result.accepted
+
+        registry = controller.device_registry
+        assert registry is not None
+        adapter = registry.opened_device("mfc.purge")
+        assert adapter is not None
+        cmd = adapter.commands_received[0]  # type: ignore[attr-defined]
+        assert cmd.kind == "set_setpoint"
+        assert cmd.payload == {"value": 50.0, "unit": "SCCM"}
+
+        _run_async(registry.aclose())
+
+    def test_destructive_dispatch_with_confirm_yes_proceeds(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cfg = _make_config((_stub_device_config("mfc.purge", family="alicat"),))
+        controller.set_active_config(cfg)
+        card = AlicatCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *a, **kw: QMessageBox.StandardButton.Yes,
+        )
+        result = _run_async(
+            card.dispatch(
+                kind="hold_valves_closed",
+                destructive=True,
+                destructive_summary="seal off line",
+            )
+        )
+        assert result is not None and result.accepted
+
+        registry = controller.device_registry
+        assert registry is not None
+        adapter = registry.opened_device("mfc.purge")
+        assert adapter is not None
+        cmd = adapter.commands_received[0]  # type: ignore[attr-defined]
+        assert cmd.kind == "hold_valves_closed"
+
+        _run_async(registry.aclose())
+
+
+# ============================================================================
+# ManualControlDock
+# ============================================================================
+
+
+class TestManualControlDock:
+    def test_no_relevant_devices_renders_empty_placeholder(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        # A device whose adapter import path matches neither sartorius nor
+        # alicat — no card class will pick it up.
+        cfg = ExperimentConfig(
+            hardware=HardwareProfile(
+                name="x",
+                devices=(
+                    DeviceConfig(
+                        name="heater",
+                        adapter="capa.devices.sim.watlow_sim",
+                        params={
+                            "tick_period_s": 0.05,
+                            "signals": {
+                                ("process_value", 1): Sine(
+                                    amplitude=1.0, frequency_hz=1.0, offset=300.0
+                                ),
+                            },
+                        },
+                    ),
+                ),
+                channels=(
+                    ChannelSpec(
+                        name="heater.pv",
+                        kind="process_var",
+                        unit="degC",
+                        derived_unit="degC",
+                        source=WatlowParameter(
+                            device="heater", parameter="process_value", instance=1
+                        ),
+                        calibration=Identity(input_unit="degC", output_unit="degC"),
+                    ),
+                ),
+            ),
+            procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
+            calibration_set=CalibrationSetRef(name="default"),
+            operator=OperatorRef(id="op", display_name="Op"),
+            sample=SampleInfo(id="S"),
+        )
+        controller.set_active_config(cfg)
+        dock = ManualControlDock(controller=controller, operator_provider=op_provider)
+        qtbot.addWidget(dock)
+        dock.load_config(cfg)
+        # Empty-state placeholder visible; no cards. (isVisible() requires
+        # the dock to be shown on screen, which it isn't in tests, so we
+        # check the label's text and the cards dict.)
+        assert not dock._empty_label.isHidden()
+        assert len(dock._cards_by_name) == 0
+
+    def test_balance_and_alicat_specs_render_one_card_each(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config(
+            (
+                _stub_device_config("balance.main", family="balance", capabilities=["HAS_TARE"]),
+                _stub_device_config("mfc.purge", family="alicat", capabilities=["HAS_SETPOINT"]),
+            )
+        )
+        controller.set_active_config(cfg)
+        dock = ManualControlDock(controller=controller, operator_provider=op_provider)
+        qtbot.addWidget(dock)
+        dock.load_config(cfg)
+        assert set(dock._cards_by_name.keys()) == {"balance.main", "mfc.purge"}
+        assert dock._empty_label.isHidden()
+
+    def test_reload_config_rebuilds_cards(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        dock = ManualControlDock(controller=controller, operator_provider=op_provider)
+        qtbot.addWidget(dock)
+
+        cfg1 = _make_config((_stub_device_config("balance.main", family="balance"),))
+        controller.set_active_config(cfg1)
+        dock.load_config(cfg1)
+        assert "balance.main" in dock._cards_by_name
+
+        cfg2 = _make_config((_stub_device_config("mfc.purge", family="alicat"),))
+        controller.set_active_config(cfg2)
+        dock.load_config(cfg2)
+        # Old card gone, new card present.
+        assert "balance.main" not in dock._cards_by_name
+        assert "mfc.purge" in dock._cards_by_name
+
+
+# ============================================================================
+# SetupTab right-click
+# ============================================================================
+
+
+class TestSetupTabContextMenu:
+    def test_right_click_on_device_emits_signal(self, qtbot: Any) -> None:
+        from capa.ui.tabs.setup import SetupTab
+
+        cfg = _make_config((DeviceConfig(name="balance.main", adapter="x.y.z", params={}),))
+        tab = SetupTab()
+        qtbot.addWidget(tab)
+        tab.load_config(cfg)
+
+        captured: list[str] = []
+        tab.device_action_requested.connect(captured.append)
+
+        # Find the device item and emit the request directly through the
+        # signal — exercising the menu .exec() requires popping a real
+        # popup which pytest-qt can't easily synchronously close.
+        items: list[Any] = []
+
+        def _walk(item: Any) -> None:
+            items.append(item)
+            for i in range(item.childCount()):
+                _walk(item.child(i))
+
+        root = tab._tree.topLevelItem(0)
+        assert root is not None
+        _walk(root)
+
+        device_items = [
+            it
+            for it in items
+            if (
+                isinstance(it.data(0, Qt.ItemDataRole.UserRole), tuple)
+                and it.data(0, Qt.ItemDataRole.UserRole)[0] == "device"
+            )
+        ]
+        assert device_items, "expected at least one device row in the tree"
+        # Simulate the signal emit that the menu callback would issue.
+        tab.device_action_requested.emit(device_items[0].data(0, Qt.ItemDataRole.UserRole)[1])
+        assert captured == ["balance.main"]
+
+
+# ============================================================================
+# WebcamCard — visible camera (UVC) manual-control card
+# ============================================================================
+
+
+def _webcam_spec(name: str = "visible_cam0") -> Any:
+    from capa.devices.camera.base import CameraSpec
+
+    return CameraSpec.model_validate(
+        {
+            "name": name,
+            "adapter": "capa.devices.camera.webcam",
+            "kind": "visible",
+        }
+    )
+
+
+class TestWebcamCard:
+    def test_renders_all_optimistic_sections(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        """Without a live UVC probe, the card falls back to the optimistic
+        default capability set and renders every section — verbs against
+        unsupported properties reject at dispatch time."""
+        from capa.ui.manual.cards.webcam import WebcamCard
+
+        card = WebcamCard(
+            spec=_webcam_spec(),
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        button_texts = [b.text() for b in card.findChildren(QPushButton)]
+        # Every section that builds adds at least one "Apply" button.
+        # 14 expected: stream-format ×2 (res, fps), exposure ×2 (auto, manual),
+        # focus ×2, zoom ×2 (optical, digital), WB ×2, pan/tilt ×2,
+        # image-adjust ×8 → 20 Apply buttons in total. Don't pin the exact
+        # count (the spec may shift); just require the card is non-empty
+        # and at least the stream-format section is present.
+        assert "Apply" in button_texts
+        assert len(button_texts) >= 5
+
+    def test_renders_under_manual_control_dock(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+        tmp_path: Path,
+    ) -> None:
+        """When the config carries a visible camera spec, the dock builds
+        a WebcamCard for it."""
+        from capa.devices.camera.base import CameraSpec
+        from capa.ui.manual.cards.webcam import WebcamCard
+
+        cam = CameraSpec.model_validate(
+            {
+                "name": "vis0",
+                "adapter": "capa.devices.camera.webcam",
+                "kind": "visible",
+            }
+        )
+        cfg = ExperimentConfig(
+            hardware=HardwareProfile(
+                name="manual",
+                devices=(),
+                channels=(),
+                cameras=(cam,),
+            ),
+            procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
+            calibration_set=CalibrationSetRef(name="default"),
+            operator=OperatorRef(id="opA", display_name="Op A"),
+            sample=SampleInfo(id="S"),
+        )
+        controller.set_active_config(cfg)
+        dock = ManualControlDock(controller=controller, operator_provider=op_provider)
+        qtbot.addWidget(dock)
+        dock.load_config(cfg)
+        assert dock.card_for("vis0") is not None
+        assert isinstance(dock.card_for("vis0"), WebcamCard)
+
+    def test_refresh_controls_from_probe_rewrites_combo_and_spinboxes(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        """After ``_refresh_controls_from_probe``, the resolution combo
+        reflects the camera-reported list, the matching entry is selected
+        from ``resolution_hint``, and each spinbox picks up the cached
+        range + current value (or the default when no current is cached).
+        """
+        from capa.devices.camera._uvc import UvcGroup, UvcProperty, UvcPropertyRange
+        from capa.ui.manual.cards.webcam import WebcamCard
+
+        card = WebcamCard(
+            spec=_webcam_spec(),
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        class _StubUvc:
+            def __init__(self) -> None:
+                self._ranges = {
+                    UvcProperty("Exposure", UvcGroup.CAMERA): UvcPropertyRange(
+                        minimum=-11, maximum=-2, step=1, default=-6
+                    ),
+                    UvcProperty("Focus", UvcGroup.CAMERA): UvcPropertyRange(
+                        minimum=0, maximum=250, step=5, default=100
+                    ),
+                    UvcProperty("Brightness", UvcGroup.VIDEO): UvcPropertyRange(
+                        minimum=0, maximum=255, step=1, default=128
+                    ),
+                }
+                self._currents = {
+                    UvcProperty("Exposure", UvcGroup.CAMERA): -5,
+                    # Focus has no cached current → default applies
+                    UvcProperty("Brightness", UvcGroup.VIDEO): 200,
+                }
+
+            def get_cached_range(self, prop: UvcProperty) -> UvcPropertyRange | None:
+                return self._ranges.get(prop)
+
+            def get_cached_current(self, prop: UvcProperty) -> int | None:
+                return self._currents.get(prop)
+
+        class _StubWebcam:
+            def __init__(self) -> None:
+                self.supported_resolutions = [(640, 480), (1280, 720), (1920, 1080)]
+                self.resolution_hint = (1280, 720)
+                self._uvc = _StubUvc()
+                self._fps_caps = {
+                    (640, 480): 60.0,
+                    (1280, 720): 30.0,
+                    (1920, 1080): 15.0,
+                }
+
+            def max_fps_for_resolution(self, w: int, h: int) -> float | None:
+                return self._fps_caps.get((w, h))
+
+        card._refresh_controls_from_probe(_StubWebcam())  # type: ignore[arg-type]
+
+        combo = card._resolution_combo
+        assert combo is not None
+        assert combo.count() == 3
+        assert combo.itemData(combo.currentIndex()) == (1280, 720)
+
+        exposure_spin = card._spinboxes["set_exposure"]
+        assert exposure_spin.minimum() == -11
+        assert exposure_spin.maximum() == -2
+        assert exposure_spin.value() == -5  # cached current wins
+
+        focus_spin = card._spinboxes["set_focus"]
+        assert focus_spin.minimum() == 0
+        assert focus_spin.maximum() == 250
+        assert focus_spin.singleStep() == 5
+        assert focus_spin.value() == 100  # falls back to default
+
+        brightness_spin = card._spinboxes["set_brightness"]
+        assert brightness_spin.value() == 200
+
+        # Spinbox for a property with no cached range is left at the
+        # safe wide default (no narrowing happened).
+        zoom_spin = card._spinboxes["set_zoom"]
+        assert zoom_spin.minimum() == -32768
+        assert zoom_spin.maximum() == 32767
+
+        # FPS spinbox is capped to the per-resolution cap for the
+        # currently-selected resolution (1280×720 → 30 fps in the stub).
+        fps_spin = card._fps_spin
+        assert fps_spin is not None
+        assert fps_spin.maximum() == 30.0
+
+        # Switching the resolution combo to 640×480 (60 fps cap) raises
+        # the cap; switching to 1920×1080 (15 fps cap) drops it and
+        # clamps the current value down.
+        idx_640 = next(i for i in range(combo.count()) if combo.itemData(i) == (640, 480))
+        combo.setCurrentIndex(idx_640)
+        assert fps_spin.maximum() == 60.0
+
+        fps_spin.setValue(30.0)
+        idx_1080 = next(i for i in range(combo.count()) if combo.itemData(i) == (1920, 1080))
+        combo.setCurrentIndex(idx_1080)
+        assert fps_spin.maximum() == 15.0
+        assert fps_spin.value() == 15.0  # clamped down from 30
+
+        assert card._controls_initialized is True

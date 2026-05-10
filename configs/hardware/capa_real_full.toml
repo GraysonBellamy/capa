@@ -23,6 +23,7 @@ rate_hz = 1.0
 auto_reconnect = true
 snapshot_period_s = 30.0
 identify_on_open = true
+io_timeout_s = 2.0
 
 # --- Real carrier MFC ---
 [[devices]]
@@ -46,7 +47,7 @@ protocol = "xbpi"
 baudrate = 19200
 src_sbn = 1
 dst_sbn = 9
-rate_hz = 2.0
+rate_hz = 50.0
 auto_reconnect = true
 snapshot_period_s = 30.0
 
@@ -65,33 +66,38 @@ overflow = "block"
 kind = "thermocouple"
 physical_channel = "cDAQ1Mod1/ai0"
 name = "TC_top_1"
-thermocouple_type = 10073    # K
+thermocouple_type = "K"
 min_val = 0.0
 max_val = 1000.0
-cjc_source = 10200            # BUILT_IN
-units = 10143                 # DEG_C
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "ONCE"
 
 [[devices.params.channels]]
 kind = "thermocouple"
 physical_channel = "cDAQ1Mod1/ai1"
 name = "TC_top_2"
-thermocouple_type = 10073
+thermocouple_type = "K"
 min_val = 0.0
 max_val = 1000.0
-cjc_source = 10200
-units = 10143
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "ONCE"
 
 # --- Real visible camera ---
 [[cameras]]
 name = "visible_cam0"
 adapter = "capa.devices.camera.webcam"
 kind = "visible"
+model_hint = "C930e"
 estimated_bps = 1_500_000
 on_failure = "warn"
 [cameras.params]
 fps = 30
-width = 1280
-height = 720
+width = 1920
+height = 1080
 codec = "libx264"
 pix_fmt = "yuv420p"
 input_format = "dshow"

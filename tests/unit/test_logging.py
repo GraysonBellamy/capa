@@ -6,6 +6,7 @@ import json
 import logging
 from pathlib import Path
 
+import pytest
 import structlog
 
 from capa.core.logging import (
@@ -95,7 +96,7 @@ class TestConfigureLogging:
 
 
 class TestPreRunLogging:
-    def test_writes_to_dated_file(self, tmp_path: Path, monkeypatch) -> None:
+    def test_writes_to_dated_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("capa.core.logging.PRE_RUN_LOG_DIR", tmp_path / "logs")
         try:
             log = configure_pre_run_logging(level="DEBUG")

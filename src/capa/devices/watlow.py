@@ -134,6 +134,15 @@ class WatlowAdapterParams(BaseModel):
     """Run :meth:`Controller.identify` immediately after opening, populating
     the cached :class:`DeviceInfo` used by :meth:`WatlowAdapter.snapshot`."""
 
+    io_timeout_s: float | None = Field(default=None, gt=0.0)
+    """Per-call wall-clock bound for the request→reply round-trip on
+    ``set_setpoint`` / ``write_parameter`` / ``read_pv`` / ``identify``.
+    ``None`` (the default) inherits :data:`watlowlib.config.DEFAULTS.io_timeout_s`
+    (1.0s). Bump to 2.0–3.0 when the bus is slow — e.g. a USB-RS485
+    bridge with a high latency timer, or a controller that occasionally
+    needs more than one tick to respond. Streaming reads ignore this
+    knob; ``watlowlib.streaming.record`` always uses the library default."""
+
     def to_serial_settings(self) -> SerialSettings:
         """Build the :class:`SerialSettings` watlowlib expects.
 
@@ -273,6 +282,7 @@ class WatlowAdapter:
             if self.params.identify_on_open:
                 self._device_info = await self._controller.identify(
                     query_configured_protocol=True,
+                    timeout=self.params.io_timeout_s,
                 )
         except WatlowError as exc:
             await self._safe_close_controller()
@@ -443,17 +453,20 @@ class WatlowAdapter:
         """
         assert self._controller is not None
         kind = cmd.kind
+        timeout = self.params.io_timeout_s
         if kind == "set_setpoint":
             value = float(cmd.payload["value"])
             instance = int(cmd.payload.get("instance", 1))
-            reading = await self._controller.set_setpoint(value, instance=instance, confirm=True)
+            reading = await self._controller.set_setpoint(
+                value, instance=instance, confirm=True, timeout=timeout
+            )
             return f"set_setpoint instance={instance} echoed={reading.value!r}"
         if kind in ("write_parameter", "set_parameter"):
             name = str(cmd.payload["name"])
             value = cmd.payload["value"]
             instance = int(cmd.payload.get("instance", 1))
             entry = await self._controller.write_parameter(
-                name, value, instance=instance, confirm=True
+                name, value, instance=instance, confirm=True, timeout=timeout
             )
             return f"write_parameter {name} instance={instance} echoed={entry.value!r}"
         raise AdapterError(
@@ -511,7 +524,9 @@ class WatlowAdapter:
                 device=self.name,
             )
         try:
-            return await self._controller.read_pv(instance=instance)
+            return await self._controller.read_pv(
+                instance=instance, timeout=self.params.io_timeout_s
+            )
         except WatlowError as exc:
             raise AdapterError(
                 f"watlow {self.name!r} read_pv failed: {exc}", device=self.name

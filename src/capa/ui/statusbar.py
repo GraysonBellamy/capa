@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Final
 
 import psutil
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QLabel, QStatusBar, QWidget
+from PySide6.QtCore import QTimer
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QLabel, QStatusBar, QWidget
 
 from capa.experiment.engine import EngineResult, EngineState
 from capa.ui.state import RunController

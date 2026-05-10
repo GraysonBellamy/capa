@@ -130,7 +130,7 @@ def _record(
         record_id=f"{adapter}:dev:{t_mono_ns}",
         adapter=adapter,
         device="dev",
-        shape=shape,  # type: ignore[arg-type]
+        shape=shape,
         t_mono_ns=t_mono_ns,
         t_utc=WALL,
         row=row or {},

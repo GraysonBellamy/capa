@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from capa.experiment.profiles import capa_pyrolysis as cap
 
 
-def _good_metadata() -> dict:
+def _good_metadata() -> dict[str, Any]:
     return {
         "specimen": {
             "id": "P-001",
@@ -87,7 +89,7 @@ def test_specimen_form_accepts_other() -> None:
 def test_profile_module_protocol_attributes_present() -> None:
     """The module exposes the DomainProfile attributes expected by the
     profile-discovery path."""
-    assert cap.id == cap.PROFILE_ID  # type: ignore[attr-defined]
-    assert cap.metadata_model is cap.CapaPyrolysisMetadata  # type: ignore[attr-defined]
-    assert cap.required_channel_groups == cap.REQUIRED_CHANNEL_GROUPS  # type: ignore[attr-defined]
-    assert cap.preflight_checks == cap.PREFLIGHT_CHECKS  # type: ignore[attr-defined]
+    assert cap.id == cap.PROFILE_ID
+    assert cap.metadata_model is cap.CapaPyrolysisMetadata
+    assert cap.required_channel_groups == cap.REQUIRED_CHANNEL_GROUPS
+    assert cap.preflight_checks == cap.PREFLIGHT_CHECKS

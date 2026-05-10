@@ -16,27 +16,34 @@ snapshot_period_s = 30.0
 auto_reconnect = false
 overflow = "block"
 
-# K-type thermocouple, ai0
+# K-type thermocouple, ai0. The NI 9214's built-in CJC, °C output, and
+# HIGH_RESOLUTION ADC timing match the module's typical slow / high-precision
+# operating point; ``ONCE`` autozero runs at acquisition start. See
+# capa.devices.nidaq_channels for the full set of accepted enum names.
 [[devices.params.channels]]
 kind = "thermocouple"
 physical_channel = "cDAQ1Mod1/ai0"
 name = "TC_top_1"
-thermocouple_type = 10073    # ThermocoupleType.K
+thermocouple_type = "K"
 min_val = 0.0
 max_val = 1000.0
-cjc_source = 10200           # CJCSource.BUILT_IN
-units = 10143                # TemperatureUnits.DEG_C
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "ONCE"
 
 # K-type thermocouple, ai1
 [[devices.params.channels]]
 kind = "thermocouple"
 physical_channel = "cDAQ1Mod1/ai1"
 name = "TC_top_2"
-thermocouple_type = 10073
+thermocouple_type = "K"
 min_val = 0.0
 max_val = 1000.0
-cjc_source = 10200
-units = 10143
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "ONCE"
 
 # --- Channels (capa-level) ---
 

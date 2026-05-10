@@ -12,8 +12,8 @@ from collections.abc import Iterable
 from typing import Final
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QSplitter, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
 from capa.channels.spec import ChannelSpec
 from capa.core.ringbuffer import RingBufferRegistry

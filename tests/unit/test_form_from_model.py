@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
-from PyQt6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QLineEdit, QSpinBox
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QLineEdit, QSpinBox
 
 from capa.experiment.profiles.capa_pyrolysis import CapaPyrolysisMetadata
 from capa.ui.forms import build_form
@@ -50,14 +50,14 @@ class _ListDemo(BaseModel):
 def test_str_field_renders_lineedit(qtbot: Any) -> None:
     form = build_form(_Demo)
     qtbot.addWidget(form)
-    name_widget = form._fields["name"]  # noqa: SLF001
+    name_widget = form._fields["name"]
     assert name_widget.findChild(QLineEdit) is not None
 
 
 def test_int_field_honors_ge_le(qtbot: Any) -> None:
     form = build_form(_Demo)
     qtbot.addWidget(form)
-    spin = form._fields["count"].findChild(QSpinBox)  # noqa: SLF001
+    spin = form._fields["count"].findChild(QSpinBox)
     assert spin is not None
     assert spin.minimum() == 0
     assert spin.maximum() == 100
@@ -66,7 +66,7 @@ def test_int_field_honors_ge_le(qtbot: Any) -> None:
 def test_float_field_honors_gt(qtbot: Any) -> None:
     form = build_form(_Constrained)
     qtbot.addWidget(form)
-    spin = form._fields["flux"].findChild(QDoubleSpinBox)  # noqa: SLF001
+    spin = form._fields["flux"].findChild(QDoubleSpinBox)
     assert spin is not None
     # Strict-greater approximated by an epsilon nudge above 0.
     assert spin.minimum() > 0
@@ -76,7 +76,7 @@ def test_float_field_honors_gt(qtbot: Any) -> None:
 def test_literal_field_renders_combobox_with_choices(qtbot: Any) -> None:
     form = build_form(_Choice)
     qtbot.addWidget(form)
-    combo = form._fields["mode"].findChild(QComboBox)  # noqa: SLF001
+    combo = form._fields["mode"].findChild(QComboBox)
     assert combo is not None
     items = [combo.itemText(i) for i in range(combo.count())]
     assert items == ["inert", "oxidative"]
@@ -85,7 +85,7 @@ def test_literal_field_renders_combobox_with_choices(qtbot: Any) -> None:
 def test_optional_field_uses_set_checkbox(qtbot: Any) -> None:
     form = build_form(_OptionalDemo)
     qtbot.addWidget(form)
-    notes = form._fields["notes"]  # noqa: SLF001
+    notes = form._fields["notes"]
     # Optional wraps the inner widget with a "Set" checkbox; unchecked = None.
     assert notes.value() is None
     checkboxes = notes.findChildren(QCheckBox)
@@ -136,7 +136,7 @@ def test_validate_surfaces_error_on_offending_widget(qtbot: Any) -> None:
     form = build_form(_LooseWidget)
     qtbot.addWidget(form)
     # Reach into the spinbox and bypass its clamp by setting maximum first.
-    cap_widget = form._fields["cap"]  # noqa: SLF001
+    cap_widget = form._fields["cap"]
     cap_spin = cap_widget.findChild(QSpinBox)
     assert cap_spin is not None
     cap_spin.setMaximum(1000)
@@ -198,7 +198,7 @@ def test_round_trip_capa_pyrolysis_metadata(qtbot: Any) -> None:
 def test_values_changed_signal_fires_on_edit(qtbot: Any) -> None:
     form = build_form(_Demo)
     qtbot.addWidget(form)
-    name_widget = form._fields["name"]  # noqa: SLF001
+    name_widget = form._fields["name"]
     edit = name_widget.findChild(QLineEdit)
     assert edit is not None
     with qtbot.waitSignal(form.valuesChanged, timeout=1000):

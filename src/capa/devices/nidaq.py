@@ -39,10 +39,10 @@ a fully pre-built :class:`DaqSession` for tests that need finer control.
 from __future__ import annotations
 
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast
 
 from nidaqlib.channels.base import ChannelSpec as NidaqChannelSpec
 from nidaqlib.errors import NIDaqError
@@ -72,6 +72,7 @@ from capa.devices.adapter import (
     CommandResult,
     DeviceCommand,
 )
+from capa.devices.nidaq_channels import NIDAQChannelConfig
 from capa.devices.records import (
     DeviceEmission,
     DeviceHealth,
@@ -156,10 +157,15 @@ class NIDAQAdapterParams(BaseModel):
     on emitted :class:`DaqReading`\\ s, and as the join key in
     :class:`NIDAQReadingField.task` / :class:`NIDAQBlockChannel.task`."""
 
-    channels: tuple[dict[str, Any], ...]
-    """Channel dicts in :class:`nidaqlib.channels.ChannelSpec` format. Each
-    must include a ``kind`` discriminator (``"ai_voltage"``, ``"thermocouple"``,
-    ``"digital_output"``, …) and ``physical_channel`` (``"Dev1/ai0"``)."""
+    channels: tuple[NIDAQChannelConfig, ...]
+    """Per-channel typed config. Each entry's ``kind`` discriminator
+    (``"thermocouple"`` / ``"ai_voltage"`` / pass-through for others) selects
+    the validating model from
+    :mod:`capa.devices.nidaq_channels`. NI enum-typed fields
+    (``thermocouple_type``, ``cjc_source``, ``units``, ``adc_timing_mode``,
+    ``auto_zero_mode``, ``terminal_config``) accept the canonical NI name
+    (``"K"``, ``"BUILT_IN"``, ``"DEG_C"``) as well as the raw ``int`` value
+    for backwards compatibility with older run-bundle TOMLs."""
 
     timing: NIDAQTimingParams | None = None
     """Hardware-clocked timing config. ``None`` means software-timed
@@ -197,8 +203,8 @@ class NIDAQAdapterParams(BaseModel):
     @field_validator("channels")
     @classmethod
     def _check_channels_nonempty(
-        cls, value: tuple[dict[str, Any], ...]
-    ) -> tuple[dict[str, Any], ...]:
+        cls, value: tuple[NIDAQChannelConfig, ...]
+    ) -> tuple[NIDAQChannelConfig, ...]:
         if not value:
             raise ValueError("NI adapter requires at least one channel")
         return value
@@ -215,8 +221,8 @@ class NIDAQAdapterParams(BaseModel):
         return OverflowPolicy.BLOCK if self.overflow == "block" else OverflowPolicy.DROP_NEWEST
 
     def build_task_spec(self) -> TaskSpec:
-        """Materialise the :class:`TaskSpec` from the declarative dicts."""
-        channels = tuple(NidaqChannelSpec.from_dict(c) for c in self.channels)
+        """Materialise the :class:`TaskSpec` from the typed channel configs."""
+        channels = tuple(NidaqChannelSpec.from_dict(c.to_nidaqlib_dict()) for c in self.channels)
         return TaskSpec(
             name=self.task_name,
             channels=channels,
@@ -497,7 +503,11 @@ class NIDAQAdapter:
             raise ValueError(f"max_emissions must be > 0; got {max_emissions}")
         record_count = 0
         emission_count = 0
-        stream = self.stream()
+        # ``stream()`` is annotated ``AsyncIterator`` to match the adapter
+        # protocol, but it's an ``AsyncGenerator`` at runtime — needed here so
+        # the ``finally``-block ``aclose()`` lets the underlying ``record_polled``
+        # context manager release the session lock cleanly (see method docstring).
+        stream = cast("AsyncGenerator[DeviceEmission]", self.stream())
         try:
             async for emission in stream:
                 yield emission
@@ -506,9 +516,9 @@ class NIDAQAdapter:
                     record_count += 1
                 if self._stop_requested:
                     continue  # let the inner stream wind down naturally
-                if max_records is not None and record_count >= max_records:
-                    await self.stop()
-                elif max_emissions is not None and emission_count >= max_emissions:
+                if (max_records is not None and record_count >= max_records) or (
+                    max_emissions is not None and emission_count >= max_emissions
+                ):
                     await self.stop()
         finally:
             await stream.aclose()
@@ -682,7 +692,7 @@ class NIDAQAdapter:
         if not devices:
             return None
 
-        first_channel = str(self.params.channels[0].get("physical_channel", "")) if self.params.channels else ""
+        first_channel = self.params.channels[0].physical_channel if self.params.channels else ""
         if not first_channel or "/" not in first_channel:
             return None
         module_name = first_channel.split("/", 1)[0]
@@ -697,7 +707,9 @@ class NIDAQAdapter:
         # therefore no chassis.
         candidate_chassis = _MODULE_SUFFIX_RE.sub("", module_name)
         chassis_name: str | None = (
-            candidate_chassis if candidate_chassis != module_name and candidate_chassis in by_name else None
+            candidate_chassis
+            if candidate_chassis != module_name and candidate_chassis in by_name
+            else None
         )
 
         serial_raw = getattr(module, "serial_number", None)
@@ -964,8 +976,8 @@ async def handshake(params: dict[str, Any]) -> str:
         known.update(d.co_physical_channels)
 
     missing: list[str] = []
-    for ch_dict in parsed.channels:
-        physical = str(ch_dict.get("physical_channel", ""))
+    for ch in parsed.channels:
+        physical = ch.physical_channel
         if not physical:
             missing.append("(unnamed)")
             continue

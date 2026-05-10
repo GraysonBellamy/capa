@@ -39,17 +39,18 @@ dependencies = [
     "ruamel.yaml>=0.18",
     "pyarrow>=18",
     "typer>=0.12",
-    "alicatlib",
-    "watlowlib>=0.2.0",
-    "sartoriuslib",
-    "nidaqlib",
-    "pyqt6>=6.7",
+    "alicatlib>=0.2.0,<0.3",
+    "watlowlib>=0.2.0,<0.3",
+    "sartoriuslib>=0.2.0,<0.3",
+    "nidaqlib>=0.2.0,<0.3",
+    "pyside6>=6.7",
     "qasync>=0.27",
     "pyqtgraph>=0.13",
     "psutil>=6",
     "numpy>=1.26",
     "av>=13",
     "pillow>=10",
+    "duvc-ctl>=2.1.0rc1 ; sys_platform == 'win32'",
 ]
 
 [project.scripts]
@@ -88,10 +89,12 @@ fallback-version = "0.0.0"
 packages = ["src/capa"]
 
 [tool.uv.sources]
-alicatlib = { path = "../alicatlib", editable = true }
-sartoriuslib = { path = "../sartoriuslib", editable = true }
-nidaqlib = { path = "../nidaqlib", editable = true }
 capa-flir = { path = "../capa-flir", editable = true }
+# Vendored Windows-only wheel for duvc-ctl. Upstream ships cp38–cp312 only;
+# capa pins Python 3.13, so we built the cp313 wheel ourselves with
+# delvewheel via tools/build_duvc_wheel.ps1. Remove this entry once upstream
+# publishes cp313 wheels (PyPI). See docs/handoff-deferred-control-surface.md.
+duvc-ctl = { path = "vendor/duvc_ctl-2.1.0rc1-cp313-cp313-win_amd64.whl" }
 
 [tool.ruff]
 line-length = 100
@@ -161,6 +164,21 @@ ignore_missing_imports = true
 module = ["pyqtgraph", "pyqtgraph.*", "qasync", "qasync.*", "psutil", "psutil.*"]
 ignore_missing_imports = true
 
+# nidaqmx ships without a py.typed marker, so its constants module resolves to
+# Any. capa.devices.nidaq_channels imports the enum classes for runtime
+# validation; silencing the missing-import warning lets the wrapper stay typed.
+[[tool.mypy.overrides]]
+module = ["nidaqmx", "nidaqmx.*"]
+ignore_missing_imports = true
+
+# duvc-ctl ships py.typed but only as a Windows-only wheel. On Linux/macOS
+# (CI, contributor machines) mypy can't import the module; the wrapper's
+# soft-import gracefully handles that at runtime, but mypy needs the
+# silencing here so non-Windows runs stay strict-clean.
+[[tool.mypy.overrides]]
+module = ["duvc_ctl", "duvc_ctl.*"]
+ignore_missing_imports = true
+
 # pyarrow's ParquetWriter / write_table / read_table / close / IPC stream
 # helpers are untyped; downstream code that calls them shouldn't be punished
 # under --strict.
@@ -174,10 +192,31 @@ module = [
 ]
 disallow_untyped_calls = false
 
+# Tests assert against parquet output via pyarrow.parquet.read_table — same
+# untyped-helper exception as the storage modules above. Keep narrowly scoped
+# to the files that need it so unrelated test untyped-call regressions still
+# surface.
+[[tool.mypy.overrides]]
+module = [
+    "tests.hardware.test_alicat_smoke",
+    "tests.hardware.test_nidaq_smoke",
+    "tests.hardware.test_sartorius_smoke",
+    "tests.hardware.test_watlow_smoke",
+    "tests.hardware.test_webcam_smoke",
+    "tests.integration.test_bundle_roundtrip",
+    "tests.integration.test_camera_engine",
+    "tests.integration.test_crash_recovery",
+    "tests.integration.test_crash_recovery_sigkill",
+    "tests.integration.test_watlow_engine",
+    "tests.unit.test_video_sink",
+]
+disallow_untyped_calls = false
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
 addopts = ["-q", "--strict-markers", "--strict-config"]
+qt_api = "pyside6"
 markers = [
     "hardware: requires real hardware (skipped unless CAPA_HARDWARE_TESTS=1)",
 ]

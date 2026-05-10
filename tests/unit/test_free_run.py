@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import anyio
 import pytest
@@ -26,9 +27,9 @@ from capa.experiment.procedures.builtin.free_run import FreeRun, FreeRunConfig
 
 class _FakeWriter:
     def __init__(self) -> None:
-        self.events: list[dict] = []
+        self.events: list[dict[str, Any]] = []
 
-    def write_event(self, **kwargs):
+    def write_event(self, **kwargs: Any) -> None:
         self.events.append(kwargs)
 
 

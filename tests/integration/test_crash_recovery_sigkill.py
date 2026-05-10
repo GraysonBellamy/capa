@@ -21,8 +21,10 @@ from __future__ import annotations
 import multiprocessing as mp
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pyarrow.parquet as pq
 
@@ -86,7 +88,7 @@ def _write_minimal_manifest(bundle: Path) -> None:
 
 
 def _spawn_and_kill(
-    target,  # type: ignore[no-untyped-def]
+    target: Callable[..., Any],
     args: tuple[object, ...],
     ready: Path,
 ) -> None:

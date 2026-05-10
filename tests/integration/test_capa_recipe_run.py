@@ -71,8 +71,9 @@ async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> N
     # Verbatim mirror of the metadata block, plus the wrapper id/standard_refs.
     assert snapshot["specimen"]["material"] == profile_meta["specimen"]["material"]
     assert snapshot["atmosphere"]["mode"] == profile_meta["atmosphere"]["mode"]
-    assert snapshot["atmosphere"]["purge"]["species"] == (
-        profile_meta["atmosphere"]["purge"]["species"]
+    assert (
+        snapshot["atmosphere"]["purge"]["species"]
+        == (profile_meta["atmosphere"]["purge"]["species"])
     )
     # Sealed bundle: the integrity walk must cover the snapshot file.
     digest_text = (bundle / "manifest.sha256").read_text(encoding="utf-8")

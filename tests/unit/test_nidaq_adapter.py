@@ -512,7 +512,9 @@ class TestDeviceInfoProbe:
     ``nidaqlib.system.discovery.list_devices``. Tests stub the discovery
     function so they don't touch ``nidaqmx``."""
 
-    async def test_device_info_none_when_discovery_returns_empty(self, monkeypatch) -> None:
+    async def test_device_info_none_when_discovery_returns_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # FakeDaqBackend doesn't go through the real ``list_devices``; with
         # nothing returned the probe must yield None and not raise.
         import nidaqlib.system.discovery as discovery
@@ -525,7 +527,9 @@ class TestDeviceInfoProbe:
         finally:
             await adapter.close()
 
-    async def test_device_info_populated_from_module_match(self, monkeypatch) -> None:
+    async def test_device_info_populated_from_module_match(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A channel ``Dev1/ai0`` matches a ``Dev1`` device row → identity wired."""
         import nidaqlib.system.discovery as discovery
 
@@ -559,7 +563,7 @@ class TestDeviceInfoProbe:
         finally:
             await adapter.close()
 
-    async def test_device_info_resolves_cdaq_chassis(self, monkeypatch) -> None:
+    async def test_device_info_resolves_cdaq_chassis(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """``cDAQ1Mod1/ai0`` → module = ``cDAQ1Mod1``, chassis = ``cDAQ1`` when both exist."""
         import nidaqlib.system.discovery as discovery
 
@@ -662,7 +666,7 @@ class TestDeviceInfoProbe:
         finally:
             await adapter.close()
 
-    async def test_device_info_cleared_on_close(self, monkeypatch) -> None:
+    async def test_device_info_cleared_on_close(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import nidaqlib.system.discovery as discovery
 
         class _FakeDevice:

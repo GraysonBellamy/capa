@@ -22,10 +22,12 @@ import typing
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, get_args, get_origin
+from typing import Any, cast, get_args, get_origin
 
-from PyQt6.QtCore import QSignalBlocker, Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from pydantic import BaseModel
+from pydantic.fields import FieldInfo
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDateTimeEdit,
@@ -41,8 +43,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from pydantic import BaseModel
-from pydantic.fields import FieldInfo
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -104,7 +104,7 @@ class FieldWidget(QWidget):
     signal to ``valueChanged``. ``ModelForm`` only ever calls these
     methods; it does not poke at the inner widgets directly."""
 
-    valueChanged = pyqtSignal()
+    valueChanged = Signal()
 
     def value(self) -> Any:
         raise NotImplementedError
@@ -135,7 +135,7 @@ class _LineEditField(FieldWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._edit)
-        self._edit.textChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._edit.textChanged.connect(self.valueChanged)
 
     def value(self) -> str:
         return self._edit.text()
@@ -166,7 +166,7 @@ class _SpinBoxField(FieldWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._spin)
-        self._spin.valueChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._spin.valueChanged.connect(self.valueChanged)
 
     def value(self) -> int:
         return int(self._spin.value())
@@ -205,7 +205,7 @@ class _DoubleSpinBoxField(FieldWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._spin)
-        self._spin.valueChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._spin.valueChanged.connect(self.valueChanged)
 
     def value(self) -> float:
         return float(self._spin.value())
@@ -222,7 +222,7 @@ class _CheckBoxField(FieldWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._check)
-        self._check.toggled.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._check.toggled.connect(self.valueChanged)
 
     def value(self) -> bool:
         return self._check.isChecked()
@@ -242,7 +242,7 @@ class _ComboBoxField(FieldWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._combo)
-        self._combo.currentIndexChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._combo.currentIndexChanged.connect(self.valueChanged)
 
     def value(self) -> Any:
         idx = self._combo.currentIndex()
@@ -265,20 +265,26 @@ class _DateTimeField(FieldWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._edit)
-        self._edit.dateTimeChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._edit.dateTimeChanged.connect(self.valueChanged)
 
     def value(self) -> datetime:
-        return self._edit.dateTime().toPyDateTime()
+        return cast(datetime, self._edit.dateTime().toPython())
 
     def set_value(self, v: Any) -> None:
-        from PyQt6.QtCore import QDateTime  # noqa: PLC0415
+        from PySide6.QtCore import QDate, QDateTime, QTime  # noqa: PLC0415
+
+        def _to_qdatetime(dt: datetime) -> QDateTime:
+            return QDateTime(
+                QDate(dt.year, dt.month, dt.day),
+                QTime(dt.hour, dt.minute, dt.second, dt.microsecond // 1000),
+            )
 
         with QSignalBlocker(self._edit):
             if isinstance(v, datetime):
-                self._edit.setDateTime(QDateTime(v))
+                self._edit.setDateTime(_to_qdatetime(v))
             elif isinstance(v, str):
                 try:
-                    self._edit.setDateTime(QDateTime(datetime.fromisoformat(v)))
+                    self._edit.setDateTime(_to_qdatetime(datetime.fromisoformat(v)))
                 except ValueError:
                     pass
 
@@ -292,8 +298,8 @@ class _PathField(FieldWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._edit)
         layout.addWidget(self._browse)
-        self._edit.textChanged.connect(self.valueChanged)  # type: ignore[arg-type]
-        self._browse.clicked.connect(self._on_browse)  # type: ignore[arg-type]
+        self._edit.textChanged.connect(self.valueChanged)
+        self._browse.clicked.connect(self._on_browse)
 
     def value(self) -> Path:
         return Path(self._edit.text())
@@ -325,9 +331,9 @@ class _OptionalField(FieldWidget):
         layout.addWidget(self._enable)
         layout.addWidget(self._inner)
         self._inner.setEnabled(False)
-        self._enable.toggled.connect(self._on_toggle)  # type: ignore[arg-type]
-        self._enable.toggled.connect(self.valueChanged)  # type: ignore[arg-type]
-        self._inner.valueChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._enable.toggled.connect(self._on_toggle)
+        self._enable.toggled.connect(self.valueChanged)
+        self._inner.valueChanged.connect(self.valueChanged)
 
     def _on_toggle(self, checked: bool) -> None:
         self._inner.setEnabled(checked)
@@ -364,9 +370,9 @@ class _StrTupleField(FieldWidget):
         buttons.addWidget(self._add)
         buttons.addWidget(self._remove)
         outer.addLayout(buttons)
-        self._add.clicked.connect(self._on_add)  # type: ignore[arg-type]
-        self._remove.clicked.connect(self._on_remove)  # type: ignore[arg-type]
-        self._list.itemChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._add.clicked.connect(self._on_add)
+        self._remove.clicked.connect(self._on_remove)
+        self._list.itemChanged.connect(self.valueChanged)
 
     def _on_add(self) -> None:
         item = QListWidgetItem("")
@@ -381,7 +387,8 @@ class _StrTupleField(FieldWidget):
         self.valueChanged.emit()
 
     def value(self) -> tuple[str, ...]:
-        return tuple(self._list.item(i).text() for i in range(self._list.count()))
+        items = (self._list.item(i) for i in range(self._list.count()))
+        return tuple(item.text() for item in items if item is not None)
 
     def set_value(self, v: Any) -> None:
         with QSignalBlocker(self._list):
@@ -415,8 +422,8 @@ class _DictStrFloatField(FieldWidget):
         buttons.addWidget(self._add)
         buttons.addWidget(self._remove)
         outer.addLayout(buttons)
-        self._add.clicked.connect(self._on_add)  # type: ignore[arg-type]
-        self._remove.clicked.connect(self._on_remove)  # type: ignore[arg-type]
+        self._add.clicked.connect(self._on_add)
+        self._remove.clicked.connect(self._on_remove)
 
     def _on_add(self, *, key: str = "", val: float = 0.0) -> None:
         row_widget = QWidget(self)
@@ -431,8 +438,8 @@ class _DictStrFloatField(FieldWidget):
         row_layout.addWidget(val_spin)
         self._rows_layout.addWidget(row_widget)
         self._rows.append((key_edit, val_spin))
-        key_edit.textChanged.connect(self.valueChanged)  # type: ignore[arg-type]
-        val_spin.valueChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        key_edit.textChanged.connect(self.valueChanged)
+        val_spin.valueChanged.connect(self.valueChanged)
         self.valueChanged.emit()
 
     def _on_remove(self) -> None:
@@ -472,7 +479,7 @@ class _JsonFallbackField(FieldWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._edit)
-        self._edit.textChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._edit.textChanged.connect(self.valueChanged)
 
     def value(self) -> Any:
         text = self._edit.text().strip()
@@ -521,7 +528,7 @@ class _NestedModelField(FieldWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(group)
-        self._inner.valuesChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        self._inner.valuesChanged.connect(self.valueChanged)
 
     def value(self) -> dict[str, Any]:
         return self._inner.values()
@@ -560,16 +567,16 @@ class _ModelTupleField(FieldWidget):
         buttons.addWidget(self._add)
         buttons.addWidget(self._remove)
         outer.addLayout(buttons)
-        self._add.clicked.connect(self._on_add)  # type: ignore[arg-type]
-        self._remove.clicked.connect(self._on_remove)  # type: ignore[arg-type]
+        self._add.clicked.connect(self._on_add)
+        self._remove.clicked.connect(self._on_remove)
 
-    def _on_add(self, *, initial: BaseModel | dict | None = None) -> None:
+    def _on_add(self, *, initial: BaseModel | dict[str, Any] | None = None) -> None:
         form = self._build_form()
         if initial is not None:
             form.set_values(initial)
         self._rows_layout.addWidget(form)
         self._rows.append(form)
-        form.valuesChanged.connect(self.valueChanged)  # type: ignore[arg-type]
+        form.valuesChanged.connect(self.valueChanged)
         self.valueChanged.emit()
 
     def _on_remove(self) -> None:
@@ -611,7 +618,7 @@ def build_field_widget(
     widget = _build_inner(inner_annotation, field, parent=parent)
     if is_optional:
         widget = _OptionalField(inner=widget, parent=parent)
-    widget._description = field.description or ""  # noqa: SLF001 - intentional internal field
+    widget._description = field.description or ""
     if field.description:
         widget.setToolTip(field.description)
     return widget
