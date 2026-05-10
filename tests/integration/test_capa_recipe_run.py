@@ -51,8 +51,8 @@ async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> N
 
     # Manifest captures the procedure id and the profile id; the profile's
     # rich metadata is snapshotted into config.toml (the full
-    # ExperimentConfig dump). Plan §5.4.1 will eventually mirror it into a
-    # dedicated profiles/<id>.toml file as well.
+    # ExperimentConfig dump) and also into a dedicated profiles/<id>.toml
+    # file (plan §5.4.1).
     manifest = json.loads((bundle / "manifest.json").read_text())
     assert manifest["procedure"]["id"] == "capa.builtin.recipe_runner"
     assert manifest["domain_profile"]["id"] == "capa.profiles.capa_pyrolysis"
@@ -61,7 +61,22 @@ async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> N
     profile_meta = config_snapshot["domain_profile"]["metadata"]
     assert profile_meta["specimen"]["material"] == "PMMA"
     assert profile_meta["atmosphere"]["mode"] == "inert"
-    assert profile_meta["atmosphere"]["carrier"]["species"] == "N2"
+    assert profile_meta["atmosphere"]["purge"]["species"] == "N2"
+
+    # Plan §5.4.1: dedicated per-profile snapshot.
+    snapshot_path = bundle / "profiles" / "capa_pyrolysis.toml"
+    assert snapshot_path.is_file(), "profiles/<id>.toml snapshot missing"
+    snapshot = tomllib.loads(snapshot_path.read_text())
+    assert snapshot["id"] == "capa.profiles.capa_pyrolysis"
+    # Verbatim mirror of the metadata block, plus the wrapper id/standard_refs.
+    assert snapshot["specimen"]["material"] == profile_meta["specimen"]["material"]
+    assert snapshot["atmosphere"]["mode"] == profile_meta["atmosphere"]["mode"]
+    assert snapshot["atmosphere"]["purge"]["species"] == (
+        profile_meta["atmosphere"]["purge"]["species"]
+    )
+    # Sealed bundle: the integrity walk must cover the snapshot file.
+    digest_text = (bundle / "manifest.sha256").read_text(encoding="utf-8")
+    assert "profiles/capa_pyrolysis.toml" in digest_text
 
     # Method executor emitted the entered/exited audit events.
     events_db = bundle / "events.sqlite"

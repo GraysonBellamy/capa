@@ -38,7 +38,9 @@ a fully pre-built :class:`DaqSession` for tests that need finer control.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final, Literal
 
@@ -79,6 +81,37 @@ from capa.devices.records import (
 
 ADAPTER_ID_POLLED: Final[str] = "nidaq_polled"
 ADAPTER_ID_BLOCK: Final[str] = "nidaq_block"
+
+_MODULE_SUFFIX_RE: Final[re.Pattern[str]] = re.compile(r"Mod\d+$")
+"""Strips ``ModN`` from a cDAQ module name to derive the chassis name
+(``cDAQ1Mod1`` → ``cDAQ1``). Only used inside :meth:`NIDAQAdapter._probe_device_info`."""
+
+
+@dataclass(frozen=True, slots=True)
+class NIDAQDeviceInfo:
+    """Identity record for an NI device backing a :class:`NIDAQAdapter`.
+
+    Populated lazily during :meth:`NIDAQAdapter.open` by enumerating the local
+    NI system via :func:`nidaqlib.system.discovery.list_devices` and matching
+    the first declared ``physical_channel`` against the returned device names.
+    Field names are chosen to align with
+    :data:`capa.experiment.engine._IDENTITY_FIELDS` so the manifest's
+    ``devices[*].identity`` block surfaces them automatically — hardware-day
+    2026-05-09 followup #3 (``manifest.json.devices`` was empty for NI-DAQ).
+    """
+
+    product_type: str | None
+    """NI product family of the module owning the channels (e.g. ``"NI 9214"``)."""
+
+    serial_number: str | None
+    """Module serial number as a string (NI returns ints; coerced for TOML)."""
+
+    physical_module: str | None
+    """The cDAQ module name resolved from the channel prefix (``"cDAQ1Mod1"``)."""
+
+    chassis: str | None
+    """The owning chassis device name (``"cDAQ1"``) when discovered, else ``None``.
+    Single-board cards (PCIe, USB-DAQ) report ``None`` here."""
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +253,7 @@ class NIDAQAdapter:
         "_backend",
         "_channels",
         "_clock",
+        "_device_info",
         "_last_sample",
         "_last_snapshot_t_mono_ns",
         "_lifecycle",
@@ -275,6 +309,7 @@ class NIDAQAdapter:
         self._last_sample = LastSampleTracker()
         self._recoverable_error_count = 0
         self._stop_requested = False
+        self._device_info: NIDAQDeviceInfo | None = None
 
     # ------------------------------------------------------------------ wiring
 
@@ -296,6 +331,17 @@ class NIDAQAdapter:
     def task_spec(self) -> TaskSpec | None:
         """The materialised :class:`TaskSpec`. ``None`` until :meth:`open`."""
         return self._task_spec
+
+    @property
+    def device_info(self) -> NIDAQDeviceInfo | None:
+        """Identity record probed during :meth:`open`. ``None`` when ``open``
+        hasn't run, ``nidaqmx`` isn't installed, or the channel module didn't
+        match any system device (typical for tests using ``FakeDaqBackend``).
+
+        The engine's ``_collect_equipment_blocks`` reads this attribute via
+        duck-typed ``getattr`` to populate ``manifest.json.devices[*].identity``.
+        """
+        return self._device_info
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -330,6 +376,11 @@ class NIDAQAdapter:
         except NIDaqError as exc:
             await self._safe_close_session()
             raise AdapterError(f"nidaq {self.name!r} open failed: {exc}", device=self.name) from exc
+        # Best-effort identity probe — failures here must not break ``open()``.
+        # Tests using ``FakeDaqBackend`` don't have ``nidaqmx`` system devices,
+        # so ``_probe_device_info`` returns ``None`` and the manifest identity
+        # block stays empty (same as before this change).
+        self._device_info = self._probe_device_info()
         self._lifecycle.open()
 
     async def close(self) -> None:
@@ -339,6 +390,7 @@ class NIDAQAdapter:
         await self._safe_close_session()
         self._session = None
         self._task_spec = None
+        self._device_info = None
         self._lifecycle.close()
 
     async def start(self, clock: RunClock | None = None) -> None:
@@ -415,6 +467,51 @@ class NIDAQAdapter:
         else:
             async for emission in self._stream_polled_mode():
                 yield emission
+
+    async def stream_until_stopped(
+        self,
+        *,
+        max_records: int | None = None,
+        max_emissions: int | None = None,
+    ) -> AsyncIterator[DeviceEmission]:
+        """Yield emissions like :meth:`stream`, but drive shutdown cooperatively.
+
+        Stops when *either* :meth:`stop` is called externally, or the optional
+        ``max_records`` / ``max_emissions`` budget is met. Always closes the
+        inner :func:`nidaqlib.streaming.record_polled` async-context-manager
+        before returning so :meth:`close` can acquire the
+        :class:`DaqSession` lock without deadlocking.
+
+        Why this exists: ``async for emission in adapter.stream(): ...; break``
+        leaves the underlying ``async with record_polled(...)`` paused and
+        holding the session lock until the outer generator is garbage
+        collected — which doesn't happen synchronously, so a subsequent
+        :meth:`close` deadlocks. Test code previously had to know to set
+        ``_stop_requested`` and explicitly ``await stream.aclose()``;
+        production callers that just want "run until I tell you to stop"
+        can use this helper instead.
+        """
+        if max_records is not None and max_records <= 0:
+            raise ValueError(f"max_records must be > 0; got {max_records}")
+        if max_emissions is not None and max_emissions <= 0:
+            raise ValueError(f"max_emissions must be > 0; got {max_emissions}")
+        record_count = 0
+        emission_count = 0
+        stream = self.stream()
+        try:
+            async for emission in stream:
+                yield emission
+                emission_count += 1
+                if isinstance(emission, SourceRecord):
+                    record_count += 1
+                if self._stop_requested:
+                    continue  # let the inner stream wind down naturally
+                if max_records is not None and record_count >= max_records:
+                    await self.stop()
+                elif max_emissions is not None and emission_count >= max_emissions:
+                    await self.stop()
+        finally:
+            await stream.aclose()
 
     async def _stream_polled_mode(self) -> AsyncIterator[DeviceEmission]:
         """Software-timed polled acquisition. One ``DaqReading`` per tick."""
@@ -561,6 +658,55 @@ class NIDAQAdapter:
             await self._session.close()
         except NIDaqError:
             return
+
+    def _probe_device_info(self) -> NIDAQDeviceInfo | None:
+        """Best-effort identity lookup by matching the first declared
+        ``physical_channel`` against ``nidaqlib.system.discovery.list_devices``.
+
+        Returns ``None`` (and never raises) when ``nidaqmx`` isn't installed,
+        the runtime is missing, no NI hardware is present, or the channel
+        prefix can't be resolved — manifest identity stays empty in those
+        cases, which matches pre-fix behaviour. Tests using ``FakeDaqBackend``
+        legitimately land here and should not be perturbed.
+        """
+        try:
+            from nidaqlib.system.discovery import list_devices  # noqa: PLC0415
+        except ImportError:
+            return None
+        try:
+            devices = list_devices()
+        except Exception:
+            # Catch broad — nidaqmx raises a non-``NIDaqError`` ``DaqNotFoundError``
+            # when the runtime is missing; the discovery hook does the same.
+            return None
+        if not devices:
+            return None
+
+        first_channel = str(self.params.channels[0].get("physical_channel", "")) if self.params.channels else ""
+        if not first_channel or "/" not in first_channel:
+            return None
+        module_name = first_channel.split("/", 1)[0]
+
+        by_name = {d.name: d for d in devices}
+        module = by_name.get(module_name)
+        if module is None:
+            return None
+
+        # Chassis name is the module name with the trailing ``ModN`` stripped
+        # (cDAQ convention). Single-board cards have no such suffix and
+        # therefore no chassis.
+        candidate_chassis = _MODULE_SUFFIX_RE.sub("", module_name)
+        chassis_name: str | None = (
+            candidate_chassis if candidate_chassis != module_name and candidate_chassis in by_name else None
+        )
+
+        serial_raw = getattr(module, "serial_number", None)
+        return NIDAQDeviceInfo(
+            product_type=getattr(module, "product_type", None),
+            serial_number=str(serial_raw) if serial_raw not in (None, "", 0) else None,
+            physical_module=module_name,
+            chassis=chassis_name,
+        )
 
     def _record_for_reading(self, reading: DaqReading) -> SourceRecord:
         """Convert a :class:`DaqReading` into a wide-row :class:`SourceRecord`.
@@ -732,6 +878,7 @@ class NIDAQAdapter:
             device=self.name,
             last_t_mono_ns=self._last_sample.last_t_mono_ns,
             expected_period_ns=self._expected_period_ns(),
+            lifecycle_state=self._lifecycle.state,
         )
 
     def _snapshot_due(self) -> bool:
@@ -769,6 +916,16 @@ class NIDAQAdapter:
             out["physical_channels"] = ",".join(
                 ch.physical_channel for ch in self._task_spec.channels
             )
+        info = self._device_info
+        if info is not None:
+            if info.product_type:
+                out["product_type"] = info.product_type
+            if info.serial_number:
+                out["serial_number"] = info.serial_number
+            if info.physical_module:
+                out["physical_module"] = info.physical_module
+            if info.chassis:
+                out["chassis"] = info.chassis
         return out
 
 
@@ -880,6 +1037,7 @@ __all__ = [
     "ADAPTER_ID_POLLED",
     "NIDAQAdapter",
     "NIDAQAdapterParams",
+    "NIDAQDeviceInfo",
     "NIDAQTimingParams",
     "discover",
     "handshake",

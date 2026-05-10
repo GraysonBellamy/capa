@@ -13,17 +13,16 @@ def _good_metadata() -> dict:
             "id": "P-001",
             "material": "PMMA",
             "initial_mass_g": 5.0,
-            "form": "pellet",
-            "crucible": "alumina 70 uL",
+            "form": "disk",
+            "specimen_holder": "stainless steel cup",
         },
         "program": {
-            "initial_temperature_c": 30.0,
-            "final_temperature_c": 600.0,
-            "ramp_rate_c_per_min": 10.0,
+            "target_heat_flux_kw_m2": 50.0,
+            "heater_setpoint_c": 600.0,
         },
         "atmosphere": {
             "mode": "inert",
-            "carrier": {
+            "purge": {
                 "species": "N2",
                 "purity": "UHP 5.0",
                 "target_flow_sccm": 100.0,
@@ -49,7 +48,7 @@ def test_validate_metadata_rejects_negative_mass() -> None:
 def test_validate_metadata_oxidative_with_reactive() -> None:
     raw = _good_metadata()
     raw["atmosphere"]["mode"] = "oxidative"
-    raw["atmosphere"]["reactive"] = {
+    raw["atmosphere"]["reactive"] = {  # secondary gas alongside the inert purge
         "species": "O2",
         "purity": "5.0",
         "target_flow_sccm": 21.0,
@@ -62,7 +61,7 @@ def test_validate_metadata_oxidative_with_reactive() -> None:
 
 def test_required_channel_groups_cover_minimum_capa_rig() -> None:
     groups = {req.group for req in cap.REQUIRED_CHANNEL_GROUPS}
-    assert {"heater_setpoint", "heater_pv", "sample_temperature", "carrier_gas_flow"} <= groups
+    assert {"heater_setpoint", "heater_pv", "sample_temperature", "purge_gas_flow"} <= groups
 
 
 def test_preflight_check_ids_are_unique() -> None:
@@ -75,6 +74,14 @@ def test_specimen_form_literal() -> None:
     raw["specimen"]["form"] = "not_a_form"
     with pytest.raises(Exception):
         cap.validate_metadata(raw)
+
+
+def test_specimen_form_accepts_other() -> None:
+    raw = _good_metadata()
+    raw["specimen"]["form"] = "other"
+    raw["specimen"]["notes"] = "thin film 200um, irregular edges"
+    meta = cap.validate_metadata(raw)
+    assert meta.specimen.form == "other"
 
 
 def test_profile_module_protocol_attributes_present() -> None:

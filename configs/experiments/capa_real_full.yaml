@@ -1,7 +1,7 @@
-# CAPA pyrolysis integration — variant B (cameras + mass).
-# Real: FLIR E85 + webcam + Sartorius. Sim: Watlow + Alicat + NI-DAQ.
+# CAPA pyrolysis integration — full all-real variant (Windows rig).
+# Real: Watlow + Alicat + Sartorius + NI-DAQ + webcam + FLIR E85.
 
-hardware: ../hardware/capa_real_partial_b.toml
+hardware: ../hardware/capa_real_full.toml
 method: ../methods/sim_capa_pyrolysis.method.toml
 
 procedure:
@@ -9,13 +9,13 @@ procedure:
   version: "0.1"
   config:
     auto_acknowledge_prompts: true
-    notes: "Hardware-day variant B: real E85+webcam+balance, sim heater+MFC+NI-DAQ."
+    notes: "Hardware-day variant C (Windows): all six adapters on real silicon."
 
 domain_profile:
   id: capa.profiles.capa_pyrolysis
   metadata:
     specimen:
-      id: REAL-B-001
+      id: REAL-C-001
       material: PMMA
       initial_mass_g: 5.0
       form: disk
@@ -40,12 +40,12 @@ operator:
   display_name: A. Researcher
 
 sample:
-  id: REAL-B-001
+  id: REAL-C-001
   material: PMMA
-  notes: "Hardware-day variant B integration"
+  notes: "Hardware-day variant C all-real integration (Windows)"
 
 tags:
   - real
-  - partial
+  - full
   - capa
   - pyrolysis

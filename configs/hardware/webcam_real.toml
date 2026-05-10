@@ -1,9 +1,9 @@
 name = "webcam_real"
 
-# Single visible-spectrum USB webcam. The default ``input_url`` of
-# ``/dev/video0`` covers the laptop's built-in camera; an external webcam
-# typically appears at /dev/video2 or higher (UVC drivers expose two nodes
-# per camera). Override via env at run time, or edit ``params.input_url``.
+# Single visible-spectrum USB webcam. Windows DirectShow input form is
+# ``video=<friendly-name>``; the friendly name comes from the OS (Device
+# Manager → Cameras, or ``ffmpeg -f dshow -list_devices true -i dummy``).
+# On Linux replace with ``input_format = "v4l2"`` + ``/dev/videoN``.
 [[cameras]]
 name = "visible_cam0"
 adapter = "capa.devices.camera.webcam"
@@ -16,5 +16,5 @@ width = 1280
 height = 720
 codec = "libx264"
 pix_fmt = "yuv420p"
-input_format = "v4l2"
-input_url = "/dev/video4"
+input_format = "dshow"
+input_url = "video=Logitech Webcam C930e"

@@ -204,10 +204,4 @@ class NIDAQPolledSim:
         )
 
 
-# Naming alias so the engine's snake-to-CamelCase adapter-class resolver
-# (``capa.experiment.engine._snake_to_camel`` produces ``NidaqPolledSim``)
-# finds this class. The canonical name keeps the ``NIDAQ`` acronym uppercase.
-NidaqPolledSim = NIDAQPolledSim
-
-
-__all__ = ["ADAPTER_ID", "NIDAQPolledSim", "NidaqPolledSim"]
+__all__ = ["ADAPTER_ID", "NIDAQPolledSim"]

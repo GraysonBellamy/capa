@@ -26,6 +26,7 @@ import contextlib
 import io
 import os
 import sys
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -54,6 +55,16 @@ from capa.devices.camera.base import (
 DEFAULT_CODEC = "libx264"
 DEFAULT_PIX_FMT = "yuv420p"
 DEFAULT_FPS = 30
+
+OPEN_RETRY_DELAYS_S: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 2.0, 2.0)
+"""Backoff schedule for transient ``av.open`` failures (Windows DirectShow
+hold-time after ``cam.close()``). Cumulative ≈ 7.75 s, which covers the
+worst-case observed C930e release latency on Windows 11. POSIX paths
+normally open first try, so retries are dormant on Linux/macOS."""
+
+OPEN_RETRY_DEADLINE_S: float = 8.0
+"""Hard ceiling on retries; if we haven't opened by then the underlying
+problem is not transient and we surface the original error."""
 
 PREVIEW_INTERVAL_NS = 500_000_000
 """2 Hz preview cadence (plan §10.2; Camera Protocol docstring). At 30 fps the
@@ -453,6 +464,54 @@ class WebcamAdapter:
                 self._preview_send.send_nowait(preview_bytes)
         return receipt
 
+    async def _open_input_with_retry(self) -> Any:
+        """Open the PyAV input container, retrying on transient I/O errors.
+
+        Windows DirectShow holds the camera filter graph for several seconds
+        after ``cam.close()``; ``av.open(format='dshow', ...)`` returns
+        ``OSError [Errno 5] I/O error`` until the graph drops. POSIX paths
+        (v4l2, avfoundation) normally succeed on the first try, so the retry
+        is a no-op there. The retry budget (:data:`OPEN_RETRY_DEADLINE_S`)
+        is sized for a worst-case C930e release on Windows 11; longer holds
+        indicate the camera is genuinely in use by another process and
+        re-raising surfaces that.
+        """
+        deadline = time.monotonic() + OPEN_RETRY_DEADLINE_S
+        attempt = 0
+        last_exc: OSError | None = None
+        for delay in OPEN_RETRY_DELAYS_S:
+            try:
+                return await anyio.to_thread.run_sync(
+                    lambda: av.open(self._input_url, format=self._input_format)
+                )
+            except OSError as exc:
+                if not _is_transient_open_error(exc) or time.monotonic() >= deadline:
+                    raise
+                attempt += 1
+                last_exc = exc
+                await self._emit_event(
+                    kind="open_retry",
+                    severity="info",
+                    message=(
+                        f"av.open transient error (attempt {attempt}); "
+                        f"retrying after {delay:.2f}s: {exc}"
+                    ),
+                )
+                await anyio.sleep(delay)
+        # One more attempt after the last sleep — if it still fails, surface it.
+        try:
+            return await anyio.to_thread.run_sync(
+                lambda: av.open(self._input_url, format=self._input_format)
+            )
+        except OSError as exc:
+            if last_exc is not None and _is_transient_open_error(exc):
+                raise AdapterError(
+                    f"webcam {self._spec.name!r}: av.open kept returning a "
+                    f"transient I/O error after {attempt + 1} retries; the "
+                    f"camera is likely held by another process. Last error: {exc}",
+                ) from exc
+            raise
+
     async def run_pump(self) -> None:
         """Open the configured PyAV input and push every decoded frame.
 
@@ -465,6 +524,10 @@ class WebcamAdapter:
         hardware-day §5.B: webcam at ~14 fps instead of 30, recipe wall-
         clock 2.7× nominal.
 
+        ``av.open`` is wrapped in :meth:`_open_input_with_retry` so back-to-back
+        opens on Windows (DirectShow filter-graph hold-time after close) don't
+        immediately fail with ``[Errno 5]``.
+
         When ``CAPA_WEBCAM_FRAME_DIAG=1`` is set, the first 150 input frames
         are logged at INFO with ``frame.format.name`` / ``width`` / ``height``
         / ``pts``. Used to investigate the libx264 EINVAL observed at t≈23 s
@@ -476,9 +539,7 @@ class WebcamAdapter:
         diag_enabled = os.environ.get("CAPA_WEBCAM_FRAME_DIAG") == "1"
         diag_remaining = 150 if diag_enabled else 0
         diag_log = structlog.get_logger("capa.webcam.frame_diag") if diag_enabled else None
-        in_container = await anyio.to_thread.run_sync(
-            lambda: av.open(self._input_url, format=self._input_format)
-        )
+        in_container = await self._open_input_with_retry()
         try:
             in_stream = next(s for s in in_container.streams if s.type == "video")
             decoder = in_container.decode(in_stream)
@@ -630,6 +691,21 @@ def _probe_v4l2_info(device_path: str) -> V4L2Probe:
     return V4L2Probe(card_name=card_name, serial=serial, bus_info=bus_info)
 
 
+def _is_transient_open_error(exc: BaseException) -> bool:
+    """Return ``True`` for ``av.open`` errors that backoff is likely to clear.
+
+    Windows DirectShow returns ``OSError [Errno 5] I/O error`` while the
+    previous filter graph is still being torn down. PyAV surfaces this
+    directly via :class:`OSError` (and its :class:`av.error.FFmpegError`
+    subclass), so matching on ``errno == 5`` covers both code paths.
+    Non-transient errors (missing device node, codec not found, permission
+    denied) propagate immediately so we don't hide real wiring problems.
+    """
+    if not isinstance(exc, OSError):
+        return False
+    return getattr(exc, "errno", None) == 5
+
+
 def _advance_decoder(decoder: Any) -> av.VideoFrame | None:
     """Pull the next decoded frame from a PyAV decoder; ``None`` at EOF.
 
@@ -684,6 +760,8 @@ __all__ = [
     "DEFAULT_CODEC",
     "DEFAULT_FPS",
     "DEFAULT_PIX_FMT",
+    "OPEN_RETRY_DEADLINE_S",
+    "OPEN_RETRY_DELAYS_S",
     "PREVIEW_INTERVAL_NS",
     "PREVIEW_JPEG_QUALITY",
     "PREVIEW_MAX_WIDTH",

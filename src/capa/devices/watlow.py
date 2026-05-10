@@ -612,6 +612,7 @@ class WatlowAdapter:
             device=self.name,
             last_t_mono_ns=self._last_sample.last_t_mono_ns,
             expected_period_ns=int(1e9 / self.params.rate_hz),
+            lifecycle_state=self._lifecycle.state,
         )
 
     def _snapshot_due(self) -> bool:

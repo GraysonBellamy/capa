@@ -237,9 +237,15 @@ class WatchdogState:
     :meth:`adapter.watchdog_state()` on every real adapter. The struct is
     plain attributes (no dependency on Pydantic) so the engine can call it
     inside a hot loop without paying for model validation. Plan §13.2.
+
+    ``lifecycle_state`` is the adapter's own ``open``/``running``/``closed``
+    label; the watchdog uses it to suppress ``device_silent`` warnings when
+    the adapter has already been told to stop. Without that grace, a clean
+    shutdown that races the 1 s watchdog sweep produces a spurious warning
+    (hardware-day 2026-05-09 followup #4).
     """
 
-    __slots__ = ("device", "expected_period_ns", "last_t_mono_ns")
+    __slots__ = ("device", "expected_period_ns", "last_t_mono_ns", "lifecycle_state")
 
     def __init__(
         self,
@@ -247,15 +253,21 @@ class WatchdogState:
         device: str,
         last_t_mono_ns: int | None,
         expected_period_ns: int,
+        lifecycle_state: str | None = None,
     ) -> None:
         self.device = device
         self.last_t_mono_ns = last_t_mono_ns
         self.expected_period_ns = expected_period_ns
+        self.lifecycle_state = lifecycle_state
 
     def is_silent(self, *, now_t_mono_ns: int, slack: float = 2.0) -> bool:
         """Return ``True`` when the producer hasn't emitted in
         ``slack * expected_period_ns``. Returns ``False`` if the adapter
-        has not yet emitted at all (start-up grace)."""
+        has not yet emitted at all (start-up grace), or if the adapter's
+        :attr:`lifecycle_state` is anything other than ``"running"`` —
+        a stopped or closed adapter is *expected* to be silent."""
+        if self.lifecycle_state is not None and self.lifecycle_state != "running":
+            return False
         if self.last_t_mono_ns is None:
             return False
         elapsed = now_t_mono_ns - self.last_t_mono_ns

@@ -115,3 +115,46 @@ class TestWatchdogState:
         assert s.is_silent(now_t_mono_ns=2_000, slack=1.0)
         # default 2× slack → not silent at 2×
         assert not s.is_silent(now_t_mono_ns=2_000, slack=2.0)
+
+    def test_lifecycle_state_open_suppresses_silence(self) -> None:
+        """An adapter that has been stopped (lifecycle state ``"open"``,
+        not ``"running"``) is *expected* to be silent — clean shutdown
+        must not trip ``device_silent``."""
+        last = 1_000_000_000
+        s = WatchdogState(
+            device="d",
+            last_t_mono_ns=last,
+            expected_period_ns=100_000_000,
+            lifecycle_state="open",
+        )
+        # 5 periods elapsed → would normally be silent, but adapter is stopped.
+        assert not s.is_silent(now_t_mono_ns=last + 500_000_000)
+
+    def test_lifecycle_state_closed_suppresses_silence(self) -> None:
+        last = 1_000_000_000
+        s = WatchdogState(
+            device="d",
+            last_t_mono_ns=last,
+            expected_period_ns=100_000_000,
+            lifecycle_state="closed",
+        )
+        assert not s.is_silent(now_t_mono_ns=last + 500_000_000)
+
+    def test_lifecycle_state_running_does_not_suppress(self) -> None:
+        """Running adapter past its window IS silent, as before."""
+        last = 1_000_000_000
+        s = WatchdogState(
+            device="d",
+            last_t_mono_ns=last,
+            expected_period_ns=100_000_000,
+            lifecycle_state="running",
+        )
+        assert s.is_silent(now_t_mono_ns=last + 500_000_000)
+
+    def test_lifecycle_state_none_preserves_legacy_behaviour(self) -> None:
+        """Existing call sites that don't pass ``lifecycle_state`` keep their
+        previous semantics — silent strictly by elapsed-time math."""
+        last = 1_000_000_000
+        s = WatchdogState(device="d", last_t_mono_ns=last, expected_period_ns=100_000_000)
+        assert s.lifecycle_state is None
+        assert s.is_silent(now_t_mono_ns=last + 500_000_000)

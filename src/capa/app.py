@@ -331,6 +331,59 @@ def run(
 
 
 # ---------------------------------------------------------------------------
+# capa gui
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def gui(
+    config: Annotated[
+        Path | None,
+        typer.Argument(
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Optional experiment config to preload. Omit to launch empty and pick one from File > Open.",
+        ),
+    ] = None,
+    runs_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--runs-root",
+            help="Where to write bundles. Default: $CAPA_RUNS_ROOT or ./runs.",
+        ),
+    ] = None,
+    plugins_lock: Annotated[
+        Path | None,
+        typer.Option(
+            "--plugins-lock",
+            help="Optional plugins.lock to record into the manifest.",
+        ),
+    ] = None,
+) -> None:
+    """Launch the GUI. Loads the optional config if provided; otherwise
+    opens empty and the operator picks a config via File > Open."""
+    from capa.ui.app import run_gui  # noqa: PLC0415 — lazy PyQt6 import
+
+    root = _resolve_runs_root(runs_root)
+    root.mkdir(parents=True, exist_ok=True)
+    lock, resolved_lock_path = _resolve_plugins_lock_for_run(plugins_lock)
+    if resolved_lock_path is not None and plugins_lock is None:
+        typer.echo(f"plugins.lock (auto-discovered): {resolved_lock_path}")
+    repo_root = _resolve_repo_root()
+    lockfile_source = (repo_root / "uv.lock") if repo_root else None
+
+    rc = run_gui(
+        config_path=config,
+        runs_root=root,
+        plugins_lock=lock,
+        repo_root=repo_root,
+        lockfile_source=lockfile_source,
+    )
+    raise typer.Exit(code=rc)
+
+
+# ---------------------------------------------------------------------------
 # capa finalize
 # ---------------------------------------------------------------------------
 

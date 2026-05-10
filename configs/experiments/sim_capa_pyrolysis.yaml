@@ -18,20 +18,24 @@ domain_profile:
       id: SIM-PMMA-001
       material: PMMA
       initial_mass_g: 5.0
-      form: pellet
-      crucible: "alumina 70 uL"
+      form: disk
+      specimen_holder: "stainless steel cup"
       conditioning: "23C / 50% RH for 48h"
     program:
-      initial_temperature_c: 30.0
-      final_temperature_c: 600.0
-      ramp_rate_c_per_min: 300.0
+      target_heat_flux_kw_m2: 50.0
+      heater_setpoint_c: 600.0
     atmosphere:
       mode: inert
       purge_duration_s: 30.0
-      carrier:
+      purge:
         species: N2
         purity: "UHP 5.0"
         target_flow_sccm: 100.0
+    # The sim heater ramps 30°C → 600°C in 0.2 s; the dynamic preflight
+    # observes the run-temperature value, not a cold-start condition.
+    # Real CAPA runs use the default 200°C limit.
+    _safe_arm:
+      max_heater_pv_c: 800.0
 
 calibration_set:
   name: default

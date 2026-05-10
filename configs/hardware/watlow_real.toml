@@ -7,7 +7,7 @@ name = "watlow_real"
 name = "heater"
 adapter = "capa.devices.watlow"
 [devices.params]
-port = "/dev/ttyUSB0"
+port = "COM6"
 address = 1
 protocol = "stdbus"
 parameters = ["process_value", "setpoint"]

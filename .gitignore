@@ -17,6 +17,8 @@ htmlcov/
 # capa runtime
 runs/
 ~/.capa/
+plugins.lock
+plugins.lock.journal
 
 # editor
 .vscode/

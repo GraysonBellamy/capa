@@ -65,7 +65,7 @@ def _operator_id() -> str:
 
 class TestRealAlicat:
     async def test_open_identify_close(self) -> None:
-        adapter = AlicatAdapter(name="carrier_mfc", **_alicat_params())
+        adapter = AlicatAdapter(name="purge_mfc", **_alicat_params())
         await adapter.open()
         try:
             assert adapter.device_info is not None
@@ -79,7 +79,7 @@ class TestRealAlicat:
         from alicatlib.devices.flow_controller import FlowController
         from alicatlib.devices.pressure_controller import PressureController
 
-        adapter = AlicatAdapter(name="carrier_mfc", **_alicat_params())
+        adapter = AlicatAdapter(name="purge_mfc", **_alicat_params())
         await adapter.open()
         try:
             if not isinstance(adapter._device, FlowController | PressureController):
@@ -104,16 +104,16 @@ class TestRealAlicatEngineRun:
                 name="alicat_smoke",
                 devices=(
                     DeviceConfig(
-                        name="carrier_mfc",
+                        name="purge_mfc",
                         adapter="capa.devices.alicat",
                         params=params,
                     ),
                 ),
                 channels=(
                     ChannelSpec(
-                        name="carrier.flow",
+                        name="purge.flow",
                         kind=ChannelKind.MFC_FLOW,
-                        source=AlicatFrameField(device="carrier_mfc", field="Mass_Flow"),
+                        source=AlicatFrameField(device="purge_mfc", field="Mass_Flow"),
                         unit="slpm",
                         derived_unit="slpm",
                         calibration=Identity(input_unit="slpm", output_unit="slpm"),

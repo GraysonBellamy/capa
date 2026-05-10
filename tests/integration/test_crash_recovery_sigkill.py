@@ -1,20 +1,25 @@
-"""Real-SIGKILL crash-recovery — closes the §7 acceptance gap from the
+"""Real-OS-kill crash-recovery — closes the §7 acceptance gap from the
 2026-05-09 hardware day.
 
 Spawns a child writer process, lets it cross several flush boundaries,
-sends a real ``SIGKILL``, then verifies ``finalize_in_place`` recovers a
-sealed bundle with every fsync'd batch.
+forces termination via :meth:`multiprocessing.Process.kill` (which maps to
+``SIGKILL`` on POSIX and ``TerminateProcess`` on Windows — both are
+uncatchable), then verifies ``finalize_in_place`` recovers a sealed bundle
+with every fsync'd batch.
 
 Uses ``mp.get_context("spawn")`` so the test runner isn't ``fork()``\\ d —
 forking pytest leaks threads/locks/fds into the child and produces flaky
 behavior. Spawn re-imports the module in a fresh interpreter.
+
+Hardware-day 2026-05-09 followup #5: the prior implementation referenced
+``signal.SIGKILL`` directly, which doesn't exist on Windows; the cross-
+platform ``proc.kill()`` covers both rigs in a single test.
 """
 
 from __future__ import annotations
 
 import multiprocessing as mp
-import os
-import signal
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -94,11 +99,23 @@ def _spawn_and_kill(
             time.sleep(0.05)
         assert ready.exists(), "child never reported ready"
         assert proc.pid is not None
-        os.kill(proc.pid, signal.SIGKILL)
+        # Cross-platform forced termination: SIGKILL on POSIX,
+        # TerminateProcess on Windows.
+        proc.kill()
         proc.join(timeout=5)
-        assert proc.exitcode == -signal.SIGKILL, (
-            f"child exit code was {proc.exitcode}, expected -SIGKILL"
-        )
+        # Exit-code semantics differ by platform:
+        # * POSIX: exitcode is the negative signal number (``-9`` for SIGKILL).
+        # * Windows: TerminateProcess yields exit code 1 (or whatever was
+        #   passed; mp uses 1).
+        # Either way, the child must have terminated with a non-zero exit.
+        if sys.platform == "win32":
+            assert proc.exitcode is not None and proc.exitcode != 0, (
+                f"child exit code was {proc.exitcode}, expected non-zero"
+            )
+        else:
+            assert proc.exitcode is not None and proc.exitcode < 0, (
+                f"child exit code was {proc.exitcode}, expected negative (signal)"
+            )
     finally:
         if proc.is_alive():
             proc.kill()

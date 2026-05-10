@@ -4,10 +4,10 @@ name = "alicat_real"
 # ``unit_id``, and ``baudrate`` to match the rig wiring; the defaults are
 # Alicat's factory shipment (19200 8-N-1, unit "A").
 [[devices]]
-name = "carrier_mfc"
+name = "purge_mfc"
 adapter = "capa.devices.alicat"
 [devices.params]
-port = "/dev/ttyUSB0"
+port = "COM7"
 unit_id = "A"
 baudrate = 115200
 rate_hz = 2.0
@@ -17,14 +17,14 @@ snapshot_period_s = 30.0
 # --- Channels ---
 
 [[channels]]
-name = "carrier.flow"
+name = "purge.flow"
 kind = "mfc_flow"
 unit = "slpm"
 derived_unit = "slpm"
 plot_group = "flows"
 [channels.source]
 source = "alicat_frame_field"
-device = "carrier_mfc"
+device = "purge_mfc"
 field = "Mass_Flow"
 [channels.calibration]
 kind = "identity"
@@ -39,7 +39,7 @@ derived_unit = "psi"
 plot_group = "pressures"
 [channels.source]
 source = "alicat_frame_field"
-device = "carrier_mfc"
+device = "purge_mfc"
 field = "Abs_Press"
 [channels.calibration]
 kind = "identity"
@@ -54,7 +54,7 @@ derived_unit = "slpm"
 plot_group = "flows"
 [channels.source]
 source = "alicat_frame_field"
-device = "carrier_mfc"
+device = "purge_mfc"
 field = "Mass_Flow_Setpt"
 [channels.calibration]
 kind = "identity"

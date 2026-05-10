@@ -1,0 +1,77 @@
+name = "nidaq_real"
+
+# Single real NI cDAQ task. The connected rig is a cDAQ-9171 chassis
+# carrying a NI 9214 thermocouple module enumerated as ``cDAQ1Mod1``.
+# Two K-type thermocouples on ai0/ai1 with the module's built-in CJC.
+# Add more channels by extending the ``channels`` array below; the
+# adapter-side strict validation will fail fast if a physical_channel
+# isn't present on the local NI system.
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.nidaq"
+[devices.params]
+task_name = "default_task"
+rate_hz = 5.0
+snapshot_period_s = 30.0
+auto_reconnect = false
+overflow = "block"
+
+# K-type thermocouple, ai0
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai0"
+name = "TC_top_1"
+thermocouple_type = 10073    # ThermocoupleType.K
+min_val = 0.0
+max_val = 1000.0
+cjc_source = 10200           # CJCSource.BUILT_IN
+units = 10143                # TemperatureUnits.DEG_C
+
+# K-type thermocouple, ai1
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai1"
+name = "TC_top_2"
+thermocouple_type = 10073
+min_val = 0.0
+max_val = 1000.0
+cjc_source = 10200
+units = 10143
+
+# --- Channels (capa-level) ---
+
+[[channels]]
+name = "TC_sample_top"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "sample_temperature"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_top_1"
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "TC_sample_mid"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+[channels.metadata]
+capa_group = "sample_temperature"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_top_2"
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"

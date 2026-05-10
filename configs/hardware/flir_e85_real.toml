@@ -8,7 +8,12 @@ name = "flir_e85_real"
 name = "ir_cam0"
 adapter = "capa_flir.flir_ir"
 kind = "ir"
-model_hint = "FLIR E85"
+# Windows FLIR USB driver enumerates the E85 with model="FLIR USB Video"
+# (a generic vendor string), so the literal "FLIR E85" model_hint that
+# works on macOS / Linux Atlas builds doesn't match here. Leave the hint
+# blank — the only USB-IR camera connected at hardware-day time is the
+# one we want, so disambiguation isn't needed. Switch to a serial-based
+# selector once we have multiple FLIR cameras on the rig.
 estimated_bps = 4_500_000   # 30 Hz uncompressed .csq, conservative
 on_failure = "warn"
 [cameras.params]

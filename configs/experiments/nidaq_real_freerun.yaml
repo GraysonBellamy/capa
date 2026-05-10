@@ -1,0 +1,34 @@
+# Free-run experiment against a real NI cDAQ task (P2). Records polled
+# DaqReadings into ``device_records/nidaq_polled.parquet`` plus a wide
+# scalars row per declared channel. Run with:
+#
+#   capa validate --strict configs/experiments/nidaq_real_freerun.yaml
+#   capa run --headless     configs/experiments/nidaq_real_freerun.yaml
+#
+# Requires a configured NI device matching ``configs/hardware/nidaq_real.toml``
+# (NI 9214 on cDAQ-9171 with K-type TCs on ai0/ai1 by default).
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 30.0
+
+calibration_set:
+  name: default
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: NIDAQ-REAL-001
+  material: none
+  notes: "P2 real-hardware NI-DAQ thermocouple free run"
+
+tags:
+  - real
+  - nidaq
+  - freerun
+
+hardware: ../hardware/nidaq_real.toml

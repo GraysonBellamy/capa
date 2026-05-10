@@ -653,3 +653,60 @@ class TestPreviewEncoding:
         # Strict upper bound: 5 frames → at most 1 preview at 2 Hz; a
         # second would require ≥500 ms between pushes.
         assert len(previews) == 1, len(previews)
+
+
+class TestOpenInputRetry:
+    """``_open_input_with_retry`` recovers from transient ``[Errno 5]``."""
+
+    async def test_transient_errno5_then_success(self, monkeypatch, tmp_path):
+        """Two transient EIO failures, then a working open. Backoff sleeps
+        are stubbed so the test runs in milliseconds."""
+        from capa.devices.camera import webcam as webcam_mod
+
+        cam = _make(codec="mpeg4")
+        await cam.open()
+
+        attempts = {"n": 0}
+        sentinel = object()
+
+        def _fake_av_open():
+            attempts["n"] += 1
+            if attempts["n"] <= 2:
+                raise OSError(5, "I/O error: device busy (DirectShow)")
+            return sentinel
+
+        sleeps: list[float] = []
+
+        async def _no_sleep(secs: float) -> None:
+            sleeps.append(secs)
+
+        # Patch ``av.open`` (called via ``anyio.to_thread.run_sync``) and
+        # the backoff to keep the test fast.
+        monkeypatch.setattr(webcam_mod.av, "open", lambda *a, **kw: _fake_av_open())
+        monkeypatch.setattr(webcam_mod.anyio, "sleep", _no_sleep)
+
+        result = await cam._open_input_with_retry()
+        assert result is sentinel
+        assert attempts["n"] == 3
+        # First two delays from the schedule should have been used.
+        assert sleeps == list(webcam_mod.OPEN_RETRY_DELAYS_S[:2])
+        await cam.close()
+
+    async def test_non_transient_errno_propagates_immediately(self, monkeypatch):
+        """ENOENT (missing device) is not transient; surface it on attempt 1."""
+        from capa.devices.camera import webcam as webcam_mod
+
+        cam = _make(codec="mpeg4")
+        await cam.open()
+
+        attempts = {"n": 0}
+
+        def _fake_av_open():
+            attempts["n"] += 1
+            raise OSError(2, "No such file or directory")
+
+        monkeypatch.setattr(webcam_mod.av, "open", lambda *a, **kw: _fake_av_open())
+        with pytest.raises(OSError):
+            await cam._open_input_with_retry()
+        assert attempts["n"] == 1
+        await cam.close()

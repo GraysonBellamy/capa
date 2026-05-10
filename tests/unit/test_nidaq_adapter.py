@@ -477,14 +477,208 @@ class TestCommandsP2:
 
 class TestWatchdog:
     async def test_silent_far_future(self) -> None:
+        """A running adapter that hasn't emitted in many periods → ``is_silent``.
+
+        ``_drain(max_records=1)`` calls ``adapter.stop()`` before returning, so
+        the live ``watchdog_state()`` reports ``lifecycle_state="open"`` and
+        the new grace logic suppresses silence. Reconstruct the state with
+        ``lifecycle_state="running"`` to assert the *time math* in isolation
+        — the lifecycle gating itself is covered by tests in
+        ``test_adapter_helpers.TestWatchdogState``.
+        """
+        from capa.devices._helpers import WatchdogState
+
         adapter, _ = _make_adapter(rate_hz=50.0)
         await adapter.open()
         try:
             await adapter.start()
             await _drain(adapter, max_records=1)
-            state = adapter.watchdog_state()
-            assert state.last_t_mono_ns is not None
-            far_future = (state.last_t_mono_ns or 0) + 10 * state.expected_period_ns
-            assert state.is_silent(now_t_mono_ns=far_future)
+            live = adapter.watchdog_state()
+            assert live.last_t_mono_ns is not None
+            running = WatchdogState(
+                device=live.device,
+                last_t_mono_ns=live.last_t_mono_ns,
+                expected_period_ns=live.expected_period_ns,
+                lifecycle_state="running",
+            )
+            far_future = (running.last_t_mono_ns or 0) + 10 * running.expected_period_ns
+            assert running.is_silent(now_t_mono_ns=far_future)
         finally:
             await adapter.close()
+
+
+class TestDeviceInfoProbe:
+    """``device_info`` is populated by matching channel module against
+    ``nidaqlib.system.discovery.list_devices``. Tests stub the discovery
+    function so they don't touch ``nidaqmx``."""
+
+    async def test_device_info_none_when_discovery_returns_empty(self, monkeypatch) -> None:
+        # FakeDaqBackend doesn't go through the real ``list_devices``; with
+        # nothing returned the probe must yield None and not raise.
+        import nidaqlib.system.discovery as discovery
+
+        monkeypatch.setattr(discovery, "list_devices", lambda: [])
+        adapter, _ = _make_adapter()
+        await adapter.open()
+        try:
+            assert adapter.device_info is None
+        finally:
+            await adapter.close()
+
+    async def test_device_info_populated_from_module_match(self, monkeypatch) -> None:
+        """A channel ``Dev1/ai0`` matches a ``Dev1`` device row → identity wired."""
+        import nidaqlib.system.discovery as discovery
+
+        class _FakeDevice:
+            def __init__(self, name: str, product_type: str, serial: int | str | None) -> None:
+                self.name = name
+                self.product_type = product_type
+                self.serial_number = serial
+                self.ai_physical_channels: tuple[str, ...] = ()
+                self.ao_physical_channels: tuple[str, ...] = ()
+                self.di_lines: tuple[str, ...] = ()
+                self.do_lines: tuple[str, ...] = ()
+                self.ci_physical_channels: tuple[str, ...] = ()
+                self.co_physical_channels: tuple[str, ...] = ()
+
+        # Single-board device (no chassis).
+        monkeypatch.setattr(
+            discovery,
+            "list_devices",
+            lambda: [_FakeDevice("Dev1", "PCIe-6320", 12345678)],
+        )
+        adapter, _ = _make_adapter()
+        await adapter.open()
+        try:
+            info = adapter.device_info
+            assert info is not None
+            assert info.product_type == "PCIe-6320"
+            assert info.serial_number == "12345678"  # int coerced to str
+            assert info.physical_module == "Dev1"
+            assert info.chassis is None
+        finally:
+            await adapter.close()
+
+    async def test_device_info_resolves_cdaq_chassis(self, monkeypatch) -> None:
+        """``cDAQ1Mod1/ai0`` → module = ``cDAQ1Mod1``, chassis = ``cDAQ1`` when both exist."""
+        import nidaqlib.system.discovery as discovery
+
+        class _FakeDevice:
+            def __init__(self, name: str, product_type: str, serial: int | None) -> None:
+                self.name = name
+                self.product_type = product_type
+                self.serial_number = serial
+                self.ai_physical_channels: tuple[str, ...] = ()
+                self.ao_physical_channels: tuple[str, ...] = ()
+                self.di_lines: tuple[str, ...] = ()
+                self.do_lines: tuple[str, ...] = ()
+                self.ci_physical_channels: tuple[str, ...] = ()
+                self.co_physical_channels: tuple[str, ...] = ()
+
+        monkeypatch.setattr(
+            discovery,
+            "list_devices",
+            lambda: [
+                _FakeDevice("cDAQ1", "cDAQ-9171", 31195776),
+                _FakeDevice("cDAQ1Mod1", "NI 9214", 26994925),
+            ],
+        )
+
+        backend = FakeDaqBackend(read_block_default_shape=(2, 1))
+        adapter = NIDAQAdapter(
+            name="cdaq1",
+            task_name="task1",
+            channels=(
+                {
+                    "kind": "ai_voltage",
+                    "physical_channel": "cDAQ1Mod1/ai0",
+                    "name": "AI0",
+                    "min_val": -10.0,
+                    "max_val": 10.0,
+                },
+            ),
+            rate_hz=50.0,
+            snapshot_period_s=1e6,
+            backend=backend,
+        )
+        await adapter.open()
+        try:
+            info = adapter.device_info
+            assert info is not None
+            assert info.product_type == "NI 9214"
+            assert info.serial_number == "26994925"
+            assert info.physical_module == "cDAQ1Mod1"
+            assert info.chassis == "cDAQ1"
+        finally:
+            await adapter.close()
+
+    async def test_stream_until_stopped_max_records(self) -> None:
+        """Helper stops on its own once ``max_records`` records have arrived,
+        and ``close()`` afterwards must not deadlock — proving the inner
+        record_polled async-with was wound down properly."""
+        adapter, _ = _make_adapter(rate_hz=200.0)
+        await adapter.open()
+        try:
+            await adapter.start()
+            records: list[SourceRecord] = []
+            async for emission in adapter.stream_until_stopped(max_records=3):
+                if isinstance(emission, SourceRecord):
+                    records.append(emission)
+            assert len(records) >= 3
+            # The real assertion: close() returns promptly. Pre-fix this would
+            # block on the inner record_polled session lock if we'd ``break``
+            # from the loop instead of using the helper.
+        finally:
+            await adapter.close()
+
+    async def test_stream_until_stopped_external_stop(self) -> None:
+        """Calling ``adapter.stop()`` from outside also unwinds cleanly."""
+        adapter, _ = _make_adapter(rate_hz=200.0)
+        await adapter.open()
+        try:
+            await adapter.start()
+            received: list[Any] = []
+            count = 0
+            async for emission in adapter.stream_until_stopped():
+                received.append(emission)
+                count += 1
+                if count == 5:
+                    await adapter.stop()
+            assert len(received) >= 5
+        finally:
+            await adapter.close()
+
+    async def test_stream_until_stopped_rejects_non_positive_budget(self) -> None:
+        adapter, _ = _make_adapter()
+        await adapter.open()
+        try:
+            await adapter.start()
+            with pytest.raises(ValueError, match="max_records"):
+                async for _ in adapter.stream_until_stopped(max_records=0):
+                    pass
+            with pytest.raises(ValueError, match="max_emissions"):
+                async for _ in adapter.stream_until_stopped(max_emissions=-1):
+                    pass
+        finally:
+            await adapter.close()
+
+    async def test_device_info_cleared_on_close(self, monkeypatch) -> None:
+        import nidaqlib.system.discovery as discovery
+
+        class _FakeDevice:
+            name = "Dev1"
+            product_type = "PCIe-6320"
+            serial_number = 1
+            ai_physical_channels: tuple[str, ...] = ()
+            ao_physical_channels: tuple[str, ...] = ()
+            di_lines: tuple[str, ...] = ()
+            do_lines: tuple[str, ...] = ()
+            ci_physical_channels: tuple[str, ...] = ()
+            co_physical_channels: tuple[str, ...] = ()
+
+        monkeypatch.setattr(discovery, "list_devices", lambda: [_FakeDevice()])
+        adapter, _ = _make_adapter()
+        await adapter.open()
+        assert adapter.device_info is not None
+        await adapter.close()
+        assert adapter.device_info is None

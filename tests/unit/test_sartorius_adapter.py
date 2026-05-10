@@ -316,15 +316,26 @@ class TestAuthorization:
 
 class TestWatchdog:
     async def test_watchdog_state_after_streaming(self) -> None:
+        """Time-math assertion only; ``_drain`` stops the adapter so we
+        rebuild the state with ``lifecycle_state="running"`` to avoid the
+        new clean-shutdown grace path."""
+        from capa.devices._helpers import WatchdogState
+
         adapter, _ = _make_adapter(rate_hz=50.0)
         await adapter.open()
         try:
             await adapter.start()
             await _drain(adapter, max_records=1)
-            state = adapter.watchdog_state()
-            assert state.last_t_mono_ns is not None
-            far_future = (state.last_t_mono_ns or 0) + 10 * state.expected_period_ns
-            assert state.is_silent(now_t_mono_ns=far_future)
+            live = adapter.watchdog_state()
+            assert live.last_t_mono_ns is not None
+            running = WatchdogState(
+                device=live.device,
+                last_t_mono_ns=live.last_t_mono_ns,
+                expected_period_ns=live.expected_period_ns,
+                lifecycle_state="running",
+            )
+            far_future = (running.last_t_mono_ns or 0) + 10 * running.expected_period_ns
+            assert running.is_silent(now_t_mono_ns=far_future)
         finally:
             await adapter.close()
 

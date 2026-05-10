@@ -1,8 +1,8 @@
 # CAPA-shaped sim hardware profile (controlled atmosphere pyrolysis).
 #
 # Provides every channel group required by capa.profiles.capa_pyrolysis:
-# heater_setpoint, heater_pv, sample_temperature, carrier_gas_flow.
-# Optional: mass (TGA-style), reactive_gas_flow (partial-oxidation runs).
+# heater_setpoint, heater_pv, sample_temperature, purge_gas_flow.
+# Optional: mass (load-cell), reactive_gas_flow (partial-oxidation runs).
 #
 # Each device's `params` declare TOML-friendly signal specs that the sim
 # adapters' from_params() classmethods convert into SignalFn callables at
@@ -24,7 +24,7 @@ kind = "constant"
 value = 600.0
 
 [[devices]]
-name = "carrier_mfc"
+name = "purge_mfc"
 adapter = "capa.devices.sim.alicat_sim"
 [devices.params.signals.Mass_Flow]
 kind = "constant"
@@ -97,19 +97,19 @@ kind = "identity"
 input_unit = "degC"
 output_unit = "degC"
 
-# --- Carrier gas (the inert sweep that defines "controlled atmosphere") ---
+# --- Purge gas (the inert sweep that defines "controlled atmosphere") ---
 
 [[channels]]
-name = "carrier.flow"
+name = "purge.flow"
 kind = "mfc_flow"
 unit = "slpm"
 derived_unit = "slpm"
 plot_group = "flows"
 [channels.metadata]
-capa_group = "carrier_gas_flow"
+capa_group = "purge_gas_flow"
 [channels.source]
 source = "alicat_frame_field"
-device = "carrier_mfc"
+device = "purge_mfc"
 field = "Mass_Flow"
 [channels.calibration]
 kind = "identity"
@@ -154,7 +154,7 @@ kind = "identity"
 input_unit = "K"
 output_unit = "K"
 
-# --- Mass (TGA-style; optional under the CAPA profile) ---
+# --- Mass (load-cell; optional under the CAPA profile) ---
 
 [[channels]]
 name = "balance.mass"

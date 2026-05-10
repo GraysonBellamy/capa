@@ -32,6 +32,7 @@ from capa.ui.docks.events import EventsDock
 from capa.ui.docks.numerics import NumericsDock
 from capa.ui.state import RunController
 from capa.ui.statusbar import CapaStatusBar, OperatorIdProvider
+from capa.ui.tabs.method import MethodTab
 from capa.ui.tabs.run import RunTab
 from capa.ui.tabs.setup import SetupTab
 
@@ -75,10 +76,12 @@ class MainWindow(QMainWindow):
         )
 
         self._setup_tab = SetupTab(self)
+        self._method_tab = MethodTab(self)
         self._run_tab = RunTab(controller=self._controller, parent=self)
 
         self._tabs = QTabWidget(self)
         self._tabs.addTab(self._setup_tab, "Setup")
+        self._tabs.addTab(self._method_tab, "Method")
         self._tabs.addTab(self._run_tab, "Run")
         self.setCentralWidget(self._tabs)
 
@@ -282,6 +285,10 @@ class MainWindow(QMainWindow):
     @property
     def setup_tab(self) -> SetupTab:
         return self._setup_tab
+
+    @property
+    def method_tab(self) -> MethodTab:
+        return self._method_tab
 
     @property
     def events_dock(self) -> EventsDock:

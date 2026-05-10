@@ -1,7 +1,7 @@
 # capa — Architecture Plan
 
 **Status:** consolidated architecture, pre-implementation
-**Target:** Python 3.12/3.13 control & data-acquisition application for a custom cone-calorimeter-class lab instrument
+**Target:** Python 3.12/3.13 control & data-acquisition application for a custom controlled-atmosphere pyrolysis lab instrument
 **Author note:** merges the strongest elements of the prior `capa-plan-claude.md` and `capa-plan-codex.md`. Supersedes both.
 
 ---
@@ -16,8 +16,8 @@ Sample rates are modest (3–60 Hz per device); the dominant I/O concern is vide
 
 - **Configurable rigs.** Channels, devices, calibrations, methods are all declarative (YAML / TOML / JSON) and version-controllable.
 - **Reproducible runs.** Every run produces a bundle that contains everything needed to interpret the data five years later — config, method, calibration snapshot, equipment, events, scalars, video.
-- **Domain-standard capture.** Cone-calorimeter runs capture the metadata needed to interpret ASTM E1354 / ISO 5660-style measurements: heat flux, specimen geometry/orientation, ignition timing, gas analyzer delay/response, smoke optics, exhaust flow, mass loss, calibration gases, and derived heat-release inputs.
-- **Extensible procedures.** New routines (heat-flux gauge calibration, paint emissivity ramp, future ASTM variants) are plugin packages, not core changes.
+- **Domain-standard capture.** CAPA pyrolysis runs capture the metadata needed to interpret a controlled-atmosphere temperature program: temperature profile, atmosphere (carrier and optional reactive gas), specimen form/mass/holder, and leak-check timestamp.
+- **Extensible procedures.** New routines (heat-flux gauge calibration, paint emissivity ramp, future profile variants) are plugin packages, not core changes.
 - **Operable.** A trained operator can launch a known recipe, monitor it, abort safely, and review the result without touching code.
 - **Headless-capable.** The engine runs without the GUI for testing, automation, and CI.
 - **Honest about safety.** Every device-write goes through an explicit run authorization or manual confirmation gate; safety monitoring is its own subsystem with its own state, not a check buried in an acquisition callback.
@@ -167,7 +167,7 @@ capa/
 │   │   ├── authorization.py         # arm/start approvals + manual-command confirmations
 │   │   ├── profiles/
 │   │   │   ├── base.py              # DomainProfile Protocol
-│   │   │   └── cone_calorimeter.py  # ASTM E1354 / ISO 5660 metadata + preflight profile
+│   │   │   └── capa_pyrolysis.py    # controlled-atmosphere pyrolysis metadata + preflight profile
 │   │   └── procedures/
 │   │       ├── base.py              # Procedure Protocol + ProcedureContext
 │   │       └── builtin/
@@ -254,7 +254,7 @@ class ChannelSpec(BaseModel):
 
 The adapter is responsible for emitting both the preserved native record and any normalized `ChannelSample`s declared by the registry. Capa does not infer scientific channels from arbitrary library columns unless the config maps them.
 
-**Units are first-class.** Every `unit` and `derived_unit` is validated against a `pint` UnitRegistry at config-load. Calibrations declare their input/output dimensions; a thermocouple calibration that consumes `V` and emits `kg` is a config error, not a runtime surprise. Where capa interfaces with external standards (ASTM E1354 / ISO 5660), the canonical unit names follow [UCUM](https://ucum.org). Operators may type natural strings ("kPa", "deg C") in configs; the loader normalizes them to canonical form and records both in `manifest.json`.
+**Units are first-class.** Every `unit` and `derived_unit` is validated against a `pint` UnitRegistry at config-load. Calibrations declare their input/output dimensions; a thermocouple calibration that consumes `V` and emits `kg` is a config error, not a runtime surprise. Canonical unit names follow [UCUM](https://ucum.org). Operators may type natural strings ("kPa", "deg C") in configs; the loader normalizes them to canonical form and records both in `manifest.json`.
 
 ### 5.2 `DeviceAdapter` — uniform device surface
 
@@ -350,7 +350,7 @@ class ExperimentConfig(BaseModel):
     hardware: HardwareProfile                # devices + channels
     method: Method | None                    # optional — free runs have no method
     procedure: ProcedureRef                  # plugin id + version constraint + plugin-specific config
-    domain_profile: DomainProfileRef | None  # default: capa_pyrolysis; cone_calorimeter also shipped
+    domain_profile: DomainProfileRef | None  # default: capa_pyrolysis
     calibration_set: CalibrationSetRef       # which cal curves are active
     storage: StoragePolicy                   # parquet flush, video codec, optional TDMS, etc.
     safety: SafetyPolicy                     # alarm rules, fault behaviors
@@ -360,31 +360,22 @@ class ExperimentConfig(BaseModel):
     custom: dict[str, Any] = {}              # operator-editable freeform
 ```
 
-#### 5.4.1 Domain profiles — CAPA pyrolysis (default) and cone calorimeter
+#### 5.4.1 Domain profile — CAPA pyrolysis
 
-Domain profiles are optional schema/preflight bundles layered on top of the generic engine. Two profiles ship, both registered on the `capa.profiles` entry-point group; `capa.profiles.capa_pyrolysis` is the default.
+Domain profiles are optional schema/preflight bundles layered on top of the generic engine. One profile ships today: `capa.profiles.capa_pyrolysis`, registered on the `capa.profiles` entry-point group and used by default.
 
-**`capa.profiles.capa_pyrolysis` (default).** Models the controlled-atmosphere pyrolysis apparatus the project is named after: a sample is heated under a controlled gas atmosphere (typically inert N2; sometimes a controlled O2 mix for partial-oxidation studies). Pyrolysis chemistry under controlled atmosphere — *not* oxygen-depletion calorimetry. Contributes:
+**`capa.profiles.capa_pyrolysis`.** Models the controlled-atmosphere pyrolysis apparatus the project is named after: a sample is heated under a controlled gas atmosphere (typically inert N2; sometimes a controlled O2 mix for partial-oxidation studies). Pyrolysis chemistry under controlled atmosphere — *not* oxygen-depletion calorimetry. Contributes:
 
-- specimen fields: id, material, initial mass, form (powder / pellet / film / fiber / chunk / liquid / other), particle size for granulates, crucible/holder, conditioning notes
-- method fields: temperature program summary (initial T, final T, ramp rate, optional hold T + duration), atmosphere mode (inert / oxidative / reducing / reactive_blend), purge duration, leak-check timestamp
-- atmosphere metadata: carrier-gas spec (species, purity, supplier, cylinder lot, target sweep flow), optional reactive-gas spec (species, purity, target flow, target mole fraction)
-- optional downstream-analyzer block: kind (FTIR / GC / MS / GC-MS / NDIR / other), serial, sampling-line delay, response time, external-file ref. The analyzer is not capa-controlled — its data lives outside the bundle — but the pedigree fields are captured so the run record cross-references the right external dataset
-- required channel groups: `heater_setpoint`, `heater_pv`, `sample_temperature`, `carrier_gas_flow`. Optional: `mass` (TGA-style rigs), `reactive_gas_flow`, `reactor_pressure`
-- preflight checks: required channel mappings, atmosphere consistency (oxidative/blend mode requires a reactive-gas channel), heater PV in safe startup range, carrier flow established, leak-test recency, balance stability when mass is present, disk projection
+- specimen fields: id, material, initial mass, form (`disk` for ~99% of runs, `other` as the escape hatch), particle size when applicable, specimen-holder description, optional holder diameter and depth, conditioning notes
+- method fields: heater program summary (target heat flux at the specimen surface in kW/m², heater setpoint °C chosen to deliver that flux via the day-of calibration, optional `flux_calibration_ref`, optional ramp rate for the minority dynamic-program runs), atmosphere mode (inert / oxidative / reducing / reactive_blend), purge duration, leak-check timestamp
+- atmosphere metadata: purge-gas spec (species, purity, supplier, cylinder lot, target purge flow), optional reactive-gas spec (species, purity, target flow, target mole fraction) for partial-oxidation runs
+- optional downstream-analyzer block (reserved for future setups; the current CAPA rig does not route gases to an analyzer): kind (FTIR / GC / MS / GC-MS / NDIR / other), serial, sampling-line delay, response time, external-file ref. If a future rig adds one, the analyzer is not capa-controlled — its data lives outside the bundle — but the pedigree fields are captured so the run record cross-references the right external dataset
+- required channel groups: `heater_setpoint`, `heater_pv`, `sample_temperature`, `purge_gas_flow`. Optional: `mass` (load-cell rigs), `reactive_gas_flow`, `reactor_pressure`
+- preflight checks: required channel mappings, atmosphere consistency (oxidative/blend mode requires a reactive-gas channel), heater PV in safe startup range, purge flow established, leak-test recency, balance stability when mass is present, disk projection
 
-The profile snapshot lands in `profiles/capa_pyrolysis.toml` (currently captured in `config.toml`; dedicated snapshot pending — see §16 P3 status) and is referenced from `manifest.json.domain_profile`.
+The profile snapshot lands in `profiles/capa_pyrolysis.toml` and is referenced from `manifest.json.domain_profile`. The profile does not make `capa` a standards-certification tool; it ensures the run bundle captures the metadata a researcher or later analyzer needs.
 
-**`capa.profiles.cone_calorimeter` (shipped, opt-in).** Aligned with ASTM E1354 / ISO 5660-style measurements; the operator opts in via `domain_profile.id`. Contributes:
-
-- required specimen fields: sample id, material, thickness, exposed area, mass, conditioning, holder/orientation, backing/retainer notes
-- method fields: target external heat flux, spark/ignition mode, exposure timing, test termination criteria
-- required channel groups: mass, exhaust flow, oxygen analyzer, smoke optical path / laser attenuation when present, heat-flux gauge, relevant thermocouples, commanded heater setpoint
-- gas-analysis metadata: calibration gases, analyzer serials, zero/span events, sampling-line delay, analyzer response time / time constant, baseline-drift notes
-- derived-channel declarations for analysis handoff: oxygen depletion, heat-release inputs, mass-loss rate inputs, smoke-production inputs
-- preflight checks: active calibration age/traceability, analyzer zero/span recency, disk projection, balance stability, heat-flux gauge presence, required channel mappings
-
-The cone profile snapshot lands in `profiles/cone_calorimeter.toml`. A cone-specific Setup-tab UI is intentionally not shipped — when the lab needs cone-mode UX it lands as a follow-up profile-UI plugin. Neither profile makes `capa` a standards-certification tool; both ensure the run bundle captures the metadata that a researcher or later analyzer needs.
+**Future profiles.** A cone-calorimeter profile module exists in the codebase but is not part of the active product surface; there are no current plans to drive a cone calorimeter with capa. If a cone-mode (or any other) profile becomes a real workload it will be (re-)introduced as an additional profile alongside CAPA pyrolysis on the same Protocol.
 
 ### 5.5 `Calibration` — first-class snapshotted objects, with uncertainty
 
@@ -477,8 +468,6 @@ Every `ChannelSample` carries `t_mono_s` (float64 seconds since run start) as th
 At 3–60 Hz this is fine — sub-millisecond cross-device jitter is invisible. Hardware sync can be added later (NI trigger lines, IRIG-B) if a measurement demands it.
 
 The run-start UTC anchor is also embedded in the visible MKV container metadata and stored as `started_utc` in `manifest.json` so external tools can re-correlate frames against the Parquet scalar stream by absolute time.
-
-Cone-calorimeter gas analysis adds a second kind of timing metadata: physical/system response delays. The cone profile records gas-sampling line delay, analyzer response time / time constant, smoke-optics response metadata, calibration gas timestamps, and any analysis-time delay correction used for heat-release calculations. These are not "clock sync" fields; they are measurement-model fields, and they belong in the bundle even though `capa` does not perform full analysis in P0–P6.
 
 ---
 
@@ -591,7 +580,7 @@ runs/2026-05-07_153000_S073-paint-A/
 ├── exports/                   # optional, generated post-hoc by `capa export-parquet`
 ├── artifacts/                 # procedure-specific outputs (plots, fitted cal curves, etc.)
 ├── profiles/
-│   └── cone_calorimeter.toml  # domain-standard metadata/preflight snapshot when profile is active
+│   └── capa_pyrolysis.toml   # domain-standard metadata/preflight snapshot for the active profile
 ├── ro-crate-metadata.json     # optional; present if storage.rocrate.enabled or `capa export-rocrate`
 └── manifest.sha256            # finalize-time table: sha256 of every file in the bundle
 ```
@@ -604,7 +593,7 @@ runs/2026-05-07_153000_S073-paint-A/
 - `tar -cf` over the directory produces a single-artifact bundle whenever you want one.
 - Visible video stays in MKV (no need to preserve radiometry); IR thermal stays in native FLIR `.csq` (raw radiometry preserved, vendor calibration intact, can be re-colorized at any time).
 - `status.sqlite` keeps low-rate device-health rows (e.g., Watlow alarm bits, Alicat valve drive, balance stable flag) separate from the `scalars.parquet` engineering channels — different cadence, different consumer.
-- `profiles/` captures domain-standard context such as cone-calorimeter geometry, heat-flux settings, gas analyzer delay, calibration gases, ignition mode, exhaust-flow metadata, and applicable ASTM/ISO standard references.
+- `profiles/` captures domain-standard context such as the temperature program summary, atmosphere metadata, specimen form/holder, leak-check recency, and (when present) downstream-analyzer pedigree fields.
 - `env/` and `manifest.sha256` make the bundle a closed scientific record. Re-deriving values five years later does not depend on what tooling happened to be installed today.
 
 **Live readback during a run is not needed** — the in-memory DataBus serves the UI. Files are written in flush-bounded chunks for crash safety, then **rewritten into well-sized row groups at finalize** (see §8.5). They are opened for analysis only after the bundle is readable (`finalized_unverified` or `sealed`).
@@ -629,8 +618,8 @@ runs/2026-05-07_153000_S073-paint-A/
   "sample":        { /* SampleInfo: id, material, prep, mass, geometry, notes */ },
   "procedure":     { "id": "capa.builtin.recipe_runner", "version": "1.4.2" },
   "domain_profile": {
-    "id": "capa.profiles.cone_calorimeter",
-    "standard_refs": ["ASTM E1354-25", "ISO 5660-1:2015"]
+    "id": "capa.profiles.capa_pyrolysis",
+    "standard_refs": []
   },
   "tags":          ["paint-A", "S073-series", "campaign-2026Q2"],
 
@@ -864,7 +853,7 @@ The action is part of the rule, not the verdict — the same fault should always
 
 ### 10.1 Tabs (central widget)
 
-- **Setup.** Hardware profile editor. Tree on the left (devices → channels), Pydantic-driven form on the right. "Detect devices" button issues a discovery scan (each adapter contributes a `discover()` classmethod). Calibration manager lives here as a sub-pane. Active domain profile (e.g. cone calorimeter) contributes required metadata and preflight checks.
+- **Setup.** Hardware profile editor. Tree on the left (devices → channels), Pydantic-driven form on the right. "Detect devices" button issues a discovery scan (each adapter contributes a `discover()` classmethod). Calibration manager lives here as a sub-pane. The active domain profile (CAPA pyrolysis by default) contributes required metadata and preflight checks.
 - **Method.** Segmented-profile editor: Step table on top, profile graph below, both edit each other live. Saves as `.method.toml`.
 - **Run.** The instrument-console view. Big run-state header (Idle / Armed / Running / Aborting / Finalizing / Sealed), Arm/Start/Abort buttons, method-progress bar, procedure-specific custom widget (rendered from the plugin), active authorization summary, live numeric grid, dockable plot panes, camera previews. This is the screen you stare at during a run.
 - **Review.** Completed-run summary: manifest, headline plots, event log, segment timeline, link to "Open in analyzer." No editing.
@@ -908,7 +897,7 @@ Procedure config and per-channel config are Pydantic models. A small auto-form g
 
 ## 11. Procedure plugin system
 
-Procedures are how research workflows extend `capa`. They are not the only way to run an experiment — most cone runs are just `RecipeRunner(method=...)` — but they are the path for anything that needs custom logic or a custom UI.
+Procedures are how research workflows extend `capa`. They are not the only way to run an experiment — most pyrolysis runs are just `RecipeRunner(method=...)` — but they are the path for anything that needs custom logic or a custom UI.
 
 ```python
 class Procedure(Protocol):
@@ -1091,7 +1080,7 @@ The adapter's `discover()` validates that the platform-appropriate Atlas shared 
 - **§5.1 — App Review.** Any App that uses the SDK must be approved in writing by FLIR before distribution. Keeping the binding in `capa-flir` means capa core is publishable freely; only `capa-flir` is gated by App Review.
 - **§6 — Confidential Information.** SDK headers, sample code, and "non-public elements" are FLIR Confidential Information for 7 years post-termination. capa core's public repo therefore contains no FLIR headers, no FLIR sample code, no struct dumps. ABI mode means the binding source contains only function *signatures* we declare ourselves against the documented public API — no header text, no SDK internals.
 - **§2.2(iii) — copyleft prohibition.** Both capa and capa-flir are permissively licensed (MIT/Apache-2.0). No GPL/AGPL/LGPL linkage anywhere on the import path.
-- **§3.1 — no medical use.** capa is research instrumentation (cone-calorimetry, materials testing); the docs explicitly state "not a medical device."
+- **§3.1 — no medical use.** capa is research instrumentation (controlled-atmosphere pyrolysis, materials testing); the docs explicitly state "not a medical device."
 - **§8.1 — export controls.** Standard notice in capa-flir's README.
 - **§11.2 — termination is fast** (60-day notice, 10-day cure). The plugin split means termination forces removal of `capa-flir` only; capa keeps shipping with webcam + IR-sim cameras, unaffected.
 
@@ -1213,7 +1202,7 @@ capa plugins list
 capa plugins trust PLUGIN_ID
     Update plugins.lock after operator/admin review. Never run implicitly.
 
-capa profile validate cone_calorimeter configs/experiments/example.yaml
+capa profile validate capa_pyrolysis configs/experiments/example.yaml
     Validate domain-profile metadata and required channel mappings without
     opening hardware.
 ```
@@ -1243,7 +1232,7 @@ Headless mode is the primary substrate for integration tests and for any future 
 - Finalize-in-place: kill mid-run, run `capa finalize`, assert the resulting bundle reads cleanly and `inferred_ended_utc` is set.
 - Procedure plugin loading (entry-point + dev folder; version constraints; bad plugin fails at *load*, not arm).
 - Plugin trust policy: production mode refuses unlocked plugins; dev-folder loading is gated; `plugins.lock` hash drift is visible.
-- Cone-calorimeter profile validation: missing required channel groups, stale calibration metadata, absent analyzer-delay metadata, and incomplete specimen metadata fail preflight.
+- CAPA pyrolysis profile validation: missing required channel groups (heater_setpoint, heater_pv, sample_temperature, purge_gas_flow), atmosphere-mode/reactive-gas inconsistency, missing leak-test timestamp, and absent specimen form fail preflight.
 - Ring buffer decimation and wrap-around.
 - Backpressure policy enforcement (BLOCK actually blocks; DROP_OLDEST actually drops).
 - External event ingest: events submitted via the UDS / HTTP loopback land in `events.sqlite` with correct timestamps.
@@ -1298,13 +1287,13 @@ Gated behind `CAPA_HARDWARE_TESTS=1`; otherwise skipped. Run on the rig PC.
 
 | Phase | Scope | Outcome |
 |-------|-------|---------|
-| **P0a — Schema + sim substrate** | `RunClock`, `ChannelSpec` with `SourceBinding` variants, `SourceRecord`, `ChannelSample`, `ExperimentConfig`, `DeviceAdapter` Protocol + `BackpressurePolicy`, simulated adapters for every device class, plugin trust model skeleton (`plugins.lock` parser), cone-calorimeter profile schema | Configs validate; simulated records can be mapped into normalized channel samples |
+| **P0a — Schema + sim substrate** | `RunClock`, `ChannelSpec` with `SourceBinding` variants, `SourceRecord`, `ChannelSample`, `ExperimentConfig`, `DeviceAdapter` Protocol + `BackpressurePolicy`, simulated adapters for every device class, plugin trust model skeleton (`plugins.lock` parser), CAPA pyrolysis profile schema | Configs validate; simulated records can be mapped into normalized channel samples |
 | **P0b — Bundle writer** | `RunBundleWriter`, normalized `scalars.parquet`, `device_records/*.parquet` sidecars, two-stage Parquet rewrite, SQLite event/status sinks, manifest with env/version/lockfile provenance, separate `run_status` and `bundle_status`, sha256 integrity table | A synthetic run writes a valid, reread-able, checksum-verifiable bundle preserving both normalized and native device-record surfaces |
 | **P0c — Headless engine + catalog** | Engine task group, `FreeRun` procedure, `run.log` via structlog, queue-depth/writer-lag metrics, `RunCatalog` with `operators`, `run_status`, `bundle_status`, and `integrity_status`, `capa validate`, `capa run --headless`, `capa finalize`, `capa catalog verify`, `capa plugins list` CLI | `capa run --headless freerun.yaml` writes a completed + sealed bundle with full software-environment provenance and catalog entry |
 | **P0d — First hardware adapter** | Real `WatlowAdapter` (smallest viable real device), Watlow SourceRecord preservation, Watlow parameter-to-channel mapping, hardware smoke-test gate | One real controller can be read headlessly and recorded into both `scalars.parquet` and `device_records/watlow.parquet` |
 | **P1 — UI core** | qasync bootstrap, main window, Setup tab (read-only inspect), Run tab with PyQtGraph live plots and numerics dock, events dock, status bar (queue depths, writer lag, disk free, operator id, camera health), run/abort controls wired to engine | Click-to-record working against sim adapters and Watlow |
 | **P2 — Device adapters** | Real `NIDAQAdapter`, `AlicatAdapter`, `SartoriusAdapter`. Capability flags. Device watchdogs and health surfacing. Discovery (`capa devices discover`). `capa validate --strict` (read-only handshake against connected hardware) | Real multi-device scalar acquisition, headless and with UI |
-| **P3 — Methods + procedures** *(shipped 2026-05-07; partial — see §16.1)* | Step / Method types, `MethodExecutor` service, `RecipeRunner` and `Batch` builtins, `Authorization` handle, full `Procedure` Protocol + `ProcedureContext`, procedure preflight checks (`Problem` collection), plugin discovery + load-time contract enforcement + production trust checks (`plugins.lock`), domain-profile preflight runtime, **CAPA pyrolysis profile (new default; cone deferred)**, external event-ingest endpoint (opt-in), `capa plugins trust` / `capa method validate` / `capa profile validate` CLI, TOML-friendly sim signal schema. *Deferred to a follow-up:* method editor UI (table + graph), Pydantic auto-form generator, cone-profile Setup-tab UI, dynamic preflight inside the task group, dedicated `profiles/<id>.toml` snapshot file. | First end-to-end recipe-driven CAPA pyrolysis run via `RecipeRunner` against sim adapters; `Batch` produces N child bundles each with the parent batch id; profile metadata snapshotted into `config.toml`; every device write carries a stamped `authorization_id` in the audit trail |
+| **P3 — Methods + procedures** *(shipped 2026-05-09)* | Step / Method types, `MethodExecutor` service, `RecipeRunner` and `Batch` builtins, `Authorization` handle, full `Procedure` Protocol + `ProcedureContext`, procedure preflight checks (`Problem` collection), plugin discovery + load-time contract enforcement + production trust checks (`plugins.lock`), domain-profile preflight runtime with split static/dynamic phases, **CAPA pyrolysis profile (default and only active profile)**, dedicated `profiles/<id>.toml` snapshot in the bundle, Pydantic auto-form generator, Method editor UI (table + graph), external event-ingest endpoint (opt-in), `capa plugins trust` / `capa method validate` / `capa profile validate` CLI, TOML-friendly sim signal schema. | First end-to-end recipe-driven CAPA pyrolysis run via `RecipeRunner` against sim adapters; `Batch` produces N child bundles each with the parent batch id; profile metadata snapshotted into `config.toml` and `profiles/capa_pyrolysis.toml`; every device write carries a stamped `authorization_id` in the audit trail; operator can author methods in the GUI |
 | **P4 — Cameras** | `Camera` Protocol + `flir_ir_sim` fixture in capa core, `WebcamAdapter` (PyAV) in capa core, video sinks, preview docks, frame-to-clock alignment, disk-space preflight. **`capa-flir` plugin package** (separate repo): CFFI ABI-mode binding to FLIR Atlas 2.19.0, `FlirIrAdapter` driving any FLIR USB camera Atlas supports (E85 is the validation/reference camera) via a single manual `OnImageReceived` → `addImage` frame-pump path that runs identically on Linux and Windows, model + serial selection in `CameraSpec`, post-finalize frame-index extraction, `CAPA_FLIR_ATLAS_ROOT` install convention, `NOTICE.md` documenting the no-redistribution licensing posture. **P4 entry gate:** confirm the FLIR SDK click-through was accepted by an authorized signer; verify capa's license is permissive; open the FLIR App Review conversation if public release of `capa-flir` is intended. | Visible + IR video aligned with channel data in a single bundle; capa core remains FLIR-free and publishable; capa-flir validated on Linux with the lab's E85, sanity-checked on Windows |
 | **P5 — Calibration workflows** | Calibration types + manager UI (with uncertainty), `HeatFluxGaugeCalibration`, `EmissivityRamp` builtins, calibration snapshot in bundle (with fit metadata + procedure pedigree), approval flow to save new curves | Calibration workflows shipped with documented uncertainty |
 | **P6 — Polish** | Review tab, run-catalog browser, completed-run summary view (with queue-health histograms and sealed/unverified state), theme, window-state persistence, Simple/Expert mode presets, `capa export-parquet`, `capa export-rocrate`, Linux smoke test, schema-version migration registry exercise | Daily-driver ready, FAIR-publishable sealed bundles |
@@ -1313,9 +1302,9 @@ Gated behind `CAPA_HARDWARE_TESTS=1`; otherwise skipped. Run on the rig PC.
 
 **Why P2 splits adapters out from methods:** wiring real devices is its own integration risk surface (drivers, USB enumeration, vendor SDKs, Windows DLL loader paths). Doing it before the method editor lets us discover hardware-specific quirks without also debugging method-execution bugs.
 
-### 16.1 P3 delivery status (2026-05-07)
+### 16.1 P3 delivery status (2026-05-09)
 
-P3 shipped the engine spine, builtins, plugin trust runtime, and the new default CAPA profile. UI work (method editor, auto-form generator, profile-specific Setup-tab panels) was deferred — the headless surface is complete and is what the lab needs first; UI follows once the operator workflow is exercised against the live rig. 413 tests pass; one new integration test (`tests/integration/test_capa_recipe_run.py`) exercises the full headless path end-to-end against the CAPA sim hardware.
+P3 shipped the engine spine, builtins, plugin trust runtime, the CAPA profile, the dedicated profile snapshot, dynamic preflight inside the task group, the Pydantic auto-form generator, and the Method editor UI. The full operator workflow — headless or GUI — is now exercisable against the CAPA sim hardware. 569 non-hardware tests pass; the integration test `tests/integration/test_capa_recipe_run.py` exercises the headless path end-to-end including the dynamic preflight phase and the verbatim profile snapshot in the sealed bundle.
 
 **Shipped:**
 
@@ -1328,28 +1317,28 @@ P3 shipped the engine spine, builtins, plugin trust runtime, and the new default
     - `capa.builtin.batch` — runs an inner procedure N times. Each iteration spawns its own `ExperimentEngine` and writes its own bundle; the parent batch id is recorded in each child's `manifest.json.custom.batch.batch_id`. `fail_fast`, `cooldown_s`, and `sample_id_template` configurable. Schema-rejects nested Batch.
     - `capa.builtin.free_run` — updated to the new contract.
 - **Plugin runtime** (`src/capa/core/plugins_runtime.py`) — entry-point discovery, load-time contract enforcement (id/name/version/config_model present, async preflight+run, structural Procedure check), production-mode trust gate against `plugins.lock` (HASH_MISMATCH / VERSION_MISMATCH / ENTRY_POINT_MISMATCH / MISSING_FROM_LOCK all block load), `ProcedureRegistry` keyed by id with `from_config` instantiation. Mode resolves from `--plugin-mode` > `CAPA_PLUGIN_MODE` env > `dev` default.
-- **Profile preflight runtime** (`src/capa/experiment/profiles/runtime.py`) — `id → callable` registry; the engine resolves the active profile's `preflight_checks`, runs them with a `ProfilePreflightContext`, collects `Problem` records. Builtin checks: `capa.required_channel_mappings`, `capa.atmosphere_consistency`, `capa.heater_pv_in_safe_range`, `capa.carrier_flow_established`, `capa.leak_test_recency`, `capa.balance_stability`, `capa.disk_projection`. Cone shares the channel-mappings + balance-stability checks via dual registration.
-- **CAPA pyrolysis profile** (`src/capa/experiment/profiles/capa_pyrolysis.py`) — see §5.4.1. Default `domain_profile.id = "capa.profiles.capa_pyrolysis"`. Cone profile remains shipped and registered.
+- **Profile preflight runtime** (`src/capa/experiment/profiles/runtime.py`) — `id → callable` registry tagged with a `static`/`dynamic` category. The engine runs static checks before opening adapters and dynamic checks inside the task group after every `adapter.start()` returns, so a silent live-data channel post-start is a blocking error rather than a downgraded warning. Builtin checks: static — `capa.required_channel_mappings`, `capa.atmosphere_consistency`, `capa.leak_test_recency`, `capa.disk_projection`; dynamic — `capa.heater_pv_in_safe_range`, `capa.purge_flow_established`, `capa.balance_stability`. `ProfilePreflightContext.adapters_started` drives the silent-channel branching.
+- **Dedicated profile snapshot** (`src/capa/storage/bundle.py`) — when `domain_profile` is set, the bundle writer mirrors `domain_profile.metadata` verbatim into `profiles/<short_id>.toml` (e.g. `profiles/capa_pyrolysis.toml`) at run-arm. The integrity walker (`bundle_root.rglob("*")`) covers it automatically; `manifest.sha256` includes it for sealed bundles.
+- **Pydantic auto-form generator** (`src/capa/ui/forms/`) — `build_form(model_cls, *, initial=None)` walks `model_cls.model_fields` and produces a `ModelForm` (`QFormLayout`-based) with one widget per field. Annotation-driven mapping covers primitives (str, int/float with `Field(gt/ge/lt/le)` constraint application, bool, datetime, Path), `Literal[...]`, nested `BaseModel` (recursive form in a group box), `tuple[X, ...]` / `list[X]` (string and nested-model variants), `dict[str, float]`, and `X | None` (wrapped with a "Set" enable checkbox). `validate()` runs `model_cls.model_validate(values())` and paints inline error styles on offending widgets.
+- **Method editor UI** (`src/capa/ui/tabs/method.py`) — third tab between Setup and Run. `QTableView` over `MethodTableModel` (`list[Step]` owner) with `#` / `kind` / `target` / `summary` columns; selecting a row builds a detail panel via `build_form(type(step))` so edits flow back into the model and the table summary updates live. Toolbar actions for Open / Save / Save As / Validate / Add Step (one menu entry per step kind, each with sane defaults) / Delete. `pyqtgraph.PlotWidget` at the bottom shows operator-declared setpoint vs. elapsed time across the method, one series per target channel; non-setpoint steps render as dashed vertical guide lines.
+- **CAPA pyrolysis profile** (`src/capa/experiment/profiles/capa_pyrolysis.py`) — see §5.4.1. Default and only active profile: `domain_profile.id = "capa.profiles.capa_pyrolysis"`. (A cone-calorimeter module exists in the codebase but is not part of the active product surface; see §5.4.1.)
 - **External event ingest** (`src/capa/core/ingest.py`) — UDS + optional HTTP loopback per §11.1. **Opt-in via `ExperimentEngine(enable_ingest=True)`**: keeps the default test path simple; production callers pass the flag. The shutdown coordinator closes the listener so accept tasks exit when the procedure finishes. Bind failures log + downgrade to "ingest disabled for this run" rather than aborting.
 - **CLI extensions** (`src/capa/app.py`) — `capa plugins list` now prints the live discovery, drift report, and rejection reasons; `capa plugins trust <id> --reason ...` writes a `PluginEntry` into `plugins.lock` and appends an audit row to `plugins.lock.journal`; `capa method validate <file>` Pydantic-validates a standalone method TOML/YAML; `capa profile validate <experiment>` validates the profile metadata block against the active profile's metadata model.
 - **TOML-friendly sim signal schema** (`src/capa/devices/sim/_signals.py`) — `signal_from_dict({"kind": "sine|ramp|constant|step", ...})` plus per-adapter `from_params` classmethods. The engine's `_construct_adapters` prefers `from_params` when present so a hardware TOML can declare `[devices.params.signals.<key>] kind = "ramp" start = ... end = ...` and the engine materialises it at construction. Existing tests that pass already-built `SignalFn` instances continue to work via a `_materialise` pass-through.
 - **CAPA sim configs** — `configs/hardware/sim_capa.toml`, `configs/methods/sim_capa_pyrolysis.method.toml`, `configs/experiments/sim_capa_pyrolysis.yaml`. Drives the integration test purely from disk (no Python fixtures).
 
-**Deferred (intentional; tracked as P3.1 follow-ups):**
+**Deferred (intentional; carried into a later phase):**
 
-- **Method editor UI** (table + graph). The headless surface is complete; UI lands once operator workflow is exercised on the rig.
-- **Pydantic auto-form generator** (`src/capa/ui/forms/from_model.py`). Procedure `config_model` and profile metadata models are renderable; the generator that walks them into Qt widgets is unbuilt.
-- **Cone-profile Setup-tab UI.** Cone profile remains validatable from YAML/TOML via `capa profile validate`; no Setup-tab panel for it.
-- **Dynamic preflight inside the task group.** The §5.4.1 checks that observe live data (`capa.heater_pv_in_safe_range`, `capa.carrier_flow_established`, `capa.balance_stability`) currently run *before* the task group spawns adapters, so a silent channel can't be distinguished from a broken one. In P3 these downgrade silent results from blocking → warning. P3.1 should move dynamic preflight into the task group after `adapter.start()` so silent channels become blocking again.
-- **Dedicated `profiles/<id>.toml` snapshot.** §5.4.1 specifies a `profiles/capa_pyrolysis.toml` snapshot file; currently the metadata is captured only in `config.toml` (the full `ExperimentConfig` dump). Adding the dedicated file is a small bundle-writer change.
-- **Watchdog → SafetyMonitor escalation.** §13.2 plans `safety_monitor` reading the same `adapter.watchdog_state()` view and applying configured actions; the watchdog still only logs + writes `device_silent` events. SafetyMonitor itself remains for a later phase.
+- **Watchdog → SafetyMonitor escalation.** §13.2 plans `safety_monitor` reading the same `adapter.watchdog_state()` view and applying configured actions; the watchdog still only logs + writes `device_silent` events. SafetyMonitor itself is P5 territory (alongside the safety-system work) and is not a P3 deferral.
 
 **New / changed beyond the original P3 scope (decisions):**
 
-- **CAPA pyrolysis profile is the new default** (operator-confirmed). The cone profile still ships and is opt-in via `domain_profile.id = "capa.profiles.cone_calorimeter"`.
+- **CAPA pyrolysis profile is the only active profile** (operator-confirmed). A cone-calorimeter module exists in the codebase but is not part of the active product surface and there are no current plans to drive a cone calorimeter with capa.
+- **CAPA domain terminology corrected.** The original schema carried TGA-flavored field names (`crucible`, `atmosphere.carrier`, `program.ramp_rate_c_per_min`) that did not match how operators describe runs. P3 renamed these to CAPA-correct equivalents: `specimen_holder` (with optional `specimen_holder_diameter_mm` / `specimen_holder_depth_mm`), `atmosphere.purge` (and `PurgeGas` / `purge_gas_flow` channel group), and a redesigned `HeaterProgram` with `target_heat_flux_kw_m2` (the scientific parameter) + `heater_setpoint_c` (the actual command) + optional `flux_calibration_ref` and optional `ramp_rate_c_per_min`. `SpecimenForm` collapsed from seven options to `disk` + `other` (~99% of CAPA runs use a disk). Channel-group keys, preflight check ids (`capa.purge_flow_established`), and problem codes (`capa.purge_silent`, `capa.purge_below_target`, …) renamed in lock-step. Backwards-compatible shims were not introduced; CAPA has no shipped runs in the wild.
 - **Authorization handle promoted to a concrete class.** §9 / §18 #12 implied this; P3 made it explicit so every executor command path is auditable end-to-end via `method.command.issued` events.
 - **Plugin mode is two-state** (`dev` / `production`) rather than a richer policy. Production refuses any drift; dev loads every contract-passing plugin and records drift for inspection.
 - **TOML-friendly sim signals.** Took the long-term path here — every sim adapter now has a `from_params` classmethod so hardware TOMLs can fully drive sim runs without Python fixtures. This is the substrate for the CAPA integration test and for any future config-only smoke tests.
+- **`anyio` task-group exception handling.** anyio 4.x wraps in-task-group exceptions in a `BaseExceptionGroup`; the engine's `try/except` chain unwraps single-exception groups via `_unwrap_single` so `ProcedureError` (from preflight) and `BackpressureAbortError` route to the same `run_status="aborted"` / `run_status="crashed"` paths that pre-task-group raises do.
 
 ---
 
@@ -1359,10 +1348,9 @@ These do not block P0.
 
 1. ~~**FLIR camera model.**~~ **Resolved:** capa-flir targets **any FLIR camera Atlas supports over USB**, with the **E85** as the reference/validation camera. Atlas SDK pinned to **2.19.0**. Linux and Windows are both supported via a single manual `OnImageReceived → addImage` pump path (§12.1) — uniform code, halved test matrix, no auto-attach divergence.
 2. ~~**Atlas redistribution licensing.**~~ **Resolved:** Atlas is *not* redistributed. The binding lives in a separate package, `capa-flir`, distributed only to FLIR licensees. capa core is FLIR-free and publishable. CFFI **ABI mode** is primary (no headers vendored, no compile step). See §12.2 for the licensing posture.
-3. ~~**Cone standard editions and lab SOP mapping.**~~ **Deprioritised:** the default profile is now CAPA pyrolysis (§5.4.1, decided 2026-05-07); cone-mode is shipped but not on the near-term path. When a cone run is actually scheduled, decide which ASTM/ISO edition the lab's SOP pins before validating production recipes.
-4. **Plugin trust workflow owner.** P3 ships the technical primitive (`capa plugins trust <id> --reason ...` writes the lock + an audit journal); the policy question — who is allowed to run that command on the rig PC and how the review is documented — is still open. Decide before flipping `CAPA_PLUGIN_MODE=production` on the rig.
-5. ~~**Naming.**~~ **Resolved by P3 ship:** the public-facing surface stabilised on `capa.builtin.*` plugin ids, the `capa.procedures` and `capa.profiles` entry-point groups, the `capa` CLI verb namespace, and `manifest.json.capa.version`. Future renames now incur the multi-day-chore tax.
-6. **`capa-flir` public-distribution timing.** If/when capa-flir is to be distributed beyond UMD, submit the App-Review package to FLIR (§5.1). Not blocking P4 development; only blocks public release of capa-flir. Decide who owns the submission and on what timeline.
+3. **Plugin trust workflow owner.** P3 ships the technical primitive (`capa plugins trust <id> --reason ...` writes the lock + an audit journal); the policy question — who is allowed to run that command on the rig PC and how the review is documented — is still open. Decide before flipping `CAPA_PLUGIN_MODE=production` on the rig.
+4. ~~**Naming.**~~ **Resolved by P3 ship:** the public-facing surface stabilised on `capa.builtin.*` plugin ids, the `capa.procedures` and `capa.profiles` entry-point groups, the `capa` CLI verb namespace, and `manifest.json.capa.version`. Future renames now incur the multi-day-chore tax.
+5. **`capa-flir` public-distribution timing.** If/when capa-flir is to be distributed beyond UMD, submit the App-Review package to FLIR (§5.1). Not blocking P4 development; only blocks public release of capa-flir. Decide who owns the submission and on what timeline.
 
 ---
 
@@ -1392,8 +1380,6 @@ These do not block P0.
 - FAIR for Research Software (FAIR4RS): https://doi.org/10.15497/RDA00068
 - RO-Crate specification: https://www.researchobject.org/ro-crate/specification.html
 - NIST metrological traceability policy: https://www.nist.gov/calibrations/traceability
-- ASTM E1354 standard page: https://store.astm.org/standards/e1354
-- ISO 5660-1 standard page: https://www.iso.org/standard/57957.html
 - DuckDB Parquet performance notes: https://duckdb.org/docs/current/guides/performance/file_formats
 - SQLite atomic commit / durability notes: https://www.sqlite.org/atomiccommit.html
 - Qt threads and QObjects: https://doc.qt.io/qt-6/threads-qobject.html

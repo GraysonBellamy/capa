@@ -26,7 +26,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
 
@@ -56,24 +56,41 @@ class ProfilePreflightContext:
     profile_metadata: dict[str, Any]
     """The ``DomainProfileRef.metadata`` dict for the active profile —
     e.g. CAPA's :class:`CapaPyrolysisMetadata` after model_dump."""
+    adapters_started: bool = False
+    """``True`` when the engine has run ``adapter.start()`` for every
+    declared device. Dynamic checks that observe live samples flip their
+    silent-channel handling on this flag: pre-start, no samples means
+    "stream not open yet" (warning); post-start, no samples means the
+    device is broken (blocking error)."""
+
+
+Category = Literal["static", "dynamic"]
+"""Static checks read only config / filesystem state and run before adapters
+are opened. Dynamic checks read live samples and must run inside the engine
+task group, after every ``adapter.start()`` has returned."""
 
 
 CheckFn = Callable[[ProfilePreflightContext], Awaitable[Problem | None]]
 """Signature of a registered preflight check."""
 
-_REGISTRY: dict[str, CheckFn] = {}
+_REGISTRY: dict[str, tuple[CheckFn, Category]] = {}
 
 
-def register(check_id: str) -> Callable[[CheckFn], CheckFn]:
+def register(
+    check_id: str, *, category: Category = "static"
+) -> Callable[[CheckFn], CheckFn]:
     """Decorator: register a check callable under ``check_id``.
 
     Re-registration is allowed and replaces the previous binding — useful
     for tests that want to swap a slow check for a fast stub. Production
     plugin loading does not re-register a builtin id; collisions there are
-    surfaced by the plugin trust check, not here."""
+    surfaced by the plugin trust check, not here.
+
+    ``category`` defaults to ``"static"`` so plugins that registered before
+    this argument existed keep their pre-task-group execution order."""
 
     def _wrap(fn: CheckFn) -> CheckFn:
-        _REGISTRY[check_id] = fn
+        _REGISTRY[check_id] = (fn, category)
         return fn
 
     return _wrap
@@ -81,11 +98,27 @@ def register(check_id: str) -> Callable[[CheckFn], CheckFn]:
 
 def get(check_id: str) -> CheckFn | None:
     """Look up a registered check. Returns ``None`` if unknown."""
-    return _REGISTRY.get(check_id)
+    entry = _REGISTRY.get(check_id)
+    return entry[0] if entry is not None else None
+
+
+def get_category(check_id: str) -> Category | None:
+    """Return the registered category for ``check_id`` or ``None`` if
+    unknown."""
+    entry = _REGISTRY.get(check_id)
+    return entry[1] if entry is not None else None
 
 
 def registered_ids() -> tuple[str, ...]:
     return tuple(sorted(_REGISTRY.keys()))
+
+
+def filter_by_category(check_ids: tuple[str, ...], category: Category) -> tuple[str, ...]:
+    """Return ``check_ids`` restricted to those registered under ``category``.
+
+    Unknown ids are dropped — they're surfaced separately by
+    :func:`run_profile_preflight` as ``profile.unknown_check`` problems."""
+    return tuple(cid for cid in check_ids if get_category(cid) == category)
 
 
 async def run_profile_preflight(
@@ -101,8 +134,8 @@ async def run_profile_preflight(
     """
     problems: list[Problem] = []
     for check_id in check_ids:
-        fn = _REGISTRY.get(check_id)
-        if fn is None:
+        entry = _REGISTRY.get(check_id)
+        if entry is None:
             problems.append(
                 Problem(
                     code="profile.unknown_check",
@@ -112,6 +145,7 @@ async def run_profile_preflight(
                 )
             )
             continue
+        fn = entry[0]
         try:
             result = await fn(ctx)
         except Exception as exc:
@@ -196,7 +230,7 @@ async def _atmosphere_consistency(ctx: ProfilePreflightContext) -> Problem | Non
     return None
 
 
-@register("capa.heater_pv_in_safe_range")
+@register("capa.heater_pv_in_safe_range", category="dynamic")
 async def _heater_pv_safe(ctx: ProfilePreflightContext) -> Problem | None:
     """Heater PV is below a sane startup limit before arming.
 
@@ -208,11 +242,12 @@ async def _heater_pv_safe(ctx: ProfilePreflightContext) -> Problem | None:
     limit_c: float = float(safe.get("max_heater_pv_c", 200.0))
     sample = await _sample_one(ctx, group_key="capa_group", group_value="heater_pv")
     if sample is None:
+        # Silent post-start = device broken; pre-start = stream not yet open.
         return Problem(
             code="capa.heater_pv_silent",
             message="no heater_pv sample observed within preflight window",
-            severity="warning",
-            blocking=False,
+            severity="error" if ctx.adapters_started else "warning",
+            blocking=ctx.adapters_started,
         )
     value = float(sample.value)
     if value > limit_c:
@@ -229,14 +264,14 @@ async def _heater_pv_safe(ctx: ProfilePreflightContext) -> Problem | None:
     return None
 
 
-@register("capa.carrier_flow_established")
-async def _carrier_flow_established(ctx: ProfilePreflightContext) -> Problem | None:
-    """Carrier flow has been seen at >= target * 0.5 for >=3 s."""
-    target = ctx.profile_metadata.get("atmosphere", {}).get("carrier", {}).get("target_flow_sccm")
+@register("capa.purge_flow_established", category="dynamic")
+async def _purge_flow_established(ctx: ProfilePreflightContext) -> Problem | None:
+    """Purge flow has been seen at >= target * 0.5 for >=3 s."""
+    target = ctx.profile_metadata.get("atmosphere", {}).get("purge", {}).get("target_flow_sccm")
     if not target:
         return Problem(
-            code="capa.carrier_target_missing",
-            message="atmosphere.carrier.target_flow_sccm not declared",
+            code="capa.purge_target_missing",
+            message="atmosphere.purge.target_flow_sccm not declared",
             severity="warning",
             blocking=False,
         )
@@ -244,26 +279,24 @@ async def _carrier_flow_established(ctx: ProfilePreflightContext) -> Problem | N
     samples = await _sample_for(
         ctx,
         group_key="capa_group",
-        group_value="carrier_gas_flow",
+        group_value="purge_gas_flow",
         seconds=3.0,
     )
     if not samples:
-        # Preflight currently runs before adapter streams open. A silent
-        # channel here is "no data yet" not "device broken" — downgrade to
-        # warning. When dynamic preflight moves into the task group (post
-        # adapter-start), this becomes blocking again.
+        # Pre-adapter-start, silent = "stream not open yet" → warning.
+        # Post-adapter-start, silent = device broken → blocking.
         return Problem(
-            code="capa.carrier_silent",
-            message="no carrier_gas_flow samples observed within preflight window",
-            severity="warning",
-            blocking=False,
+            code="capa.purge_silent",
+            message="no purge_gas_flow samples observed within preflight window",
+            severity="error" if ctx.adapters_started else "warning",
+            blocking=ctx.adapters_started,
         )
     last_below = [s for s in samples if float(s.value) < threshold]
     if last_below:
         return Problem(
-            code="capa.carrier_below_target",
+            code="capa.purge_below_target",
             message=(
-                f"carrier flow held below {threshold:.2f} sccm for "
+                f"purge flow held below {threshold:.2f} sccm for "
                 f"{len(last_below)}/{len(samples)} samples in last 3 s"
             ),
             severity="error",
@@ -311,8 +344,8 @@ async def _leak_test_recency(ctx: ProfilePreflightContext) -> Problem | None:
     return None
 
 
-@register("capa.balance_stability")
-@register("cone.balance_stability")
+@register("capa.balance_stability", category="dynamic")
+@register("cone.balance_stability", category="dynamic")
 async def _balance_stability(ctx: ProfilePreflightContext) -> Problem | None:
     """When a mass channel is declared, it must report stable for >=5 s."""
     profile_id = ctx.config.domain_profile.id if ctx.config.domain_profile else ""
@@ -325,8 +358,8 @@ async def _balance_stability(ctx: ProfilePreflightContext) -> Problem | None:
         return Problem(
             code="profile.balance_silent",
             message="no mass samples observed within preflight window",
-            severity="warning",
-            blocking=False,
+            severity="error" if ctx.adapters_started else "warning",
+            blocking=ctx.adapters_started,
         )
     values = [float(s.value) for s in samples]
     spread = max(values) - min(values)

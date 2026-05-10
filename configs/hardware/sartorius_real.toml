@@ -7,7 +7,7 @@ name = "sartorius_real"
 name = "balance"
 adapter = "capa.devices.sartorius"
 [devices.params]
-port = "/dev/ttyUSB0"
+port = "COM4"
 protocol = "xbpi"
 baudrate = 19200
 src_sbn = 1

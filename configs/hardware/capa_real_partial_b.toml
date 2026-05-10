@@ -1,7 +1,7 @@
 # CAPA pyrolysis integration profile — variant B (cameras + mass).
 #
 # Real silicon: FLIR E85 (IR) + external webcam (visible) + Sartorius balance.
-# Sim devices: Watlow heater, Alicat carrier MFC, NI-DAQ thermocouples.
+# Sim devices: Watlow heater, Alicat purge MFC, NI-DAQ thermocouples.
 # Channels match the capa.profiles.capa_pyrolysis required groups so the
 # same method (configs/methods/sim_capa_pyrolysis.method.toml) drives it.
 
@@ -22,7 +22,7 @@ value = 30.0
 
 # --- Sim carrier MFC (real one belongs to variant A) ---
 [[devices]]
-name = "carrier_mfc"
+name = "purge_mfc"
 adapter = "capa.devices.sim.alicat_sim"
 [devices.params.signals.Mass_Flow]
 kind = "constant"
@@ -39,7 +39,7 @@ value = 100.0
 name = "balance"
 adapter = "capa.devices.sartorius"
 [devices.params]
-port = "/dev/ttyUSB1"
+port = "COM4"
 protocol = "xbpi"
 baudrate = 19200
 src_sbn = 1
@@ -76,18 +76,22 @@ width = 1280
 height = 720
 codec = "libx264"
 pix_fmt = "yuv420p"
-input_format = "v4l2"
-input_url = "/dev/video4"
+input_format = "dshow"
+input_url = "video=Logitech Webcam C930e"
 
-# --- Sim IR camera (real E85 deferred — Linux USB-mode-switch gap, see §4.4) ---
+# --- Real IR camera (E85 over USB, Atlas-driven). Windows enumerates it as
+#     "FLIR USB Video"; no model_hint needed since only one IR camera is
+#     attached. Atlas SDK root is set via ``CAPA_FLIR_ATLAS_ROOT`` at run time.
 [[cameras]]
 name = "ir_cam0"
-adapter = "capa.devices.sim.flir_ir_sim"
+adapter = "capa_flir.flir_ir"
 kind = "ir"
-estimated_bps = 1_500_000
+estimated_bps = 4_500_000
 on_failure = "warn"
 [cameras.params]
-fps = 30
+circular_buffer_frames = 60
+compression = false
+discovery_timeout_s = 5.0
 
 # --- Controller channels (sim heater) ---
 
@@ -130,16 +134,16 @@ output_unit = "degC"
 # --- Carrier gas (sim Alicat) ---
 
 [[channels]]
-name = "carrier.flow"
+name = "purge.flow"
 kind = "mfc_flow"
 unit = "slpm"
 derived_unit = "slpm"
 plot_group = "flows"
 [channels.metadata]
-capa_group = "carrier_gas_flow"
+capa_group = "purge_gas_flow"
 [channels.source]
 source = "alicat_frame_field"
-device = "carrier_mfc"
+device = "purge_mfc"
 field = "Mass_Flow"
 [channels.calibration]
 kind = "identity"

@@ -218,6 +218,23 @@ class RunBundleWriter:
                 tomli_w.dumps(_toml_safe(method_dump)), encoding="utf-8"
             )
 
+        # profiles/<id>.toml — plan §5.4.1: dedicated snapshot of the active
+        # domain profile's metadata, mirrored verbatim from config so a
+        # downstream reader can pick it up without parsing the larger
+        # config.toml.
+        if self._config.domain_profile is not None:
+            profile_dir = self._bundle_path / "profiles"
+            profile_dir.mkdir(exist_ok=True)
+            short_id = self._config.domain_profile.id.rsplit(".", 1)[-1]
+            snapshot = {
+                "id": self._config.domain_profile.id,
+                "standard_refs": list(self._config.domain_profile.standard_refs),
+                **self._config.domain_profile.metadata,
+            }
+            (profile_dir / f"{short_id}.toml").write_text(
+                tomli_w.dumps(_toml_safe(snapshot)), encoding="utf-8"
+            )
+
         # equipment.toml stub — populated by P0c+ once adapters report firmware.
         equipment_stub: dict[str, Any] = {"devices": []}
         for dev in self._config.hardware.devices:

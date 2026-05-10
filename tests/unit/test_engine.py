@@ -309,6 +309,42 @@ def test_engine_state_callback_failure_does_not_crash_engine() -> None:
     assert engine.state is EngineState.PREPARING
 
 
+class TestImportAdapterClass:
+    """Resolver covers CamelCase + bare-acronym shapes without per-adapter aliases."""
+
+    def test_resolves_camelcase_real_adapter(self) -> None:
+        from capa.devices.watlow import WatlowAdapter
+        from capa.experiment.engine import _import_adapter_class
+
+        assert _import_adapter_class("capa.devices.watlow") is WatlowAdapter
+
+    def test_resolves_sim_class(self) -> None:
+        from capa.devices.sim.watlow_sim import WatlowSim
+        from capa.experiment.engine import _import_adapter_class
+
+        assert _import_adapter_class("capa.devices.sim.watlow_sim") is WatlowSim
+
+    def test_resolves_bare_acronym_real_adapter(self) -> None:
+        """``capa.devices.nidaq`` → ``NIDAQAdapter`` without an alias."""
+        from capa.devices.nidaq import NIDAQAdapter
+        from capa.experiment.engine import _import_adapter_class
+
+        assert _import_adapter_class("capa.devices.nidaq") is NIDAQAdapter
+
+    def test_resolves_bare_acronym_sim(self) -> None:
+        """``capa.devices.sim.nidaq_polled_sim`` → ``NIDAQPolledSim`` without an alias."""
+        from capa.devices.sim.nidaq_polled_sim import NIDAQPolledSim
+        from capa.experiment.engine import _import_adapter_class
+
+        assert _import_adapter_class("capa.devices.sim.nidaq_polled_sim") is NIDAQPolledSim
+
+    def test_unknown_module_raises(self) -> None:
+        from capa.experiment.engine import EngineError, _import_adapter_class
+
+        with pytest.raises(EngineError, match="not importable"):
+            _import_adapter_class("capa.devices.does_not_exist_xyz")
+
+
 @pytest.mark.anyio
 async def test_engine_databus_subscription_before_run_observes_samples(tmp_path: Path) -> None:
     """The UI must be able to subscribe before run() and see emissions."""

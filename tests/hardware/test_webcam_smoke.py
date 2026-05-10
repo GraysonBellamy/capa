@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import anyio
@@ -53,6 +54,19 @@ def _webcam_device() -> str:
     return device
 
 
+def _input_format() -> str:
+    """``CAPA_TEST_WEBCAM_INPUT_FORMAT`` overrides the platform default —
+    ``v4l2`` on Linux, ``avfoundation`` on macOS, ``dshow`` on Windows."""
+    override = os.environ.get("CAPA_TEST_WEBCAM_INPUT_FORMAT")
+    if override:
+        return override
+    if sys.platform == "win32":
+        return "dshow"
+    if sys.platform == "darwin":
+        return "avfoundation"
+    return "v4l2"
+
+
 def _operator_id() -> str:
     return os.environ.get("CAPA_TEST_WEBCAM_OPERATOR", "hw-test")
 
@@ -70,11 +84,29 @@ def _spec(device: str, name: str = "visible_cam0") -> CameraSpec:
                 "height": 720,
                 "codec": "libx264",
                 "pix_fmt": "yuv420p",
-                "input_format": "v4l2",
+                "input_format": _input_format(),
                 "input_url": device,
             },
         }
     )
+
+
+@pytest.fixture(autouse=True)
+def _release_dshow_handle_between_tests():
+    """Force PyAV refcount cleanup between Windows webcam tests.
+
+    The production ``WebcamAdapter._open_input_with_retry`` now handles the
+    DirectShow ``[Errno 5]`` hold-time, so the autouse sleep that previously
+    papered over it is gone. We still ``gc.collect()`` on Windows so the
+    PyAV ``InputContainer``'s cyclic-collected refs drop promptly — without
+    it, the retry budget ticks against an unreleased handle the GC will
+    eventually free anyway.
+    """
+    yield
+    if sys.platform == "win32":
+        import gc
+
+        gc.collect()
 
 
 class TestRealWebcam:

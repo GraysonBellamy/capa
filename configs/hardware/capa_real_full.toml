@@ -1,11 +1,13 @@
-# CAPA pyrolysis integration profile — variant A (control + visible).
+# CAPA pyrolysis integration profile — Windows full-real variant.
 #
-# Real silicon: Watlow + Alicat + external webcam.
-# Sim devices: Sartorius balance, NI-DAQ thermocouples (no Linux driver).
-# Channels match the capa.profiles.capa_pyrolysis required groups so the
-# same method (configs/methods/sim_capa_pyrolysis.method.toml) drives it.
+# All six devices on real silicon at once. Possible on the Windows rig
+# because every adapter (Watlow, Alicat, Sartorius, NI-DAQ, webcam, FLIR
+# E85) has a working driver path here; the original Linux session split
+# this into two partial runs because NI-DAQ and FLIR E85 had no usable
+# Linux driver. Channels match the capa.profiles.capa_pyrolysis required
+# groups so the same method drives it.
 
-name = "capa_real_partial_a"
+name = "capa_real_full"
 
 # --- Real heater controller ---
 [[devices]]
@@ -34,30 +36,50 @@ rate_hz = 2.0
 auto_reconnect = true
 snapshot_period_s = 30.0
 
-# --- Sim balance (real one belongs to variant B) ---
+# --- Real balance ---
 [[devices]]
 name = "balance"
-adapter = "capa.devices.sim.sartorius_sim"
-[devices.params.mass_signal]
-kind = "ramp"
-start = 5.0
-end = 4.0
-duration_s = 30.0
+adapter = "capa.devices.sartorius"
+[devices.params]
+port = "COM4"
+protocol = "xbpi"
+baudrate = 19200
+src_sbn = 1
+dst_sbn = 9
+rate_hz = 2.0
+auto_reconnect = true
+snapshot_period_s = 30.0
 
-# --- Sim NI-DAQ thermocouples (no Linux driver) ---
+# --- Real NI-DAQ thermocouples (NI 9214 in cDAQ-9171) ---
 [[devices]]
 name = "cdaq1"
-adapter = "capa.devices.sim.nidaq_polled_sim"
-[devices.params.signals.TC_top_1]
-kind = "ramp"
-start = 303.0
-end = 873.0
-duration_s = 30.0
-[devices.params.signals.TC_top_2]
-kind = "ramp"
-start = 303.0
-end = 873.0
-duration_s = 30.0
+adapter = "capa.devices.nidaq"
+[devices.params]
+task_name = "default_task"
+rate_hz = 5.0
+snapshot_period_s = 30.0
+auto_reconnect = false
+overflow = "block"
+
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai0"
+name = "TC_top_1"
+thermocouple_type = 10073    # K
+min_val = 0.0
+max_val = 1000.0
+cjc_source = 10200            # BUILT_IN
+units = 10143                 # DEG_C
+
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai1"
+name = "TC_top_2"
+thermocouple_type = 10073
+min_val = 0.0
+max_val = 1000.0
+cjc_source = 10200
+units = 10143
 
 # --- Real visible camera ---
 [[cameras]]
@@ -74,6 +96,19 @@ codec = "libx264"
 pix_fmt = "yuv420p"
 input_format = "dshow"
 input_url = "video=Logitech Webcam C930e"
+
+# --- Real IR camera (E85). No model_hint — Windows enumerates it as
+#     "FLIR USB Video" so a literal "FLIR E85" hint would mismatch.
+[[cameras]]
+name = "ir_cam0"
+adapter = "capa_flir.flir_ir"
+kind = "ir"
+estimated_bps = 4_500_000
+on_failure = "warn"
+[cameras.params]
+circular_buffer_frames = 60
+compression = false
+discovery_timeout_s = 5.0
 
 # --- Controller channels (heater) ---
 
@@ -113,7 +148,7 @@ kind = "identity"
 input_unit = "degC"
 output_unit = "degC"
 
-# --- Carrier gas (real Alicat) ---
+# --- Carrier gas (Alicat) ---
 
 [[channels]]
 name = "purge.flow"
@@ -132,13 +167,13 @@ kind = "identity"
 input_unit = "slpm"
 output_unit = "slpm"
 
-# --- Sample-thermocouples (sim NI-DAQ) ---
+# --- Sample-thermocouples (NI 9214) ---
 
 [[channels]]
 name = "TC_sample_top"
 kind = "tc"
-unit = "K"
-derived_unit = "K"
+unit = "degC"
+derived_unit = "degC"
 plot_group = "temperatures"
 [channels.metadata]
 capa_group = "sample_temperature"
@@ -149,14 +184,14 @@ task = "default_task"
 field = "TC_top_1"
 [channels.calibration]
 kind = "identity"
-input_unit = "K"
-output_unit = "K"
+input_unit = "degC"
+output_unit = "degC"
 
 [[channels]]
 name = "TC_sample_mid"
 kind = "tc"
-unit = "K"
-derived_unit = "K"
+unit = "degC"
+derived_unit = "degC"
 plot_group = "temperatures"
 [channels.metadata]
 capa_group = "sample_temperature"
@@ -167,10 +202,10 @@ task = "default_task"
 field = "TC_top_2"
 [channels.calibration]
 kind = "identity"
-input_unit = "K"
-output_unit = "K"
+input_unit = "degC"
+output_unit = "degC"
 
-# --- Mass (sim balance) ---
+# --- Mass (Sartorius) ---
 
 [[channels]]
 name = "balance.mass"

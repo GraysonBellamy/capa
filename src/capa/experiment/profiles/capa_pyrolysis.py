@@ -1,37 +1,41 @@
 """CAPA — controlled atmosphere pyrolysis apparatus domain profile.
 
 This is the project's namesake apparatus and the **default** domain profile.
-A CAPA run heats a sample inside a reactor under a controlled gas atmosphere
-(typically inert, e.g. N2; sometimes a controlled-O2 mix for partial-oxidation
-studies). It looks superficially like a cone calorimeter but the science is
-different: pyrolysis chemistry under controlled atmosphere, not oxygen-
-depletion calorimetry.
+CAPA is a controlled-atmosphere cone-calorimeter-class instrument: a
+specimen sits in a holder on a load cell under a radiant heater, swept by
+a purge gas to control atmosphere chemistry. The scientific parameter is
+the radiant **heat flux** at the specimen surface (kW/m²); operators
+achieve a target flux by setting the heater temperature, typically via a
+day-of (or per-experiment) flux-vs-setpoint calibration. Most runs are a
+single setpoint hold; dynamic programs (ramps) are the minority.
 
 This profile contributes:
 
-- **specimen fields** — id, material, mass, geometry/form (powder, pellet,
-  film), particle size when relevant, holder/crucible, conditioning notes
-- **method fields** — temperature program (initial T, ramp rate, hold T,
-  hold time), atmosphere composition + flow rate, optional secondary-flow
-  for partial-oxidation experiments, exposure / soak time
+- **specimen fields** — id, material, mass, form (disk for ~99% of runs;
+  ``other`` for rare non-disk shapes), particle size when relevant,
+  specimen-holder description and optional dimensions, conditioning notes
+- **method fields** — heater program (target heat flux + heater setpoint,
+  optional flux-calibration reference, optional ramp rate), atmosphere
+  composition + purge flow target, optional secondary-flow for
+  partial-oxidation experiments, exposure / soak time
 - **required channel groups**:
 
   * ``heater_setpoint`` / ``heater_pv`` — the controller pair
   * ``sample_temperature`` — at least one TC inside or close to the sample
-  * ``mass`` — when the rig is TGA-style; optional otherwise
-  * ``carrier_gas_flow`` — the inert/sweep gas MFC
+  * ``mass`` — when a load cell is present; optional otherwise
+  * ``purge_gas_flow`` — the inert/sweep gas MFC
   * ``reactor_pressure`` — optional; required if the rig has a pressure
     transducer
-- **gas-analysis metadata** — carrier-gas spec (purity grade, supplier,
+- **gas-analysis metadata** — purge-gas spec (purity grade, supplier,
   cylinder lot), sweep flow target, optional downstream analyzer (FTIR / GC
   / MS) entry-point + serial + sampling-line delay. CAPA does *not* do
   oxygen-depletion calorimetry by default, so the analyzer block is shaped
   for "qualitative product analysis" rather than "quantitative HRR".
-- **preflight checks** — heater PV in safe range, carrier gas flow
+- **preflight checks** — heater PV in safe range, purge gas flow
   established and stable, leak-test recency, balance stability when present,
   required channel mappings.
 
-Cone-calorimeter mode lives separately in
+Cone-calorimeter mode (oxygen-depletion HRR) lives separately in
 :mod:`capa.experiment.profiles.cone_calorimeter` and is not wired in as a
 default; a future operator can opt into it via ``domain_profile.id`` in the
 experiment YAML.
@@ -61,10 +65,10 @@ experiment via ``DomainProfileRef.standard_refs``."""
 # ---------------------------------------------------------------------------
 
 
-SpecimenForm = Literal["powder", "pellet", "film", "fiber", "chunk", "liquid", "other"]
-"""Specimen physical form. Distinct from cone's ``orientation`` (which is
-about exposure geometry under a downward-facing cone heater); for CAPA the
-form drives crucible/holder choice and surface-area assumptions."""
+SpecimenForm = Literal["disk", "other"]
+"""Specimen physical form. ~99% of CAPA runs use a disk; ``other`` is the
+escape hatch for rare non-disk geometries (irregular solid, liquid, etc.)
+described in ``notes``."""
 
 
 class CapaSpecimen(BaseModel):
@@ -80,12 +84,20 @@ class CapaSpecimen(BaseModel):
     initial_mass_g: float = Field(gt=0)
     form: SpecimenForm
     particle_size_um: float | None = Field(default=None, gt=0)
-    """Median particle size for powders / granulates. ``None`` for forms
-    where it doesn't apply (films, chunks)."""
+    """Median particle size for the rare powder/granulate run (``form``
+    set to ``other``). ``None`` for the typical disk."""
 
-    crucible: str
-    """Crucible/holder identifier (e.g. ``"alumina 70 uL"``,
-    ``"quartz boat 50x10 mm"``)."""
+    specimen_holder: str
+    """Specimen-holder description (e.g. ``"stainless steel cup"``). The
+    holder geometry varies by run — depth and diameter, plus optional
+    insulation, change the exposed surface area."""
+
+    specimen_holder_diameter_mm: float | None = Field(default=None, gt=0)
+    """Outside / nominal diameter of the holder cup, when applicable."""
+
+    specimen_holder_depth_mm: float | None = Field(default=None, gt=0)
+    """Internal cup depth. Combined with diameter, captures the cavity
+    geometry that affects exposed surface area."""
 
     conditioning: str | None = None
     """Free-text description of pre-test conditioning (drying, desiccator,
@@ -94,21 +106,36 @@ class CapaSpecimen(BaseModel):
     notes: str | None = None
 
 
-class TemperatureProgram(BaseModel):
-    """Operator-declared temperature program summary.
+class HeaterProgram(BaseModel):
+    """Operator-declared heater program summary.
 
-    This is *metadata* — the actual setpoint sequence lives in the
+    CAPA's experimental parameter is the radiant **heat flux** at the
+    specimen surface; operators achieve a target flux by commanding a
+    heater temperature, with the flux ↔ setpoint mapping established via
+    a day-of (or per-experiment) calibration. This block records what the
+    operator intended; the actual command sequence lives in the
     :class:`Method`. The summary is captured here so a downstream analyzer
-    can quickly classify the run without parsing the method graph.
+    can classify the run without parsing the method graph.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    initial_temperature_c: float
-    final_temperature_c: float
-    ramp_rate_c_per_min: float = Field(gt=0)
-    hold_temperature_c: float | None = None
-    hold_duration_s: float | None = Field(default=None, ge=0)
+    target_heat_flux_kw_m2: float = Field(gt=0)
+    """Target radiant heat flux at the specimen surface — the scientific
+    parameter for the run."""
+
+    heater_setpoint_c: float
+    """Heater temperature setpoint commanded to deliver the target flux,
+    chosen via the flux-vs-temperature calibration."""
+
+    flux_calibration_ref: str | None = None
+    """Pointer to the heat-flux ↔ heater-setpoint calibration used
+    (date-stamped lookup-table id, lab-notebook entry, etc.). Free-form."""
+
+    ramp_rate_c_per_min: float | None = Field(default=None, gt=0)
+    """Optional ramp rate for dynamic programs. ``None`` for the common
+    case of a single static-flux setpoint hold; populated for the minority
+    of runs that ramp the heater."""
 
 
 AtmosphereMode = Literal["inert", "oxidative", "reducing", "reactive_blend"]
@@ -116,8 +143,8 @@ AtmosphereMode = Literal["inert", "oxidative", "reducing", "reactive_blend"]
 should fail preflight if the secondary (O2) MFC is reading non-zero."""
 
 
-class CarrierGas(BaseModel):
-    """Carrier / sweep gas spec."""
+class PurgeGas(BaseModel):
+    """Purge / sweep gas spec — the inert atmosphere flow."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -130,12 +157,12 @@ class CarrierGas(BaseModel):
     supplier: str | None = None
     cylinder_lot: str | None = None
     target_flow_sccm: float = Field(gt=0)
-    """Target sweep flow at standard conditions. The actual MFC channel is
+    """Target purge flow at standard conditions. The actual MFC channel is
     the source of truth; this is the operator's intended setpoint."""
 
 
 class ReactiveGas(BaseModel):
-    """Optional secondary gas (used for partial-oxidation or doped-carrier
+    """Optional secondary gas (used for partial-oxidation or doped-purge
     experiments). Set ``None`` for pure-inert runs."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -156,7 +183,7 @@ class Atmosphere(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     mode: AtmosphereMode
-    carrier: CarrierGas
+    purge: PurgeGas
     reactive: ReactiveGas | None = None
     purge_duration_s: float = Field(default=0.0, ge=0)
     """Purge time before heating begins. Recorded so downstream analysis
@@ -204,7 +231,7 @@ class CapaPyrolysisMetadata(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     specimen: CapaSpecimen
-    program: TemperatureProgram
+    program: HeaterProgram
     atmosphere: Atmosphere
     analyzer: DownstreamAnalyzer | None = None
     sop_revision: str | None = None
@@ -233,7 +260,7 @@ REQUIRED_CHANNEL_GROUPS: tuple[ChannelRequirement, ...] = (
         min_count=1,
     ),
     ChannelRequirement(
-        group="carrier_gas_flow",
+        group="purge_gas_flow",
         kinds=(ChannelKind.MFC_FLOW.value, ChannelKind.ANALOG_IN.value),
         min_count=1,
     ),
@@ -286,8 +313,8 @@ PREFLIGHT_CHECKS: tuple[PreflightCheck, ...] = (
         blocking=True,
     ),
     PreflightCheck(
-        id="capa.carrier_flow_established",
-        description="Carrier gas flow has been seen >= target * 0.5 for >=3 s.",
+        id="capa.purge_flow_established",
+        description="Purge gas flow has been seen >= target * 0.5 for >=3 s.",
         blocking=True,
     ),
     PreflightCheck(
@@ -341,10 +368,10 @@ __all__ = [
     "AtmosphereMode",
     "CapaPyrolysisMetadata",
     "CapaSpecimen",
-    "CarrierGas",
     "DownstreamAnalyzer",
+    "HeaterProgram",
+    "PurgeGas",
     "ReactiveGas",
     "SpecimenForm",
-    "TemperatureProgram",
     "validate_metadata",
 ]

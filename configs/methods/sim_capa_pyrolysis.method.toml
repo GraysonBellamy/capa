@@ -1,12 +1,12 @@
 name = "sim_capa_pyrolysis"
-description = "Heat-up + soak under N2 sweep, then safe shutdown."
+description = "Heat-up + soak under N2 purge, then safe shutdown."
 
-# 1. Establish carrier flow.
+# 1. Establish purge flow.
 [[steps]]
 kind = "setpoint"
 value = 100.0
 [steps.target]
-name = "carrier.flow"
+name = "purge.flow"
 
 # 2. Ramp heater from ambient to soak temperature.
 [[steps]]
@@ -24,10 +24,10 @@ duration_s = 0.05
 [steps.target]
 name = "heater.setpoint"
 
-# 4. Cool down + zero the carrier.
+# 4. Cool down + zero the purge.
 [[steps]]
 kind = "safe_shutdown"
 duration_s = 0.0
 [steps.cool_target]
 "heater.setpoint" = 100.0
-"carrier.flow" = 0.0
+"purge.flow" = 0.0

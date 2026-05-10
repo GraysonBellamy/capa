@@ -78,6 +78,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
 ]
+flir = ["capa-flir"]
 
 [tool.hatch.version]
 source = "vcs"
@@ -90,6 +91,7 @@ packages = ["src/capa"]
 alicatlib = { path = "../alicatlib", editable = true }
 sartoriuslib = { path = "../sartoriuslib", editable = true }
 nidaqlib = { path = "../nidaqlib", editable = true }
+capa-flir = { path = "../capa-flir", editable = true }
 
 [tool.ruff]
 line-length = 100

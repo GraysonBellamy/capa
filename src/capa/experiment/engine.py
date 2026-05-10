@@ -92,7 +92,9 @@ from capa.experiment.procedures.base import (
     ProcedureError,
 )
 from capa.experiment.profiles.runtime import (
+    Category as ProfileCheckCategory,
     ProfilePreflightContext,
+    filter_by_category,
     run_profile_preflight,
 )
 from capa.storage.bundle import RunBundleWriter
@@ -598,14 +600,17 @@ class ExperimentEngine:
             problems = await self._procedure.preflight(self._build_context())
             self._handle_preflight_problems(problems, source="procedure")
 
-            # Profile preflight — domain-profile checks against the active
-            # ChannelRegistry / databus. Plan §5.4.1.
+            # Profile preflight (static phase) — config / filesystem checks
+            # that don't need live data. Plan §5.4.1. The dynamic phase runs
+            # later, inside the task group after adapters have started.
             if config.domain_profile is not None:
-                await self._run_domain_profile_preflight(config)
+                await self._run_domain_profile_preflight(
+                    config, category="static", adapters_started=False
+                )
 
             self._set_state(EngineState.RUNNING)
             # The main task-group dance.
-            run_status = await self._run_task_group()
+            run_status = await self._run_task_group(config)
 
         except ProcedureError as exc:
             run_status = "aborted"
@@ -617,6 +622,26 @@ class ExperimentEngine:
             exit_reason = f"backpressure: {exc}"
             if self._logger is not None:
                 self._logger.error("engine.backpressure.abort", error=str(exc))
+        except BaseExceptionGroup as eg:
+            # anyio task groups wrap their inner exception(s) in an
+            # ExceptionGroup. Unwrap to get the same routing as if the
+            # exception had been raised outside the task group.
+            unwrapped = _unwrap_single(eg)
+            if isinstance(unwrapped, ProcedureError):
+                run_status = "aborted"
+                exit_reason = f"preflight: {unwrapped}"
+                if self._logger is not None:
+                    self._logger.error("engine.preflight.failed", error=str(unwrapped))
+            elif isinstance(unwrapped, BackpressureAbortError):
+                run_status = "crashed"
+                exit_reason = f"backpressure: {unwrapped}"
+                if self._logger is not None:
+                    self._logger.error("engine.backpressure.abort", error=str(unwrapped))
+            else:
+                run_status = "crashed"
+                exit_reason = f"engine: {type(unwrapped).__name__}: {unwrapped}"
+                if self._logger is not None:
+                    self._logger.exception("engine.run.crashed", error=str(unwrapped))
         except BaseException as exc:
             run_status = "crashed"
             exit_reason = f"engine: {type(exc).__name__}: {exc}"
@@ -877,12 +902,26 @@ class ExperimentEngine:
             codes = ", ".join(p.code for p in blockers)
             raise ProcedureError(f"{source} preflight blocked by: {codes}")
 
-    async def _run_domain_profile_preflight(self, config: ExperimentConfig) -> None:
-        """Resolve the active profile's check ids and execute them."""
+    async def _run_domain_profile_preflight(
+        self,
+        config: ExperimentConfig,
+        *,
+        category: ProfileCheckCategory,
+        adapters_started: bool,
+    ) -> None:
+        """Resolve the active profile's check ids and execute the subset
+        registered under ``category``.
+
+        Static checks run before adapters open (no live samples available).
+        Dynamic checks run inside the engine task group, after every
+        ``adapter.start()`` has returned, so they can observe live data and
+        treat silent channels as blocking errors instead of warnings.
+        """
         assert config.domain_profile is not None
         assert self._instruments is not None
 
-        check_ids = _resolve_profile_check_ids(config.domain_profile.id)
+        all_ids = _resolve_profile_check_ids(config.domain_profile.id)
+        check_ids = filter_by_category(all_ids, category)
         if not check_ids:
             return
         ctx = ProfilePreflightContext(
@@ -890,11 +929,12 @@ class ExperimentEngine:
             instruments=self._instruments,
             databus=self._databus,
             profile_metadata=dict(config.domain_profile.metadata),
+            adapters_started=adapters_started,
         )
         problems = await run_profile_preflight(ctx, check_ids)
-        self._handle_preflight_problems(problems, source="profile")
+        self._handle_preflight_problems(problems, source=f"profile.{category}")
 
-    async def _run_task_group(self) -> str:
+    async def _run_task_group(self, config: ExperimentConfig) -> str:
         """Spawn producer + fan-out + procedure tasks. Return the
         ``run_status`` string.
 
@@ -948,6 +988,19 @@ class ExperimentEngine:
                 producer_queue.close()
 
             tg.start_soon(self._fanout_task, producer_queue)
+
+            # Profile preflight (dynamic phase) — runs after every adapter
+            # has started and the fanout is pumping samples onto the
+            # databus, but before the procedure task spawns so a silent
+            # channel can abort the run before any commands are issued.
+            # Plan §5.4.1; raises ProcedureError on blocking problems,
+            # which cancels the task group and is caught by the outer
+            # try/except in run().
+            if config.domain_profile is not None:
+                await self._run_domain_profile_preflight(
+                    config, category="dynamic", adapters_started=True
+                )
+
             tg.start_soon(self._procedure_task, procedure_completed)
             tg.start_soon(self._shutdown_coordinator, procedure_completed, cameras_stop)
             tg.start_soon(self._watchdog_task, procedure_completed)
@@ -1252,6 +1305,7 @@ async def _wait_event(event: anyio.Event, scope: anyio.CancelScope) -> None:
 _IDENTITY_FIELDS: tuple[str, ...] = (
     "part_number",
     "model",
+    "product_type",
     "manufacturer",
     "serial_number",
     "serial",
@@ -1260,11 +1314,16 @@ _IDENTITY_FIELDS: tuple[str, ...] = (
     "hardware_id",
     "family",
     "software",
+    "chassis",
+    "physical_module",
 )
 """Field names probed off an adapter's ``device_info`` to populate
 ``equipment.toml`` identity. Adapters expose heterogeneous shapes
 (Watlow's ``DeviceInfo`` is a dataclass, Sartorius's is a Pydantic
-model); duck-typing keeps the engine ignorant of those differences."""
+model, NIDAQ's is a frozen dataclass); duck-typing keeps the engine
+ignorant of those differences. ``product_type`` / ``chassis`` /
+``physical_module`` are NIDAQ-specific but harmless on adapters that
+don't expose them (the extractor drops missing fields)."""
 
 
 def _identity_from_device_info(info: Any) -> dict[str, Any]:
@@ -1333,19 +1392,30 @@ def _import_adapter_class(module_path: str) -> type:
       (``alicat_sim`` → ``AlicatSim``).
     * ``<Leaf>Adapter`` — the real-adapter naming used in plan §5.2
       (``watlow`` → ``WatlowAdapter``, ``alicat`` → ``AlicatAdapter``).
+    * Bare-acronym variants where the first leaf segment is upper-cased
+      (``nidaq`` → ``NIDAQAdapter``, ``nidaq_polled_sim`` → ``NIDAQPolledSim``).
+      Without this, every acronym adapter (NIDAQ, LCR, MFC, PWM, …) had to
+      ship a CamelCase alias to satisfy the resolver.
     """
     try:
         module = importlib.import_module(module_path)
     except ImportError as exc:
         raise EngineError(f"adapter module {module_path!r} not importable: {exc}") from exc
     leaf = module_path.rsplit(".", 1)[-1]
+    leaf_no_sim = leaf.removesuffix("_sim")
     base = _snake_to_camel(leaf)
-    base_no_sim = _snake_to_camel(leaf.removesuffix("_sim"))
+    base_no_sim = _snake_to_camel(leaf_no_sim)
+    upper_first = _snake_to_camel_upper_first(leaf)
+    upper_first_no_sim = _snake_to_camel_upper_first(leaf_no_sim)
     candidate_names = [
         base,
         base_no_sim + "Sim",
         base + "Adapter",
         base_no_sim + "Adapter",
+        upper_first,
+        upper_first_no_sim + "Sim",
+        upper_first + "Adapter",
+        upper_first_no_sim + "Adapter",
     ]
     seen: list[str] = []
     for name in candidate_names:
@@ -1360,6 +1430,33 @@ def _import_adapter_class(module_path: str) -> type:
 
 def _snake_to_camel(name: str) -> str:
     return "".join(part.title() for part in name.split("_"))
+
+
+def _snake_to_camel_upper_first(name: str) -> str:
+    """Like :func:`_snake_to_camel` but the leading segment stays uppercase.
+
+    ``nidaq`` → ``NIDAQ`` (single segment), ``nidaq_polled_sim`` →
+    ``NIDAQPolledSim``. This is the resolver's bare-acronym fallback for
+    adapters whose canonical class name begins with an acronym kept all-
+    caps (``NIDAQAdapter``, ``LCRAdapter``, ``MFCAdapter``, …)."""
+    parts = name.split("_")
+    if not parts:
+        return name
+    return parts[0].upper() + "".join(p.title() for p in parts[1:])
+
+
+def _unwrap_single(eg: BaseExceptionGroup) -> BaseException:
+    """Return the deepest single exception in an ExceptionGroup chain.
+
+    anyio task groups wrap one inner exception in an ``ExceptionGroup``
+    instance even though there's only one underlying error. When the group
+    contains exactly one exception (typical for our preflight-fails-fast
+    paths), drill through nested groups to recover the original. Groups
+    with multiple sub-exceptions are returned unchanged."""
+    current: BaseException = eg
+    while isinstance(current, BaseExceptionGroup) and len(current.exceptions) == 1:
+        current = current.exceptions[0]
+    return current
 
 
 def _resolve_profile_check_ids(profile_id: str) -> tuple[str, ...]:

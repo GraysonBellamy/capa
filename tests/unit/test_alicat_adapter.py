@@ -405,18 +405,31 @@ class TestWatchdog:
         await adapter.close()
 
     async def test_after_streaming_marked(self) -> None:
+        """Verify the time-based silence math in isolation. ``_drain`` calls
+        ``adapter.stop()`` before returning, so the live adapter's
+        ``lifecycle_state`` is ``"open"`` and the new grace logic correctly
+        suppresses silence; we rebuild the state with ``"running"`` so the
+        elapsed-time arithmetic can be asserted on its own."""
+        from capa.devices._helpers import WatchdogState
+
         adapter, _ = _make_adapter(rate_hz=50.0)
         await adapter.open()
         try:
             await adapter.start()
             await _drain(adapter, max_records=1)
-            state = adapter.watchdog_state()
-            assert state.last_t_mono_ns is not None
+            live = adapter.watchdog_state()
+            assert live.last_t_mono_ns is not None
+            running = WatchdogState(
+                device=live.device,
+                last_t_mono_ns=live.last_t_mono_ns,
+                expected_period_ns=live.expected_period_ns,
+                lifecycle_state="running",
+            )
             # Right after the most-recent sample, age is tiny → not silent.
-            now_ns = (state.last_t_mono_ns or 0) + 10  # 10 ns later
-            assert not state.is_silent(now_t_mono_ns=now_ns)
+            now_ns = (running.last_t_mono_ns or 0) + 10  # 10 ns later
+            assert not running.is_silent(now_t_mono_ns=now_ns)
             # Far future → silent.
-            far_future = (state.last_t_mono_ns or 0) + 10 * state.expected_period_ns
-            assert state.is_silent(now_t_mono_ns=far_future)
+            far_future = (running.last_t_mono_ns or 0) + 10 * running.expected_period_ns
+            assert running.is_silent(now_t_mono_ns=far_future)
         finally:
             await adapter.close()
