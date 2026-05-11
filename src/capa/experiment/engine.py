@@ -109,9 +109,29 @@ ENGINE_VERSION: Final[str] = "0.1.0-p0c"
 change in a way that affects bundle interpretation."""
 
 
-PRODUCER_QUEUE_CAPACITY: Final[int] = 256
-"""Producer → fan-out buffer. Sized for the 3–60 Hz envelope; the producer
-side is BLOCK so a slow fan-out backs up at the producer rather than dropping."""
+PRODUCER_QUEUE_MIN_CAPACITY: Final[int] = 256
+"""Floor for the producer→fan-out queue capacity. Below this the queue is
+too short to absorb the natural jitter of any rig and would trip
+``ABORT_RUN`` on benign bursts."""
+
+
+PRODUCER_QUEUE_MAX_CAPACITY: Final[int] = 32_768
+"""Ceiling for the producer→fan-out queue capacity. Bounds in-flight loss
+on hard kill: at ~1 KB per Pydantic emission this caps memory at ~32 MB,
+which is well under any acceptable RAM budget."""
+
+
+PRODUCER_QUEUE_HEADROOM_FACTOR: Final[float] = 1.5
+"""Multiplier applied to ``aggregate_emission_rate × abort_after_s`` when
+sizing the producer queue. Absorbs short emission bursts above the steady
+rate without tripping ``ABORT_RUN``."""
+
+
+DEFAULT_ADAPTER_EMISSION_RATE_HZ: Final[float] = 240.0
+"""Fallback emission rate when an adapter omits
+:attr:`DeviceAdapter.expected_emission_rate_hz`. Conservative — 60 Hz poll
+× (1 SourceRecord + 3 ChannelSamples) — so a stale adapter doesn't size
+the queue blind on the low side."""
 
 
 # ---------------------------------------------------------------------------
@@ -1007,6 +1027,32 @@ class ExperimentEngine:
         problems = await run_profile_preflight(ctx, check_ids)
         await self._handle_preflight_problems(problems, source=f"profile.{category}")
 
+    def _compute_producer_queue_capacity(self, abort_after_s: float) -> int:
+        """Size the producer→fan-out queue from adapter rate hints.
+
+        ``cap = clamp(aggregate_rate × abort_after_s × 1.5, MIN, MAX)``
+        where ``aggregate_rate`` is the sum of every adapter's
+        :attr:`DeviceAdapter.expected_emission_rate_hz`. Adapters that
+        don't expose the hint contribute
+        :data:`DEFAULT_ADAPTER_EMISSION_RATE_HZ` and the fallback is
+        logged so the operator can audit the chosen capacity post-run.
+        """
+        assert self._logger is not None
+        aggregate_hz = 0.0
+        for adapter in self._adapters:
+            rate = getattr(adapter, "expected_emission_rate_hz", None)
+            if rate is None or rate <= 0:
+                self._logger.info(
+                    "engine.producer_queue.rate_fallback",
+                    adapter=getattr(adapter, "name", "?"),
+                    fallback_hz=DEFAULT_ADAPTER_EMISSION_RATE_HZ,
+                )
+                aggregate_hz += DEFAULT_ADAPTER_EMISSION_RATE_HZ
+            else:
+                aggregate_hz += float(rate)
+        target = int(aggregate_hz * abort_after_s * PRODUCER_QUEUE_HEADROOM_FACTOR)
+        return max(PRODUCER_QUEUE_MIN_CAPACITY, min(PRODUCER_QUEUE_MAX_CAPACITY, target))
+
     async def _run_task_group(self, config: ExperimentConfig) -> str:
         """Spawn producer + fan-out + procedure tasks. Return the
         ``run_status`` string.
@@ -1022,11 +1068,20 @@ class ExperimentEngine:
         """
         assert self._procedure is not None
         assert self._writer is not None
+        assert self._logger is not None
 
+        abort_after_s = config.storage.producer_queue_abort_after_s
+        capacity = self._compute_producer_queue_capacity(abort_after_s)
+        self._logger.info(
+            "engine.producer_queue.sized",
+            capacity=capacity,
+            abort_after_s=abort_after_s,
+        )
         producer_queue: BoundedQueue[DeviceEmission] = BoundedQueue(
             name="producer-fanout",
-            capacity=PRODUCER_QUEUE_CAPACITY,
-            policy=BackpressurePolicy.BLOCK,
+            capacity=capacity,
+            policy=BackpressurePolicy.ABORT_RUN,
+            abort_after_s=abort_after_s,
         )
         queue_metrics = self._metrics.queue("producer-fanout")
         procedure_completed = anyio.Event()
@@ -1060,7 +1115,7 @@ class ExperimentEngine:
             if producers_alive.value == 0:
                 producer_queue.close()
 
-            tg.start_soon(self._fanout_task, producer_queue)
+            tg.start_soon(self._fanout_task, producer_queue, queue_metrics)
 
             # Profile preflight (dynamic phase) — runs after every adapter
             # has started and the fanout is pumping samples onto the
@@ -1141,6 +1196,7 @@ class ExperimentEngine:
         assert self._logger is not None
         try:
             async for emission in adapter.stream():
+                metrics.mark_enqueued(id(emission))
                 await queue.put(emission)
                 metrics.observe_depth(queue.depth)
         except (AdapterError, BackpressureAbortError):
@@ -1205,6 +1261,7 @@ class ExperimentEngine:
     async def _fanout_task(
         self,
         queue: BoundedQueue[DeviceEmission],
+        queue_metrics: Any,
     ) -> None:
         """Drain ``queue`` and route each emission. Exits when the queue is
         closed *and* empty.
@@ -1213,16 +1270,25 @@ class ExperimentEngine:
         a full inbox transparently switches to a blocking put off-loop so
         the loop yields while waiting for space. Writer latency is observed
         inside the writer thread itself — see :class:`WriterThread`.
+
+        Fan-out lag (enqueue→dequeue) and the two downstream awaits
+        (writer submit, databus publish) are timed separately so the
+        manifest can attribute a slowdown to the correct stage.
         """
         assert self._writer_thread is not None
+        submit_metrics = self._metrics.writer("fanout.submit")
+        publish_metrics = self._metrics.writer("fanout.publish")
         while True:
             try:
                 emission = await queue.get()
             except RuntimeError:
                 # Queue closed and empty. Normal termination.
                 return
-            await self._writer_thread.submit(emission)
-            await self._databus.publish(emission)
+            queue_metrics.mark_dequeued(id(emission))
+            with submit_metrics.time_write():
+                await self._writer_thread.submit(emission)
+            with publish_metrics.time_write():
+                await self._databus.publish(emission)
 
     async def _procedure_task(self, procedure_completed: anyio.Event) -> None:
         assert self._procedure is not None

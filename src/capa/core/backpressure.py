@@ -28,7 +28,14 @@ class BackpressurePolicy(Enum):
     """
 
     BLOCK = "block"
-    """Producer waits for space. Use for durable records that must not be lost."""
+    """Producer waits for space, indefinitely. Use only on bounded internal
+    queues with a guaranteed consumer (e.g. the writer-thread inbox).
+
+    **Not valid on** :class:`~capa.core.databus.DataBus` **subscriptions** —
+    a stuck BLOCK subscriber would freeze the fan-out and back-pressure
+    every adapter. Must-not-drop databus subscribers use
+    :meth:`~capa.core.databus.DataBus.subscribe_critical` (``ABORT_RUN``
+    with a deadline); the databus rejects ``BLOCK`` at registration time."""
 
     DROP_OLDEST = "drop_oldest"
     """Ring-buffer semantics. Use when freshness > completeness (UI plots)."""

@@ -168,6 +168,21 @@ class DeviceAdapter(Protocol):
         """Issue a generic command. Concrete adapters layer typed wrappers on top."""
         ...
 
+    @property
+    def expected_emission_rate_hz(self) -> float | None:
+        """Hint for engine queue sizing: total emissions per second this
+        adapter will produce once :meth:`start` is running, summed across
+        :class:`SourceRecord` plus per-bound-channel :class:`ChannelSample`.
+
+        Returning ``None`` (or omitting the property) is acceptable; the
+        engine falls back to a conservative default and logs the fallback
+        so the operator knows the producer queue was sized blind. Compute
+        this from the adapter's poll rate and bound-channel count *after*
+        :meth:`configure_channels` has run — the engine reads it between
+        ``configure_channels`` and the producer-task spawn.
+        """
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Lifecycle states — used by sim adapters to enforce the open/start ordering

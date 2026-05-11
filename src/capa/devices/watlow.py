@@ -261,6 +261,11 @@ class WatlowAdapter:
         )
 
     @property
+    def expected_emission_rate_hz(self) -> float:
+        # One SourceRecord + one ChannelSample per bound channel per poll.
+        return self.params.rate_hz * (1 + len(self._channels))
+
+    @property
     def device_info(self) -> DeviceInfo | None:
         """The cached :class:`DeviceInfo` from the last :meth:`open` /
         :meth:`identify`. ``None`` until the adapter has been opened with

@@ -104,6 +104,11 @@ class SartoriusSim:
             specs, device=self.name, binding_source="sartorius_reading"
         )
 
+    @property
+    def expected_emission_rate_hz(self) -> float:
+        rate = 1.0 / self.tick_period_s if self.tick_period_s > 0 else 0.0
+        return rate * (1 + len(self._channels))
+
     async def open(self) -> None:
         self._lifecycle.open()
 

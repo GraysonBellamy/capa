@@ -334,6 +334,19 @@ class NIDAQAdapter:
         self._channels = channels_for_device(specs, device=self.name, binding_source=binding_source)
 
     @property
+    def expected_emission_rate_hz(self) -> float:
+        bound = len(self._channels)
+        if self.params.is_block_mode():
+            assert self.params.timing is not None
+            # One SourceRecord per block plus one ChannelSample per bound
+            # channel per sample. The per-block SourceRecord term is dwarfed
+            # by the per-sample ChannelSamples at any meaningful block
+            # cadence, so the bound-channel term carries the estimate.
+            return self.params.timing.rate_hz * bound
+        # Polled: one SourceRecord + one ChannelSample per bound channel.
+        return self.params.rate_hz * (1 + bound)
+
+    @property
     def task_spec(self) -> TaskSpec | None:
         """The materialised :class:`TaskSpec`. ``None`` until :meth:`open`."""
         return self._task_spec

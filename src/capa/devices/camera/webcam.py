@@ -1034,7 +1034,7 @@ def _probe_v4l2_info(device_path: str) -> V4L2Probe:
     empty = V4L2Probe(card_name=None, serial=None, bus_info=None)
     if sys.platform != "linux":
         return empty
-    if not device_path.startswith("/dev/video"):  # type: ignore[unreachable]
+    if not device_path.startswith("/dev/video"):
         return empty
     node = device_path.rsplit("/", 1)[-1]  # "video4"
     sysfs_root = Path("/sys/class/video4linux") / node

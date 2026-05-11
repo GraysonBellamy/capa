@@ -180,6 +180,13 @@ class StoragePolicy(BaseModel):
     parquet_final_compression: str = "zstd:6"
     enable_tdms_passthrough: bool = False
     enable_rocrate: bool = False
+    producer_queue_abort_after_s: float = Field(default=5.0, gt=0)
+    """How long the producer→fan-out queue may stay at capacity before the
+    run aborts. The producer queue's policy is :class:`ABORT_RUN`, so a
+    sustained writer-thread or fan-out stall surfaces as a crashed run
+    (bundle still sealed) rather than an indefinite acquisition freeze.
+    Tune upward only if the rig genuinely tolerates longer durable-sink
+    pauses — the default 5 s is the operator-runbook trade-off."""
 
 
 class SafetyRuleConfig(BaseModel):

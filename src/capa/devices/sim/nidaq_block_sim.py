@@ -94,6 +94,12 @@ class NIDAQBlockSim:
             specs, device=self.name, binding_source="nidaq_block_channel"
         )
 
+    @property
+    def expected_emission_rate_hz(self) -> float:
+        # Per-sample ChannelSamples dominate; the per-block SourceRecord
+        # adds a negligible blocks/s term.
+        return self.sample_rate_hz * len(self._channels)
+
     async def open(self) -> None:
         self._lifecycle.open()
 
