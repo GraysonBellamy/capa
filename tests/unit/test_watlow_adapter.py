@@ -210,6 +210,19 @@ class StubWatlowController:
             protocol=ProtocolKind.STDBUS,
         )
 
+    async def read_setpoint(self, *, instance: int = 1, timeout: float | None = None) -> Reading:
+        del timeout
+        value = self.signals.get(("setpoint", instance), 0.0)
+        spec = PARAMETERS.resolve("setpoint")
+        return Reading(
+            value=float(value) if value is not None else None,
+            unit=resolve_unit(spec.unit_kind, self.display_unit),
+            received_at=datetime.now(UTC),
+            monotonic_ns=time.monotonic_ns(),
+            raw=b"",
+            protocol=ProtocolKind.STDBUS,
+        )
+
     async def read_comms_unit_label(self, *, timeout: float | None = None) -> Unit | None:
         del timeout
         return self.display_unit
@@ -845,6 +858,32 @@ class TestReadPV:
         adapter, _ = _make_adapter()
         with pytest.raises(AdapterError):
             await adapter.read_pv()
+
+
+# ---------------------------------------------------------------------------
+# read_state_snapshot — operator-facing readback for the manual control card
+# ---------------------------------------------------------------------------
+
+
+class TestReadStateSnapshot:
+    async def test_read_state_snapshot_returns_setpoint_and_pv(self) -> None:
+        adapter, _stub = _make_adapter()
+        await adapter.open()
+        try:
+            snapshot = await adapter.read_state_snapshot()
+        finally:
+            await adapter.close()
+        assert snapshot is not None
+        assert snapshot.setpoint == pytest.approx(410.0)
+        assert snapshot.process_value == pytest.approx(400.0)
+        # Stub display_unit is Unit.CELSIUS by default -> string "C".
+        assert snapshot.setpoint_unit == "C"
+        assert snapshot.process_value_unit == "C"
+
+    async def test_read_state_snapshot_before_open_returns_none(self) -> None:
+        adapter, _ = _make_adapter()
+        result = await adapter.read_state_snapshot()
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
