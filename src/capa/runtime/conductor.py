@@ -408,6 +408,16 @@ class Conductor:
         return self._state
 
     @property
+    def run_id(self) -> str:
+        """Stable identifier of the run managed by this conductor."""
+        return self._session.run_id
+
+    @property
+    def bundle_path(self) -> Path | None:
+        """Filesystem path for the run bundle once the session has opened."""
+        return self._session.bundle_path
+
+    @property
     def databus(self) -> DataBus | None:
         """The authoritative :class:`DataBus`. ``None`` before :meth:`start`
         has reached the bus-construction step. Procedure subscribers and
@@ -483,11 +493,16 @@ class Conductor:
             out[f"worker:{rid}"] = {
                 "samples_emitted": float(wm.samples_emitted),
                 "samples_late": float(wm.samples_late),
+                "polls_emitted": float(wm.polls_emitted),
                 "commands_total": float(wm.commands_total),
                 "commands_failed": float(wm.commands_failed),
                 "tick_duration_p50_ms": float(wm.tick_duration_p50_ms),
                 "tick_duration_p99_ms": float(wm.tick_duration_p99_ms),
+                "poll_period_p50_ms": float(wm.poll_period_p50_ms),
+                "poll_period_p99_ms": float(wm.poll_period_p99_ms),
+                "poll_rate_hz": float(wm.poll_rate_hz),
                 "loop_lag_p99_ms": float(wm.loop_lag_ms_p99),
+                "last_sample_age_s": float(wm.last_sample_age_s),
             }
         return out
 

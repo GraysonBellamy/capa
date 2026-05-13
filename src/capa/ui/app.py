@@ -25,6 +25,7 @@ from capa.core.errors import CapaError
 from capa.core.logging import configure_pre_run_logging
 from capa.core.plugins_lock import PluginsLock
 from capa.experiment.config import ExperimentConfig
+from capa.runtime.recovery import recover_active_bundle_checkpoint
 from capa.storage.catalog import RunCatalog
 from capa.ui.main_window import MainWindow
 
@@ -77,7 +78,20 @@ def run_gui(
     catalog = RunCatalog(runs_root)
     catalog.__enter__()
     try:
+        # Catalog-side orphan flip handles the ``running`` → ``crashed``
+        # row transition. The active-bundle checkpoint recovery is the
+        # bundle-side counterpart: if the previous capa hard-exited
+        # between bundle creation and finalize, mark its manifest as
+        # crashed so bundle-only consumers see the same status. The
+        # helper is bounded internally and tolerates absent / live-PID
+        # checkpoints.
         catalog.flip_orphans()
+        recovery = recover_active_bundle_checkpoint(runs_root)
+        if recovery.status == "reconciled":
+            _logger.info(
+                "shutdown.bundle_checkpoint_recovered",
+                run_id=recovery.checkpoint.run_id if recovery.checkpoint else None,
+            )
         window = MainWindow(
             runs_root=runs_root,
             catalog=catalog,

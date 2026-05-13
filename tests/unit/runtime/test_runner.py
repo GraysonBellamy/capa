@@ -24,14 +24,15 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import Future
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import pytest
 
 from capa.runtime.errors import RunnerStateError
 from capa.runtime.runner import InlineRunner, ThreadedRunner, WorkerRunner
+from capa.runtime.shutdown import RunnerStopResult
 
 T = TypeVar("T")
 
@@ -133,7 +134,10 @@ async def test_multiple_submits_complete(
         async def _doubled(x: int) -> int:
             return x * 2
 
-        futs = [runner.submit(lambda i=i: _doubled(i)) for i in range(10)]
+        def _make(i: int) -> Callable[[], Coroutine[Any, Any, int]]:
+            return lambda: _doubled(i)
+
+        futs: list[Future[int]] = [runner.submit(_make(i)) for i in range(10)]
         results = await asyncio.gather(*(_wrap(f) for f in futs))
         assert results == [i * 2 for i in range(10)]
     finally:
@@ -231,11 +235,54 @@ class TestThreadedRunner:
         runner = ThreadedRunner(name="join")
         await _wrap(runner.start())
         ident = runner.thread_ident
-        await _wrap(runner.stop(grace_s=2.0))
+        result = await _wrap(runner.stop(grace_s=2.0))
         # After stop's future resolves the helper thread has joined.
         # Iterate enumerate() once to confirm no live thread with that ident.
         alive_idents = {t.ident for t in threading.enumerate() if t.is_alive()}
         assert ident not in alive_idents
+        assert isinstance(result, RunnerStopResult)
+        assert result.joined is True
+        assert result.name == "join"
+        assert result.grace_s == 2.0
+        assert result.thread_ident == ident
+
+    @pytest.mark.anyio
+    async def test_stop_reports_not_joined_when_loop_wedged(self) -> None:
+        """The loop is held alive past grace by a shielded sleep that
+        ignores ``loop.stop()``. Stop's grace expires; the helper thread
+        completes the future with ``joined=False`` and the worker thread
+        keeps running (until the test process exits)."""
+        runner = ThreadedRunner(name="wedged")
+        await _wrap(runner.start())
+
+        # Submit a task that captures CancelledError and keeps the loop
+        # alive past grace. Shield + a long sleep means loop.stop() is
+        # a no-op while this is pending.
+        async def _wedge() -> None:
+            try:
+                await asyncio.shield(asyncio.sleep(5.0))
+            except asyncio.CancelledError:
+                # Even if cancelled, swallow and keep the loop busy.
+                await asyncio.sleep(5.0)
+
+        runner.submit(_wedge)
+        # Let the worker actually schedule the task before we issue stop.
+        await asyncio.sleep(0.05)
+
+        result = await _wrap(runner.stop(grace_s=0.2))
+        assert isinstance(result, RunnerStopResult)
+        assert result.joined is False
+        assert result.name == "wedged"
+        assert result.grace_s == 0.2
+        assert result.thread_ident is not None
+
+    @pytest.mark.anyio
+    async def test_stop_result_shape_for_threaded(self) -> None:
+        runner = ThreadedRunner(name="shape")
+        await _wrap(runner.start())
+        result = await _wrap(runner.stop(grace_s=1.0))
+        assert result.thread_ident is not None
+        assert result.joined is True
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +310,17 @@ class TestInlineRunner:
             assert runner.thread_ident is None
         finally:
             await _wrap(runner.stop(grace_s=1.0))
+
+    @pytest.mark.anyio
+    async def test_stop_result_shape_for_inline(self) -> None:
+        runner = InlineRunner(name="inline-shape")
+        await _wrap(runner.start())
+        result = await _wrap(runner.stop(grace_s=1.0))
+        assert isinstance(result, RunnerStopResult)
+        assert result.name == "inline-shape"
+        assert result.joined is True
+        assert result.grace_s == 1.0
+        assert result.thread_ident is None
 
     def test_start_outside_running_loop_raises(self) -> None:
         runner = InlineRunner()

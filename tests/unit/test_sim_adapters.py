@@ -105,6 +105,20 @@ class TestWatlowSim:
             assert s.unit == "degC"
             assert s.value == 400.0
 
+    async def test_tick_first_marks_only_first_record_of_batch(self) -> None:
+        # The diagnostics dock reads ``metadata["tick_first"]`` to count
+        # one poll per acquisition tick rather than one per polled
+        # parameter. Two parameters per tick → first record True, second
+        # record False. Without this, a 1 Hz heater with 2 params reports
+        # ~thousands of Hz because per-parameter yields are sub-millisecond.
+        sim, _ = self._make()
+        await sim.open()
+        await sim.start()
+        records, _ = _split(sim.tick_once())
+        assert len(records) == 2
+        assert records[0].metadata["tick_first"] is True
+        assert records[1].metadata["tick_first"] is False
+
     async def test_command_unauthorized_rejected(self) -> None:
         sim, _ = self._make()
         await sim.open()

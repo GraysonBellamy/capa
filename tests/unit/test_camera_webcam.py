@@ -64,51 +64,25 @@ def _solid_frame(width: int, height: int, color: tuple[int, int, int]) -> np.nda
     return arr
 
 
-class TestWebcamPreviewMode:
-    """Preview-mode lifecycle is decoupled from recording: ``start_preview`` /
-    ``stop_preview`` toggle a separate state flag, ``push_preview_frame`` emits
-    JPEGs onto ``preview_stream`` without touching the encoder. The manual-
-    control card drives this between runs so settings changes are visible
-    on a live tile."""
+class TestWebcamPreviewBetweenRuns:
+    """Preview emission is unconditional in the unified-pump design:
+    ``push_frame`` produces a 2 Hz preview JPEG whether or not recording
+    is active, so the live tile stays current between runs without a
+    separate ``start_preview`` / ``run_preview_pump`` lifecycle. This
+    replaces the legacy two-pump model where DirectShow filter-graph
+    hold-time froze the tile for several seconds after every run-stop.
+    """
 
-    async def test_start_preview_requires_open(self) -> None:
-        cam = _make()
-        with pytest.raises(AdapterError, match="requires open"):
-            await cam.start_preview()
-
-    async def test_start_stop_preview_idempotent(self) -> None:
-        cam = _make()
-        await cam.open()
-        try:
-            assert bool(cam._previewing) is False
-            await cam.start_preview()
-            await cam.start_preview()  # second call no-op
-            assert bool(cam._previewing) is True
-            await cam.stop_preview()
-            await cam.stop_preview()  # second call no-op
-            assert bool(cam._previewing) is False
-        finally:
-            await cam.close()
-
-    async def test_push_preview_frame_requires_start_preview(self) -> None:
+    async def test_push_frame_emits_preview_without_recording(self) -> None:
+        """``push_frame`` between runs emits a JPEG but no FrameReceipt —
+        the live tile updates while the encoder stays idle."""
         cam = _make()
         await cam.open()
         try:
             frame = _solid_frame(64, 48, (255, 0, 0))
-            with pytest.raises(AdapterError, match="requires start_preview"):
-                await cam.push_preview_frame(frame)
-        finally:
-            await cam.close()
-
-    async def test_push_preview_frame_emits_jpeg(self) -> None:
-        cam = _make()
-        await cam.open()
-        try:
-            await cam.start_preview()
-            frame = _solid_frame(64, 48, (255, 0, 0))
-            await cam.push_preview_frame(frame)
-            # Drain one JPEG off the preview stream — should be a non-empty
-            # bytes payload starting with the JPEG SOI marker (FFD8).
+            receipt = await cam.push_frame(frame)
+            assert receipt is None, "no FrameReceipt when not recording"
+            # The JPEG landed on the preview stream.
             stream = cam.preview_stream()
             jpeg_bytes = await stream.__anext__()
             assert isinstance(jpeg_bytes, bytes)
@@ -124,10 +98,9 @@ class TestWebcamPreviewMode:
         cam = _make()
         await cam.open()
         try:
-            await cam.start_preview()
             frame = _solid_frame(64, 48, (255, 0, 0))
-            await cam.push_preview_frame(frame)
-            await cam.push_preview_frame(frame)  # throttled
+            await cam.push_frame(frame)
+            await cam.push_frame(frame)  # throttled
             stream = cam.preview_stream()
             # First receive must succeed; second receive must timeout
             # within a short window (no second frame queued).
@@ -183,33 +156,38 @@ class TestWebcamPreviewMode:
         finally:
             await cam.close()
 
-    async def test_close_stops_preview(self) -> None:
-        cam = _make()
+    async def test_preview_keeps_emitting_after_stop_recording(self, tmp_path: Path) -> None:
+        """Regression for the bug that motivated unifying the pumps:
+        after ``stop_recording``, ``push_frame`` must still emit preview
+        frames (no FrameReceipt) so the live tile doesn't freeze on the
+        last recorded frame while the operator waits for the next run.
+        """
+        cam = _make(codec="mpeg4")
         await cam.open()
-        await cam.start_preview()
-        assert cam._previewing is True
-        await cam.close()
-        assert cam._previewing is False
+        await cam.start_recording(tmp_path / "v.mkv")
+        r1 = await cam.push_frame(_solid_frame(64, 48, (10, 200, 30)))
+        assert r1 is not None
+        await cam.stop_recording()
 
-    async def test_preview_independent_of_recording(self, tmp_path: Path) -> None:
-        """Recording uses its own pump (``run_pump`` + ``push_frame``); preview
-        uses ``run_preview_pump`` + ``push_preview_frame``. The two flags are
-        independent and don't interact through the encoder path."""
-        cam = _make()
-        await cam.open()
-        try:
-            await cam.start_preview()
-            await cam.start_recording(tmp_path / "preview_indep.mkv")
-            # Both flags set.
-            assert cam._previewing is True
-            assert cam._recording is True
-            await cam.stop_recording()
-            # Preview unaffected by stop_recording.
-            assert cam._previewing is True
-            await cam.stop_preview()
-            assert cam._previewing is False
-        finally:
-            await cam.close()
+        # Throttle is at 0ns since the recording-mode preview just
+        # emitted; reset it so the next push fires its preview.
+        cam._last_preview_t_mono_ns = None
+
+        r2 = await cam.push_frame(_solid_frame(64, 48, (200, 10, 30)))
+        assert r2 is None, "no FrameReceipt after stop_recording"
+
+        # cam.close() drops the preview send-end so the iterator
+        # terminates after draining buffered items. Two JPEGs should
+        # be present: one from inside the recording window, one from
+        # the preview-only push after.
+        await cam.close()
+
+        previews: list[bytes] = []
+        async for jpeg in cam.preview_stream():
+            previews.append(jpeg)
+        assert len(previews) == 2
+        for jpeg in previews:
+            assert jpeg[:3] == b"\xff\xd8\xff"
 
 
 class TestWebcamLifecycle:
@@ -227,10 +205,12 @@ class TestWebcamLifecycle:
         await cam.close()
         await cam.close()
 
-    async def test_push_before_recording_rejected(self) -> None:
+    async def test_push_before_open_rejected(self) -> None:
+        """``push_frame`` requires ``open()`` so the streams are bound. It
+        does NOT require ``start_recording`` — the preview-only path is
+        valid between runs and emits a JPEG without a FrameReceipt."""
         cam = _make()
-        await cam.open()
-        with pytest.raises(AdapterError, match="requires start_recording"):
+        with pytest.raises(AdapterError, match="requires open"):
             await cam.push_frame(_solid_frame(64, 48, (255, 0, 0)))
 
 
@@ -589,39 +569,32 @@ class TestPushFrameOffLoop:
         )
 
 
-class TestStopTimeRaceGuard:
-    """Hardware-day 2026-05-09 PM re-validation: every clean stop emitted a
-    misleading ``engine.camera.pump_failed: push_frame requires
-    start_recording()`` because the pump's last in-flight frame raced with
-    ``close()`` flipping ``_recording=False``. ``run_pump`` must observe the
-    flag between decode and ``push_frame`` and exit before invoking the
-    precondition guard on a non-recording adapter.
+class TestInputPumpLifecycle:
+    """Unified input pump: ``start_input_pump`` spawns the long-lived
+    decode-and-push loop, ``stop_input_pump`` signals it to exit and
+    closes the input container. The pump runs across the recording
+    boundary — encoding when ``_recording`` is set, preview-only
+    otherwise — so the operator's live tile never freezes on the gap
+    between runs.
     """
 
-    async def test_run_pump_does_not_call_push_frame_after_stop(
+    async def test_start_then_stop_drives_decoder_and_exits(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        cam = _make(codec="mpeg4")
-        await cam.open()
-        await cam.start_recording(tmp_path / "v.mkv")
-
-        # Synthetic decode loop. Frame 3's decode flips ``_recording`` to
-        # False mid-tick — before the fix, run_pump would proceed to
-        # push_frame and the precondition guard would raise.
+        """Pump opens the input, decodes a few frames into the preview
+        stream, then exits cleanly when ``stop_input_pump`` fires."""
         decoded = 0
+        pump_container_closed = {"n": 0}
 
         def fake_advance(_decoder: object) -> object | None:
             nonlocal decoded
             decoded += 1
-            if decoded == 3:
-                cam._recording = False
-                return object()
             if decoded > 3:
                 return None
             return object()
 
         def fake_reformat(_frame: object) -> np.ndarray:
-            return _solid_frame(64, 48, (10, 0, 0))
+            return _solid_frame(64, 48, (10, 200, 30))
 
         class _FakeStream:
             type = "video"
@@ -632,7 +605,13 @@ class TestStopTimeRaceGuard:
             def decode(self, _stream: object) -> object:
                 return object()
 
-            def close(self) -> None: ...
+            def close(self) -> None:
+                pump_container_closed["n"] += 1
+
+        cam = _make(codec="mpeg4")
+        # Real av.open during the dshow/V4L2 probe in cam.open(); the
+        # fake replaces it only for the pump's input-side ``_open_input_with_retry``.
+        await cam.open()
 
         monkeypatch.setattr(
             "capa.devices.camera.webcam.av.open",
@@ -641,64 +620,54 @@ class TestStopTimeRaceGuard:
         monkeypatch.setattr("capa.devices.camera.webcam._advance_decoder", fake_advance)
         monkeypatch.setattr("capa.devices.camera.webcam._reformat_to_rgb24", fake_reformat)
 
-        push_calls_recording_state: list[bool] = []
-        original_push = WebcamAdapter.push_frame
+        await cam.start_input_pump()
 
-        async def tracked_push(
-            self_: WebcamAdapter,
-            frame: np.ndarray,
-            *,
-            capture_latency_s: float = 0.0,
-        ) -> FrameReceipt | None:
-            push_calls_recording_state.append(self_._recording)
-            return await original_push(self_, frame, capture_latency_s=capture_latency_s)
+        # Let the pump drain the synthetic decoder.
+        import anyio
 
-        monkeypatch.setattr(WebcamAdapter, "push_frame", tracked_push)
+        previews: list[bytes] = []
 
-        # No exception must propagate — that's the regression.
-        await cam.run_pump()
+        async def _drain_one() -> None:
+            async for jpeg in cam.preview_stream():
+                previews.append(jpeg)
+                if len(previews) >= 1:
+                    return
 
-        # Frames 1 + 2 reached push_frame; frame 3's decode flipped the
-        # flag and the new gate broke the loop before push_frame fired.
-        assert decoded == 3
-        assert push_calls_recording_state == [True, True], (
-            "stop-time race regressed: push_frame called with "
-            f"_recording state history {push_calls_recording_state}"
-        )
+        with anyio.move_on_after(1.0):
+            await _drain_one()
 
-    async def test_run_pump_breaks_after_reformat_when_recording_flips(
+        await cam.stop_input_pump()
+        await cam.close()
+
+        assert decoded >= 1, "pump never advanced the decoder"
+        assert pump_container_closed["n"] == 1, "pump's input container closed exactly once"
+        assert len(previews) >= 1
+        assert previews[0][:2] == b"\xff\xd8"
+
+    async def test_pump_survives_stop_recording(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Second gate: ``_recording`` may also flip during the reformat
-        worker thread (CPU-heavy on real frames). The post-reformat check
-        must catch that too.
-        """
-        cam = _make(codec="mpeg4")
-        await cam.open()
-        await cam.start_recording(tmp_path / "v.mkv")
-
+        """The bug this whole refactor fixes: after ``stop_recording``
+        the pump must continue emitting preview frames so the live tile
+        stays current. The pump must NOT close the input container."""
         decoded = 0
 
         def fake_advance(_decoder: object) -> object | None:
             nonlocal decoded
             decoded += 1
-            if decoded > 2:
-                return None
+            # Stay alive long enough for the test to exercise both
+            # phases (recording, then between-runs). The test stops the
+            # pump explicitly via stop_input_pump.
             return object()
 
-        reformatted = 0
-
         def fake_reformat(_frame: object) -> np.ndarray:
-            nonlocal reformatted
-            reformatted += 1
-            if reformatted == 2:
-                # Flip the flag inside reformat — exercises the post-reformat
-                # gate that wraps push_frame.
-                cam._recording = False
-            return _solid_frame(64, 48, (10, 0, 0))
+            return _solid_frame(64, 48, (10, 200, 30))
 
         class _FakeStream:
             type = "video"
+
+        pump_opened = {"n": 0}
+        pump_closed = {"n": 0}
 
         class _FakeContainer:
             streams = (_FakeStream(),)
@@ -706,34 +675,52 @@ class TestStopTimeRaceGuard:
             def decode(self, _stream: object) -> object:
                 return object()
 
-            def close(self) -> None: ...
+            def close(self) -> None:
+                pump_closed["n"] += 1
 
-        monkeypatch.setattr(
-            "capa.devices.camera.webcam.av.open",
-            lambda *_a, **_kw: _FakeContainer(),
-        )
+        def fake_av_open(*_a: object, **_kw: object) -> _FakeContainer:
+            pump_opened["n"] += 1
+            return _FakeContainer()
+
+        cam = _make(codec="mpeg4")
+        # Real av.open for the dshow/V4L2 probe inside cam.open() AND
+        # for start_recording's output encoder; the fake replaces it
+        # only for the pump's input container open.
+        await cam.open()
+        await cam.start_recording(tmp_path / "v.mkv")
+
+        monkeypatch.setattr("capa.devices.camera.webcam.av.open", fake_av_open)
         monkeypatch.setattr("capa.devices.camera.webcam._advance_decoder", fake_advance)
         monkeypatch.setattr("capa.devices.camera.webcam._reformat_to_rgb24", fake_reformat)
 
-        push_calls_recording_state: list[bool] = []
-        original_push = WebcamAdapter.push_frame
+        await cam.start_input_pump()
 
-        async def tracked_push(
-            self_: WebcamAdapter,
-            frame: np.ndarray,
-            *,
-            capture_latency_s: float = 0.0,
-        ) -> FrameReceipt | None:
-            push_calls_recording_state.append(self_._recording)
-            return await original_push(self_, frame, capture_latency_s=capture_latency_s)
+        # Wait for the pump to drain at least two frames, then stop recording.
+        import anyio
 
-        monkeypatch.setattr(WebcamAdapter, "push_frame", tracked_push)
+        async def _wait_for_frames(n: int) -> None:
+            while decoded < n:
+                await anyio.sleep(0.01)
 
-        await cam.run_pump()
+        with anyio.move_on_after(1.0):
+            await _wait_for_frames(2)
+        frames_at_stop = decoded
+        await cam.stop_recording()
 
-        # Only the first frame reached push_frame; the second's reformat
-        # flipped the flag and the post-reformat gate broke the loop.
-        assert push_calls_recording_state == [True]
+        # Critical assertion: the pump task is still running, input
+        # container was not closed by stop_recording.
+        assert cam._pump_task is not None
+        assert not cam._pump_task.done(), "pump must outlive stop_recording"
+        assert pump_closed["n"] == 0, "input container must NOT close on stop_recording"
+        assert pump_opened["n"] == 1, "input container should open exactly once per pool"
+
+        # Let it run a bit more to verify post-recording pumping works.
+        with anyio.move_on_after(1.0):
+            await _wait_for_frames(frames_at_stop + 2)
+
+        await cam.stop_input_pump()
+        await cam.close()
+        assert pump_closed["n"] == 1, "input container closed exactly once at close()"
 
 
 class TestPreviewEncoding:

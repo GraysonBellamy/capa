@@ -319,8 +319,19 @@ class CameraDeviceAdapter:
 
     async def open(self) -> None:
         """Open the camera handle. Idempotent (Camera.open is documented
-        as idempotent for the success path)."""
+        as idempotent for the success path).
+
+        For cameras with a long-lived input pump (the visible
+        :class:`WebcamAdapter` advertises ``start_input_pump``), this
+        also spawns the pump so the live preview tile stays current for
+        the entire pool lifetime — across runs and between them.
+        Cameras without that surface (IR sim, FLIR Atlas, …) keep their
+        per-run pump driven by the multiplexer in :meth:`stream`.
+        """
         await self._camera.open()
+        start_pump = getattr(self._camera, "start_input_pump", None)
+        if callable(start_pump):
+            await start_pump()
 
     async def close(self) -> None:
         """Close the camera handle. Idempotent.
@@ -328,7 +339,9 @@ class CameraDeviceAdapter:
         If recording is somehow still active when this lands (the
         worker.close() path requires IDLE, but defensive code is cheap
         here), the camera's own :meth:`close` flips ``stop_recording``
-        before releasing the handle (see [flir_ir_sim.py:305-314]).
+        before releasing the handle (see [flir_ir_sim.py:305-314]) and
+        — for cameras with a long-lived input pump — also stops the
+        pump.
         """
         await self._camera.close()
 
@@ -593,14 +606,17 @@ class CameraDeviceAdapter:
     # Two independent task scopes:
     #
     # * channel (drainer): camera.preview_stream() → bridge. Lifetime =
-    #   open()..close(); survives IDLE/ARMED/SAMPLING/DRAINING. The
-    #   drainer doesn't care WHICH producer fills ``_preview_send`` (the
-    #   recording pump pushes during SAMPLING; ``run_preview_pump``
-    #   pushes during IDLE); it just forwards JPEGs.
-    # * source (pump): adapters that need a separate ``av.open`` driver
-    #   between runs (WebcamAdapter does; the IR sim and FLIR Atlas
-    #   don't). Lifetime = IDLE only — must stop before SAMPLING so the
-    #   recording pump can claim the input container.
+    #   open()..close(); survives IDLE/ARMED/SAMPLING/DRAINING. Forwards
+    #   JPEGs from the camera's preview stream onto the pool-owned
+    #   ThreadBridge regardless of run state.
+    # * source (pump): retained as no-op hooks for cameras with a long-
+    #   lived input pump owned by the camera itself (the visible
+    #   :class:`WebcamAdapter` runs one continuous av.open for the entire
+    #   adapter-open lifetime; see :meth:`open`). For legacy cameras that
+    #   exposed ``run_preview_pump`` / ``start_preview`` as separate IDLE-
+    #   only routines this still drives them via getattr-probing — kept
+    #   so future adapters can opt into the old shape without redesigning
+    #   the worker calls.
 
     async def start_preview_channel(self, bridge: ThreadBridge[PreviewFrame]) -> None:
         """Start the long-lived drainer that pumps

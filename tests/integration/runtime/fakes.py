@@ -339,6 +339,233 @@ def make_stuck_adapter(name: str = "stuck", grace_buster_s: float = 30.0) -> Fak
     return a
 
 
+@dataclass
+class HangingCloseAdapter:
+    """Adapter whose :meth:`close` hangs forever.
+
+    Used by shutdown-bounds tests to verify that
+    :meth:`Worker._close_all_impl` wraps each ``adapter.close()`` in
+    ``asyncio.wait_for`` and surfaces the timeout as a result-error
+    rather than wedging the worker thread.
+    """
+
+    name: str
+    resource_id: str = "sim:hanging-close"
+    capabilities: frozenset[Capability] = field(
+        default_factory=lambda: frozenset({Capability.HAS_SETPOINT})
+    )
+    open_calls: int = 0
+    close_calls: int = 0
+    start_calls: int = 0
+    stop_calls: int = 0
+    expected_emission_rate_hz: float = 100.0
+    _lifecycle: AdapterLifecycle = field(default_factory=AdapterLifecycle)
+
+    async def open(self) -> None:
+        self.open_calls += 1
+        self._lifecycle.open()
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        # Hang until cancelled (or the deadline fires above us).
+        await asyncio.Event().wait()
+
+    async def start(self, clock: RunClock | None = None) -> None:
+        self.start_calls += 1
+        self._lifecycle.start()
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+        self._lifecycle.stop()
+
+    async def stream(self) -> AsyncIterator[DeviceEmission]:
+        if False:  # pragma: no cover - never iterated; satisfies type checker
+            yield  # type: ignore[unreachable]
+
+    async def snapshot(self) -> DeviceEmission:
+        return DeviceSnapshot(
+            adapter="hanging-close",
+            device=self.name,
+            t_mono_ns=0,
+            t_utc=datetime.now(UTC),
+            healthy=True,
+            fields={},
+        )
+
+    async def command(self, cmd: DeviceCommand) -> CommandResult:
+        return CommandResult(
+            accepted=True, detail="hanging-close ack", t_mono_ns=0, t_utc=datetime.now(UTC)
+        )
+
+
+@dataclass
+class HangingStopAdapter:
+    """Adapter whose :meth:`stop` hangs forever.
+
+    Used by disarm-bounds tests for the ``adapter_stop_grace_s`` wrap-
+    in-``asyncio.wait_for`` behavior. The stream yields one snapshot
+    immediately so SAMPLING is reachable, then awaits a future that the
+    test never resolves so the stream task is still pending when disarm
+    runs.
+    """
+
+    name: str
+    resource_id: str = "sim:hanging-stop"
+    capabilities: frozenset[Capability] = field(
+        default_factory=lambda: frozenset({Capability.HAS_SETPOINT})
+    )
+    open_calls: int = 0
+    close_calls: int = 0
+    start_calls: int = 0
+    stop_calls: int = 0
+    expected_emission_rate_hz: float = 100.0
+    _lifecycle: AdapterLifecycle = field(default_factory=AdapterLifecycle)
+    _stream_park: asyncio.Event | None = None
+
+    async def open(self) -> None:
+        self.open_calls += 1
+        self._lifecycle.open()
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self._lifecycle.close()
+
+    async def start(self, clock: RunClock | None = None) -> None:
+        self.start_calls += 1
+        self._lifecycle.start()
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+        # Hang past the adapter_stop_grace_s. We never flip lifecycle,
+        # but the disarm event still fires so the test can validate the
+        # bound landed.
+        await asyncio.Event().wait()
+
+    async def stream(self) -> AsyncIterator[DeviceEmission]:
+        # Yield one snapshot so SAMPLING is reachable and the stream
+        # task isn't immediately done, then park.
+        yield DeviceSnapshot(
+            adapter="hanging-stop",
+            device=self.name,
+            t_mono_ns=0,
+            t_utc=datetime.now(UTC),
+            healthy=True,
+            fields={},
+        )
+        self._stream_park = asyncio.Event()
+        await self._stream_park.wait()
+
+    async def snapshot(self) -> DeviceEmission:
+        return DeviceSnapshot(
+            adapter="hanging-stop",
+            device=self.name,
+            t_mono_ns=0,
+            t_utc=datetime.now(UTC),
+            healthy=True,
+            fields={},
+        )
+
+    async def command(self, cmd: DeviceCommand) -> CommandResult:
+        return CommandResult(
+            accepted=True, detail="hanging-stop ack", t_mono_ns=0, t_utc=datetime.now(UTC)
+        )
+
+
+@dataclass
+class CancelIgnoringStreamAdapter:
+    """Adapter whose stream() catches :class:`asyncio.CancelledError`.
+
+    Used by the secondary-bounded-gather test. The stream loops on a
+    short sleep; when cancelled, the ``except`` clause re-enters a long
+    sleep that itself ignores cancellation (the canonical "vendor
+    finally block taking forever" pattern). The Phase B
+    ``stream_cancel_grace_s`` bound is what keeps disarm from wedging.
+    """
+
+    name: str
+    resource_id: str = "sim:cancel-ignorer"
+    capabilities: frozenset[Capability] = field(
+        default_factory=lambda: frozenset({Capability.HAS_SETPOINT})
+    )
+    open_calls: int = 0
+    close_calls: int = 0
+    start_calls: int = 0
+    stop_calls: int = 0
+    expected_emission_rate_hz: float = 100.0
+    _lifecycle: AdapterLifecycle = field(default_factory=AdapterLifecycle)
+    cancel_swallow_s: float = 10.0
+    """How long the finally block hangs after CancelledError. Picked
+    well above the test's ``stream_cancel_grace_s`` so the secondary
+    bound is what unwedges disarm."""
+
+    async def open(self) -> None:
+        self.open_calls += 1
+        self._lifecycle.open()
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self._lifecycle.close()
+
+    async def start(self, clock: RunClock | None = None) -> None:
+        self.start_calls += 1
+        self._lifecycle.start()
+
+    async def stop(self) -> None:
+        # Don't actually flip lifecycle — we want the stream task to
+        # still be running when disarm's Phase A grace fires so Phase B
+        # cancellation is exercised.
+        self.stop_calls += 1
+
+    async def stream(self) -> AsyncIterator[DeviceEmission]:
+        try:
+            while True:
+                yield DeviceSnapshot(
+                    adapter="cancel-ignorer",
+                    device=self.name,
+                    t_mono_ns=0,
+                    t_utc=datetime.now(UTC),
+                    healthy=True,
+                    fields={},
+                )
+                await asyncio.sleep(0.01)
+        except asyncio.CancelledError:
+            # The canonical "swallowed cancel" — vendor finally block
+            # that takes much longer than expected. Sleep with shielding
+            # so a second cancel still doesn't unwedge it. The Phase B
+            # secondary bound is what saves us.
+            await asyncio.shield(asyncio.sleep(self.cancel_swallow_s))
+            raise
+
+    async def snapshot(self) -> DeviceEmission:
+        return DeviceSnapshot(
+            adapter="cancel-ignorer",
+            device=self.name,
+            t_mono_ns=0,
+            t_utc=datetime.now(UTC),
+            healthy=True,
+            fields={},
+        )
+
+    async def command(self, cmd: DeviceCommand) -> CommandResult:
+        return CommandResult(
+            accepted=True, detail="cancel-ignorer ack", t_mono_ns=0, t_utc=datetime.now(UTC)
+        )
+
+
+def make_hanging_close_adapter(name: str = "hangs-close") -> HangingCloseAdapter:
+    return HangingCloseAdapter(name=name)
+
+
+def make_hanging_stop_adapter(name: str = "hangs-stop") -> HangingStopAdapter:
+    return HangingStopAdapter(name=name)
+
+
+def make_cancel_ignoring_adapter(
+    name: str = "ignores-cancel", *, cancel_swallow_s: float = 10.0
+) -> CancelIgnoringStreamAdapter:
+    return CancelIgnoringStreamAdapter(name=name, cancel_swallow_s=cancel_swallow_s)
+
+
 def collect_emissions_from_bridge(bridge: Any, *, max_count: int = 100) -> Sequence[DeviceEmission]:
     """Synchronous-side helper to drain a bridge to a list.
 

@@ -39,7 +39,7 @@ import structlog
 
 from capa.devices.adapter import CommandResult, DeviceAdapter, DeviceCommand
 from capa.devices.camera.metadata import WebcamMetadata
-from capa.devices.records import DeviceEmission
+from capa.devices.records import DeviceEmission, SourceRecord
 from capa.runtime.bridge import BridgePolicy, ThreadBridge
 from capa.runtime.camera_adapter import CameraDeviceAdapter
 from capa.runtime.emissions import WorkerEmission
@@ -55,6 +55,11 @@ from capa.runtime.metrics import DisarmResult, WorkerMetrics
 from capa.runtime.preview import PreviewFrame
 from capa.runtime.runcontext import RunContext
 from capa.runtime.runner import ThreadedRunner, WorkerRunner
+from capa.runtime.shutdown import (
+    RunnerStopResult,
+    WorkerCloseResult,
+    WorkerShutdownConfig,
+)
 
 _logger = structlog.get_logger("capa.runtime.worker")
 
@@ -80,6 +85,7 @@ class Worker:
         runner: WorkerRunner | None = None,
         outbound_capacity: int = 64,
         preview_bridges: Mapping[str, ThreadBridge[PreviewFrame]] | None = None,
+        shutdown_config: WorkerShutdownConfig | None = None,
     ) -> None:
         if not adapters:
             raise ValueError(f"Worker {resource_id!r}: must have at least one adapter")
@@ -87,6 +93,7 @@ class Worker:
             raise ValueError(
                 f"Worker {resource_id!r}: outbound_capacity must be >= 1, got {outbound_capacity}"
             )
+        self._shutdown_config: WorkerShutdownConfig = shutdown_config or WorkerShutdownConfig()
         self._resource_id = resource_id
         # dict for name-based lookup; tuple preserves declaration order for
         # the rare adapter that cares (e.g. open ordering on a shared bus).
@@ -115,6 +122,17 @@ class Worker:
         # stop signal.
         self._disarm_event: asyncio.Event | None = None
         self._fatal_error: BaseException | None = None
+        # Most recent disarm's per-adapter stop errors as human-readable
+        # strings. Cleared at every disarm start; consumed by
+        # :meth:`_close_all_impl` when close runs after a disarm so the
+        # WorkerCloseResult surfaces the disarm-side errors alongside any
+        # close-side ones. :meth:`WorkerPool.shutdown_close` drives the
+        # disarm-then-close sequence for non-IDLE workers.
+        self._last_adapter_stop_errors: list[str] = []
+        # Tracks the most recent disarm's outcome (DisarmResult value)
+        # so close can include it in WorkerCloseResult. ``None`` when
+        # the worker has never been disarmed in its current open cycle.
+        self._last_disarm_result: DisarmResult | None = None
 
         self._metrics = WorkerMetrics(
             resource_id=resource_id,
@@ -214,7 +232,7 @@ class Worker:
             # try/except); the runner is still up. Stop it then propagate.
             stop_fut = self._runner.stop(grace_s=2.0)
 
-            def _on_stop_done(_sf: Future[None]) -> None:
+            def _on_stop_done(_sf: Future[RunnerStopResult]) -> None:
                 # Even if stop itself errored we still propagate the
                 # original open exception — it's the more informative one.
                 out.set_exception(exc)
@@ -224,13 +242,23 @@ class Worker:
         impl_fut.add_done_callback(_on_open_done)
         return out
 
-    def close(self, *, grace_s: float = 5.0) -> Future[None]:
+    def close(self, *, grace_s: float = 5.0) -> Future[WorkerCloseResult]:
         """Close every adapter and stop the runner.
 
         Requires :attr:`WorkerState.IDLE`. Raises
         :class:`WorkerStateError` (synchronously, in the returned future)
         otherwise. The :class:`WorkerPool` is responsible for disarming
         any active run before closing the worker.
+
+        Returns a :class:`WorkerCloseResult` describing the outcome.
+        Adapter-level errors are captured in the result's error tuples
+        rather than raised — every adapter is given the chance to
+        release its bus, and the caller (pool, shutdown coordinator)
+        aggregates per-worker outcomes.
+
+        ``grace_s`` bounds the runner-stop deadline; the per-phase
+        :class:`WorkerShutdownConfig` is what bounds the adapter-close
+        calls.
         """
         if self._state is not WorkerState.IDLE:
             return _failed_future(
@@ -241,20 +269,44 @@ class Worker:
                 )
             )
 
-        out: Future[None] = Future()
+        state_before = self._state.value
+        # Snapshot the disarm-side bookkeeping that the impl will reset
+        # so they end up in the result even if a fresh disarm runs
+        # concurrently (the shutdown_close path drives disarm then close
+        # back-to-back).
+        adapter_stop_errors = tuple(self._last_adapter_stop_errors)
+        disarm_result_str = (
+            self._last_disarm_result.value if self._last_disarm_result is not None else None
+        )
 
-        def _on_close_done(impl_fut: Future[None]) -> None:
-            exc = impl_fut.exception()
-            # Always stop the runner — even on partial close failure we don't
-            # want a leaked loop+thread. Errors during close get logged and
-            # propagated; runner-stop errors are subordinate.
+        out: Future[WorkerCloseResult] = Future()
+
+        def _on_close_done(impl_fut: Future[tuple[str, ...]]) -> None:
+            impl_exc = impl_fut.exception()
+            # An unexpected exception out of _close_all_impl itself (not
+            # an adapter-level error, which is now captured as a string)
+            # gets recorded as a synthetic error and the result still
+            # composes — close should never raise for adapter problems.
+            if impl_exc is not None:
+                close_errors: tuple[str, ...] = (f"close impl crashed: {impl_exc!r}",)
+            else:
+                close_errors = impl_fut.result()
+            # Always stop the runner — even on partial close failure we
+            # don't want a leaked loop+thread.
             stop_fut = self._runner.stop(grace_s=grace_s)
 
-            def _on_stop_done(_sf: Future[None]) -> None:
-                if exc is not None:
-                    out.set_exception(exc)
-                else:
-                    out.set_result(None)
+            def _on_stop_done(sf: Future[RunnerStopResult]) -> None:
+                runner_stop = sf.result()
+                out.set_result(
+                    WorkerCloseResult(
+                        resource_id=self._resource_id,
+                        state_before=state_before,
+                        adapter_stop_errors=adapter_stop_errors,
+                        adapter_close_errors=close_errors,
+                        disarm_result=disarm_result_str,
+                        runner_stop=runner_stop,
+                    )
+                )
 
             stop_fut.add_done_callback(_on_stop_done)
 
@@ -456,13 +508,15 @@ class Worker:
             raise
         self._transition(WorkerState.IDLE)
 
-    async def _close_all_impl(self) -> None:
-        """IDLE → CLOSED. Close every adapter.
+    async def _close_all_impl(self) -> tuple[str, ...]:
+        """IDLE → CLOSED. Close every adapter; return per-adapter errors.
 
-        Close failures are logged but do NOT abort the close sequence —
-        every adapter gets the chance to release its bus. The first failure
-        is re-raised after the loop completes so the caller sees a
-        diagnostic; later failures are logged only.
+        Close failures are captured as strings and do NOT abort the
+        close sequence — every adapter gets the chance to release its
+        bus. Each ``adapter.close()`` is bounded by
+        ``adapter_close_grace_s`` so a vendor close that wedges in a
+        native call cannot pin the worker thread; on timeout the error
+        is recorded and the next adapter is attempted.
 
         For each :class:`CameraDeviceAdapter` we tear down the preview
         machinery in two steps before :meth:`Camera.close`: source first
@@ -471,13 +525,32 @@ class Worker:
         would leave the drainer task missing if the source somehow
         wedges and is cancelled.
         """
-        first_exc: BaseException | None = None
+        errors: list[str] = []
+        cfg = self._shutdown_config
         for adapter in reversed(self._adapter_list):
             camera_adapter = _as_camera_adapter(adapter)
             if camera_adapter is not None:
                 try:
-                    await camera_adapter.stop_idle_preview_source()
+                    await asyncio.wait_for(
+                        camera_adapter.stop_idle_preview_source(),
+                        timeout=cfg.adapter_close_grace_s,
+                    )
+                except TimeoutError:
+                    errors.append(
+                        f"adapter {camera_adapter.name!r} stop_idle_preview_source "
+                        f"timeout after {cfg.adapter_close_grace_s}s"
+                    )
+                    _logger.warning(
+                        "worker.close_stop_source_timeout",
+                        resource_id=self._resource_id,
+                        adapter=camera_adapter.name,
+                        grace_s=cfg.adapter_close_grace_s,
+                    )
                 except BaseException as src_exc:
+                    errors.append(
+                        f"adapter {camera_adapter.name!r} stop_idle_preview_source "
+                        f"failed: {src_exc!r}"
+                    )
                     _logger.warning(
                         "worker.close_stop_source_failed",
                         resource_id=self._resource_id,
@@ -485,8 +558,25 @@ class Worker:
                         error=str(src_exc),
                     )
                 try:
-                    await camera_adapter.stop_preview_channel()
+                    await asyncio.wait_for(
+                        camera_adapter.stop_preview_channel(),
+                        timeout=cfg.adapter_close_grace_s,
+                    )
+                except TimeoutError:
+                    errors.append(
+                        f"adapter {camera_adapter.name!r} stop_preview_channel "
+                        f"timeout after {cfg.adapter_close_grace_s}s"
+                    )
+                    _logger.warning(
+                        "worker.close_stop_channel_timeout",
+                        resource_id=self._resource_id,
+                        adapter=camera_adapter.name,
+                        grace_s=cfg.adapter_close_grace_s,
+                    )
                 except BaseException as ch_exc:
+                    errors.append(
+                        f"adapter {camera_adapter.name!r} stop_preview_channel failed: {ch_exc!r}"
+                    )
                     _logger.warning(
                         "worker.close_stop_channel_failed",
                         resource_id=self._resource_id,
@@ -494,19 +584,27 @@ class Worker:
                         error=str(ch_exc),
                     )
             try:
-                await adapter.close()
+                await asyncio.wait_for(adapter.close(), timeout=cfg.adapter_close_grace_s)
+            except TimeoutError:
+                errors.append(
+                    f"adapter {adapter.name!r} close timeout after {cfg.adapter_close_grace_s}s"
+                )
+                _logger.warning(
+                    "worker.close_timeout",
+                    resource_id=self._resource_id,
+                    adapter=adapter.name,
+                    grace_s=cfg.adapter_close_grace_s,
+                )
             except BaseException as exc:
+                errors.append(f"adapter {adapter.name!r} close failed: {exc!r}")
                 _logger.warning(
                     "worker.close_failed",
                     resource_id=self._resource_id,
                     adapter=adapter.name,
                     error=str(exc),
                 )
-                if first_exc is None:
-                    first_exc = exc
         self._transition(WorkerState.CLOSED)
-        if first_exc is not None:
-            raise first_exc
+        return tuple(errors)
 
     async def _arm_impl(self, run_context: RunContext) -> None:
         """IDLE → ARMED. Install run context. No I/O."""
@@ -658,23 +756,46 @@ class Worker:
     async def _disarm_impl(self, *, grace_s: float) -> DisarmResult:
         """SAMPLING/ARMED → DRAINING → IDLE.
 
-        Phase A: signal stream tasks to stop (``adapter.stop()``), then
-        await each task with ``grace_s``. Phase B (forced): cancel any
-        task still running; record the outcome.
+        Phase A: signal stream tasks to stop (``adapter.stop()`` wrapped in
+        ``asyncio.wait_for`` with ``adapter_stop_grace_s``), then await
+        each stream task with ``grace_s``. Phase B (forced): cancel any
+        task still running, then await the cancellations with a
+        secondary ``stream_cancel_grace_s`` bound — a stream task that
+        ignores its cancellation past this bound is wedged in a non-
+        cancellable native call, and the
+        :class:`~capa.ui.shutdown.ShutdownCoordinator`'s hard wall-clock
+        fuse takes over.
         """
         from_state = self._state
         self._transition(WorkerState.DRAINING)
         assert self._disarm_event is not None or from_state is WorkerState.ARMED
 
-        # Phase A: cooperative stop. adapter.stop() flips the adapter's
-        # lifecycle so stream() exits naturally on its next yield.
+        cfg = self._shutdown_config
         result = DisarmResult.OK
-        stop_errors: list[BaseException] = []
+        # Phase A: cooperative stop. adapter.stop() flips the adapter's
+        # lifecycle so stream() exits naturally on its next yield. Each
+        # call is bounded — a stop that ignores its deadline is recorded
+        # and disarm continues; the disarm event still fires below so
+        # stream tasks can observe it.
+        self._last_adapter_stop_errors = []
         for adapter in reversed(self._adapter_list):
             try:
-                await adapter.stop()
+                await asyncio.wait_for(adapter.stop(), timeout=cfg.adapter_stop_grace_s)
+            except TimeoutError as exc:
+                err = f"adapter {adapter.name!r} stop timeout after {cfg.adapter_stop_grace_s}s"
+                self._last_adapter_stop_errors.append(err)
+                result = DisarmResult.FORCED
+                _logger.warning(
+                    "worker.adapter_stop_timeout",
+                    resource_id=self._resource_id,
+                    adapter=adapter.name,
+                    grace_s=cfg.adapter_stop_grace_s,
+                    error=str(exc),
+                )
             except BaseException as exc:
-                stop_errors.append(exc)
+                self._last_adapter_stop_errors.append(
+                    f"adapter {adapter.name!r} stop failed: {exc!r}"
+                )
                 _logger.warning(
                     "worker.adapter_stop_failed",
                     resource_id=self._resource_id,
@@ -686,7 +807,8 @@ class Worker:
             self._disarm_event.set()
 
         # Wait for stream tasks to exit with grace. Any still-running after
-        # grace expiry are cancelled and the result is FORCED.
+        # grace expiry are cancelled; cancellation itself is then bounded
+        # so a CancelledError-swallowing stream task can't wedge disarm.
         if self._stream_tasks:
             done, pending = await asyncio.wait(self._stream_tasks, timeout=grace_s)
             if pending:
@@ -697,10 +819,28 @@ class Worker:
                 )
                 for t in pending:
                     t.cancel()
-                # Drain the cancellations so we don't leak "Task was destroyed
-                # but it is pending" warnings.
-                await asyncio.gather(*pending, return_exceptions=True)
                 result = DisarmResult.FORCED
+                # Secondary bounded wait on the cancellations themselves.
+                # A stream task that catches CancelledError and keeps
+                # running (vendor code with a slow finally block, native
+                # blocking call that didn't observe the cancel) is the
+                # canonical case here. We can't kill it from here; the
+                # in-process coordinator's hard fuse is what closes the
+                # gap if it never returns.
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending, return_exceptions=True),
+                        timeout=cfg.stream_cancel_grace_s,
+                    )
+                except TimeoutError:
+                    unfinished = [t for t in pending if not t.done()]
+                    _logger.warning(
+                        "worker.disarm_cancel_timeout",
+                        resource_id=self._resource_id,
+                        grace_s=cfg.stream_cancel_grace_s,
+                        unfinished_task_names=tuple(t.get_name() for t in unfinished),
+                        thread_ident=self._runner.thread_ident,
+                    )
             # Surface in-stream exceptions (best-effort) as fatal_error.
             for t in done:
                 if t.cancelled():
@@ -735,6 +875,7 @@ class Worker:
                         adapter=camera_adapter.name,
                         error=str(exc),
                     )
+        self._last_disarm_result = result
         return result
 
     async def _stream_task(self, adapter: DeviceAdapter) -> None:
@@ -759,6 +900,17 @@ class Worker:
                 now_mono = time.monotonic()
                 self._metrics.observe_tick_duration((now_mono - last_emit_mono) * 1000.0)
                 last_emit_mono = now_mono
+                # Per-poll cadence: stamp on the SourceRecord that opens
+                # an acquisition tick. Most adapters emit exactly one
+                # SourceRecord per tick, so the default is "every
+                # SourceRecord opens its own tick"; Watlow emits one per
+                # polled parameter and flags only the first of each batch
+                # with ``metadata["tick_first"] = True`` so the worker
+                # doesn't double-count the per-parameter fanout. The
+                # ``True`` default preserves correct behavior for adapters
+                # that don't set the flag.
+                if isinstance(emission, SourceRecord) and emission.metadata.get("tick_first", True):
+                    self._metrics.observe_poll_emitted(t_mono_s=now_mono)
                 await outbound.put(emission)
                 self._metrics.observe_sample_emitted()
         except asyncio.CancelledError:

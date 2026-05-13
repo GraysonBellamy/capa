@@ -118,9 +118,9 @@ class TestRealWebcam:
         cam = WebcamAdapter.from_params(spec=spec, clock=clock, **params)
         await cam.open()
         try:
+            await cam.start_input_pump()
             await cam.start_recording(output)
-            with anyio.move_on_after(5.0):
-                await cam.run_pump()
+            await anyio.sleep(5.0)
             await cam.stop_recording()
             health = await cam.snapshot()
             assert health.frame_count > 10, "pump produced too few frames"

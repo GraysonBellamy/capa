@@ -395,8 +395,15 @@ class WatlowAdapter:
                 async for batch in batches:
                     if self._stop_requested:
                         break
-                    for sample in batch:
-                        record = self._record_for(sample)
+                    # Watlow is the one adapter whose ``poll_many`` returns
+                    # multiple Samples per acquisition tick (one per polled
+                    # parameter). Mark the first SourceRecord of each batch
+                    # so the worker can count one poll per tick rather than
+                    # one per parameter — without that flag, a 1 Hz heater
+                    # with 2 parameters bins as ~2 Hz at best, or thousands
+                    # of Hz when the within-batch yields are sub-millisecond.
+                    for i, sample in enumerate(batch):
+                        record = self._record_for(sample, tick_first=(i == 0))
                         yield record
                         self._last_sample.mark(record.t_mono_ns)
                         for cs in self._channel_samples_for(sample, record.record_id):
@@ -579,7 +586,7 @@ class WatlowAdapter:
             # Cleanup path: don't mask whatever the original failure was.
             return
 
-    def _record_for(self, sample: Sample) -> SourceRecord:
+    def _record_for(self, sample: Sample, *, tick_first: bool = True) -> SourceRecord:
         """Convert a watlowlib :class:`Sample` into a long-format
         :class:`SourceRecord`.
 
@@ -587,6 +594,10 @@ class WatlowAdapter:
         the row schema matches what an offline ``watlowlib`` recorder would
         produce — important for ``device_records/watlow.parquet`` parity
         across sim and real bundles.
+
+        ``tick_first`` lands in :attr:`SourceRecord.metadata` so the worker
+        can collapse the per-parameter fanout back into one observation per
+        acquisition tick when computing the operator-facing poll rate.
         """
         assert self._clock is not None
         row = sample_to_row(sample)
@@ -602,7 +613,7 @@ class WatlowAdapter:
             t_mono_ns=t_mono_ns,
             t_utc=sample.midpoint_at,
             row=row,
-            metadata={"parameter_id": sample.parameter_id},
+            metadata={"parameter_id": sample.parameter_id, "tick_first": tick_first},
         )
 
     def _channel_samples_for(self, sample: Sample, record_id: str) -> list[DeviceEmission]:

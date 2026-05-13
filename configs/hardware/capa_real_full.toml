@@ -44,7 +44,7 @@ adapter = "capa.devices.sartorius"
 [devices.params]
 port = "COM4"
 protocol = "xbpi"
-baudrate = 19200
+baudrate = 57600
 src_sbn = 1
 dst_sbn = 9
 rate_hz = 50.0

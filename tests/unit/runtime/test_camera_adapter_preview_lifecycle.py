@@ -286,6 +286,53 @@ class TestStartIdlePreviewSource:
         await wrapper.stop_idle_preview_source()
 
 
+class _LongLivedPumpFakeCamera(_BaseFakeCamera):
+    """Camera with the new unified-pump surface: declares
+    ``start_input_pump`` / ``stop_input_pump`` so the wrapper drives the
+    pump across its open / close lifecycle instead of the legacy IDLE-
+    only ``run_preview_pump``.
+    """
+
+    def __init__(self, spec: CameraSpec) -> None:
+        super().__init__(spec, capabilities=frozenset({CameraCapability.LIVE_PREVIEW}))
+        self.input_pump_started = 0
+        self.input_pump_stopped = 0
+
+    async def start_input_pump(self) -> None:
+        self.input_pump_started += 1
+
+    async def stop_input_pump(self) -> None:
+        self.input_pump_stopped += 1
+
+    async def preview_stream(self) -> AsyncIterator[bytes]:
+        await asyncio.Event().wait()
+        yield b""
+
+
+class TestUnifiedInputPumpHandoff:
+    """The wrapper's :meth:`open` calls ``camera.start_input_pump`` when
+    the camera advertises it (new visible-cam pump model). The
+    ``start_idle_preview_source`` hook is then a no-op for these
+    cameras — the pump runs across runs already.
+    """
+
+    async def test_open_starts_input_pump_when_camera_has_one(self) -> None:
+        cam = _LongLivedPumpFakeCamera(_spec())
+        wrapper = _make_wrapper(cam)
+        await wrapper.open()
+        assert cam.input_pump_started == 1
+        # No idle source spawned — the long-lived pump replaces it.
+        await wrapper.start_idle_preview_source()
+        assert wrapper._source_task is None  # type: ignore[attr-defined]
+
+    async def test_open_is_noop_for_cameras_without_input_pump(self) -> None:
+        cam = _PumplessFakeCamera(_spec())
+        wrapper = _make_wrapper(cam)
+        # No ``start_input_pump`` to invoke — open just delegates and
+        # returns without spawning anything.
+        await wrapper.open()
+
+
 class TestScopeIndependence:
     """Regression guard: rev-1 of the plan conflated the channel and the
     source into one scope, so stopping one killed the other. The rewrite

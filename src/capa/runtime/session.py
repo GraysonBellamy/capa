@@ -36,6 +36,7 @@ What it does **not** own:
 
 from __future__ import annotations
 
+import os
 import re
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -53,6 +54,11 @@ from capa.core.logging import (
 from capa.experiment.authorization import Authorization
 from capa.runtime.bundle_ref import BundleWriterRef
 from capa.runtime.conductor import RunOutcome
+from capa.runtime.recovery import (
+    ActiveCheckpoint,
+    delete_active_checkpoint,
+    write_active_checkpoint,
+)
 from capa.runtime.runcontext import RunContext
 from capa.runtime.writer_ref import WriterThreadRef
 from capa.storage.bundle import RunBundleWriter
@@ -177,8 +183,10 @@ class RealRunSession:
         "_bundle_path",
         "_bundle_writer",
         "_catalog",
+        "_checkpoint_written",
         "_clock",
         "_config",
+        "_config_path",
         "_configure_logging_for_bundle",
         "_engine_version",
         "_exit_reason",
@@ -210,6 +218,7 @@ class RealRunSession:
         metrics: MetricsRegistry | None = None,
         engine_version: str = "conductor",
         configure_logging_for_bundle: bool = True,
+        config_path: Path | None = None,
     ) -> None:
         self._config = config
         self._runs_root = runs_root
@@ -227,6 +236,7 @@ class RealRunSession:
         self._metrics = metrics
         self._engine_version = engine_version
         self._configure_logging_for_bundle = configure_logging_for_bundle
+        self._config_path = config_path
 
         self._bundle_writer: RunBundleWriter | None = None
         self._writer_thread: WriterThread | None = None
@@ -235,6 +245,11 @@ class RealRunSession:
         self._logger: Any = structlog.get_logger("capa")
         self._bundle_path: Path | None = None
         self._opened = False
+        # Active-bundle checkpoint state. Written immediately after the
+        # bundle directory is created so a hard exit between
+        # open and finalize leaves a recoverable breadcrumb at
+        # ``<runs_root>/.runtime-active.json``. Cleared at clean close.
+        self._checkpoint_written = False
         self._outcome: RunOutcome = RunOutcome.COMPLETED
         self._exit_reason: str | None = None
         # Per-loop / per-bridge / per-worker diagnostics handed in by the
@@ -362,6 +377,45 @@ class RealRunSession:
                 engine_version=self._engine_version,
             )
             self._bundle_path = self._bundle_writer.bundle_path
+
+            # Active-bundle checkpoint: atomic JSON at
+            # ``<runs_root>/.runtime-active.json`` so a hard exit before
+            # finalize leaves a durable breadcrumb the next launch can
+            # reconcile via :func:`recover_active_bundle_checkpoint`. We
+            # write this BEFORE the writer thread starts because the
+            # writer is one of the more likely places a future shutdown
+            # path could wedge — the breadcrumb must exist before any
+            # sampling can begin.
+            now = datetime.now(UTC)
+            try:
+                write_active_checkpoint(
+                    self._runs_root,
+                    ActiveCheckpoint(
+                        pid=os.getpid(),
+                        run_id=self._run_id,
+                        bundle_path=self._bundle_path,
+                        config_path=self._config_path,
+                        started_utc=now,
+                        last_update_utc=now,
+                    ),
+                )
+                self._checkpoint_written = True
+                self._logger.info(
+                    "shutdown.bundle_checkpoint_written",
+                    run_id=self._run_id,
+                    bundle_path=str(self._bundle_path),
+                )
+            except OSError as ckpt_exc:
+                # A failed checkpoint write is not fatal — the run can
+                # still proceed; we just lose the recovery breadcrumb.
+                # Log loudly so an operator notices a misconfigured
+                # runs_root (read-only volume, missing parent, etc.).
+                self._logger.warning(
+                    "shutdown.bundle_checkpoint_write_failed",
+                    run_id=self._run_id,
+                    bundle_path=str(self._bundle_path),
+                    error=str(ckpt_exc),
+                )
 
             # Reconfigure logging now that the bundle's run.log exists so
             # every log line from this point teeing into the bundle is
@@ -508,7 +562,18 @@ class RealRunSession:
             except Exception as exc:
                 self._logger.warning("session.catalog.update_failed", error=str(exc))
 
-        # 4. Disarm authorization so any straggler tasks can't issue commands.
+        # 4. Clear the active-bundle checkpoint. Only safe to delete
+        # here — after finalize + catalog update — because that's when
+        # the bundle is durably recoverable WITHOUT the checkpoint. A
+        # failure between bundle finalize and this delete leaves a
+        # harmless stale checkpoint that next launch's recovery helper
+        # will notice and clear (the manifest is already ``sealed`` so
+        # recovery becomes a no-op marker-write).
+        if self._checkpoint_written:
+            delete_active_checkpoint(self._runs_root)
+            self._checkpoint_written = False
+
+        # 5. Disarm authorization so any straggler tasks can't issue commands.
         if self._authorization is not None:
             self._authorization.disarm()
 

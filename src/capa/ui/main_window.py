@@ -26,11 +26,17 @@ from PySide6.QtWidgets import (
 from capa.core.errors import CapaError
 from capa.experiment.config import ExperimentConfig
 from capa.storage.catalog import RunCatalog
-from capa.ui.async_util import schedule_bg
 from capa.ui.docks.camera_preview import CameraPreviewDock
+from capa.ui.docks.diagnostics import DiagnosticsDock
 from capa.ui.docks.events import EventsDock
 from capa.ui.docks.manual_control import ManualControlDock
 from capa.ui.docks.numerics import NumericsDock
+from capa.ui.shutdown import (
+    ShutdownCoordinator,
+    ShutdownPhase,
+    ShutdownResult,
+    status_message_for_phase,
+)
 from capa.ui.state import RunController, RunUiResult, RunUiState
 from capa.ui.statusbar import CapaStatusBar, OperatorIdProvider
 from capa.ui.tabs.method import MethodTab
@@ -63,6 +69,7 @@ class MainWindow(QMainWindow):
         configure_logging_for_bundle: bool = True,
         initial_config: ExperimentConfig | None = None,
         initial_config_path: Path | None = None,
+        shutdown_coordinator: ShutdownCoordinator | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("capa")
@@ -71,14 +78,12 @@ class MainWindow(QMainWindow):
         self._runs_root: Path = runs_root
         self._operator_provider = OperatorIdProvider()
 
-        # Close-flow state machine. The first closeEvent kicks off an async
-        # shutdown (abort run, await its task, close the worker pool) and
-        # ignores Qt's close request; the shutdown coroutine flips
-        # ``_shutdown_complete`` to ``True`` and re-calls :meth:`close`, and
-        # the second closeEvent falls through to ``super().closeEvent``.
-        # Without this, ``aclose_pool`` raced the conductor's disarm and the
-        # non-daemon worker threads ([runner.py:163](src/capa/runtime/runner.py#L163))
-        # leaked at process exit, holding the Python interpreter open.
+        # Close-flow state machine driven by ShutdownCoordinator. First
+        # closeEvent calls ``begin_shutdown``; the coordinator's
+        # ``completed`` signal flips ``_shutdown_complete`` and
+        # re-triggers ``close()``, and the second closeEvent falls
+        # through to ``super().closeEvent``. The coordinator owns
+        # deadlines and the hard wall-clock fuse.
         self._shutdown_started: bool = False
         self._shutdown_complete: bool = False
 
@@ -91,6 +96,22 @@ class MainWindow(QMainWindow):
             configure_logging_for_bundle=configure_logging_for_bundle,
             parent=self,
         )
+
+        # Shutdown coordinator. ``catalog`` is passed in so the
+        # coordinator's CLOSE_CATALOG phase can release the SQLite
+        # handle. Tests inject a coordinator with a no-op hard_exit so
+        # the fuse can be asserted without killing pytest.
+        self._shutdown_coordinator: ShutdownCoordinator = (
+            shutdown_coordinator
+            if shutdown_coordinator is not None
+            else ShutdownCoordinator(
+                controller=self._controller,
+                catalog=catalog,
+                parent=self,
+            )
+        )
+        self._shutdown_coordinator.phase_changed.connect(self._on_shutdown_phase)
+        self._shutdown_coordinator.completed.connect(self._on_shutdown_completed)
 
         self._setup_tab = SetupTab(self)
         self._method_tab = MethodTab(self)
@@ -114,6 +135,8 @@ class MainWindow(QMainWindow):
         # layout stays consistent.
         self._numerics_dock: NumericsDock | None = None
         self._camera_preview_dock: CameraPreviewDock | None = None
+        self._diagnostics_dock: DiagnosticsDock | None = None
+        self._diagnostics_toggle: QAction | None = None
         self._events_dock = EventsDock(self)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._events_dock)
 
@@ -173,15 +196,17 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
-        # Devices menu — gateway to the manual control dock. The dock's
-        # toggleViewAction keeps its checked state in sync with visibility
-        # so closing via the dock's [×] flips the menu check off.
-        devices_menu = menu.addMenu("&Devices")
+        # Devices menu — gateway to the manual control dock and the
+        # diagnostics dock. The dock toggleViewActions keep their checked
+        # state in sync with visibility so closing via [×] flips the
+        # menu check off. The diagnostics action is added/replaced each
+        # time a config loads (the dock is rebuilt then).
+        self._devices_menu = menu.addMenu("&Devices")
         toggle_action = self._manual_dock.toggleViewAction()
         if toggle_action is not None:
             toggle_action.setText("&Manual Control")
             toggle_action.setShortcut("Ctrl+M")
-            devices_menu.addAction(toggle_action)
+            self._devices_menu.addAction(toggle_action)
 
     # ------------------------------------------------------------------ slots
 
@@ -268,6 +293,30 @@ class MainWindow(QMainWindow):
         self._controller.preview_received.connect(self._camera_preview_dock.update_preview)
         self._controller.camera_event_received.connect(self._camera_preview_dock.note_event)
 
+        # Rebuild the acquisition diagnostics dock. The worker topology
+        # (resource_id → adapter_names) is snapshotted once here; values
+        # are polled live from the conductor at 1 Hz during a run.
+        if self._diagnostics_dock is not None:
+            if self._diagnostics_toggle is not None:
+                self._devices_menu.removeAction(self._diagnostics_toggle)
+                self._diagnostics_toggle = None
+            self.removeDockWidget(self._diagnostics_dock)
+            self._diagnostics_dock.deleteLater()
+        pool = self._controller.worker_pool
+        worker_topology = (
+            {rid: w.adapter_names for rid, w in pool.workers.items()} if pool is not None else {}
+        )
+        self._diagnostics_dock = DiagnosticsDock(
+            controller=self._controller,
+            worker_topology=worker_topology,
+            parent=self,
+        )
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._diagnostics_dock)
+        self._diagnostics_dock.start()
+        self._diagnostics_toggle = self._diagnostics_dock.toggleViewAction()
+        self._diagnostics_toggle.setText("&Acquisition Diagnostics")
+        self._devices_menu.addAction(self._diagnostics_toggle)
+
         title_path = f" — {path.name}" if path else ""
         self.setWindowTitle(f"capa{title_path}")
         _logger.info("ui.config_loaded", path=str(path) if path else None)
@@ -313,17 +362,22 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802 — Qt override
         if event is None:
             return
-        # Second pass: async shutdown finished and re-entered closeEvent.
-        # Save state and let Qt close the window for real.
+        # Second pass: coordinator finished and re-triggered close().
+        # Save window state and let Qt close the window for real.
         if self._shutdown_complete:
             self._save_window_state()
             super().closeEvent(event)
             return
-        # Re-entry while the async shutdown is still in flight (e.g. user
-        # double-clicks the [×]) — keep ignoring until shutdown completes.
+        # Re-entry while the coordinator is still working (e.g. operator
+        # double-clicks the [×]) — keep ignoring. ``begin_shutdown`` is
+        # idempotent so we can call it again safely, but there's no
+        # point.
         if self._shutdown_started:
             event.ignore()
             return
+        # First close: confirm if a run is in flight, then hand control
+        # to the ShutdownCoordinator. The coordinator owns deadlines,
+        # phase ordering, and the hard wall-clock fuse.
         if self._controller.is_active:
             answer = QMessageBox.question(
                 self,
@@ -335,32 +389,41 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
-            self._controller.request_abort(mode="immediate")
-        # Defer the close until the conductor has actually finished disarming
-        # and the worker pool has had ``close()`` called on each worker — only
-        # then are the non-daemon worker threads stopped. See
-        # :meth:`RunController.await_active_run`.
         self._shutdown_started = True
         event.ignore()
-        schedule_bg(self._shutdown_then_close())
+        # ``begin_shutdown`` is idempotent — repeat callers (e.g. future
+        # tray-menu quit) get the same in-flight task. The completed
+        # signal wires us back into closeEvent via _on_shutdown_completed.
+        self._shutdown_coordinator.begin_shutdown("window_close")
 
-    async def _shutdown_then_close(self) -> None:
-        """Drive the orderly shutdown sequence then re-trigger window close.
+    def _on_shutdown_phase(self, phase: object) -> None:
+        """Surface shutdown phases via the status bar.
 
-        Awaits the in-flight run task (so the conductor reaches SEALED and
-        workers are IDLE), then closes the pool (which joins every
-        :class:`ThreadedRunner`). Errors are logged but never re-raised:
-        the user has already asked to close the window, and a failure here
-        must not strand them.
+        Connected to :attr:`ShutdownCoordinator.phase_changed`. The
+        status bar is the operator's signal that the [×] click was
+        received and shutdown is making progress.
         """
-        try:
-            await self._controller.await_active_run()
-        except BaseException as exc:
-            _logger.exception("ui.shutdown.await_run_failed", error=str(exc))
-        try:
-            await self._controller.aclose_pool()
-        except BaseException as exc:
-            _logger.exception("ui.shutdown.aclose_pool_failed", error=str(exc))
+        if not isinstance(phase, ShutdownPhase):
+            return
+        msg = status_message_for_phase(phase)
+        if msg is not None:
+            self._status.showMessage(msg)
+
+    def _on_shutdown_completed(self, result: object) -> None:
+        """Flip the close-flow state machine and re-trigger window close.
+
+        Connected to :attr:`ShutdownCoordinator.completed`. Logging the
+        outcome here gives ops one structured event per shutdown attempt
+        without needing to grep the coordinator's per-phase logs.
+        """
+        if isinstance(result, ShutdownResult):
+            _logger.info(
+                "ui.shutdown.completed",
+                reason=result.reason,
+                clean=result.clean,
+                elapsed_s=result.elapsed_s,
+                errors=result.errors,
+            )
         self._shutdown_complete = True
         self.close()
 

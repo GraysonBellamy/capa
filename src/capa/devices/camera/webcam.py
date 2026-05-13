@@ -1,19 +1,28 @@
 """Visible-camera adapter — PyAV-driven H.264 → MKV (plan §12.3).
 
-The adapter runs in two complementary modes:
+The adapter has a single long-lived input pump
+(:meth:`WebcamAdapter._run_input_loop`) that opens the
+:class:`av.container.InputContainer` once at :meth:`start_input_pump`
+and closes it at :meth:`stop_input_pump`. The pump unconditionally emits
+2 Hz preview JPEGs onto ``preview_stream`` so the operator always has a
+live tile between runs, and additionally encodes each frame to the
+output container + emits a :class:`FrameReceipt` while ``_recording``
+is set.
 
-* **Push mode.** The host calls :meth:`WebcamAdapter.push_frame` with a numpy
-  ndarray and a capture timestamp. Used by tests and by the engine when the
-  frame source is a non-PyAV producer (e.g. a hardware-specific grabber that
-  pushes via the loopback ingest).
-* **Pump mode.** :meth:`WebcamAdapter.run_pump` opens an input
-  :class:`av.container.InputContainer` and forwards each decoded frame
-  through the same push path. The default input is a V4L2 device on Linux,
-  AVFoundation on macOS, or DirectShow on Windows; ``params["input_url"]``
-  / ``params["input_format"]`` override.
+Two consumer paths:
 
-Both modes share the encoder + frame-index path, so live-capture and tests
-exercise identical bookkeeping.
+* **Push mode.** Tests call :meth:`WebcamAdapter.push_frame` directly
+  with a numpy ndarray to drive the encoder + preview path without
+  going through the pump.
+* **Pump mode.** Production: :meth:`start_input_pump` spawns the
+  long-lived loop. The default input is a V4L2 device on Linux,
+  AVFoundation on macOS, or DirectShow on Windows;
+  ``params["input_url"]`` / ``params["input_format"]`` override.
+
+Unifying the input pump across the recording / between-runs boundary
+removes the DirectShow filter-graph hold-time that previously froze
+the live preview tile for several seconds after every run-stop —
+``av.open`` happens exactly once per pool open, not once per phase.
 
 MKV container metadata carries the run-start UTC anchor (plan §12.5) so an
 external tool can re-correlate by absolute time without parsing capa's
@@ -22,6 +31,7 @@ manifest.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import os
@@ -65,6 +75,9 @@ from capa.devices.camera.base import (
     make_stream_pair,
 )
 from capa.devices.camera.metadata import UvcRangeMetadata, WebcamMetadata
+
+_logger = structlog.get_logger("capa.devices.camera.webcam")
+
 
 _BASE_CAPABILITIES: frozenset[CameraCapability] = frozenset(
     {
@@ -159,7 +172,8 @@ class WebcamAdapter:
         "_pix_fmt",
         "_preview_recv",
         "_preview_send",
-        "_previewing",
+        "_pump_stop",
+        "_pump_task",
         "_recording",
         "_resolution_fps_caps",
         "_spec",
@@ -217,7 +231,8 @@ class WebcamAdapter:
         self._resolution_fps_caps: dict[tuple[int, int], float] = {}
         self._open: bool = False
         self._recording: bool = False
-        self._previewing: bool = False
+        self._pump_task: asyncio.Task[None] | None = None
+        self._pump_stop: asyncio.Event | None = None
         self._frame_count = 0
         self._dropped_frames = 0
         self._file_size = 0
@@ -443,8 +458,7 @@ class WebcamAdapter:
     async def close(self) -> None:
         if self._recording:
             await self.stop_recording()
-        if self._previewing:
-            await self.stop_preview()
+        await self.stop_input_pump()
         await self._frame_send.aclose()
         await self._preview_send.aclose()
         await self._event_send.aclose()
@@ -481,52 +495,6 @@ class WebcamAdapter:
         await self._emit_event(
             kind="recording_started",
             message=f"path={output_path} codec={self._codec}",
-            severity="info",
-        )
-
-    async def start_preview(self) -> None:
-        """Begin emitting preview frames *without* opening the encoder.
-
-        Decoupled from :meth:`start_recording` so the manual-control UI can
-        show a live tile while the operator adjusts UVC settings between
-        runs. Mutually exclusive with recording: while the engine is
-        actively recording, the recording pump owns the input container and
-        already emits previews — calling ``start_preview`` then is a
-        no-op (idempotent). When recording is *not* active, the consumer
-        is expected to drive :meth:`run_preview_pump` on its own task to
-        actually source frames; this method only flips the state flag and
-        resets the throttle timestamp.
-
-        Idempotent against re-entry. Requires :meth:`open` to have
-        completed (the V4L2 / DirectShow identity probe lives there).
-        """
-        if not self._open:
-            raise AdapterError("WebcamAdapter.start_preview requires open()")
-        if self._previewing:
-            return
-        self._previewing = True
-        # Reset the 2 Hz throttle so the first preview frame fires
-        # immediately instead of waiting up to 500 ms.
-        self._last_preview_t_mono_ns = None
-        await self._emit_event(
-            kind="preview_started",
-            message=f"resolution={self._width}x{self._height}",
-            severity="info",
-        )
-
-    async def stop_preview(self) -> None:
-        """Flip ``_previewing`` off. The consumer task driving
-        :meth:`run_preview_pump` should observe the flag and exit naturally
-        within one decoder iteration (~33 ms at 30 fps).
-
-        Idempotent: a second call against a not-previewing adapter is a
-        no-op, mirroring :meth:`stop_recording`."""
-        if not self._previewing:
-            return
-        self._previewing = False
-        await self._emit_event(
-            kind="preview_stopped",
-            message="",
             severity="info",
         )
 
@@ -709,58 +677,73 @@ class WebcamAdapter:
         frame: np.ndarray,
         capture_latency_s: float = 0.0,
     ) -> tuple[FrameReceipt | None, bytes | None, str | None]:
-        """Encode + mux + bookkeep a single frame.
+        """Encode (if recording) + bookkeep + JPEG-thumbnail one frame.
 
-        Returns ``(receipt, preview_bytes, drop_reason)`` — ``drop_reason``
-        is ``None`` on success and a short error string when the frame was
-        rejected by the encoder (e.g. libx264 EINVAL for a malformed input;
-        hardware-day §6 anomaly). Dropping rather than raising keeps the
-        pump alive across single-frame faults.
+        Returns ``(receipt, preview_bytes, drop_reason)``:
 
-        The CPU-heavy work (libx264 encode, container mux) lives here so
-        :meth:`push_frame` can run it in a worker thread via
+        * ``receipt`` is ``None`` when the adapter is not actively
+          recording (preview-only mode) or when the encoder rejected the
+          frame.
+        * ``preview_bytes`` is ``None`` on throttled ticks (2 Hz cap).
+        * ``drop_reason`` is non-``None`` only when the encoder rejected
+          the frame mid-recording (libx264 EINVAL, format renegotiation,
+          …). Dropping rather than raising keeps the pump alive across
+          single-frame faults (hardware-day §6).
+
+        The CPU-heavy work (libx264 encode, container mux, JPEG encode)
+        lives here so :meth:`push_frame` can run it in a worker thread via
         :func:`anyio.to_thread.run_sync`, keeping the asyncio loop free for
         other adapters' I/O.
         """
-        if not self._recording or self._output_container is None or self._output_stream is None:
-            raise AdapterError("push_frame requires start_recording()")
         if frame.ndim != 3 or frame.shape[2] != 3 or frame.dtype != np.uint8:
             raise AdapterError(
                 f"push_frame expects HxWx3 uint8 ndarray; got "
                 f"shape={frame.shape} dtype={frame.dtype}"
             )
 
-        idx = self._frame_count
         t_mono_ns = self._clock.t_mono_ns()
 
-        video_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
-        video_frame.pts = idx
-        try:
-            # time_base set by the stream; PyAV remuxes pts via that.
-            for packet in self._output_stream.encode(video_frame):
-                self._output_container.mux(packet)
-        except av.error.FFmpegError as exc:
-            # Frame index is NOT advanced — the next push reuses ``idx``,
-            # so receipt frame_idx values stay contiguous over surviving
-            # frames and the encoder doesn't see a pts gap.
-            self._dropped_frames += 1
-            reason = f"{type(exc).__name__}: {exc} (shape={frame.shape}, encoder={self._codec})"
-            return None, None, reason
+        # Encode + receipt only when actively recording. Snapshot the
+        # encoder handles so a concurrent stop_recording() flipping
+        # _output_container to None doesn't race the check below.
+        receipt: FrameReceipt | None = None
+        drop_reason: str | None = None
+        recording = self._recording
+        out_container = self._output_container
+        out_stream = self._output_stream
+        if recording and out_container is not None and out_stream is not None:
+            idx = self._frame_count
+            video_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
+            video_frame.pts = idx
+            try:
+                # time_base set by the stream; PyAV remuxes pts via that.
+                for packet in out_stream.encode(video_frame):
+                    out_container.mux(packet)
+            except av.error.FFmpegError as exc:
+                # Frame index is NOT advanced — the next push reuses
+                # ``idx`` so surviving frames stay contiguous and the
+                # encoder doesn't see a pts gap.
+                self._dropped_frames += 1
+                drop_reason = (
+                    f"{type(exc).__name__}: {exc} (shape={frame.shape}, encoder={self._codec})"
+                )
+            else:
+                self._frame_count = idx + 1
+                self._last_frame_t_mono_ns = t_mono_ns
+                receipt = FrameReceipt(
+                    name=self._spec.name,
+                    frame_idx=idx,
+                    t_mono_ns=t_mono_ns,
+                    t_utc=self._clock.to_wall_ns(t_mono_ns),
+                    capture_latency_s=capture_latency_s,
+                )
 
-        self._frame_count = idx + 1
-        self._last_frame_t_mono_ns = t_mono_ns
-        receipt = FrameReceipt(
-            name=self._spec.name,
-            frame_idx=idx,
-            t_mono_ns=t_mono_ns,
-            t_utc=self._clock.to_wall_ns(t_mono_ns),
-            capture_latency_s=capture_latency_s,
-        )
-        # Preview: 2 Hz cap, JPEG-encoded thumbnail, aspect preserved. Skipped
-        # encodes save the Pillow + libjpeg cost on every frame the consumer
-        # cannot use (28 of 30 at webcam rate). DROP_OLDEST is enforced by
-        # ``_preview_send`` having capacity 2; ``send_nowait`` from the wrapper
-        # silently drops on backpressure.
+        # Preview is unconditional: the live tile must stay current
+        # whether or not we're recording. 2 Hz cap, JPEG-encoded thumbnail,
+        # aspect preserved. Skipped encodes save the Pillow + libjpeg cost
+        # on every frame the consumer cannot use (28 of 30 at webcam rate).
+        # DROP_OLDEST is enforced by ``_preview_send`` having capacity 2;
+        # ``send_nowait`` from the wrapper silently drops on backpressure.
         preview_bytes: bytes | None = None
         if (
             self._last_preview_t_mono_ns is None
@@ -768,7 +751,7 @@ class WebcamAdapter:
         ):
             preview_bytes = _encode_preview_jpeg(frame)
             self._last_preview_t_mono_ns = t_mono_ns
-        return receipt, preview_bytes, None
+        return receipt, preview_bytes, drop_reason
 
     async def push_frame(
         self,
@@ -776,21 +759,21 @@ class WebcamAdapter:
         *,
         capture_latency_s: float = 0.0,
     ) -> FrameReceipt | None:
-        """Encode ``frame`` (HxWx3 uint8, RGB24) into the MKV stream and emit
-        a :class:`FrameReceipt`.
+        """Process ``frame`` (HxWx3 uint8, RGB24): encode to MKV + emit a
+        :class:`FrameReceipt` if recording; always emit a 2 Hz preview JPEG.
 
-        Returns ``None`` when the encoder rejected the frame; the bad
-        frame is counted in :attr:`CameraHealth.dropped_frames` and a
-        ``pump_warning`` event lands on the event stream. Hardware-day §6
-        regression: previously this raised :class:`av.error.FFmpegError`
-        and killed the entire camera task.
+        Returns the receipt when one was produced (recording succeeded);
+        returns ``None`` when not recording (preview-only) or when the
+        encoder rejected the frame. Encoder-reject paths land a
+        ``pump_warning`` on the event stream.
 
-        Used by tests and by adapters that source frames from outside PyAV
-        (vendor SDKs, network grabbers). The engine's pump-mode loop also
-        funnels through this path so the timestamp + frame-index bookkeeping
-        is identical for both modes. The libx264 encode runs in a worker
-        thread so the asyncio loop stays responsive at 30 fps.
+        Used by the long-lived input pump (:meth:`_run_input_loop`) and
+        by tests that drive frames directly. The libx264 encode + JPEG
+        encode run in a worker thread so the asyncio loop stays responsive
+        at 30 fps.
         """
+        if not self._open:
+            raise AdapterError("WebcamAdapter.push_frame requires open()")
         receipt, preview_bytes, drop_reason = await anyio.to_thread.run_sync(
             self._push_frame_sync, frame, capture_latency_s
         )
@@ -800,12 +783,8 @@ class WebcamAdapter:
                 message=f"frame dropped: {drop_reason}",
                 severity="warning",
             )
-            return None
-        assert receipt is not None
-        await self._frame_send.send(receipt)
-        # ``preview_bytes`` is ``None`` on throttled ticks (2 Hz cap inside
-        # ``_push_frame_sync``). DROP_OLDEST is preserved by ignoring
-        # ``WouldBlock`` from the bounded preview stream.
+        if receipt is not None:
+            await self._frame_send.send(receipt)
         if preview_bytes is not None:
             with contextlib.suppress(anyio.WouldBlock):
                 self._preview_send.send_nowait(preview_bytes)
@@ -859,45 +838,104 @@ class WebcamAdapter:
                 ) from exc
             raise
 
-    async def run_pump(self) -> None:
-        """Open the configured PyAV input and push every decoded frame.
+    async def start_input_pump(self) -> None:
+        """Spawn the long-lived input pump task. Idempotent.
 
-        Hardware-only path. Tests use :meth:`push_frame` directly. Cancellation
-        propagates through the AnyIO task group.
+        The pump opens an :class:`av.container.InputContainer` once and
+        drives the same decode → push_frame path for the entire
+        adapter-open lifetime. It emits 2 Hz preview JPEGs unconditionally
+        and additionally encodes + emits FrameReceipts while
+        :attr:`_recording` is set — so the live tile stays current
+        between runs and ``av.open`` happens exactly once per pool open.
 
-        The decode and reformat steps each run in a worker thread; without
-        this the per-frame CPU work (libav decode, RGB conversion) would
-        block the asyncio loop and starve other adapters. Observed in
-        hardware-day §5.B: webcam at ~14 fps instead of 30, recipe wall-
-        clock 2.7× nominal.
+        Idempotent: a second call while the pump is already running
+        returns without action. Requires :meth:`open` to have completed.
 
-        ``av.open`` is wrapped in :meth:`_open_input_with_retry` so back-to-back
-        opens on Windows (DirectShow filter-graph hold-time after close) don't
-        immediately fail with ``[Errno 5]``.
-
-        When ``CAPA_WEBCAM_FRAME_DIAG=1`` is set, the first 150 input frames
-        are logged at INFO with ``frame.format.name`` / ``width`` / ``height``
-        / ``pts``. Used to investigate the libx264 EINVAL observed at t≈23 s
-        in hardware-day §5.A — correlate any UVC frame-format renegotiation
-        with the first ``pump_warning`` event.
+        Called by :meth:`CameraDeviceAdapter.open` on the worker loop;
+        the resulting task binds to that loop.
         """
-        if not self._recording:
-            raise AdapterError("run_pump requires start_recording()")
+        if not self._open:
+            raise AdapterError("WebcamAdapter.start_input_pump requires open()")
+        if self._pump_task is not None and not self._pump_task.done():
+            return
+        self._pump_stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        self._pump_task = loop.create_task(
+            self._run_input_loop(),
+            name=f"webcam-input-{self._spec.name}",
+        )
+
+    async def stop_input_pump(self) -> None:
+        """Signal the input pump to exit and await it. Idempotent.
+
+        Sets :attr:`_pump_stop` so the loop's next iteration breaks; the
+        pump's ``finally`` block closes the input container. If the pump
+        outlives a bounded grace window the task is hard-cancelled. Safe
+        to call when no pump is running (e.g. test paths).
+        """
+        task = self._pump_task
+        self._pump_task = None
+        if task is None:
+            self._pump_stop = None
+            return
+        if self._pump_stop is not None:
+            self._pump_stop.set()
+        if not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+            except TimeoutError:
+                task.cancel()
+                with contextlib.suppress(BaseException):
+                    await task
+            except BaseException:
+                with contextlib.suppress(BaseException):
+                    await task
+        self._pump_stop = None
+
+    async def _run_input_loop(self) -> None:
+        """Long-lived input pump (pool lifetime).
+
+        Opens the PyAV input container with retry, then loops:
+        ``decode → reformat → push_frame``. ``push_frame`` always emits a
+        2 Hz preview JPEG and additionally encodes + emits a
+        :class:`FrameReceipt` while :attr:`_recording` is set. Exits when
+        :attr:`_pump_stop` is set, when the decoder reaches EOF, or on
+        cancellation.
+
+        ``av.open`` is wrapped in :meth:`_open_input_with_retry` so the
+        Windows DirectShow filter-graph hold-time after a previous close
+        is absorbed transparently. Decode + reformat each run in a worker
+        thread so the per-frame CPU work doesn't block the asyncio loop
+        (hardware-day §5.B: 14 fps regression).
+
+        When ``CAPA_WEBCAM_FRAME_DIAG=1`` is set, the first 150 input
+        frames are logged at INFO with ``frame.format.name`` /
+        ``width`` / ``height`` / ``pts``.
+        """
+        assert self._pump_stop is not None
         diag_enabled = os.environ.get("CAPA_WEBCAM_FRAME_DIAG") == "1"
         diag_remaining = 150 if diag_enabled else 0
         diag_log = structlog.get_logger("capa.webcam.frame_diag") if diag_enabled else None
-        in_container = await self._open_input_with_retry()
+
+        try:
+            in_container = await self._open_input_with_retry()
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            _logger.warning(
+                "webcam.input_open_failed",
+                camera=self._spec.name,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return
+
         try:
             in_stream = next(s for s in in_container.streams if s.type == "video")
             decoder = in_container.decode(in_stream)
-            while self._recording:
+            while self._open and not self._pump_stop.is_set():
                 frame = await anyio.to_thread.run_sync(_advance_decoder, decoder)
-                # close() may flip _recording to False while the decode worker
-                # was running; bail before push_frame's precondition guard
-                # would raise AdapterError("push_frame requires
-                # start_recording()") and surface as a misleading
-                # engine.camera.pump_failed warning on every clean stop.
-                if frame is None or not self._recording:
+                if frame is None or self._pump_stop.is_set() or not self._open:
                     break
                 if diag_remaining > 0 and diag_log is not None:
                     diag_log.info(
@@ -912,112 +950,17 @@ class WebcamAdapter:
                     )
                     diag_remaining -= 1
                 rgb = await anyio.to_thread.run_sync(_reformat_to_rgb24, frame)
-                # Same race window applies after reformat (which is itself a
-                # threaded yield). Match the ``_push_frame_sync`` precondition
-                # shape to defeat mypy narrowing of ``_recording`` from the
-                # ``while`` condition above and to match the guard the push
-                # path itself enforces.
-                if not self._recording or self._output_container is None:
+                if self._pump_stop.is_set() or not self._open:
                     break
-                # push_frame returns None on encoder-rejected frames; the
-                # adapter has already emitted a pump_warning event and
-                # bumped dropped_frames. Pump continues with the next
-                # frame rather than dying.
+                # ``push_frame`` handles both preview-only and recording
+                # modes — _push_frame_sync checks _recording per-frame and
+                # falls back to preview-only emission when not recording.
+                # Encoder-reject paths land a pump_warning event and the
+                # loop continues with the next frame.
                 await self.push_frame(rgb)
         finally:
-            await anyio.to_thread.run_sync(in_container.close)
-
-    async def run_preview_pump(self) -> None:
-        """Drive the input container for preview-only emission.
-
-        Parallel to :meth:`run_pump` but runs while ``_previewing`` is set
-        and writes nothing to disk — frames are JPEG-thumbnailed at the
-        same 2 Hz cadence as the recording-mode preview and pushed onto
-        ``_preview_send``.
-
-        Manual-control owns this task; the engine still uses
-        :meth:`run_pump` for in-run frames. The two are mutually
-        exclusive at the lifecycle level: cards stop preview before the
-        engine acquires the camera (see ``WebcamCard._on_engine_state``),
-        and :meth:`start_preview` no-ops while ``_recording`` is set, so
-        we never end up with two pumps fighting for the same UVC pin.
-
-        Exits on ``stop_preview`` (the ``while self._previewing`` loop
-        observes the flag flip within one decoder iteration ≈ 33 ms at
-        30 fps) or on a hard cancellation from the surrounding task.
-        ``av.open`` failures (camera already in use by another process)
-        surface as :class:`AdapterError`; transient I/O errors on Windows
-        DirectShow are retried inside :meth:`_open_input_with_retry`.
-        """
-        if not self._previewing:
-            raise AdapterError("run_preview_pump requires start_preview()")
-        in_container = await self._open_input_with_retry()
-        try:
-            in_stream = next(s for s in in_container.streams if s.type == "video")
-            decoder = in_container.decode(in_stream)
-            while self._previewing:
-                frame = await anyio.to_thread.run_sync(_advance_decoder, decoder)
-                # Same race-window guard as run_pump: ``stop_preview`` may
-                # flip the flag while the decode worker was running; bail
-                # before the precondition check in :meth:`push_preview_frame`
-                # raises.
-                if frame is None or not self._previewing:
-                    break
-                rgb = await anyio.to_thread.run_sync(_reformat_to_rgb24, frame)
-                # ``push_preview_frame`` re-checks ``_previewing`` itself, so
-                # a flag flip during the reformat-thread yield raises an
-                # AdapterError in the pump task; the surrounding
-                # :func:`_run_preview_pump_safe` swallows it. One stale
-                # frame's worth of work is acceptable for the simpler
-                # loop structure.
-                await self.push_preview_frame(rgb)
-        finally:
-            await anyio.to_thread.run_sync(in_container.close)
-
-    async def push_preview_frame(self, frame: np.ndarray) -> None:
-        """JPEG-thumbnail ``frame`` and push onto the preview stream.
-
-        Used by :meth:`run_preview_pump` (the production path) and by
-        tests that drive frames directly without opening a real input
-        container. The 2 Hz throttle is shared with :meth:`push_frame`'s
-        recording-mode preview generation — switching from preview to
-        recording back to preview re-uses ``_last_preview_t_mono_ns``
-        so the consumer sees a smooth 2 Hz cadence across the transition.
-
-        DROP_OLDEST is enforced upstream by ``_preview_send``'s capacity
-        of 2; ``send_nowait`` discards on backpressure rather than
-        blocking the pump task, which keeps the decoder draining the
-        UVC ring buffer at hardware rate.
-        """
-        if not self._previewing:
-            raise AdapterError("push_preview_frame requires start_preview()")
-        preview_bytes = await anyio.to_thread.run_sync(self._maybe_encode_preview, frame)
-        if preview_bytes is None:
-            return
-        with contextlib.suppress(anyio.WouldBlock):
-            self._preview_send.send_nowait(preview_bytes)
-
-    def _maybe_encode_preview(self, frame: np.ndarray) -> bytes | None:
-        """Apply the 2 Hz throttle + JPEG-encode the thumbnail.
-
-        Returns ``None`` when the throttle hasn't elapsed (no encode
-        cost paid on the throttled tick). Worker-thread-callable —
-        :meth:`push_preview_frame` wraps it in
-        :func:`anyio.to_thread.run_sync`.
-        """
-        if frame.ndim != 3 or frame.shape[2] != 3 or frame.dtype != np.uint8:
-            raise AdapterError(
-                f"push_preview_frame expects HxWx3 uint8 ndarray; "
-                f"got shape={frame.shape} dtype={frame.dtype}"
-            )
-        t_mono_ns = self._clock.t_mono_ns()
-        if (
-            self._last_preview_t_mono_ns is not None
-            and t_mono_ns - self._last_preview_t_mono_ns < PREVIEW_INTERVAL_NS
-        ):
-            return None
-        self._last_preview_t_mono_ns = t_mono_ns
-        return _encode_preview_jpeg(frame)
+            with contextlib.suppress(BaseException):
+                await anyio.to_thread.run_sync(in_container.close)
 
     # -------------------------------------------------------------- internals
 

@@ -8,6 +8,8 @@ break the manifest schema.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from capa.runtime.lifecycle import WorkerState
@@ -25,8 +27,11 @@ class TestWorkerMetricsInit:
         assert m.commands_failed == 0
         assert m.samples_emitted == 0
         assert m.samples_late == 0
+        assert m.polls_emitted == 0
         assert m.disconnects == 0
         assert m.bridge_out is None
+        assert m.poll_rate_hz == 0.0
+        assert m.last_sample_age_s == 0.0
 
     def test_loop_lag_is_per_resource(self) -> None:
         m1 = WorkerMetrics(resource_id="serial:A", adapter_names=())
@@ -107,6 +112,80 @@ class TestTickDurationPercentiles:
         m = WorkerMetrics(resource_id="r", adapter_names=("a",))
         assert m.tick_duration_p50_ms == 0.0
         assert m.tick_duration_p99_ms == 0.0
+
+
+class TestPollMetrics:
+    """The operator-facing per-poll surface that the diagnostics dock reads.
+
+    These tests pin the contract that fixes the "thousands of Hz" bug:
+    rate is computed from poll periods (one observation per SourceRecord),
+    not from tick durations (one per emission). For a 4 Hz device with 5
+    channel bindings, ``poll_rate_hz`` must report ~4 Hz, not ~30 Hz.
+    """
+
+    def test_counter_increments_per_observation(self) -> None:
+        m = WorkerMetrics(resource_id="r", adapter_names=("a",))
+        m.observe_poll_emitted(t_mono_s=10.0)
+        m.observe_poll_emitted(t_mono_s=10.25)
+        m.observe_poll_emitted(t_mono_s=10.50)
+        assert m.polls_emitted == 3
+
+    def test_first_observation_seeds_without_period(self) -> None:
+        # No period can be measured from a single observation — only the
+        # 2nd+ observation feeds the ring.
+        m = WorkerMetrics(resource_id="r", adapter_names=("a",))
+        m.observe_poll_emitted(t_mono_s=10.0)
+        assert m.polls_emitted == 1
+        assert m.poll_period_p50_ms == 0.0
+        assert m.poll_rate_hz == 0.0
+
+    def test_period_p50_matches_configured_rate(self) -> None:
+        # 4 Hz cadence → 250 ms between polls → rate ~ 4 Hz.
+        m = WorkerMetrics(resource_id="r", adapter_names=("a",))
+        t = 10.0
+        for _ in range(20):
+            m.observe_poll_emitted(t_mono_s=t)
+            t += 0.25  # 250 ms
+        assert 200.0 <= m.poll_period_p50_ms <= 300.0
+        assert 3.0 <= m.poll_rate_hz <= 5.0
+
+    def test_rate_unaffected_by_emission_fanout(self) -> None:
+        # The diagnostics bug was: tick_duration is observed per emission,
+        # so 1 SourceRecord + 5 ChannelSamples per poll produced a p50 of
+        # microseconds and a "rate" in the tens of thousands. The
+        # observe_poll_emitted path must be immune to that.
+        m = WorkerMetrics(resource_id="r", adapter_names=("a",))
+        t = 10.0
+        for _ in range(10):
+            # Simulated emission burst at every poll: 6 tick observations
+            # (5 sub-millisecond, 1 large) but only ONE poll observation.
+            for sub_ms in (0.05, 0.05, 0.05, 0.05, 0.05):
+                m.observe_tick_duration(sub_ms)
+            m.observe_tick_duration(250.0)  # gap to next poll
+            m.observe_poll_emitted(t_mono_s=t)
+            t += 0.25
+        # tick-duration p50 reflects burst microseconds — that's correct
+        # for the saturation budget metric but wrong for operator rate.
+        assert m.tick_duration_p50_ms < 1.0
+        # poll-rate is the operator-facing metric and must match cadence.
+        assert 3.0 <= m.poll_rate_hz <= 5.0
+
+
+class TestLastSampleAge:
+    def test_zero_before_first_poll(self) -> None:
+        m = WorkerMetrics(resource_id="r", adapter_names=("a",))
+        assert m.last_sample_age_s == 0.0
+
+    def test_grows_with_wallclock_after_poll(self) -> None:
+        m = WorkerMetrics(resource_id="r", adapter_names=("a",))
+        m.observe_poll_emitted(t_mono_s=time.monotonic())
+        # Same-tick read: age is some small positive number close to zero.
+        age0 = m.last_sample_age_s
+        assert 0.0 <= age0 < 0.5
+        # Simulate an old stamp — age must report the gap.
+        m.observe_poll_emitted(t_mono_s=time.monotonic() - 3.0)
+        age1 = m.last_sample_age_s
+        assert 2.5 <= age1 <= 3.5
 
 
 class TestDisarmResult:

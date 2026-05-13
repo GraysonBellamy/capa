@@ -23,6 +23,7 @@ block; the UI status-bar binding lands in Phase 4.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -117,9 +118,10 @@ class WorkerMetrics:
 
     samples_emitted: int = 0
     """Number of ``adapter.stream()`` items the worker put on its outbound
-    bridge. Read by the per-worker watchdog (Phase 2) to detect stream
-    silence — ``samples_emitted`` failing to advance for ``2 / rate_hz`` is
-    the silence trigger (§5.3)."""
+    bridge — every emission, including the channel-sample fanout. Read by
+    the per-worker watchdog (Phase 2) to detect stream silence —
+    ``samples_emitted`` failing to advance for ``2 / rate_hz`` is the silence
+    trigger (§5.3). For "polls per second" use :attr:`polls_emitted`."""
 
     samples_late: int = 0
     """Subset of :attr:`samples_emitted`: producer side observed > 1 tick
@@ -127,17 +129,19 @@ class WorkerMetrics:
     specific; the worker exposes the metric, the adapter decides what to
     record."""
 
+    polls_emitted: int = 0
+    """Number of ``SourceRecord`` emissions — i.e. actual polls / samples,
+    not the per-poll fanout. Every device adapter yields 1 ``SourceRecord``
+    plus N ``ChannelSample``s plus the occasional ``DeviceSnapshot`` per
+    poll; :attr:`samples_emitted` counts all of those, while this counter
+    counts only the underlying poll cadence. The diagnostics dock divides
+    this by elapsed time to display the operator-facing acquisition rate."""
+
     disconnects: int = 0
     """Number of mid-run adapter reconnects (when the adapter declares
     :attr:`Capability.SUPPORTS_AUTO_RECONNECT` and recovers silently).
     Diagnostic only; non-supporting adapters bubble the error and trigger
     the worker's degraded path instead."""
-
-    last_sample_age_s: float = 0.0
-    """Wall-clock seconds since the most recent ``samples_emitted`` increment.
-    Computed lazily (the worker stamps a monotonic timestamp on every emit;
-    the property reads it on demand). Read by the UI as part of the per-device
-    age widget."""
 
     # ---- bridges ---------------------------------------------------------
 
@@ -154,7 +158,22 @@ class WorkerMetrics:
     tick_duration_ms: _PercentileRing = field(default_factory=_PercentileRing)
     """One observation per ``adapter.stream()`` yield: time spent in the
     worker between consecutive emissions. p50/p99 of this is what §10 line
-    1962 budgets to < 18 ms for the Sartorius @ 50 Hz."""
+    1962 budgets to < 18 ms for the Sartorius @ 50 Hz. Includes the
+    microsecond gaps inside a single poll's emission burst — this is the
+    bridge-latency budget metric, NOT the operator-facing poll period.
+    Use :attr:`poll_period_ms` for the latter."""
+
+    poll_period_ms: _PercentileRing = field(default_factory=_PercentileRing)
+    """One observation per ``SourceRecord`` emission: time between
+    consecutive polls. p50 of this is the inverse of the actual sample
+    rate — what the diagnostics dock reports as "Rate (Hz)" and what
+    operators compare against the configured ``rate_hz``."""
+
+    _last_poll_mono_s: float | None = field(default=None, init=False)
+    """``time.monotonic()`` of the most recent :class:`SourceRecord`
+    emission, or ``None`` before the first poll has landed. Used by the
+    :attr:`last_sample_age_s` property to compute age on read, and by
+    :meth:`observe_poll_emitted` to compute :attr:`poll_period_ms`."""
 
     def __post_init__(self) -> None:
         self.loop_lag = LoopLagMetric(name=f"worker-{self.resource_id}")
@@ -183,6 +202,22 @@ class WorkerMetrics:
     def observe_tick_duration(self, dt_ms: float) -> None:
         self.tick_duration_ms.observe(dt_ms)
 
+    def observe_poll_emitted(self, *, t_mono_s: float) -> None:
+        """Called once per :class:`SourceRecord` emission (i.e. once per
+        actual poll/sample, not per per-poll fanout emission). Updates the
+        poll counter, the poll-period percentile ring, and the age stamp.
+
+        The first observation has no prior poll to subtract from, so it
+        seeds :attr:`_last_poll_mono_s` without recording a period.
+        Subsequent observations record ``(t_mono_s - prev) * 1000`` as one
+        :attr:`poll_period_ms` sample.
+        """
+        prev = self._last_poll_mono_s
+        if prev is not None:
+            self.poll_period_ms.observe((t_mono_s - prev) * 1000.0)
+        self._last_poll_mono_s = t_mono_s
+        self.polls_emitted += 1
+
     def observe_disconnect(self) -> None:
         self.disconnects += 1
 
@@ -195,6 +230,34 @@ class WorkerMetrics:
     @property
     def tick_duration_p99_ms(self) -> float:
         return self.tick_duration_ms.p99
+
+    @property
+    def poll_period_p50_ms(self) -> float:
+        return self.poll_period_ms.p50
+
+    @property
+    def poll_period_p99_ms(self) -> float:
+        return self.poll_period_ms.p99
+
+    @property
+    def poll_rate_hz(self) -> float:
+        """Inverse of :attr:`poll_period_p50_ms`. ``0.0`` before the
+        second poll has landed (i.e. before any period has been measured).
+        """
+        p50 = self.poll_period_ms.p50
+        return 1000.0 / p50 if p50 > 0.0 else 0.0
+
+    @property
+    def last_sample_age_s(self) -> float:
+        """Wall-clock seconds since the most recent poll (``SourceRecord``
+        emission). ``0.0`` before the first poll has landed — callers that
+        want to distinguish "never polled" from "just polled" should check
+        :attr:`polls_emitted` first.
+        """
+        prev = self._last_poll_mono_s
+        if prev is None:
+            return 0.0
+        return time.monotonic() - prev
 
     @property
     def loop_lag_ms_p99(self) -> float:

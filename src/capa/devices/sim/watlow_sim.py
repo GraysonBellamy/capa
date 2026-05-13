@@ -185,7 +185,11 @@ class WatlowSim:
         clock = self._clock
         t_now_s = clock.t_mono()
 
-        for (parameter, instance), signal in self.signals.items():
+        # Mirror the real Watlow's per-tick fanout convention: the first
+        # SourceRecord in this batch carries ``tick_first=True`` in metadata
+        # so the worker counts one poll per tick rather than one per
+        # parameter. See watlow.py for the matching real-adapter logic.
+        for tick_idx, ((parameter, instance), signal) in enumerate(self.signals.items()):
             t_mono_ns, requested_at, received_at, midpoint_at, _t_utc, latency_s = synth_timing(
                 clock
             )
@@ -220,7 +224,7 @@ class WatlowSim:
                 t_mono_ns=t_mono_ns,
                 t_utc=midpoint_at,
                 row=row,
-                metadata={"parameter_id": parameter_id},
+                metadata={"parameter_id": parameter_id, "tick_first": tick_idx == 0},
             )
             emissions.append(record)
 

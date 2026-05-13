@@ -164,7 +164,6 @@ class CapaStatusBar(QStatusBar):
         # backpressure signals are loop / sat / q.
         buffers = self._controller.buffers
         overflow = buffers.total_overflow()
-        decimated = buffers.total_decimated()
         self._ui_overflow_label.setText(f"UI overflow {overflow}")
         self._ui_overflow_label.setToolTip(self._build_buffer_tooltip(buffers))
         self._ui_overflow_label.setStyleSheet("")
@@ -226,9 +225,7 @@ class CapaStatusBar(QStatusBar):
             f"Decimated: {decimated_total} — samples that arrived sooner than "
             "the channel's 1/decimate_to_hz interval since the last kept sample."
         )
-        rows = [
-            (name, ovf, dec) for name, (ovf, dec) in per_channel.items() if ovf or dec
-        ]
+        rows = [(name, ovf, dec) for name, (ovf, dec) in per_channel.items() if ovf or dec]
         if not rows:
             return header
         rows.sort(key=lambda r: (r[2], r[1]), reverse=True)

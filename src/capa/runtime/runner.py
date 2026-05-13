@@ -44,6 +44,7 @@ from typing import Any, Protocol, TypeVar, runtime_checkable
 import structlog
 
 from capa.runtime.errors import RunnerStateError
+from capa.runtime.shutdown import RunnerStopResult
 
 T = TypeVar("T")
 
@@ -110,15 +111,22 @@ class WorkerRunner(Protocol):
         """
         ...
 
-    def stop(self, *, grace_s: float = 5.0) -> Future[None]:
+    def stop(self, *, grace_s: float = 5.0) -> Future[RunnerStopResult]:
         """Tear the runner down. Resolves once the loop has stopped and
-        (for :class:`ThreadedRunner`) the thread has joined.
+        (for :class:`ThreadedRunner`) the thread-join attempt has finished.
 
         ``grace_s`` bounds the thread join. On expiry the
-        :class:`ThreadedRunner` records a degraded state and lets the
-        thread persist as a daemon — see migration doc §3.8 Phase B for the
-        protocol. :class:`InlineRunner` ignores the grace; it just cancels
-        outstanding tasks on its loop.
+        :class:`ThreadedRunner` resolves with
+        :attr:`RunnerStopResult.joined` ``= False``. The runner does
+        **not** attempt to convert a non-daemon thread into a daemon — an
+        already-started ``threading.Thread`` cannot have its daemon flag
+        toggled — and it does not pretend the thread exited. Callers
+        treat non-joined threads as degraded shutdown; the
+        :class:`~capa.ui.shutdown.ShutdownCoordinator` owns the
+        process-wide hard fuse.
+
+        :class:`InlineRunner` ignores the grace, has no thread to join,
+        and always resolves with :attr:`RunnerStopResult.joined` ``= True``.
         """
         ...
 
@@ -130,6 +138,15 @@ class ThreadedRunner:
     The thread is non-daemon (``daemon=False``) per migration doc §4.1
     line 659 so a misbehaving worker is visible at process exit rather
     than silently dropped.
+
+    Stop policy: the thread stays non-daemon for the worker's lifetime.
+    ``stop()`` either joins within grace or returns
+    :class:`RunnerStopResult` with ``joined=False``. The runner makes no
+    attempt to convert a non-daemon thread into a daemon — an already-
+    started ``threading.Thread`` cannot have its daemon flag toggled.
+    Callers treat a non-joined runner as degraded shutdown; the
+    :class:`~capa.ui.shutdown.ShutdownCoordinator` owns the process-wide
+    hard fuse.
     """
 
     def __init__(self, *, name: str) -> None:
@@ -204,13 +221,23 @@ class ThreadedRunner:
         loop.call_soon_threadsafe(_kick)
         return out
 
-    def stop(self, *, grace_s: float = 5.0) -> Future[None]:
+    def stop(self, *, grace_s: float = 5.0) -> Future[RunnerStopResult]:
         if not self._started:
             raise RunnerStateError(f"ThreadedRunner {self._name!r}: stop() before start()")
-        out: Future[None] = Future()
+        out: Future[RunnerStopResult] = Future()
+        thread_ident_at_call = self._thread.ident if self._thread is not None else None
         if self._stopped:
-            # Idempotent; resolve immediately.
-            out.set_result(None)
+            # Idempotent; resolve with a synthetic "already stopped" result.
+            # We can't re-check liveness reliably (the original join may have
+            # already happened on the first stop call), so report joined=True.
+            out.set_result(
+                RunnerStopResult(
+                    name=self._name,
+                    joined=True,
+                    grace_s=grace_s,
+                    thread_ident=thread_ident_at_call,
+                )
+            )
             return out
         self._stopped = True
 
@@ -220,17 +247,27 @@ class ThreadedRunner:
 
         def _finalize_after_join() -> None:
             thread.join(timeout=grace_s)
-            if thread.is_alive():
-                # Migration doc §3.8 Phase B / §5.10: the loop refused to
-                # stop within grace. Record and let the thread persist as
-                # daemon for the process lifetime. We can't safely interrupt
-                # a wedged native call.
+            joined = not thread.is_alive()
+            if not joined:
+                # The loop refused to stop within grace, or a submitted
+                # coroutine is wedged in a non-cancellable native call.
+                # We cannot safely interrupt it. Surface the degraded
+                # state in the result; the ShutdownCoordinator decides
+                # whether to escalate to its hard fuse.
                 _logger.warning(
                     "runner.thread_did_not_join",
                     name=self._name,
                     grace_s=grace_s,
+                    thread_ident=thread.ident,
                 )
-            out.set_result(None)
+            out.set_result(
+                RunnerStopResult(
+                    name=self._name,
+                    joined=joined,
+                    grace_s=grace_s,
+                    thread_ident=thread.ident,
+                )
+            )
 
         if loop is None:
             # start() finished but the loop never bound; nothing to stop.
@@ -356,16 +393,21 @@ class InlineRunner:
         task.add_done_callback(_bridge)
         return out
 
-    def stop(self, *, grace_s: float = 5.0) -> Future[None]:
-        del grace_s  # inline runner doesn't have a thread to join
+    def stop(self, *, grace_s: float = 5.0) -> Future[RunnerStopResult]:
         if not self._started:
             raise RunnerStateError(f"InlineRunner {self._name!r}: stop() before start()")
-        out: Future[None] = Future()
+        out: Future[RunnerStopResult] = Future()
+        result = RunnerStopResult(
+            name=self._name,
+            joined=True,  # no thread to join — always "joined" by definition
+            grace_s=grace_s,
+            thread_ident=None,
+        )
         if self._stopped:
-            out.set_result(None)
+            out.set_result(result)
             return out
         self._stopped = True
-        out.set_result(None)
+        out.set_result(result)
         return out
 
 

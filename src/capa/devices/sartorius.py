@@ -32,8 +32,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Final, Literal
 
-_log = logging.getLogger(__name__)
-
 import anyio
 import sartoriuslib
 from pydantic import BaseModel, ConfigDict, Field
@@ -73,6 +71,8 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+
+_log = logging.getLogger(__name__)
 
 ADAPTER_ID: Final[str] = "sartorius"
 
@@ -906,7 +906,9 @@ class SartoriusAdapter:
 
     def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
         info = self._device_info
-        interval_min = None if math.isinf(self._interval_min_ms) else round(self._interval_min_ms, 2)
+        interval_min = (
+            None if math.isinf(self._interval_min_ms) else round(self._interval_min_ms, 2)
+        )
         out: dict[str, float | int | str | bool | None] = {
             "protocol": self.params.protocol,
             "rate_hz": self.params.rate_hz,
@@ -914,7 +916,9 @@ class SartoriusAdapter:
             "state": self._lifecycle.state,
             "recoverable_errors": self._recoverable_error_count,
             "wire_interval_min_ms": interval_min,
-            "wire_interval_max_ms": round(self._interval_max_ms, 2) if self._interval_max_ms else None,
+            "wire_interval_max_ms": round(self._interval_max_ms, 2)
+            if self._interval_max_ms
+            else None,
             "wire_interval_narrow_count": self._interval_narrow_count,
         }
         if interval_min is not None:

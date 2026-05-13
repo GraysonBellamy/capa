@@ -54,10 +54,11 @@ from capa.runtime.lifecycle import PoolState
 from capa.runtime.pool import WorkerPool
 from capa.runtime.preview import PreviewFrame
 from capa.runtime.session import RealRunSession
+from capa.runtime.shutdown import PoolCloseResult
 from capa.runtime.state import ConductorState
 from capa.storage.catalog import RunCatalog
 from capa.storage.manifest import BundleManifest
-from capa.ui.async_util import schedule_bg
+from capa.ui.lifecycle import LifecycleKind, LifecycleRegistry
 
 if TYPE_CHECKING:
     from capa.runtime.conductor import RunSession
@@ -73,6 +74,23 @@ ABORT_GRACE_S: Final[float] = 5.0
 finish their stream tasks. Matches :data:`ConductorConfig.shutdown_grace_s`."""
 
 _logger = structlog.get_logger("capa.ui.controller")
+
+
+def _running_loop_or_none() -> asyncio.AbstractEventLoop | None:
+    """Return the running asyncio loop, or ``None`` when no loop is
+    running.
+
+    The controller's :meth:`set_active_config` runs from a Qt slot
+    under qasync in production (so the qasync loop is the running
+    loop). Tests that construct the controller without qasync are
+    exercising pure bookkeeping paths — they don't need lifecycle
+    tasks to actually run. Returning ``None`` lets those paths skip
+    scheduling without raising.
+    """
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +282,21 @@ class RunController(QObject):
         self._last_result: RunUiResult | None = None
         self._ui_state: RunUiState = RunUiState.IDLE
         self._state_poll_task: asyncio.Task[None] | None = None
+        # Latched abort request from before the conductor exists.
+        # ``request_abort()`` sets this when ``_conductor is None`` but
+        # ``_task`` is still active (i.e. ``_run()`` is preparing the
+        # conductor). ``_run()`` checks the latch immediately after
+        # constructing the conductor and forwards a ``conductor.stop()``.
+        self._pending_abort_reason: str | None = None
+        # Hard gate set by the ShutdownCoordinator before it starts its
+        # phase ladder. While true, ``start()``, ``set_active_config()``,
+        # and ``request_abort()`` refuse new lifecycle-creating work so
+        # the coordinator can drain the registry without a slot creating
+        # fresh tasks behind its back.
+        self._shutdown_requested: bool = False
+        # Lifecycle-task registry. The coordinator iterates this
+        # snapshot to know what to cancel/await.
+        self._lifecycle: LifecycleRegistry = LifecycleRegistry()
 
         # ManualClient — single facade for UI manual cards. Built lazily
         # on first pool open; reconstructed if the pool is swapped.
@@ -320,15 +353,55 @@ class RunController(QObject):
     def active_config(self) -> ExperimentConfig | None:
         return self._active_config
 
+    @property
+    def lifecycle(self) -> LifecycleRegistry:
+        """Live registry of lifecycle tasks. The
+        :class:`~capa.ui.shutdown.ShutdownCoordinator` snapshots this in
+        its CANCEL_LIFECYCLE_TASKS phase."""
+        return self._lifecycle
+
+    @property
+    def shutdown_requested(self) -> bool:
+        """``True`` once the ShutdownCoordinator has called
+        :meth:`enter_shutdown_mode`. UI slots use this to refuse new
+        lifecycle-creating work (Start, Open Config, manual writes)."""
+        return self._shutdown_requested
+
+    @property
+    def active_run_id(self) -> str | None:
+        """ID of the currently-running run, or ``None`` when idle. Read
+        by the :class:`~capa.ui.shutdown.ShutdownCoordinator` into its
+        diagnostic payload."""
+        c = self._conductor
+        return c.run_id if c is not None else None
+
+    @property
+    def active_bundle_path(self) -> Path | None:
+        """Bundle path of the currently-running run, or ``None``. Read by
+        the :class:`~capa.ui.shutdown.ShutdownCoordinator` into its
+        hard-exit diagnostic payload so a wedged shutdown still names
+        the recoverable bundle."""
+        c = self._conductor
+        return c.bundle_path if c is not None else None
+
+    def enter_shutdown_mode(self) -> None:
+        """Flip ``_shutdown_requested`` so subsequent ``start()`` /
+        ``set_active_config()`` / ``request_abort()`` calls are gated.
+        Idempotent. Called by the :class:`ShutdownCoordinator` at the
+        DISABLE_UI phase."""
+        self._shutdown_requested = True
+
     # ------------------------------------------------------------------ config lifecycle
 
     def set_active_config(self, config: ExperimentConfig) -> None:
         """Bind a freshly-loaded config: rebuild the :class:`WorkerPool`.
 
         Builds a new pool synchronously and schedules its async
-        :meth:`WorkerPool.open` on the qasync loop. The old pool (if any)
-        is closed via :func:`schedule_bg` — fire-and-forget so the UI
-        does not block while serial ports release.
+        :meth:`WorkerPool.open` on the qasync loop as a registered
+        lifecycle task. The old pool (if any) is closed via a separate
+        registered :attr:`LifecycleKind.OLD_POOL_CLOSE` task so the
+        shutdown coordinator can see both lifecycle phases independently
+        (plan §4.7).
 
         The new pool is published via :attr:`pool_changed` once
         :meth:`WorkerPool.open` resolves, so manual cards know not to
@@ -336,6 +409,9 @@ class RunController(QObject):
         raise :class:`UnknownDeviceError` (no worker registered yet) and
         cards surface the failure in their inline status label.
         """
+        if self._shutdown_requested:
+            _logger.info("ui.controller.set_active_config_during_shutdown_ignored")
+            return
         old_pool = self._worker_pool
         # set_active_config runs on the qasync loop (called from a UI
         # signal handler), so the running loop is the consumer loop for
@@ -366,28 +442,83 @@ class RunController(QObject):
             conductor_provider=lambda: self._conductor,
         )
 
-        # Spawn an async open + signal. The pool_changed signal fires
-        # once on completion (success or failure); subscribers should
-        # tolerate it firing on the next event-loop tick rather than
-        # synchronously.
-        schedule_bg(self._open_pool(new_pool, old_pool))
+        # Old-pool close runs as its OWN registered task so the shutdown
+        # coordinator can see it separately from the new pool's open.
+        # The old pool's close must complete before the new pool's open
+        # touches any shared serial bus, so the open task awaits the
+        # close task's future explicitly (not via schedule order).
+        #
+        # ``_running_loop_or_none`` returns ``None`` in unit tests that
+        # construct the controller outside qasync (manual-control card
+        # tests, etc.) — in that case there's no loop to schedule on,
+        # so we close the coroutine immediately. The exception is the
+        # legitimate runtime path where ``set_active_config`` must
+        # always be called from the qasync loop.
+        loop = _running_loop_or_none()
+        old_close_task: asyncio.Task[None] | None = None
+        if old_pool is not None and loop is not None:
+            old_close_task = loop.create_task(
+                self._close_old_pool(old_pool),
+                name="ui-old-pool-close",
+            )
+            self._lifecycle.register(
+                LifecycleKind.OLD_POOL_CLOSE,
+                "old-pool-close",
+                old_close_task,
+                critical=True,
+            )
+
+        # Pool open task is critical (the coordinator awaits it before
+        # closing the pool — opening then immediately closing is the
+        # well-defined case; cancelling mid-open could leak threads).
+        if loop is not None:
+            open_task = loop.create_task(
+                self._open_pool(new_pool, old_close_task),
+                name="ui-pool-open",
+            )
+            self._lifecycle.register(
+                LifecycleKind.POOL_OPEN,
+                "pool-open",
+                open_task,
+                critical=True,
+            )
+        else:
+            # No loop running — close the coroutine to avoid the
+            # "coroutine was never awaited" RuntimeWarning. Tests that
+            # construct a controller without a loop are doing pure
+            # bookkeeping work; they don't need the pool open task.
+            self._open_pool(new_pool, old_close_task).close()
+
+    async def _close_old_pool(self, old_pool: WorkerPool) -> None:
+        """Tear down the previous config's pool before the new pool's
+        ``open()`` touches a shared bus.
+
+        Split out of :meth:`_open_pool` so the
+        :class:`ShutdownCoordinator` can see this work as its own
+        registered :attr:`LifecycleKind.OLD_POOL_CLOSE` entry instead of
+        being buried inside the pool-open task.
+        """
+        await self._stop_preview_drainers()
+        try:
+            await old_pool.close()
+        except Exception as exc:
+            _logger.warning(
+                "ui.controller.old_pool_close_failed",
+                error=str(exc),
+            )
 
     async def _open_pool(
         self,
         new_pool: WorkerPool,
-        old_pool: WorkerPool | None,
+        old_close_task: asyncio.Task[None] | None,
     ) -> None:
-        # 1. Tear down old pool's preview machinery FIRST: drainers
-        #    reference bridges that pool.close() will invalidate.
-        if old_pool is not None:
-            await self._stop_preview_drainers()
-            try:
-                await old_pool.close()
-            except Exception as exc:
-                _logger.warning(
-                    "ui.controller.old_pool_close_failed",
-                    error=str(exc),
-                )
+        # 1. Await the old-pool close task if any. We don't share
+        #    teardown with the close task itself — that's its own
+        #    registered lifecycle entry — but we MUST wait for it to
+        #    finish before the new pool touches a shared serial bus.
+        if old_close_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await old_close_task
 
         # 2. Attach preview consumers BEFORE pool.open. The worker
         #    threads attach producers inside _open_all_impl; the
@@ -415,14 +546,22 @@ class RunController(QObject):
         #    over PreviewFrame items and re-emits preview_received on
         #    the Qt thread. Lifetime = until close_preview_bridges
         #    fires ThreadBridgeClosedError or _stop_preview_drainers
-        #    cancels.
-        self._preview_drainers = {
-            name: asyncio.create_task(
+        #    cancels. Each drainer is registered as a non-critical
+        #    lifecycle task so the shutdown coordinator can cancel them
+        #    en masse without blocking on the close.
+        self._preview_drainers = {}
+        for name, bridge in new_pool.preview_bridges().items():
+            task = asyncio.create_task(
                 self._drain_preview(bridge),
                 name=f"ui-preview-{name}",
             )
-            for name, bridge in new_pool.preview_bridges().items()
-        }
+            self._preview_drainers[name] = task
+            self._lifecycle.register(
+                LifecycleKind.PREVIEW_DRAIN,
+                f"preview-{name}",
+                task,
+                critical=False,
+            )
         self.pool_changed.emit(new_pool)
 
     async def _drain_preview(self, bridge: ThreadBridge[PreviewFrame]) -> None:
@@ -460,10 +599,16 @@ class RunController(QObject):
             task.cancel()
         await asyncio.gather(*drainers.values(), return_exceptions=True)
 
-    async def aclose_pool(self) -> None:
-        """Close the active pool and clear the binding. Used by
-        :meth:`MainWindow.closeEvent` to release serial ports cleanly on
-        app-quit. Safe to call when no pool is bound."""
+    async def aclose_pool(self) -> PoolCloseResult | None:
+        """Close the active pool and clear the binding via the
+        best-effort :meth:`WorkerPool.shutdown_close` path.
+
+        Returns the structured :class:`PoolCloseResult` so the
+        :class:`ShutdownCoordinator` can record any degraded outcome in
+        its :class:`ShutdownResult.errors`. ``None`` when no pool was
+        bound. Exceptions are not swallowed — shutdown-critical results
+        must reach the coordinator.
+        """
         old = self._worker_pool
         self._worker_pool = None
         self._manual_client = None
@@ -472,9 +617,9 @@ class RunController(QObject):
         # Cancel UI-side preview drainers before pool.close so they
         # don't observe a half-closed bridge mid-iteration.
         await self._stop_preview_drainers()
-        if old is not None:
-            with contextlib.suppress(Exception):
-                await old.close()
+        if old is None:
+            return None
+        return await old.shutdown_close()
 
     def emit_manual_event(self, event: DeviceEvent) -> None:
         """Surface a manual-command :class:`DeviceEvent` to the events dock."""
@@ -493,6 +638,8 @@ class RunController(QObject):
         :class:`PoolState.OPENING` pool (which would crash inside
         ``pool.arm_all`` with a :class:`PoolStateError`).
         """
+        if self._shutdown_requested:
+            raise RuntimeError("shutdown in progress; cannot start a new run")
         if self.is_active:
             raise RuntimeError("a run is already active; abort it first")
         pool = self._worker_pool
@@ -504,18 +651,41 @@ class RunController(QObject):
                 "to finish loading before starting a run"
             )
         loop = asyncio.get_event_loop()
-        self._task = loop.create_task(self._run(config))
+        self._task = loop.create_task(self._run(config), name="ui-run")
+        self._lifecycle.register(
+            LifecycleKind.RUN,
+            "run",
+            self._task,
+            critical=True,
+        )
 
     def request_abort(self, *, mode: str = "safe_shutdown") -> None:
-        """Forward the abort request to the active conductor. No-op if no
-        run is active. ``mode`` is kept for API compatibility with the
-        legacy engine; the conductor's :meth:`Conductor.stop` does the
-        same thing regardless of mode (the procedure executor's
-        ``SafeShutdownStep`` runs unconditionally before disarm)."""
+        """Forward the abort request to the active conductor; latch it
+        when the conductor doesn't exist yet.
+
+        ``mode`` is recorded in the run's ``exit_reason`` for audit
+        purposes (``"safe_shutdown"`` vs ``"immediate"``); the conductor
+        treats both the same way — its ``SafeShutdownStep`` runs
+        unconditionally before disarm.
+
+        Behavior:
+
+        * Conductor exists → forward the stop immediately.
+        * Conductor is ``None`` but ``_run()`` is in flight (preparing
+          the conductor) → latch the reason. ``_run()`` consumes the
+          latch right after assigning ``self._conductor`` so the
+          operator's abort is honored even if Start was clicked and
+          Abort hit before the conductor was constructed.
+        * No active run at all → no-op.
+        """
         conductor = self._conductor
-        if conductor is None:
+        if conductor is not None:
+            conductor.stop(reason=f"operator_{mode}")
             return
-        conductor.stop(reason=f"operator_{mode}")
+        task = self._task
+        if task is not None and not task.done():
+            self._pending_abort_reason = f"operator_{mode}"
+            _logger.info("runcontroller.abort_latched", reason=self._pending_abort_reason)
 
     async def await_active_run(self) -> None:
         """Await the in-flight :meth:`_run` task, if any.
@@ -635,6 +805,15 @@ class RunController(QObject):
         _conductor_holder.append(conductor)
         self._conductor = conductor
 
+        # Apply any abort that landed before the conductor existed.
+        # Cleared whether or not consumed so a stale latch can't bleed
+        # into the next run.
+        pending_reason = self._pending_abort_reason
+        self._pending_abort_reason = None
+        if pending_reason is not None:
+            _logger.info("runcontroller.pending_abort_applied", reason=pending_reason)
+            conductor.stop(reason=pending_reason)
+
         # UI bridge — Conductor → UI thread channel. DROP_OLDEST so the
         # conductor never blocks on UI subscribers.
         ui_bridge: ThreadBridge[WorkerEmission] = ThreadBridge(
@@ -647,10 +826,18 @@ class RunController(QObject):
         conductor.attach_ui_bridge(ui_bridge)
 
         # State-polling task surfaces conductor transitions as Qt signals.
+        # Non-critical lifecycle entry: the coordinator cancels it during
+        # the CANCEL_LIFECYCLE_TASKS phase rather than waiting.
         self._set_ui_state(RunUiState.PREPARING)
         self._state_poll_task = asyncio.create_task(
             self._poll_conductor_state(conductor),
             name="ui-state-poll",
+        )
+        self._lifecycle.register(
+            LifecycleKind.STATE_POLL,
+            "state-poll",
+            self._state_poll_task,
+            critical=False,
         )
 
         # Start the conductor (spawns its own thread + loop) and drain
