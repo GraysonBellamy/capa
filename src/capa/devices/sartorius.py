@@ -26,9 +26,13 @@ Architecture (plan §5.2 / §5.6 / §7.2):
 
 from __future__ import annotations
 
+import logging
+import math
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Final, Literal
+
+_log = logging.getLogger(__name__)
 
 import anyio
 import sartoriuslib
@@ -233,6 +237,10 @@ class SartoriusAdapter:
         "_clock",
         "_cold_open_retry_count",
         "_device_info",
+        "_interval_max_ms",
+        "_interval_min_ms",
+        "_interval_narrow_count",
+        "_last_monotonic_ns",
         "_last_sample",
         "_last_snapshot_t_mono_ns",
         "_lifecycle",
@@ -286,6 +294,10 @@ class SartoriusAdapter:
         self._recoverable_error_count = 0
         self._stop_requested = False
         self._cold_open_retry_count = 0
+        self._last_monotonic_ns: int | None = None
+        self._interval_min_ms: float = math.inf
+        self._interval_max_ms: float = 0.0
+        self._interval_narrow_count: int = 0
 
     # ------------------------------------------------------------------ wiring
 
@@ -345,6 +357,10 @@ class SartoriusAdapter:
         self._last_sample.reset()
         self._recoverable_error_count = 0
         self._last_snapshot_t_mono_ns = -(2**62)
+        self._last_monotonic_ns = None
+        self._interval_min_ms = math.inf
+        self._interval_max_ms = 0.0
+        self._interval_narrow_count = 0
 
     async def stop(self) -> None:
         """Request the streaming loop to exit cleanly. Idempotent."""
@@ -413,6 +429,18 @@ class SartoriusAdapter:
                         # treat as missed tick.
                         self._recoverable_error_count += 1
                         continue
+                    # Track wire-midpoint spacing so we can diagnose jitter.
+                    cur_mono = sample.monotonic_ns
+                    if self._last_monotonic_ns is not None:
+                        dt_ms = (cur_mono - self._last_monotonic_ns) / 1e6
+                        if dt_ms < self._interval_min_ms:
+                            self._interval_min_ms = dt_ms
+                        if dt_ms > self._interval_max_ms:
+                            self._interval_max_ms = dt_ms
+                        expected_ms = 1000.0 / self.params.rate_hz
+                        if dt_ms < expected_ms * 0.75:
+                            self._interval_narrow_count += 1
+                    self._last_monotonic_ns = cur_mono
                     record = self._record_for(sample)
                     yield record
                     self._last_sample.mark(record.t_mono_ns)
@@ -878,13 +906,27 @@ class SartoriusAdapter:
 
     def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
         info = self._device_info
+        interval_min = None if math.isinf(self._interval_min_ms) else round(self._interval_min_ms, 2)
         out: dict[str, float | int | str | bool | None] = {
             "protocol": self.params.protocol,
             "rate_hz": self.params.rate_hz,
             "channel_count": len(self._channels),
             "state": self._lifecycle.state,
             "recoverable_errors": self._recoverable_error_count,
+            "wire_interval_min_ms": interval_min,
+            "wire_interval_max_ms": round(self._interval_max_ms, 2) if self._interval_max_ms else None,
+            "wire_interval_narrow_count": self._interval_narrow_count,
         }
+        if interval_min is not None:
+            expected_ms = 1000.0 / self.params.rate_hz
+            _log.info(
+                "sartorius %r wire-spacing: min=%.1f ms  max=%.1f ms  narrow(<75%% of %.0f ms)=%d",
+                self.name,
+                self._interval_min_ms,
+                self._interval_max_ms,
+                expected_ms,
+                self._interval_narrow_count,
+            )
         if info is not None:
             out["model"] = info.model
             out["serial"] = info.serial
