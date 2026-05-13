@@ -36,9 +36,8 @@ from capa.devices.adapter import (
 from capa.devices.camera.base import Camera
 from capa.devices.records import DeviceEvent
 from capa.experiment.authorization import Authorization, AuthorizationError
-from capa.experiment.engine import EngineState
 from capa.ui.async_util import schedule_bg
-from capa.ui.state import RunController
+from capa.ui.state import RunController, RunUiState
 from capa.ui.statusbar import OperatorIdProvider
 from capa.ui.theme import COLOR_FAIL, COLOR_IDLE, COLOR_OK, COLOR_WARN, monospace_font
 
@@ -50,15 +49,15 @@ CommandTarget = DeviceAdapter | Camera
 
 _logger = structlog.get_logger("capa.ui.manual")
 
-# Engine states during which writes are NEVER routed through the manual
+# UI states during which writes are NEVER routed through the manual
 # panel. The plan's principle (handoff §1.3): manual commands during a run
 # go through procedure steps, not the panel.
-_WRITE_BLOCKED_STATES: Final[frozenset[EngineState]] = frozenset(
+_WRITE_BLOCKED_STATES: Final[frozenset[RunUiState]] = frozenset(
     {
-        EngineState.PREPARING,
-        EngineState.RUNNING,
-        EngineState.ABORTING,
-        EngineState.FINALIZING,
+        RunUiState.PREPARING,
+        RunUiState.RUNNING,
+        RunUiState.DRAINING,
+        RunUiState.FINALIZING,
     }
 )
 
@@ -156,28 +155,27 @@ class DeviceCard(QGroupBox):
     # ------------------------------------------------------------------ adapter handle
 
     async def _ensure_adapter(self) -> CommandTarget | None:
-        """Return the live adapter, opening it via the registry on first
-        call. Returns ``None`` (and surfaces an error in the status label)
-        if no registry is bound or the open() fails.
+        """Probe for liveness; pure no-op for device cards.
 
-        Subclasses controlling non-device targets (cameras) override this
-        to acquire from a different source — the rest of the dispatch
-        machinery only cares about the ``command(cmd)`` surface, which is
-        unified between :class:`DeviceAdapter` and :class:`Camera`.
+        Phase 4: cards no longer hold adapter references. Dispatch goes
+        through :class:`ManualClient` which routes to the
+        :class:`WorkerPool`'s worker for the device. The wrapper / adapter
+        instance lives in the worker thread; cards never see it directly.
+
+        Returns a sentinel non-``None`` to satisfy the legacy contract that
+        cards check before dispatch (camera subclasses override this to
+        return the live :class:`Camera` handle they need for preview
+        subscriptions). For device cards the actual dispatch happens via
+        :meth:`dispatch` → ``ManualClient.dispatch``, which doesn't need
+        the cached handle.
         """
-        if self._adapter is not None:
-            return self._adapter
-        registry = self._controller.device_registry
-        if registry is None:
+        client = self._controller.manual_client
+        if client is None:
             self._set_status("no config loaded — open a config first", level="warn")
             return None
-        try:
-            self._adapter = await registry.acquire_device(self._name)
-        except Exception as exc:
-            self._set_status(f"open failed: {exc}", level="error")
-            _logger.warning("manual.acquire_failed", device=self._name, error=str(exc))
-            return None
-        return self._adapter
+        # Return the client itself as the sentinel — callers (camera
+        # subclasses) override this method when they need a real handle.
+        return client  # type: ignore[return-value]
 
     # ------------------------------------------------------------------ dispatch
 
@@ -238,6 +236,11 @@ class DeviceCard(QGroupBox):
         if adapter is None:
             return None
 
+        client = self._controller.manual_client
+        if client is None:
+            self._set_status("no config loaded — open a config first", level="warn")
+            return None
+
         # Build the command via the run-arm-free manual-issue path. The
         # Authorization helper enforces the issued_by + confirmed_by
         # invariant for us — both stamps are the same operator in P1.
@@ -255,7 +258,7 @@ class DeviceCard(QGroupBox):
             return None
 
         try:
-            result = await adapter.command(cmd)
+            result = await client.dispatch(self._name, cmd)
         except Exception as exc:
             self._set_status(f"{kind} failed: {exc}", level="error")
             self._emit_manual_event(
@@ -310,7 +313,7 @@ class DeviceCard(QGroupBox):
         return self._controller.state in _WRITE_BLOCKED_STATES
 
     def _on_engine_state(self, state: object) -> None:
-        if not isinstance(state, EngineState):
+        if not isinstance(state, RunUiState):
             return
         blocked = state in _WRITE_BLOCKED_STATES
         for widget in self._action_widgets:

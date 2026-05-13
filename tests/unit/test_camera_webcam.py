@@ -143,6 +143,46 @@ class TestWebcamPreviewMode:
         finally:
             await cam.close()
 
+    async def test_start_recording_resets_preview_throttle(self, tmp_path: Path) -> None:
+        """``CameraDeviceAdapter`` rebinds the clock proxy onto the
+        run's RunClock immediately before calling ``start_recording``.
+        ``_last_preview_t_mono_ns`` was previously persisted across that
+        rebind, so the throttle check (``t_mono_ns() - last >= 500ms``)
+        saw a large negative delta — the new clock's ``t_mono_ns`` was
+        near zero but ``last`` held a value in the OLD anchor's units.
+        Previews stayed dark for the early part of every run and the
+        dock's stale detector tripped.
+
+        Regression: after ``start_recording``, the throttle must be
+        reset so the first push_frame's preview encode fires.
+        """
+        cam = _make()
+        await cam.open()
+        try:
+            # Simulate "idle preview ran for a while" by stamping the
+            # throttle with a value far in the future of the new clock
+            # we'll install via the wrapper analogue.
+            cam._last_preview_t_mono_ns = 30_000_000_000  # 30s in old units
+
+            out = tmp_path / "v.mkv"
+            await cam.start_recording(out)
+            # Throttle must be reset; first push_frame produces a preview.
+            assert cam._last_preview_t_mono_ns is None
+
+            await cam.push_frame(_solid_frame(64, 48, (255, 0, 0)))
+
+            # A JPEG SHOULD be available on the preview stream right away.
+            import anyio
+
+            jpeg: bytes | None = None
+            with anyio.move_on_after(0.5):
+                jpeg = await cam.preview_stream().__anext__()
+            assert jpeg is not None, "expected preview JPEG after first recorded frame"
+            assert jpeg[:2] == b"\xff\xd8"
+            await cam.stop_recording()
+        finally:
+            await cam.close()
+
     async def test_close_stops_preview(self) -> None:
         cam = _make()
         await cam.open()

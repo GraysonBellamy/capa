@@ -6,7 +6,8 @@ the CAPA controlled-atmosphere-pyrolysis run, since that's the apparatus
 the project is named after; cone-calorimeter mode is deferred.
 
 This test loads ``configs/experiments/sim_capa_pyrolysis.yaml``, runs it
-through :class:`ExperimentEngine` against simulated adapters, and checks:
+through :func:`run_headless` (the conductor stack) against simulated
+adapters, and checks:
 
 * the bundle finalizes cleanly (``run_status="completed"``,
   ``bundle_status="sealed"``);
@@ -26,21 +27,35 @@ from pathlib import Path
 import pytest
 
 from capa.experiment.config import ExperimentConfig
-from capa.experiment.engine import ExperimentEngine
+from capa.experiment.method import HoldStep, Method
+from capa.runtime.headless import run_headless
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPERIMENT_PATH = REPO_ROOT / "configs" / "experiments" / "sim_capa_pyrolysis.yaml"
 
 
+def _load_smoke_config(path: Path) -> ExperimentConfig:
+    """Load the production CAPA recipe, but keep the integration run short."""
+    config = ExperimentConfig.load(path)
+    method = config.method
+    assert isinstance(method, Method)
+
+    steps = tuple(
+        step.model_copy(update={"duration_s": 0.25})
+        if isinstance(step, HoldStep) and step.duration_s is not None and step.duration_s > 1.0
+        else step
+        for step in method.steps
+    )
+    return config.model_copy(update={"method": method.model_copy(update={"steps": steps})})
+
+
 @pytest.mark.anyio
 async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> None:
-    config = ExperimentConfig.load(EXPERIMENT_PATH)
-    engine = ExperimentEngine()
+    config = _load_smoke_config(EXPERIMENT_PATH)
 
-    result = await engine.run(
+    result = await run_headless(
         config,
         runs_root=tmp_path,
-        configure_logging_for_bundle=False,
     )
 
     # Outcome gate: clean completion + sealed bundle.

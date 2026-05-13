@@ -166,9 +166,10 @@ class Batch(Procedure):
 
     async def run(self, ctx: ProcedureContext) -> None:
         # Lazy import: avoids a circular dependency between
-        # capa.experiment.engine (which imports Procedure) and Batch (which
-        # spawns engines).
-        from capa.experiment.engine import ExperimentEngine, make_run_id  # noqa: PLC0415
+        # capa.runtime.headless (which imports procedures.base) and Batch
+        # (which spawns child runs through the headless entry point).
+        from capa.runtime.headless import run_headless  # noqa: PLC0415
+        from capa.runtime.session import make_run_id  # noqa: PLC0415
 
         assert self._runs_root is not None  # guaranteed by preflight
         ctx.logger.info(
@@ -208,7 +209,6 @@ class Batch(Procedure):
                 batch_id=self._batch_id,
                 iteration=idx,
             )
-            child_engine = ExperimentEngine()
             child_run_id = make_run_id(sample_id=child_sample_id)
 
             ctx.logger.info(
@@ -232,14 +232,15 @@ class Batch(Procedure):
                 },
             )
 
-            result = await child_engine.run(
+            # Each child gets its own bundle via a nested conductor stack.
+            # ``run_headless`` opens a fresh :class:`WorkerPool` for the child
+            # config and tears it down before returning — child resources
+            # are isolated from the parent's pool, matching legacy engine
+            # semantics.
+            result = await run_headless(
                 child_config,
                 runs_root=self._runs_root,
                 run_id=child_run_id,
-                # Each child gets its own logging configuration so the
-                # parent's run.log doesn't tee child output. The parent's
-                # log captures only batch-level events.
-                configure_logging_for_bundle=True,
             )
 
             severity = "info" if result.run_status == "completed" else "warning"

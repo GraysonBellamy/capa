@@ -372,12 +372,19 @@ class MethodExecutor:
     # ---------- helpers ---------------------------------------------------
 
     async def _command_setpoint(self, channel_name: str, value: float, *, kind: str) -> None:
-        """Resolve ``channel_name`` → adapter, build a :class:`DeviceCommand`
-        through :class:`Authorization`, and dispatch it.
+        """Resolve ``channel_name`` → device, build a :class:`DeviceCommand`
+        through :class:`Authorization`, and dispatch it via the procedure
+        context's :attr:`CommandDispatcher`.
 
         Plan §18 #12: every device write is attributable. The command's
         ``issued_by`` / ``authorization_id`` come from the run-arm
-        :class:`Authorization`."""
+        :class:`Authorization`.
+
+        Migration doc §3.5: the dispatch surface is an abstraction over
+        the concurrency layer — engine-style ``AdapterDispatcher`` (direct
+        in-loop call) and conductor-style ``ConductorDispatcher`` (worker-
+        thread routed) both satisfy the same async contract, so this
+        method is loop-shape-agnostic."""
         try:
             resolved = self.ctx.instruments.resolve(channel_name)
         except Exception as exc:
@@ -388,8 +395,12 @@ class MethodExecutor:
             raise MethodExecutorError(
                 f"channel {channel_name!r} has no device binding (derived?); cannot command"
             )
-        adapter = self.ctx.adapters.get(device)
-        if adapter is None:
+        # We still validate that the device exists in the adapter map so a
+        # misconfigured channel binding fails with the same MethodExecutorError
+        # as before — the dispatcher would raise a different exception type
+        # for an unknown device, but the executor's error vocabulary stays
+        # stable for procedures that catch MethodExecutorError.
+        if device not in self.ctx.adapters:
             raise MethodExecutorError(
                 f"no adapter registered for device {device!r} (channel {channel_name!r})"
             )
@@ -404,7 +415,7 @@ class MethodExecutor:
                 "step_kind": kind,
             },
         )
-        result = await adapter.command(cmd)
+        result = await self.ctx.dispatcher.dispatch(device, cmd)
         self.ctx.bundle_writer.write_event(
             kind="method.command.issued",
             message=f"setpoint {channel_name}={value} (step={kind})",

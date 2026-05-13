@@ -24,12 +24,15 @@ def schedule_bg(coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any] | None:
 
     Returns the :class:`asyncio.Task` on success, or ``None`` when no
     event loop is running (typical in unit tests that don't construct
-    a qasync loop). Callers can use the ``None`` return to surface a
-    "UI not running" warning without raising.
+    a qasync loop). The unscheduled coroutine is closed before returning
+    so the "UI not running" path does not leak RuntimeWarnings. Callers
+    can use the ``None`` return to surface a "UI not running" warning
+    without raising.
     """
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
+        coro.close()
         return None
     task = loop.create_task(coro)
     _BG_TASKS.add(task)

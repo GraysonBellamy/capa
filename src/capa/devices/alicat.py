@@ -59,6 +59,7 @@ from capa.devices._helpers import (
     make_not_open_result,
     make_record_id,
     reject_unless_authorized,
+    serial_resource_id,
 )
 from capa.devices.adapter import (
     AdapterLifecycle,
@@ -262,6 +263,10 @@ class AlicatAdapter:
     def expected_emission_rate_hz(self) -> float:
         # One SourceRecord + one ChannelSample per bound channel per poll.
         return self.params.rate_hz * (1 + len(self._channels))
+
+    @property
+    def resource_id(self) -> str:
+        return serial_resource_id(self.params.port)
 
     def update_capabilities_from_device(self, device: AlicatDevice) -> None:
         """Refine :attr:`capabilities` from the library's probed

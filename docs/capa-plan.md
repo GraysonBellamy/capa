@@ -4,6 +4,24 @@
 **Target:** Python 3.12/3.13 control & data-acquisition application for a custom controlled-atmosphere pyrolysis lab instrument
 **Author note:** merges the strongest elements of the prior `capa-plan-claude.md` and `capa-plan-codex.md`. Supersedes both.
 
+> **Runtime migration (Phase 4, 2026-05-12).** The single-loop
+> `ExperimentEngine` + `DeviceRegistry` + `camera_task` scaffold
+> described below has been replaced by the per-resource worker model
+> documented in [`per-resource-worker-migration.md`](per-resource-worker-migration.md):
+> one thread + one asyncio loop per hardware resource, coordinated by a
+> per-run `Conductor` (`src/capa/runtime/conductor.py`) over a
+> long-lived `WorkerPool` (`src/capa/runtime/pool.py`). The CLI
+> (`python -m capa.app --headless`) is built on `run_headless()`
+> (`src/capa/runtime/headless.py`); the GUI's `RunController`
+> (`src/capa/ui/state.py`) builds a `Conductor` per run against the
+> same pool the UI keeps open across runs. Manual-card command
+> dispatch goes through `ManualClient`
+> (`src/capa/runtime/dispatch.py`) which routes to the conductor while
+> a run is armed and to the pool otherwise. Sections below that still
+> reference `ExperimentEngine`, `DeviceRegistry`, or
+> `cameras.py::camera_task` are stale in the implementation; the
+> migration doc is the authoritative reference for the runtime layer.
+
 ---
 
 ## 1. Overview

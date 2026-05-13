@@ -109,6 +109,10 @@ class SartoriusSim:
         rate = 1.0 / self.tick_period_s if self.tick_period_s > 0 else 0.0
         return rate * (1 + len(self._channels))
 
+    @property
+    def resource_id(self) -> str:
+        return f"sim:{self.name}"
+
     async def open(self) -> None:
         self._lifecycle.open()
 

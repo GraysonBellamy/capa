@@ -25,14 +25,13 @@ from PySide6.QtWidgets import (
 
 from capa.core.errors import CapaError
 from capa.experiment.config import ExperimentConfig
-from capa.experiment.engine import EngineResult, EngineState
 from capa.storage.catalog import RunCatalog
 from capa.ui.async_util import schedule_bg
 from capa.ui.docks.camera_preview import CameraPreviewDock
 from capa.ui.docks.events import EventsDock
 from capa.ui.docks.manual_control import ManualControlDock
 from capa.ui.docks.numerics import NumericsDock
-from capa.ui.state import RunController
+from capa.ui.state import RunController, RunUiResult, RunUiState
 from capa.ui.statusbar import CapaStatusBar, OperatorIdProvider
 from capa.ui.tabs.method import MethodTab
 from capa.ui.tabs.run import RunTab
@@ -71,6 +70,17 @@ class MainWindow(QMainWindow):
 
         self._runs_root: Path = runs_root
         self._operator_provider = OperatorIdProvider()
+
+        # Close-flow state machine. The first closeEvent kicks off an async
+        # shutdown (abort run, await its task, close the worker pool) and
+        # ignores Qt's close request; the shutdown coroutine flips
+        # ``_shutdown_complete`` to ``True`` and re-calls :meth:`close`, and
+        # the second closeEvent falls through to ``super().closeEvent``.
+        # Without this, ``aclose_pool`` raced the conductor's disarm and the
+        # non-daemon worker threads ([runner.py:163](src/capa/runtime/runner.py#L163))
+        # leaked at process exit, holding the Python interpreter open.
+        self._shutdown_started: bool = False
+        self._shutdown_complete: bool = False
 
         self._controller = RunController(
             runs_root=runs_root,
@@ -228,10 +238,14 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._numerics_dock)
         self._numerics_dock.start()
 
-        # Replace the camera-preview dock the same way. Subscribes to the
-        # controller's preview_received signal; tiles only render frames
-        # for cameras whose adapters declare CameraCapability.LIVE_PREVIEW
-        # (filtering happens engine-side in _drain_preview).
+        # Replace the camera-preview dock the same way. The dock
+        # subscribes to ``preview_received``; the signal is driven by
+        # the per-camera UI drainers spawned in
+        # :meth:`RunController._open_pool` that read from pool-owned
+        # :class:`ThreadBridge[PreviewFrame]` channels. Tiles only paint
+        # when the adapter declares CameraCapability.LIVE_PREVIEW —
+        # without it, :meth:`CameraDeviceAdapter.start_preview_channel`
+        # never spawns a drainer and the bridge stays empty.
         if self._camera_preview_dock is not None:
             # ``disconnect`` raises ``TypeError`` when no slot was connected
             # (e.g. the prior dock was constructed but never lit up). Treat
@@ -276,14 +290,14 @@ class MainWindow(QMainWindow):
         # When a run starts, the controller has rebuilt the buffer registry.
         # Rebind the numerics dock to point at the new one.
         if (
-            isinstance(state, EngineState)
-            and state is EngineState.RUNNING
+            isinstance(state, RunUiState)
+            and state is RunUiState.RUNNING
             and self._numerics_dock is not None
         ):
             self._numerics_dock.set_registry(self._controller.buffers)
 
     def _on_run_finished(self, result: object) -> None:
-        if not isinstance(result, EngineResult):
+        if not isinstance(result, RunUiResult):
             return
         if result.bundle_path is None:
             self._events_dock.append_run_marker(
@@ -299,6 +313,17 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802 — Qt override
         if event is None:
             return
+        # Second pass: async shutdown finished and re-entered closeEvent.
+        # Save state and let Qt close the window for real.
+        if self._shutdown_complete:
+            self._save_window_state()
+            super().closeEvent(event)
+            return
+        # Re-entry while the async shutdown is still in flight (e.g. user
+        # double-clicks the [×]) — keep ignoring until shutdown completes.
+        if self._shutdown_started:
+            event.ignore()
+            return
         if self._controller.is_active:
             answer = QMessageBox.question(
                 self,
@@ -311,14 +336,33 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self._controller.request_abort(mode="immediate")
-        # Release serial ports / hardware handles held by the manual control
-        # panel's DeviceRegistry. Fire-and-forget — Qt's closeEvent is sync,
-        # and aclose is best-effort on its own.
-        registry = self._controller.device_registry
-        if registry is not None:
-            schedule_bg(registry.aclose())
-        self._save_window_state()
-        super().closeEvent(event)
+        # Defer the close until the conductor has actually finished disarming
+        # and the worker pool has had ``close()`` called on each worker — only
+        # then are the non-daemon worker threads stopped. See
+        # :meth:`RunController.await_active_run`.
+        self._shutdown_started = True
+        event.ignore()
+        schedule_bg(self._shutdown_then_close())
+
+    async def _shutdown_then_close(self) -> None:
+        """Drive the orderly shutdown sequence then re-trigger window close.
+
+        Awaits the in-flight run task (so the conductor reaches SEALED and
+        workers are IDLE), then closes the pool (which joins every
+        :class:`ThreadedRunner`). Errors are logged but never re-raised:
+        the user has already asked to close the window, and a failure here
+        must not strand them.
+        """
+        try:
+            await self._controller.await_active_run()
+        except BaseException as exc:
+            _logger.exception("ui.shutdown.await_run_failed", error=str(exc))
+        try:
+            await self._controller.aclose_pool()
+        except BaseException as exc:
+            _logger.exception("ui.shutdown.aclose_pool_failed", error=str(exc))
+        self._shutdown_complete = True
+        self.close()
 
     def _save_window_state(self) -> None:
         try:

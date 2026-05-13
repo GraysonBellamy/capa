@@ -16,6 +16,7 @@ serializes the value as JSON — surface for the rare case, not pretty.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import types
 import typing
@@ -104,7 +105,7 @@ class FieldWidget(QWidget):
     signal to ``valueChanged``. ``ModelForm`` only ever calls these
     methods; it does not poke at the inner widgets directly."""
 
-    valueChanged = Signal()
+    valueChanged = Signal()  # noqa: N815 - Qt signal naming convention
 
     def value(self) -> Any:
         raise NotImplementedError
@@ -283,10 +284,8 @@ class _DateTimeField(FieldWidget):
             if isinstance(v, datetime):
                 self._edit.setDateTime(_to_qdatetime(v))
             elif isinstance(v, str):
-                try:
+                with contextlib.suppress(ValueError):
                     self._edit.setDateTime(_to_qdatetime(datetime.fromisoformat(v)))
-                except ValueError:
-                    pass
 
 
 class _PathField(FieldWidget):
@@ -445,7 +444,7 @@ class _DictStrFloatField(FieldWidget):
     def _on_remove(self) -> None:
         if not self._rows:
             return
-        key_edit, val_spin = self._rows.pop()
+        key_edit, _val_spin = self._rows.pop()
         widget = key_edit.parentWidget()
         if widget is not None:
             widget.deleteLater()

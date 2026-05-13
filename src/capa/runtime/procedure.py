@@ -1,0 +1,256 @@
+""":class:`ProcedureRunner` — adapter between the procedure plugin layer
+and the :class:`ConductorRunner` contract.
+
+Migration doc §4.5. The conductor doesn't know about
+:class:`~capa.experiment.procedures.base.Procedure` plugins; it only knows
+about the :class:`~capa.runtime.conductor.ConductorRunner` protocol (one
+``preflight``, one ``run``). :class:`ProcedureRunner` is the thin adapter:
+
+* Wraps a :class:`Procedure` instance.
+* Constructs the :class:`ProcedureContext` from the conductor-supplied
+  :class:`RunContext` plus the per-run pieces that the conductor doesn't
+  carry (adapters dict for introspection, dispatcher, authorization,
+  method executor).
+* Translates ``Procedure.preflight``'s :class:`Problem` list into either a
+  silent pass (no blocking problems) or a :class:`ProcedureError` raise
+  (the conductor will surface this as ``run_status="crashed"``).
+* Routes ``Procedure.run`` through with the constructed context.
+
+What it does **not** do:
+
+* Build the procedure plugin itself. The caller resolves the procedure
+  via :class:`~capa.experiment.procedures.registry.ProcedureRegistry` and
+  passes the instance in.
+* Resolve channels, build adapters, open the bundle. All of that is the
+  session/factory's job (Phase 2.4).
+* Hard-stop a procedure. The conductor's normal cancel scope handles
+  that — :meth:`run` propagates :class:`asyncio.CancelledError`.
+
+Phase 2.3 scope: the procedure runner is the bridge between today's
+plugin layer and the conductor's lifecycle. Phase 2.4 will wire it into
+a session that handles bundle/writer construction.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+import anyio
+import structlog
+
+from capa.experiment.procedures.base import (
+    ProcedureContext,
+    ProcedureError,
+)
+
+if TYPE_CHECKING:
+    from capa.channels.registry import ChannelRegistry
+    from capa.core.databus import DataBus
+    from capa.devices.adapter import DeviceAdapter
+    from capa.experiment.authorization import Authorization
+    from capa.experiment.config import ExperimentConfig
+    from capa.experiment.executor import MethodExecutor
+    from capa.experiment.procedures.base import Problem, Procedure
+    from capa.runtime.dispatch import CommandDispatcher
+    from capa.runtime.runcontext import RunContext
+    from capa.storage.bundle import RunBundleWriter
+
+
+_logger = structlog.get_logger("capa.runtime.procedure")
+
+
+class ProcedureRunner:
+    """Adapt a :class:`Procedure` to :class:`ConductorRunner`.
+
+    The runner is **per-run** — construct one each time you start a
+    conductor. State carried across runs would be a bug; the procedure
+    plugin layer already has its own per-instance lifecycle.
+
+    :param procedure: The resolved procedure plugin instance.
+    :param config: The frozen run recipe.
+    :param channel_registry: Frozen channel registry the procedure resolves
+        names against.
+    :param dispatcher: Command-dispatch surface (typically a
+        :class:`~capa.runtime.dispatch.ConductorDispatcher` for runs through
+        the conductor; an :class:`AdapterDispatcher` for engine-path tests).
+    :param authorization: Run-arm authorization handle.
+    :param adapters: Adapter handles keyed by device name (introspection
+        only — the dispatcher does the commanding).
+    :param external_stop: Procedures that loop poll this; the conductor
+        sets it during shutdown so blocking procedures exit promptly.
+    :param bundle_writer: For procedure-side event recording (via
+        ``ctx.bundle_writer.write_event(...)``). The conductor's drain
+        tasks own all *data* writes — procedures only record structured
+        events.
+    :param method_executor: Optional. Procedures that walk a method (recipe
+        runner, etc.) get the executor preconstructed against the same
+        context.
+    """
+
+    __slots__ = (
+        "_adapters",
+        "_authorization",
+        "_bundle_writer",
+        "_channel_registry",
+        "_config",
+        "_dispatcher",
+        "_external_stop",
+        "_logger",
+        "_method_executor",
+        "_proc_ctx",
+        "_procedure",
+        "_stop_signal",
+    )
+
+    def __init__(
+        self,
+        *,
+        procedure: Procedure,
+        config: ExperimentConfig,
+        channel_registry: ChannelRegistry,
+        dispatcher: CommandDispatcher,
+        authorization: Authorization,
+        adapters: dict[str, DeviceAdapter],
+        bundle_writer: RunBundleWriter,
+        method_executor: MethodExecutor | None = None,
+        stop_signal: asyncio.Event | None = None,
+    ) -> None:
+        self._procedure = procedure
+        self._config = config
+        self._channel_registry = channel_registry
+        self._dispatcher = dispatcher
+        self._authorization = authorization
+        self._adapters = adapters
+        # ``stop_signal`` is the conductor's loop-local completion event;
+        # ``external_stop`` (the anyio.Event the procedure sees in its
+        # ProcedureContext) is created on the conductor's loop inside
+        # :meth:`_build_proc_ctx` and bridged to ``stop_signal`` by a
+        # small linker task spawned in :meth:`run`. This avoids the cross-
+        # loop binding error you'd get if the caller's external_stop event
+        # (created on the calling loop) were passed straight through.
+        self._stop_signal = stop_signal
+        self._external_stop: anyio.Event | None = None
+        self._bundle_writer = bundle_writer
+        self._method_executor = method_executor
+        self._proc_ctx: ProcedureContext | None = None
+        self._logger = structlog.get_logger("capa.runtime.procedure").bind(
+            procedure=getattr(procedure, "id", "<unknown>"),
+        )
+
+    async def preflight(self, ctx: RunContext, bus: DataBus) -> None:
+        """Conductor preflight hook.
+
+        Constructs the :class:`ProcedureContext` once (re-used in
+        :meth:`run`) and invokes :meth:`Procedure.preflight`. Blocking
+        problems raise :class:`ProcedureError`; non-blocking problems are
+        logged and written to the bundle as warnings.
+
+        The conductor catches the raised error and turns it into a
+        ``RunOutcome.CRASHED`` with the failure reason — the bundle still
+        seals so the operator can inspect what went wrong.
+        """
+        self._proc_ctx = self._build_proc_ctx(ctx, bus)
+        problems: list[Problem] = await self._procedure.preflight(self._proc_ctx)
+        # Migration doc §3.7 + procedures/base.py:76: ``blocking=True``
+        # refuses the run regardless of severity; non-blocking is a warning
+        # regardless of severity.
+        blocking = [p for p in problems if p.blocking]
+        warnings = [p for p in problems if not p.blocking]
+        for p in warnings:
+            self._logger.warning(
+                "procedure.preflight.warning",
+                code=p.code,
+                message=p.message,
+                severity=str(p.severity),
+            )
+            # Best-effort bundle record; do not let a write failure mask
+            # the procedure's preflight result.
+            try:
+                self._bundle_writer.write_event(
+                    kind="procedure.preflight.warning",
+                    message=p.message,
+                    severity="warning",
+                    source="procedure",
+                    t_mono_ns=ctx.clock.t_mono_ns(),
+                    t_utc=datetime.now(UTC),
+                    metadata={"code": p.code},
+                )
+            except BaseException as exc:
+                self._logger.warning(
+                    "procedure.preflight.warning_record_failed",
+                    error=str(exc),
+                )
+        if blocking:
+            messages = "; ".join(f"{p.code}: {p.message}" for p in blocking)
+            raise ProcedureError(f"procedure preflight refused: {messages}")
+
+    async def run(self, ctx: RunContext, bus: DataBus) -> None:
+        """Conductor run hook.
+
+        Re-uses the :class:`ProcedureContext` built in :meth:`preflight`;
+        falls back to a fresh build if preflight wasn't called (defensive,
+        but the conductor always calls preflight first).
+
+        Spawns a "stop linker" task that mirrors the conductor's loop-
+        local completion event into the procedure's ``external_stop``,
+        so a procedure that ``await ctx.external_stop.wait()``s exits
+        cleanly when the conductor signals shutdown — instead of
+        bubbling up a :class:`CancelledError` mid-handler.
+
+        Returning normally signals "procedure complete"; raising signals
+        "procedure crashed". The conductor's task-group cancel scope is
+        the cancellation channel.
+        """
+        proc_ctx = self._proc_ctx or self._build_proc_ctx(ctx, bus)
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(self._link_stop_signal)
+            try:
+                await self._procedure.run(proc_ctx)
+            finally:
+                # Ensure the linker exits whatever the outcome — without
+                # this it'd wait forever on the stop signal and stall the
+                # surrounding task group.
+                tg.cancel_scope.cancel()
+
+    async def _link_stop_signal(self) -> None:
+        """Mirror the conductor's completion event into the procedure's
+        loop-local ``external_stop`` event.
+
+        No-op when ``stop_signal`` is unwired (tests / non-conductor
+        callers). Exits via task-group cancel when the procedure returns.
+        """
+        if self._stop_signal is None or self._external_stop is None:
+            await anyio.sleep_forever()
+            return
+        try:
+            await asyncio.wait_for(self._stop_signal.wait(), timeout=None)
+            self._external_stop.set()
+        except asyncio.CancelledError:
+            raise
+
+    def _build_proc_ctx(self, ctx: RunContext, bus: DataBus) -> ProcedureContext:
+        # The external_stop event must be loop-local — anyio.Event is bound
+        # to whatever loop creates it. _build_proc_ctx runs on the
+        # conductor loop, so the event we make here is safe for the
+        # procedure (also on the conductor loop) to await on.
+        if self._external_stop is None:
+            self._external_stop = anyio.Event()
+        return ProcedureContext(
+            clock=ctx.clock,
+            config=self._config,
+            bundle_writer=self._bundle_writer,
+            databus=bus,
+            logger=self._logger.bind(component="procedure"),
+            external_stop=self._external_stop,
+            instruments=self._channel_registry,
+            adapters=self._adapters,
+            dispatcher=self._dispatcher,
+            authorization=self._authorization,
+            method_executor=self._method_executor,
+            metadata={},
+        )
+
+
+__all__ = ["ProcedureRunner"]

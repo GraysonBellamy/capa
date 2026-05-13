@@ -34,6 +34,7 @@ State invariants:
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -523,15 +524,22 @@ def _seed_camera_entry(spec: CameraSpec) -> CameraEntry:
 def _toml_safe(value: Any) -> Any:
     """Recursively coerce Pydantic-dump output into TOML-safe primitives.
 
-    tomli_w refuses ``None`` values and tuples-of-mixed-type. Since manifest
-    fields are JSON-mode dumped already, we mostly need to drop ``None`` from
-    nested mappings and convert tuples to lists.
+    tomli_w refuses ``None`` values, tuples-of-mixed-type, and any object
+    outside its built-in primitive whitelist (str/int/float/bool/datetime).
+    Equipment-block identities may carry vendor-library types like
+    ``FirmwareVersion`` that survive the JSON-mode dump — coerce them via
+    ``str()`` rather than letting them blow up the finalize.
     """
     if isinstance(value, dict):
         return {k: _toml_safe(v) for k, v in value.items() if v is not None}
     if isinstance(value, list | tuple):
         return [_toml_safe(v) for v in value if v is not None]
-    return value
+    if (
+        isinstance(value, str | int | float | bool | _dt.datetime | _dt.date | _dt.time)
+        or value is None
+    ):
+        return value
+    return str(value)
 
 
 def _json_dumps(value: Any) -> str:

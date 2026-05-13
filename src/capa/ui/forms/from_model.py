@@ -21,6 +21,7 @@ validation.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -51,7 +52,7 @@ class ModelForm(QWidget):
     inner :class:`FieldWidget` instances and re-emits their changes
     coalesced as :attr:`valuesChanged`."""
 
-    valuesChanged = Signal()
+    valuesChanged = Signal()  # noqa: N815 - Qt signal naming convention
 
     def __init__(
         self,
@@ -141,10 +142,8 @@ class ModelForm(QWidget):
             if name in _HIDDEN_FIELD_NAMES:
                 continue
             if info.default_factory is not None:
-                try:
+                with contextlib.suppress(TypeError):
                     defaults[name] = info.default_factory()  # type: ignore[call-arg]
-                except TypeError:
-                    pass
                 continue
             # `info.default` is `PydanticUndefined` for required fields,
             # `Ellipsis` for legacy `Field(...)`, and the actual default

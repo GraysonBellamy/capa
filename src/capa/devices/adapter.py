@@ -125,6 +125,23 @@ class DeviceAdapter(Protocol):
     capabilities: frozenset[Capability]
     """The set of :class:`Capability` flags this adapter declares."""
 
+    resource_id: str
+    """Stable identifier for the underlying hardware contention domain.
+
+    Per-resource worker migration (``docs/per-resource-worker-migration.md`` §4.10):
+    two adapters that share a physical resource (a serial port on an RS-485
+    multi-drop bus, a DAQmx chassis, a single camera handle) MUST expose the
+    same ``resource_id`` so that ``build_workers`` groups them into one
+    worker thread. Two adapters that do not share a resource MUST expose
+    different ``resource_id``\\ s.
+
+    Format is ``<scheme>:<body>`` where ``scheme`` is one of:
+    ``serial``, ``daqmx``, ``webcam``, ``sim``. The body is whatever
+    identifies the resource within that scheme (port name, device/chassis
+    name, serial number). The string is stable across calls and computed
+    from constructor inputs without I/O — it must be safe to read before
+    :meth:`open` has been called."""
+
     async def open(self) -> None:
         """Establish the connection (open serial port, query identity).
 

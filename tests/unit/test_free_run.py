@@ -23,6 +23,7 @@ from capa.experiment.config import (
 )
 from capa.experiment.procedures.base import ProcedureContext, ProcedureError
 from capa.experiment.procedures.builtin.free_run import FreeRun, FreeRunConfig
+from capa.runtime.dispatch import AdapterDispatcher
 
 
 class _FakeWriter:
@@ -52,6 +53,7 @@ def _ctx(stop: anyio.Event, *, with_method: bool = False) -> ProcedureContext:
     )
     instruments = ChannelRegistry.from_specs(list(config.hardware.channels))
     instruments.freeze()
+    adapters_map: dict[str, Any] = {}
     return ProcedureContext(
         clock=RunClock(started_mono_ns=0, started_utc=datetime.now(UTC)),
         config=config,
@@ -60,7 +62,8 @@ def _ctx(stop: anyio.Event, *, with_method: bool = False) -> ProcedureContext:
         logger=structlog.get_logger("test"),
         external_stop=stop,
         instruments=instruments,
-        adapters={},
+        adapters=adapters_map,
+        dispatcher=AdapterDispatcher(adapters_map),
         authorization=Authorization(operator_id="abr", run_id="test"),
     )
 

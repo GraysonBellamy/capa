@@ -119,6 +119,7 @@ class WriterThread:
         "_closed",
         "_depth_high_water",
         "_inbox",
+        "_last_accept_monotonic_ns",
         "_logger",
         "_metrics",
         "_started",
@@ -151,6 +152,16 @@ class WriterThread:
         self._thread_exc: BaseException | None = None
         self._submit_blocked_count = 0
         self._depth_high_water = 0
+        # Monotonic-ns timestamp of the most recent successful inbox-pop by
+        # the drain thread. The Conductor saturation monitor reads this to
+        # detect a stalled writer: if `depth > 0` but `last_accept_monotonic`
+        # hasn't advanced within `saturation_deadline_s`, the writer has
+        # stopped accepting work (migration doc §4.5). Initialized to the
+        # start-of-process monotonic time so a freshly-started, empty inbox
+        # doesn't immediately read as "stalled". Updated without locks; a
+        # single 64-bit int store is atomic under the GIL on CPython and the
+        # reader treats the value as advisory.
+        self._last_accept_monotonic_ns = time.monotonic_ns()
 
     # ------------------------------------------------------------------ props
 
@@ -173,6 +184,22 @@ class WriterThread:
         """High-water mark for inbox depth across the run."""
         return self._depth_high_water
 
+    @property
+    def last_accept_monotonic_ns(self) -> int:
+        """Monotonic-ns timestamp of the most recent successful inbox pop.
+
+        Read by the Conductor saturation monitor (migration doc §4.5) to
+        detect a stalled writer: ``depth > 0`` combined with
+        ``last_accept_monotonic_ns`` not advancing for
+        ``saturation_deadline_s`` is the canonical writer-stall signal.
+
+        Initialized to process-start so an empty, just-started inbox never
+        appears stalled. Advanced inside the drain loop after each
+        :meth:`_dispatch` returns successfully (i.e. only counts items the
+        writer actually processed, not the close sentinel).
+        """
+        return self._last_accept_monotonic_ns
+
     def snapshot(self) -> dict[str, float]:
         """Render an inbox-health entry in the shape
         :class:`~capa.storage.manifest.QueueHealthEntry` consumes, so the
@@ -185,6 +212,7 @@ class WriterThread:
             "lag_s_max": 0.0,
             "capacity": float(self._capacity),
             "submit_blocked_count": float(self._submit_blocked_count),
+            "last_accept_monotonic_ns": float(self._last_accept_monotonic_ns),
         }
 
     @property
@@ -351,6 +379,12 @@ class WriterThread:
                     return
                 start = time.monotonic()
                 self._dispatch(item)
+                # Advance the saturation signal AFTER dispatch returns so a
+                # mid-flush stall reads as "not accepting" rather than
+                # "accepted then crashed". Single int store is atomic under
+                # the GIL; under PEP 703 free-threaded Python the reader
+                # tolerates a slightly-stale read (advisory signal).
+                self._last_accept_monotonic_ns = time.monotonic_ns()
                 if self._metrics is not None:
                     self._metrics.observe_write(time.monotonic() - start)
         except BaseException as exc:  # surface to the engine via _thread_exc

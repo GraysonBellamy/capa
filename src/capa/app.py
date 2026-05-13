@@ -29,13 +29,9 @@ from capa.core.errors import CapaError
 from capa.core.logging import configure_pre_run_logging
 from capa.core.plugins_lock import PluginsLock
 from capa.experiment.config import ExperimentConfig
-from capa.experiment.engine import (
-    ENGINE_VERSION,
-    EngineResult,
-    ExperimentEngine,
-    _import_adapter_class,
-    install_sigint_handler,
-)
+from capa.runtime import RUNTIME_VERSION, install_sigint_handler
+from capa.runtime.build import _import_adapter_class
+from capa.runtime.headless import HeadlessResult, run_headless
 from capa.storage.catalog import CatalogError, RunCatalog
 from capa.storage.finalize import FinalizeError, finalize_in_place
 from capa.storage.manifest import BundleManifest
@@ -44,7 +40,7 @@ app = typer.Typer(
     name="capa",
     help=(
         "Control and DAQ for cone-calorimeter-class lab instruments.\n\n"
-        f"capa {capa_version} (engine {ENGINE_VERSION})"
+        f"capa {capa_version} (runtime {RUNTIME_VERSION})"
     ),
     no_args_is_help=True,
 )
@@ -305,11 +301,13 @@ def run(
     stop_event = anyio.Event()
     install_sigint_handler(stop_event)
 
-    async def _go() -> EngineResult:
+    async def _go() -> HeadlessResult:
         with RunCatalog(root) as cat:
             cat.flip_orphans()
-            engine = ExperimentEngine()
-            return await engine.run(
+            # Conductor / per-resource-worker entry point (migration doc §8
+            # Phase 2). Replaces the single-loop ExperimentEngine path; the
+            # GUI still goes through ExperimentEngine until Phase 4.
+            return await run_headless(
                 ec,
                 runs_root=root,
                 plugins_lock=lock,
@@ -921,8 +919,8 @@ def devices_discover(
 
 @app.command()
 def version() -> None:
-    """Print the capa version + engine revision."""
-    typer.echo(f"capa {capa_version} (engine {ENGINE_VERSION})")
+    """Print the capa version + runtime revision."""
+    typer.echo(f"capa {capa_version} (runtime {RUNTIME_VERSION})")
 
 
 # ---------------------------------------------------------------------------

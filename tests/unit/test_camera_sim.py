@@ -281,6 +281,7 @@ class TestFlirIrSimCapabilities:
         sim = _make_sim(tmp_path=Path("/tmp"))
         assert CameraCapability.RADIOMETRIC in sim.capabilities
         assert CameraCapability.PALETTE in sim.capabilities
-        # Live preview is NOT advertised — sim emits preview bytes but does
-        # not mark itself as a preview-quality source.
-        assert CameraCapability.LIVE_PREVIEW not in sim.capabilities
+        # Phase 4 follow-up: sim now emits JPEG-decodable preview frames
+        # so the preview dock / webcam card actually paint pixels in
+        # integration tests. See tests/unit/test_camera_flir_ir_sim_preview.py.
+        assert CameraCapability.LIVE_PREVIEW in sim.capabilities

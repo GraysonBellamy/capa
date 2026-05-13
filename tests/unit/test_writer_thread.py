@@ -382,6 +382,74 @@ class TestMetrics:
         # third submit_nowait failed; the harness never queued it).
         assert len(captured) == 2
 
+    def test_last_accept_monotonic_advances_on_each_dispatch(self) -> None:
+        """The saturation signal must advance for every accepted item.
+
+        Phase 2 Conductor reads this to distinguish "writer healthy but
+        empty" from "writer stuck mid-flush" (migration doc §4.5).
+        """
+        wt = WriterThread(FakeWriter())
+        before_start = wt.last_accept_monotonic_ns
+        wt.start()
+        try:
+            for i in range(3):
+                wt.submit_nowait(_sample("a", i, float(i)))
+                # Each accept must move the timestamp strictly forward; spin
+                # until the drain visibly advances past the previous reading.
+                prev = wt.last_accept_monotonic_ns
+                _wait_for(
+                    lambda p=prev: wt.last_accept_monotonic_ns > p,
+                    timeout=1.0,
+                )
+        finally:
+            assert wt.close()
+        assert wt.last_accept_monotonic_ns > before_start
+
+    def test_last_accept_monotonic_stalls_when_dispatch_blocks(self) -> None:
+        """When the drain is wedged inside a write, the signal must stop
+        advancing — that's exactly the condition the saturation monitor
+        watches for."""
+        gate = threading.Event()
+
+        class GatedWriter:
+            def record_sample(self, sample: ChannelSample) -> None:
+                gate.wait(timeout=2.0)
+
+            def record_source(self, record: SourceRecord) -> None: ...
+            def record_event(self, event: DeviceEvent) -> None: ...
+            def record_snapshot(self, snapshot: DeviceSnapshot) -> None: ...
+            def record_frame(self, receipt: FrameReceipt) -> None: ...
+            def write_event(self, **kwargs: Any) -> None: ...
+
+        wt = WriterThread(GatedWriter(), capacity=4)
+        wt.start()
+        try:
+            wt.submit_nowait(_sample("a", 0, 0.0))
+            # Let the drain pop the item and enter the gated record_sample.
+            _wait_for(lambda: wt.depth == 0, timeout=0.5)
+            stalled_at = wt.last_accept_monotonic_ns
+            # While the drain is wedged, more items pile up but no accept
+            # advances. Wait a small interval and assert no progress.
+            wt.submit_nowait(_sample("a", 1, 1.0))
+            time.sleep(0.05)
+            assert wt.last_accept_monotonic_ns == stalled_at
+            assert wt.depth >= 1
+        finally:
+            gate.set()
+            assert wt.close()
+
+    def test_last_accept_monotonic_in_snapshot(self) -> None:
+        wt = WriterThread(FakeWriter())
+        wt.start()
+        try:
+            wt.submit_nowait(_sample("a", 0, 0.0))
+            _wait_for(lambda: wt.depth == 0, timeout=0.5)
+            snap = wt.snapshot()
+            assert "last_accept_monotonic_ns" in snap
+            assert snap["last_accept_monotonic_ns"] == float(wt.last_accept_monotonic_ns)
+        finally:
+            assert wt.close()
+
 
 # ---------------------------------------------------------------------------
 # Defaults

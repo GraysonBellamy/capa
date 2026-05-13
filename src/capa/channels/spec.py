@@ -270,8 +270,13 @@ class ChannelSpec(BaseModel):
     """Which named sinks receive this channel. Matches keys in the storage
     layer wired up in P0b."""
 
-    decimate_to_hz: float = Field(default=10.0, gt=0)
-    """Plot-only decimation. Underlying disk capture is at native rate."""
+    decimate_to_hz: float = Field(default=60.0, gt=0)
+    """Plot-only decimation. Underlying disk capture is at native rate.
+    Default is intentionally above the fastest producer (50 Hz Sartorius
+    balance) so the ring buffer keeps every sample — the plot pane's
+    peak-mode downsampler then preserves transients regardless of the
+    actual repaint cadence (currently 10 Hz). Set lower in config only
+    if a channel produces faster than the buffer can usefully store."""
 
     metadata: dict[str, str] = Field(default_factory=dict)
 

@@ -89,12 +89,19 @@ class AlicatCard(DeviceCard):
             parent=parent,
         )
         self._spec: DeviceConfig = spec
-        registry = controller.device_registry
+        # Pool-hosted adapter feeds the real capability set; fall back
+        # to the Alicat default flags when the pool hasn't finished
+        # opening (migration doc §3.6).
         caps: frozenset[Capability] = frozenset()
-        if registry is not None:
-            opened = registry.opened_device(spec.name)
+        pool = controller.worker_pool
+        if pool is not None:
+            try:
+                worker = pool.worker_for(spec.name)
+                opened = worker.adapters.get(spec.name)
+            except Exception:
+                opened = None
             if opened is not None:
-                caps = opened.capabilities
+                caps = getattr(opened, "capabilities", frozenset())
         if not caps:
             caps = _default_alicat_capabilities()
         self._capabilities: frozenset[Capability] = caps

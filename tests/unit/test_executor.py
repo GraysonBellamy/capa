@@ -43,6 +43,7 @@ from capa.experiment.method import (
     WaitStep,
 )
 from capa.experiment.procedures.base import ProcedureContext
+from capa.runtime.dispatch import AdapterDispatcher
 
 
 class _FakeWriter:
@@ -104,6 +105,7 @@ def _make_ctx(
     instruments.freeze()
     writer = _FakeWriter()
     stop = anyio.Event()
+    adapters_map: dict[str, Any] = {"heater": adapter}
     ctx = ProcedureContext(
         clock=RunClock(started_mono_ns=0, started_utc=datetime.now(UTC)),
         config=config,
@@ -112,7 +114,8 @@ def _make_ctx(
         logger=structlog.get_logger("test"),
         external_stop=stop,
         instruments=instruments,
-        adapters={"heater": adapter},  # type: ignore[dict-item]
+        adapters=adapters_map,
+        dispatcher=AdapterDispatcher(adapters_map),
         authorization=Authorization(operator_id="abr", run_id="r1"),
         metadata={},
     )

@@ -36,6 +36,7 @@ from capa.storage.bundle import RunBundleWriter
 
 if TYPE_CHECKING:
     from capa.experiment.executor import MethodExecutor
+    from capa.runtime.dispatch import CommandDispatcher
 
 
 class ProcedureError(CapaError):
@@ -153,8 +154,20 @@ class ProcedureContext:
 
     adapters: dict[str, DeviceAdapter]
     """Adapter handles keyed by device name (matches
-    :attr:`SourceBinding.device`). Procedures and executors send commands
-    through these."""
+    :attr:`SourceBinding.device`). Provided for **introspection only** —
+    procedures that need adapter metadata (capabilities, resource_id) can
+    read here. Sending commands directly through ``adapter.command`` is
+    deprecated as of Phase 2; use :attr:`dispatcher` instead so the
+    concurrency layer (single-loop Engine vs per-resource-worker
+    Conductor) is transparent to procedures."""
+
+    dispatcher: CommandDispatcher
+    """Command dispatch surface. Procedures and the :class:`MethodExecutor`
+    issue every device write through :meth:`CommandDispatcher.dispatch`.
+    The engine wires :class:`~capa.runtime.dispatch.AdapterDispatcher` here
+    for the single-loop path; the conductor wires
+    :class:`~capa.runtime.dispatch.ConductorDispatcher` for per-resource-
+    worker runs. Migration doc §3.5."""
 
     authorization: Authorization
     """Run-arm authorization handle. Every device command goes through

@@ -91,18 +91,22 @@ class BalanceCard(DeviceCard):
             parent=parent,
         )
         self._spec: DeviceConfig = spec
-        # We start without a live adapter; capabilities are read from the
-        # constructed (not opened) adapter so the card builds without an
-        # open connection. Sartorius adapters set the flagset in __init__.
-        registry = controller.device_registry
+        # Capabilities are read off the pool-hosted adapter when one
+        # exists; otherwise fall back to the Sartorius default set.
+        # Phase 4 / migration doc §3.6: the pool is opened
+        # asynchronously after :meth:`set_active_config` returns, so the
+        # card may build before the worker is up — the fallback is what
+        # keeps the UI consistent in that window.
         caps: frozenset[Capability] = frozenset()
-        if registry is not None:
-            opened = registry.opened_device(spec.name)
+        pool = controller.worker_pool
+        if pool is not None:
+            try:
+                worker = pool.worker_for(spec.name)
+                opened = worker.adapters.get(spec.name)
+            except Exception:
+                opened = None
             if opened is not None:
-                caps = opened.capabilities
-        # Even without opening, we know Sartorius always declares this set.
-        # That's a hardcoded fallback — keeps the UI consistent before the
-        # first acquire. Real flagset will be re-read on first dispatch.
+                caps = getattr(opened, "capabilities", frozenset())
         if not caps:
             caps = _default_sartorius_capabilities()
         self._capabilities: frozenset[Capability] = caps

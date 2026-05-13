@@ -26,12 +26,14 @@ Subscribers register through one of four buckets so :meth:`publish` does
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Final
 
 from capa.core.backpressure import BackpressurePolicy, BoundedQueue
+from capa.core.errors import CapaError
 from capa.devices.records import (
     ChannelSample,
     DeviceEmission,
@@ -55,6 +57,19 @@ _BUCKET_CHANNEL: Final[str] = "channel"
 _BUCKET_ADAPTER: Final[str] = "adapter"
 _BUCKET_WILDCARD: Final[str] = "wildcard"
 _BUCKET_CUSTOM: Final[str] = "custom"
+
+
+class DataBusLoopError(CapaError):
+    """Raised when :meth:`DataBus.publish` / :meth:`DataBus.publish_nowait`
+    is called from a different event loop than the one that owns the bus.
+
+    Migration doc §3.10 / §3.11 invariant 7. Each :class:`DataBus` instance
+    is **loop-affine**: its subscription queues are :class:`BoundedQueue`s
+    bound to one loop, and mutating them from a different loop's task is
+    undefined behaviour for asyncio. Phase 2's :class:`Conductor` builds one
+    bus on the conductor loop; UIBridge (Phase 4) builds a separate mirror
+    bus on the UI loop.
+    """
 
 
 @dataclass(slots=True)
@@ -96,6 +111,7 @@ class DataBus:
         "_closed",
         "_custom",
         "_last_values",
+        "_owning_loop",
         "_wildcard",
     )
 
@@ -110,6 +126,12 @@ class DataBus:
         # cheap "what was the last value?" lookups without re-implementing
         # a per-channel ring. Only ChannelSample emissions populate this.
         self._last_values: dict[str, float] = {}
+        # Loop the bus is pinned to (migration doc §3.10). ``None`` until the
+        # first :meth:`publish` / :meth:`publish_nowait` call, at which point
+        # the running loop is captured. :meth:`bind_loop` lets owners (the
+        # Conductor) bind explicitly at construction time so a misconfigured
+        # subscriber fails immediately rather than after first publish.
+        self._owning_loop: asyncio.AbstractEventLoop | None = None
 
     # ------------------------------------------------------------------ subscribe
 
@@ -297,6 +319,68 @@ class DataBus:
                     return
         sub.queue.close()
 
+    # ------------------------------------------------------------------ loop affinity
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Pin the bus to ``loop`` explicitly.
+
+        Migration doc §3.10. The :class:`Conductor` calls this once at
+        startup so a misconfigured subscriber (e.g. a UI thread accidentally
+        publishing into the conductor bus) fails at bind time rather than at
+        first publish.
+
+        Calling :meth:`bind_loop` with the already-bound loop is a no-op;
+        binding to a *different* loop raises :class:`DataBusLoopError`.
+        """
+        if self._owning_loop is None:
+            self._owning_loop = loop
+            return
+        if self._owning_loop is not loop:
+            raise DataBusLoopError(
+                "DataBus already bound to a different loop "
+                f"(bound={self._owning_loop!r}, new={loop!r}); each bus is "
+                "loop-affine (migration doc §3.10) — construct a separate "
+                "DataBus on the other loop instead."
+            )
+
+    @property
+    def owning_loop(self) -> asyncio.AbstractEventLoop | None:
+        """Loop the bus is pinned to, or ``None`` if not yet bound.
+
+        Bound lazily by the first :meth:`publish` / :meth:`publish_nowait`
+        call, or eagerly via :meth:`bind_loop`.
+        """
+        return self._owning_loop
+
+    def _check_loop_affinity(self) -> None:
+        """Assert the current running loop matches ``_owning_loop``; on
+        first call, capture the running loop as the owner.
+
+        Cheap: one ``get_running_loop()`` and one ``is`` comparison per
+        publish. Sub-microsecond on CPython. Worth the cost — a loop-affinity
+        violation produces silent data loss or queue corruption, neither of
+        which a metric will reliably surface.
+        """
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError as exc:
+            # publish_nowait is sync but the underlying BoundedQueue mutates
+            # an asyncio.Queue; mutating that from outside any loop violates
+            # the queue's invariants even when same-thread.
+            raise DataBusLoopError(
+                "DataBus.publish/publish_nowait must be called from within "
+                "the owning event loop; no loop is currently running."
+            ) from exc
+        if self._owning_loop is None:
+            self._owning_loop = running
+            return
+        if running is not self._owning_loop:
+            raise DataBusLoopError(
+                "DataBus publish from wrong loop "
+                f"(bound={self._owning_loop!r}, running={running!r}); each "
+                "bus is loop-affine (migration doc §3.10)."
+            )
+
     # ------------------------------------------------------------------ publish
 
     async def publish(self, emission: DeviceEmission) -> None:
@@ -307,18 +391,29 @@ class DataBus:
         coroutine, ``DROP_OLDEST`` ones never do, ``ABORT_RUN`` ones raise
         once their stuck-window expires (which the engine surfaces as a
         crash exit).
+
+        Loop-affinity is checked on every call; the first call captures the
+        owning loop (see :meth:`bind_loop` for explicit binding).
         """
         if self._closed:
             return
+        self._check_loop_affinity()
         for sub in self._iter_targets(emission):
             await sub.queue.put(emission)
 
     def publish_nowait(self, emission: DeviceEmission) -> None:
         """Synchronous publish: matches each subscription and uses
         :meth:`BoundedQueue.put_nowait`. ``BLOCK`` subscribers that are full
-        silently drop here — the caller chose to take a non-async path."""
+        silently drop here — the caller chose to take a non-async path.
+
+        Loop-affinity is checked on every call. The call must be made from a
+        synchronous context running on the owning loop's thread (e.g. from
+        inside a coroutine that hasn't yielded since the running loop was
+        established); calling from a non-loop thread raises.
+        """
         if self._closed:
             return
+        self._check_loop_affinity()
         for sub in self._iter_targets(emission):
             sub.queue.put_nowait(emission)
 
@@ -462,6 +557,7 @@ PublishFn = Callable[[DeviceEmission], Awaitable[None]]
 __all__ = [
     "DEFAULT_SUBSCRIBER_CAPACITY",
     "DataBus",
+    "DataBusLoopError",
     "PublishFn",
     "Subscription",
 ]

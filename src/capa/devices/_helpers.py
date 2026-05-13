@@ -18,6 +18,7 @@ P2 adapters) from re-implementing the exact same logic.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
@@ -274,14 +275,52 @@ class WatchdogState:
         return elapsed > int(slack * self.expected_period_ns)
 
 
+_DAQMX_MODULE_SUFFIX_RE = re.compile(r"Mod\d+$")
+"""Strips a trailing ``ModN`` from a cDAQ module name to derive the chassis
+name (``cDAQ1Mod1`` → ``cDAQ1``)."""
+
+
+def serial_resource_id(port: str) -> str:
+    """Return the ``resource_id`` for a serial-port adapter.
+
+    Per ``docs/per-resource-worker-migration.md`` §4.10: two adapters sharing
+    a serial port (multi-drop RS-485 bus) must share a worker. Windows COM
+    names are case-insensitive at the OS layer, so the body is normalized to
+    upper case — ``"com6"`` and ``"COM6"`` collapse to the same worker.
+    """
+    return f"serial:{port.strip().upper()}"
+
+
+def daqmx_resource_id_from_channels(physical_channels: Iterable[str]) -> str:
+    """Return the ``resource_id`` for a DAQmx adapter, derived from its
+    physical-channel strings (e.g. ``"cDAQ1Mod1/ai0"``).
+
+    The contention domain is the chassis (cDAQ) or the device (single-board
+    card). Channel strings are parsed locally — no call into ``nidaqmx`` —
+    so the property is safe to read before :meth:`open` and in sim/CI where
+    the NI runtime is absent. Per the migration doc §4.10: ``cDAQ1Mod1`` and
+    ``cDAQ1Mod3`` collapse to ``daqmx:cDAQ1``; a single-board ``Dev1`` stays
+    ``daqmx:Dev1``.
+    """
+    for raw in physical_channels:
+        head = raw.split("/", 1)[0] if "/" in raw else raw
+        if not head:
+            continue
+        stripped = _DAQMX_MODULE_SUFFIX_RE.sub("", head)
+        return f"daqmx:{stripped}"
+    return "daqmx:unknown"
+
+
 __all__ = [
     "LastSampleTracker",
     "WatchdogState",
     "build_channel_sample",
     "channels_for_device",
+    "daqmx_resource_id_from_channels",
     "make_accepted_result",
     "make_not_open_result",
     "make_record_id",
     "make_unauthorized_result",
     "reject_unless_authorized",
+    "serial_resource_id",
 ]

@@ -100,6 +100,10 @@ class NIDAQBlockSim:
         # adds a negligible blocks/s term.
         return self.sample_rate_hz * len(self._channels)
 
+    @property
+    def resource_id(self) -> str:
+        return f"sim:{self.name}"
+
     async def open(self) -> None:
         self._lifecycle.open()
 

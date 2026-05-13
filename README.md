@@ -2,11 +2,19 @@
 
 Control and DAQ application for a custom cone-calorimeter-class lab instrument.
 
-See [capa-plan.md](capa-plan.md) for the full architecture plan.
+See [docs/capa-plan.md](docs/capa-plan.md) for the high-level architecture
+plan, and [docs/per-resource-worker-migration.md](docs/per-resource-worker-migration.md)
+for the runtime layer (per-resource workers, conductor / pool / manual
+client) that supersedes the legacy single-loop engine described in
+`capa-plan.md`.
 
 ## Status
 
-Pre-alpha. Phase **P0a — Schema + sim substrate** in progress (see plan §16).
+Pre-alpha. Phase 4 of the per-resource-worker migration is complete:
+the single-loop `ExperimentEngine` has been replaced by `Conductor` +
+`WorkerPool` (`src/capa/runtime/`); the GUI's `RunController` runs
+against the new stack; the legacy `engine.py`, `cameras.py`, and
+`registry.py` modules are deleted.
 
 ## Development
 

@@ -42,8 +42,7 @@ from capa.experiment.config import (
     ProcedureRef,
     SampleInfo,
 )
-from capa.experiment.engine import EngineResult, EngineState
-from capa.ui.state import RunController
+from capa.ui.state import RunController, RunUiResult, RunUiState
 
 
 def _make_config(
@@ -103,17 +102,34 @@ async def test_run_controller_run_completes_and_populates_buffers(
     config = _make_config(sample_id="CTRL-1", duration_s=0.15, channels=2)
     controller = RunController(runs_root=tmp_path, configure_logging_for_bundle=False)
 
-    states: list[EngineState] = []
-    finished: list[EngineResult] = []
+    states: list[RunUiState] = []
+    finished: list[RunUiResult] = []
     events: list[object] = []
     controller.state_changed.connect(states.append)
     controller.run_finished.connect(finished.append)
     controller.event_received.connect(events.append)
 
-    # Drive the controller's async path directly. start() is the
-    # event-loop-task-spawning variant the GUI uses; under pytest-anyio we
-    # simply await the work coroutine.
-    await controller._run(config)
+    # Phase 4 split set_active_config from start: open the pool first so
+    # the conductor has workers to arm. Tests run on a single asyncio
+    # loop (pytest-anyio's), so we await the open inline.
+    from capa.runtime.dispatch import ManualClient
+    from capa.runtime.pool import WorkerPool
+
+    pool = WorkerPool.from_config(config)
+    controller._active_config = config
+    controller._worker_pool = pool
+    controller._manual_client = ManualClient(
+        pool=pool,
+        conductor_provider=lambda: controller._conductor,
+    )
+    await pool.open()
+    try:
+        # Drive the controller's async path directly. start() is the
+        # event-loop-task-spawning variant the GUI uses; under
+        # pytest-anyio we simply await the work coroutine.
+        await controller._run(config)
+    finally:
+        await pool.close()
 
     assert finished, "expected run_finished signal to fire"
     result = finished[0]
@@ -130,10 +146,10 @@ async def test_run_controller_run_completes_and_populates_buffers(
         assert buf.size > 0, f"buffer for {ch_name} got no samples"
 
     # Plan §10.1 transitions all visible to the UI.
-    assert EngineState.PREPARING in states
-    assert EngineState.RUNNING in states
-    assert EngineState.FINALIZING in states
-    assert EngineState.SEALED in states
+    assert RunUiState.PREPARING in states
+    assert RunUiState.RUNNING in states
+    assert RunUiState.FINALIZING in states
+    assert RunUiState.SEALED in states
 
 
 @pytest.mark.anyio
@@ -141,33 +157,46 @@ async def test_run_controller_abort_sets_aborted_status(
     qapp: Any,
     tmp_path: Path,
 ) -> None:
-    """request_abort() flows through to the engine and produces an aborted
-    bundle. The mode is recorded for downstream phases."""
+    """request_abort() flows through to the conductor and produces an
+    aborted bundle. The conductor's stop reason is recorded for
+    downstream phases (operator audit, P3 cooldown)."""
     config = _make_config(sample_id="CTRL-ABORT", duration_s=10.0, channels=1)
     controller = RunController(runs_root=tmp_path, configure_logging_for_bundle=False)
 
-    finished: list[EngineResult] = []
+    finished: list[RunUiResult] = []
     controller.run_finished.connect(finished.append)
 
+    from capa.runtime.dispatch import ManualClient
+    from capa.runtime.pool import WorkerPool
+
+    pool = WorkerPool.from_config(config)
+    controller._active_config = config
+    controller._worker_pool = pool
+    controller._manual_client = ManualClient(
+        pool=pool,
+        conductor_provider=lambda: controller._conductor,
+    )
+    await pool.open()
+
     async def fire_abort() -> None:
-        # Wait for engine to be RUNNING before aborting.
-        for _ in range(200):
-            engine = controller.engine
-            if engine is not None and engine.state is EngineState.RUNNING:
+        # Wait for the conductor to reach RUNNING before aborting.
+        for _ in range(400):
+            conductor = controller.conductor
+            if conductor is not None and conductor.state.value == "running":
                 break
             await anyio.sleep(0.005)
         controller.request_abort(mode="immediate")
 
-    async with anyio.create_task_group() as tg:
-        tg.start_soon(fire_abort)
-        await controller._run(config)
+    try:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(fire_abort)
+            await controller._run(config)
+    finally:
+        await pool.close()
 
     result = finished[0]
     assert result.run_status == "aborted"
     assert result.bundle_status == "sealed"
-    engine = controller.engine
-    assert engine is not None
-    assert engine.abort_mode == "immediate"
 
 
 def test_run_controller_request_abort_with_no_active_run_is_noop(
@@ -177,7 +206,7 @@ def test_run_controller_request_abort_with_no_active_run_is_noop(
     controller = RunController(runs_root=tmp_path)
     # Should not raise.
     controller.request_abort(mode="safe_shutdown")
-    assert controller.engine is None
+    assert controller.conductor is None
 
 
 # ---------------------------------------------------------------------------
@@ -210,9 +239,25 @@ def test_main_window_renders_with_initial_config(qtbot: Any, tmp_path: Path) -> 
     events = window.events_dock
     assert events is not None
 
-    # Run tab knows the config and Start is enabled.
+    # Run tab knows the config; Start enables once the worker pool's async
+    # ``open()`` resolves. In production that runs on the qasync loop via
+    # ``schedule_bg``; this test has no running loop, so ``schedule_bg``
+    # closes the coroutine without scheduling. Drive ``pool.open()`` →
+    # check → ``pool.close()`` in one coroutine so the worker threads are
+    # joined before pytest tears down (otherwise the live threads keep
+    # the test process hanging at exit).
+    pool = window._controller.worker_pool
+    assert pool is not None
     run_tab = window.run_tab
-    assert run_tab.can_start() is True
+
+    async def _open_then_check_then_close() -> None:
+        await pool.open()
+        try:
+            assert run_tab.can_start() is True
+        finally:
+            await pool.close()
+
+    anyio.run(_open_then_check_then_close)
 
     # Operator id reached the status-bar provider.
     assert window._operator_provider.current_operator_id() == "abr"

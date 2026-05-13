@@ -32,6 +32,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Literal
 
 import anyio
@@ -63,6 +64,7 @@ from capa.devices.camera.base import (
     FrameReceipt,
     make_stream_pair,
 )
+from capa.devices.camera.metadata import UvcRangeMetadata, WebcamMetadata
 
 _BASE_CAPABILITIES: frozenset[CameraCapability] = frozenset(
     {
@@ -289,6 +291,20 @@ class WebcamAdapter:
         return self._info
 
     @property
+    def resource_id(self) -> str:
+        """Per-resource worker key (``docs/per-resource-worker-migration.md`` §4.10).
+
+        Prefers the camera serial (stable across enumeration order); falls
+        back to the configured camera ``name`` when no serial is declared
+        (CI / dshow-by-name use). Two ``WebcamAdapter`` instances pointing
+        at the same physical camera share this string and therefore would
+        share a worker in Phase 1.
+        """
+        if self._spec.serial:
+            return f"webcam:{self._spec.serial}"
+        return f"webcam:{self._spec.name}"
+
+    @property
     def supported_resolutions(self) -> list[tuple[int, int]]:
         """``(width, height)`` pairs the dshow input enumerated at open-time.
 
@@ -314,6 +330,43 @@ class WebcamAdapter:
         control card to preselect the matching combo entry without poking
         :attr:`_width` / :attr:`_height` directly."""
         return (self._width, self._height)
+
+    def snapshot_metadata(self) -> WebcamMetadata:
+        """Build a :class:`WebcamMetadata` snapshot for cross-loop transfer.
+
+        Called by :meth:`CameraDeviceAdapter.camera_metadata` on the worker
+        loop. The result is consumed on the qasync loop by
+        :class:`WebcamCard._apply_metadata`. Keeping the snapshot
+        construction inside the adapter means the wrapper stays generic
+        — it forwards via a ``getattr(camera, "snapshot_metadata", None)``
+        probe, the same capability-style pattern used for ``run_preview_pump``
+        and ``start_preview``.
+
+        Safe to call before duvc-ctl has probed (``self._uvc is None``):
+        the ``uvc_ranges`` mapping is empty and the card keeps its wide
+        default bounds. The two resolution-related fields populate from
+        :attr:`_supported_resolutions` and :attr:`_resolution_fps_caps`,
+        which are themselves set at ``open()`` and never mutated.
+        """
+        ranges: dict[str, UvcRangeMetadata] = {}
+        if self._uvc is not None:
+            for verb, prop in PROPERTY_BY_VERB.items():
+                rng = self._uvc.get_cached_range(prop)
+                if rng is None:
+                    continue
+                ranges[verb] = UvcRangeMetadata(
+                    minimum=rng.minimum,
+                    maximum=rng.maximum,
+                    step=rng.step,
+                    default=rng.default,
+                    current=self._uvc.get_cached_current(prop),
+                )
+        return WebcamMetadata(
+            supported_resolutions=tuple(self._supported_resolutions),
+            resolution_hint=(self._width, self._height),
+            resolution_fps_caps=MappingProxyType(dict(self._resolution_fps_caps)),
+            uvc_ranges=MappingProxyType(ranges),
+        )
 
     # ----------------------------------------------------------- protocol API
 
@@ -412,6 +465,17 @@ class WebcamAdapter:
         self._dropped_frames = 0
         self._file_size = 0
         self._last_frame_t_mono_ns = None
+        # The 2 Hz preview throttle is measured against ``_clock``. The
+        # CameraDeviceAdapter rebinds its clock proxy to the run's
+        # RunClock immediately before start_recording, so any prior
+        # value of ``_last_preview_t_mono_ns`` is in the *old* anchor's
+        # units. Resetting here makes the first in-run frame fire the
+        # preview encode immediately (matching :meth:`start_preview`).
+        # Without this, ``t_mono_ns - _last_preview_t_mono_ns`` is a
+        # large negative number until the new clock advances past the
+        # stale value, so previews stay dark for the early part of the
+        # run and the dock's stale detector trips.
+        self._last_preview_t_mono_ns = None
         self._started_t_mono_ns = self._clock.t_mono_ns()
         self._recording = True
         await self._emit_event(
@@ -1032,7 +1096,7 @@ def _probe_v4l2_info(device_path: str) -> V4L2Probe:
       ``idVendor``, ``idProduct`` files identify the unit.
     """
     empty = V4L2Probe(card_name=None, serial=None, bus_info=None)
-    if sys.platform != "linux":
+    if not _is_linux_platform():
         return empty
     if not device_path.startswith("/dev/video"):
         return empty
@@ -1074,6 +1138,10 @@ _DSHOW_MIN_FORMAT_RE: re.Pattern[str] = re.compile(
 )
 _DSHOW_MAX_SIZE_RE: re.Pattern[str] = re.compile(r"\bmax s=(\d+)x(\d+)\b", re.IGNORECASE)
 _DSHOW_MIN_SIZE_RE: re.Pattern[str] = re.compile(r"\bmin s=(\d+)x(\d+)\b", re.IGNORECASE)
+
+
+def _is_linux_platform() -> bool:
+    return sys.platform.startswith("linux")
 
 
 def _probe_dshow_format_info_sync(

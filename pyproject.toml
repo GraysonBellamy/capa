@@ -93,7 +93,7 @@ capa-flir = { path = "../capa-flir", editable = true }
 # Vendored Windows-only wheel for duvc-ctl. Upstream ships cp38–cp312 only;
 # capa pins Python 3.13, so we built the cp313 wheel ourselves with
 # delvewheel via tools/build_duvc_wheel.ps1. Remove this entry once upstream
-# publishes cp313 wheels (PyPI). See docs/handoff-deferred-control-surface.md.
+# publishes cp313 wheels (PyPI).
 duvc-ctl = { path = "vendor/duvc_ctl-2.1.0rc1-cp313-cp313-win_amd64.whl" }
 
 [tool.ruff]
@@ -145,6 +145,8 @@ warn_redundant_casts = true
 warn_unreachable = true
 namespace_packages = true
 explicit_package_bases = true
+cache_dir = ".mypy_cache/regular"
+sqlite_cache = false
 
 [[tool.mypy.overrides]]
 module = ["pint", "pint.*"]

@@ -26,12 +26,9 @@ run-clock anchor.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Final
 
 import structlog
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -43,17 +40,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from capa.core.clock import RunClock
-from capa.devices.camera._uvc import PROPERTY_BY_VERB
-from capa.devices.camera.base import Camera, CameraCapability, CameraSpec
-from capa.devices.camera.webcam import WebcamAdapter
-from capa.devices.registry import _SingleCameraConfig
-from capa.experiment.cameras import construct_cameras
-from capa.experiment.engine import EngineState
+from capa.devices.camera.base import CameraCapability, CameraSpec
+from capa.devices.camera.metadata import WebcamMetadata
+from capa.runtime.dispatch import ManualClient
 from capa.ui.async_util import schedule_bg
 from capa.ui.manual.cards.base import CommandTarget, DeviceCard
-from capa.ui.manual.cards.camera import _safe_close_camera
-from capa.ui.state import RunController
+from capa.ui.state import RunController, RunUiState
 from capa.ui.statusbar import OperatorIdProvider
 
 _logger = structlog.get_logger("capa.ui.manual.webcam")
@@ -77,9 +69,9 @@ RELEVANT_CAPABILITIES: Final[tuple[CameraCapability, ...]] = (
 # Fallback resolution set used only when the dshow ``list_options`` probe
 # could not enumerate real device formats (non-Windows, the camera was
 # constructed without being opened, the probe parse turned up empty).
-# :meth:`WebcamAdapter.open` populates :attr:`WebcamAdapter.supported_resolutions`
-# from the real device when it can, and :meth:`WebcamCard._refresh_controls_from_probe`
-# rewrites the combo from those values on first open.
+# The card calls :meth:`ManualClient.camera_metadata` on pool open; the
+# returned :class:`WebcamMetadata.supported_resolutions` rewrites the
+# combo from the real device list when the probe succeeded.
 _FALLBACK_RESOLUTIONS: Final[tuple[tuple[int, int], ...]] = (
     (640, 480),
     (1280, 720),
@@ -89,16 +81,6 @@ _FALLBACK_RESOLUTIONS: Final[tuple[tuple[int, int], ...]] = (
 # Same logic for framerates — the UVC negotiation will reject any fps the
 # camera doesn't advertise for the chosen resolution.
 COMMON_FRAMERATES: Final[tuple[float, ...]] = (15.0, 30.0, 60.0)
-
-
-PREVIEW_TILE_WIDTH: Final[int] = 320
-"""Width of the embedded preview tile in pixels. Matches the adapter's
-:data:`PREVIEW_MAX_WIDTH` so JPEGs from :meth:`WebcamAdapter.preview_stream`
-scale 1:1 — no extra resizing on the UI thread."""
-
-PREVIEW_TILE_HEIGHT: Final[int] = 180
-"""16:9 height for the preview tile. Frames with other aspect ratios are
-centered in the tile rather than stretched."""
 
 
 def is_webcam_camera(spec: CameraSpec) -> bool:
@@ -138,38 +120,22 @@ class WebcamCard(DeviceCard):
         self.set_subtitle(
             f"Camera: {spec.name}   Adapter: {spec.adapter.rsplit('.', 1)[-1]}   Kind: {spec.kind}"
         )
-        # Preview tile lifecycle. The two background tasks run on the
-        # qasync loop: ``_preview_pump_task`` drives the adapter's input
-        # container; ``_preview_consumer_task`` drains preview_stream() and
-        # paints into ``_preview_label``. Both cancel when the card leaves
-        # IDLE (engine.PREPARING) so the engine can claim the camera.
-        self._preview_label: QLabel = self._build_preview_tile()
-        self._preview_pump_task: asyncio.Task[object] | None = None
-        self._preview_consumer_task: asyncio.Task[object] | None = None
         # Live widget references and a latch so the probe-driven refresh
         # only runs once per card lifetime. Populated by section builders
-        # and consumed by :meth:`_refresh_controls_from_probe`.
+        # and consumed by :meth:`_apply_metadata`.
         self._resolution_combo: QComboBox | None = None
         self._fps_spin: QDoubleSpinBox | None = None
         self._spinboxes: dict[str, QSpinBox] = {}
         self._controls_initialized: bool = False
-        # Kept in sync from :meth:`_refresh_controls_from_probe` so the
+        # Kept in sync from :meth:`_apply_metadata` so the
         # resolution-combo change handler can recompute the fps cap without
         # holding a reference to the WebcamAdapter.
         self._resolution_fps_caps: dict[tuple[int, int], float] = {}
         self._build_capability_sections()
-        # Kick off the preview right after construction *when* an event loop
-        # is running (production: qasync loop is up by the time MainWindow
-        # builds the dock). In tests that build a card without spinning up
-        # the loop, skip the kickoff — the coroutine would never be awaited
-        # and Python would emit a RuntimeWarning. Production cards always
-        # see a running loop here.
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-        else:
-            schedule_bg(self._start_preview_session())
+        # Pool-change handler: kick the one-shot probe refresh when the
+        # camera handle becomes available. The pool publishes itself via
+        # pool_changed after open() resolves.
+        self._controller.pool_changed.connect(self._on_pool_changed)
 
     # ------------------------------------------------------------------ build
 
@@ -451,160 +417,86 @@ class WebcamCard(DeviceCard):
     # ------------------------------------------------------------------ lifecycle
 
     async def _ensure_adapter(self) -> CommandTarget | None:
-        """Construct + open the webcam on first action. Same rationale as
-        :meth:`FlirCard._ensure_adapter`: cameras are not registry-shared
-        because frame timestamps must anchor to the run clock, and the
-        panel uses an idle :class:`RunClock` since it never records."""
+        """Return the :class:`WorkerPool`-owned webcam handle.
+
+        Phase 4 / migration doc §6: webcams are constructed inside the
+        pool's :class:`Worker` at :meth:`WorkerPool.open` time and
+        wrapped in :class:`CameraDeviceAdapter`. The card consumes
+        preview JPEGs via :attr:`RunController.preview_received` and
+        probe metadata via :meth:`ManualClient.camera_metadata`; this
+        helper is only used so the base-class
+        :meth:`schedule_dispatch` has a non-``None`` target.
+        """
         if self._adapter is not None:
             return self._adapter
-        try:
-            cameras = construct_cameras(
-                _SingleCameraConfig(self._spec),  # type: ignore[arg-type]
-                clock=RunClock.now(),
-            )
-            if not cameras:
-                self._set_status("camera construction returned no instance", level="error")
-                return None
-            camera = cameras[0]
-            await camera.open()
-        except Exception as exc:
-            self._set_status(f"open failed: {exc}", level="error")
-            _logger.warning(
-                "manual.webcam_open_failed",
-                camera=self._spec.name,
-                error=str(exc),
-            )
+        client = self._controller.manual_client
+        if client is None:
+            self._set_status("no config loaded — open a config first", level="warn")
+            return None
+        camera = client.camera(self._spec.name)
+        if camera is None:
+            self._set_status("camera not yet available (pool still opening?)", level="warn")
             return None
         self._adapter = camera
         return camera
 
     def _on_engine_state(self, state: object) -> None:
-        """Release our handle on PREPARING so the engine can acquire the
-        camera with a fresh run-clock anchor. Same dance as FlirCard, with
-        the addition that we cancel the preview tasks first — the engine's
-        ``camera_task`` opens its own input container, which would collide
-        with ours if it's still pumping."""
+        """Phase 4: the pool owns the webcam handle across runs, so there
+        is no per-run hand-off and no preview to tear down on PREPARING.
+        :class:`WebcamAdapter` supports preview running concurrently with
+        recording — the pre-run release dance the legacy card needed is
+        gone."""
         super()._on_engine_state(state)
-        if not isinstance(state, EngineState):
+        if not isinstance(state, RunUiState):
             return
-        if state is EngineState.PREPARING and isinstance(self._adapter, Camera):
-            camera = self._adapter
-            self._adapter = None
-            schedule_bg(self._stop_preview_session_and_close(camera))
-        elif state is EngineState.IDLE and self._adapter is None:
-            # Returning to idle after a run: re-acquire and restart preview.
-            schedule_bg(self._start_preview_session())
+        # Card-side cleanup intentionally absent (see camera.py).
 
-    # ----------------------------------------------------------- preview tile
+    def _on_pool_changed(self, pool: object) -> None:
+        """Kick off the one-shot probe-driven control refresh when the pool
+        becomes available. The pool publishes itself via
+        :attr:`RunController.pool_changed` after :meth:`WorkerPool.open`
+        resolves; before that, the camera handle is not yet open and the
+        probe attributes are absent.
 
-    def _build_preview_tile(self) -> QLabel:
-        """Fixed-size :class:`QLabel` that hosts the live preview pixmap.
-
-        Inserted as the first row of the card body via :meth:`add_section`
-        so it sits above every settings section but below the subtitle.
-        Until a frame arrives the label shows an "(no preview)" placeholder
-        in the idle-text color.
+        The metadata read happens on the worker loop via
+        :meth:`ManualClient.camera_metadata` — a typed snapshot DTO crosses
+        loops, the live :class:`WebcamAdapter` handle never does. The
+        async fetch is scheduled fire-and-forget; the apply step runs in
+        :meth:`_apply_metadata` once the future resolves.
         """
-        body = self.add_section("Live preview")
-        label = QLabel(self)
-        label.setFixedSize(PREVIEW_TILE_WIDTH, PREVIEW_TILE_HEIGHT)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet(
-            "QLabel { background-color: #111; color: #888; border: 1px solid #333; }"
-        )
-        label.setText("(no preview)")
-        body.addWidget(label)
-        return label
+        if pool is None or self._controls_initialized:
+            return
+        client = self._controller.manual_client
+        if client is None:
+            return
+        schedule_bg(self._fetch_and_apply_metadata(client))
 
-    async def _start_preview_session(self) -> None:
-        """Acquire the adapter, start preview, spawn pump + consumer tasks.
+    async def _fetch_and_apply_metadata(self, client: ManualClient) -> None:
+        """Probe the worker-resident camera and apply the snapshot.
 
-        Safe to call repeatedly: returns early if either task is already
-        running. Failures (adapter open failed, camera held by another
-        process) are surfaced in the inline status label and leave the
-        preview tile in its placeholder state. The card stays interactive
-        — operators can still change settings even if no preview is
-        available, although the response to those changes obviously won't
-        be visible until a future preview attempt succeeds.
+        :class:`ManualClient.camera_metadata` returns ``None`` for
+        non-webcam adapters (IR cameras, devices) and for cameras whose
+        probe found nothing; either case leaves the card on its static
+        widget defaults. We swallow unexpected exceptions because the
+        card surface stays usable on the static fallback — a failed
+        metadata fetch should not kill the whole card.
         """
-        if self._preview_pump_task is not None or self._preview_consumer_task is not None:
-            return
-        adapter = await self._ensure_adapter()
-        if adapter is None:
-            return
-        webcam = self._as_webcam(adapter)
-        if webcam is None:
-            return
-        if not self._controls_initialized:
-            self._refresh_controls_from_probe(webcam)
         try:
-            await webcam.start_preview()
+            metadata = await client.camera_metadata(self._spec.name)
         except Exception as exc:
             _logger.warning(
-                "manual.webcam_preview_start_failed",
+                "webcam_card.metadata_fetch_failed",
                 camera=self._spec.name,
                 error=str(exc),
             )
             return
-        self._preview_pump_task = schedule_bg(_run_preview_pump_safe(webcam))
-        self._preview_consumer_task = schedule_bg(self._consume_preview_stream(webcam))
+        if metadata is None:
+            return
+        self._apply_metadata(metadata)
 
-    async def _stop_preview_session_and_close(self, camera: Camera) -> None:
-        """Cancel both preview tasks, stop preview on the adapter, then
-        close. Sequence matters: the consumer must drain (or be cancelled)
-        before close, otherwise its ``async for`` raises a noisy
-        :class:`anyio.ClosedResourceError`."""
-        for task in (self._preview_consumer_task, self._preview_pump_task):
-            if task is not None and not task.done():
-                task.cancel()
-        self._preview_consumer_task = None
-        self._preview_pump_task = None
-        webcam = self._as_webcam(camera)
-        if webcam is not None:
-            try:
-                await webcam.stop_preview()
-            except Exception as exc:  # pragma: no cover — defensive
-                _logger.debug(
-                    "manual.webcam_stop_preview_failed",
-                    camera=self._spec.name,
-                    error=str(exc),
-                )
-        await _safe_close_camera(camera)
-        # Clear the tile so a stale frame doesn't suggest the preview is
-        # still live during the run.
-        self._preview_label.clear()
-        self._preview_label.setText("(preview paused — run active)")
-
-    async def _consume_preview_stream(self, webcam: WebcamAdapter) -> None:
-        """Drain ``preview_stream()`` and paint each JPEG into the tile.
-
-        Runs on the qasync loop so ``setPixmap`` is safe without a signal
-        marshal. Exits cleanly on ``BrokenResourceError`` (adapter closed)
-        or ``CancelledError`` (engine PREPARING cancelled the task)."""
-        try:
-            async for jpeg in webcam.preview_stream():
-                pix = QPixmap()
-                if not pix.loadFromData(jpeg):
-                    continue
-                scaled = pix.scaled(
-                    PREVIEW_TILE_WIDTH,
-                    PREVIEW_TILE_HEIGHT,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                self._preview_label.setPixmap(scaled)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # pragma: no cover — defensive
-            _logger.debug(
-                "manual.webcam_preview_consumer_exit",
-                camera=self._spec.name,
-                error=str(exc),
-            )
-
-    def _refresh_controls_from_probe(self, webcam: WebcamAdapter) -> None:
+    def _apply_metadata(self, metadata: WebcamMetadata) -> None:
         """Rewrite the resolution combo, fps cap, and spinbox ranges from
-        the device probe.
+        the metadata snapshot.
 
         Called once after the adapter first opens. The resolution combo gets
         the dshow-enumerated list (or stays on the static fallback when the
@@ -616,53 +508,39 @@ class WebcamCard(DeviceCard):
         Signals are blocked across the rewrite so the dispatch handlers don't
         fire a flurry of stale set_* commands during widget rebuild.
         """
-        # Snapshot the fps caps off the adapter so the combo's change
-        # handler doesn't need to keep a webcam reference.
-        self._resolution_fps_caps = {
-            wh: webcam.max_fps_for_resolution(*wh) or 0.0
-            for wh in webcam.supported_resolutions
-            if webcam.max_fps_for_resolution(*wh) is not None
-        }
+        self._resolution_fps_caps = dict(metadata.resolution_fps_caps)
 
         combo = self._resolution_combo
-        if combo is not None:
-            resolutions = webcam.supported_resolutions
-            if resolutions:
-                combo.blockSignals(True)
-                try:
-                    combo.clear()
-                    hint = webcam.resolution_hint
-                    selected = -1
-                    for i, (w, h) in enumerate(resolutions):
-                        combo.addItem(f"{w}×{h}", userData=(w, h))
-                        if (w, h) == hint:
-                            selected = i
-                    if selected >= 0:
-                        combo.setCurrentIndex(selected)
-                finally:
-                    combo.blockSignals(False)
+        if combo is not None and metadata.supported_resolutions:
+            combo.blockSignals(True)
+            try:
+                combo.clear()
+                hint = metadata.resolution_hint
+                selected = -1
+                for i, (w, h) in enumerate(metadata.supported_resolutions):
+                    combo.addItem(f"{w}×{h}", userData=(w, h))
+                    if (w, h) == hint:
+                        selected = i
+                if selected >= 0:
+                    combo.setCurrentIndex(selected)
+            finally:
+                combo.blockSignals(False)
 
         # Apply fps cap for whatever resolution the combo now shows. Done
         # after the combo refresh so the cap matches the displayed entry.
         self._apply_fps_cap_for_current_resolution()
 
-        uvc = webcam._uvc
-        if uvc is not None:
-            for verb, prop in PROPERTY_BY_VERB.items():
-                spin = self._spinboxes.get(verb)
-                if spin is None:
-                    continue
-                rng = uvc.get_cached_range(prop)
-                if rng is None:
-                    continue
-                spin.blockSignals(True)
-                try:
-                    spin.setRange(rng.minimum, rng.maximum)
-                    spin.setSingleStep(max(1, rng.step))
-                    current = uvc.get_cached_current(prop)
-                    spin.setValue(current if current is not None else rng.default)
-                finally:
-                    spin.blockSignals(False)
+        for verb, rng in metadata.uvc_ranges.items():
+            spin = self._spinboxes.get(verb)
+            if spin is None:
+                continue
+            spin.blockSignals(True)
+            try:
+                spin.setRange(rng.minimum, rng.maximum)
+                spin.setSingleStep(max(1, rng.step))
+                spin.setValue(rng.current if rng.current is not None else rng.default)
+            finally:
+                spin.blockSignals(False)
 
         self._controls_initialized = True
 
@@ -693,31 +571,6 @@ class WebcamCard(DeviceCard):
                 spin.setValue(float(cap))
         finally:
             spin.blockSignals(False)
-
-    @staticmethod
-    def _as_webcam(adapter: CommandTarget | Camera) -> WebcamAdapter | None:
-        """Narrow ``adapter`` to :class:`WebcamAdapter` for type-checked
-        access to the preview surface. Returns ``None`` if the adapter
-        isn't a webcam (defensive; should never happen since this card
-        is only constructed for visible cameras)."""
-        return adapter if isinstance(adapter, WebcamAdapter) else None
-
-
-async def _run_preview_pump_safe(webcam: WebcamAdapter) -> None:
-    """Run the preview pump, swallowing the AdapterError that arises when
-    the camera is already held by another process. The pump task's
-    failure shouldn't propagate out of :func:`schedule_bg` as an
-    "exception was never retrieved" warning."""
-    try:
-        await webcam.run_preview_pump()
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        _logger.info(
-            "manual.webcam_preview_pump_exit",
-            camera=getattr(getattr(webcam, "spec", None), "name", "?"),
-            error=str(exc),
-        )
 
 
 def _default_webcam_capabilities() -> frozenset[CameraCapability]:

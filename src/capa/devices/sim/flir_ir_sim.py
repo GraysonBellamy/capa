@@ -34,6 +34,7 @@ backed extractor. The two never overlap (different magic).
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import struct
 from collections.abc import AsyncIterator
@@ -43,6 +44,7 @@ from typing import Any, Literal
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+from PIL import Image
 
 from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
@@ -137,6 +139,11 @@ class FlirIrSim:
             CameraCapability.SUPPORTS_DISCOVERY,
             CameraCapability.MODEL_HINT,
             CameraCapability.SERIAL_SELECT,
+            # Sim emits JPEG-encoded preview frames during recording so the
+            # preview integration tests can decode pixels via QImage. The
+            # real FlirIrAdapter declares this when capa-flir wires the
+            # live preview pump (see Phase 4 follow-up).
+            CameraCapability.LIVE_PREVIEW,
             # Control-surface flags — sim mirrors the real FlirIrAdapter so
             # recipes / UI panels can be developed against the sim without an
             # SDK install. Verb table mirrors capa-flir's _dispatch_command.
@@ -279,6 +286,16 @@ class FlirIrSim:
     @property
     def info(self) -> CameraInfo:
         return self._info
+
+    @property
+    def resource_id(self) -> str:
+        """Per-resource worker key (``docs/per-resource-worker-migration.md`` §4.10).
+
+        Sim cameras share the ``sim:`` scheme with sim device adapters so
+        ``build_workers`` validation treats them uniformly. The body is the
+        configured spec name — distinct sims emit distinct workers.
+        """
+        return f"sim:{self._spec.name}"
 
     # ----------------------------------------------------------- protocol API
 
@@ -521,10 +538,34 @@ class FlirIrSim:
             t_utc=self._clock.to_wall_ns(t_mono_ns),
         )
         await self._frame_send.send(receipt)
-        # Best-effort preview drop (DROP_OLDEST semantics, matching plan §7.1).
+        # Encode a tiny grayscale-gradient JPEG so the preview dock /
+        # webcam card can actually paint pixels. The sim doesn't have a
+        # real radiometric frame to render, so we synthesize a 64×48
+        # gradient seeded by ``idx`` to give the operator a visible
+        # cadence indicator. Best-effort drop (DROP_OLDEST semantics,
+        # matching plan §7.1).
+        jpeg = self._encode_preview_jpeg(idx)
         with contextlib.suppress(anyio.WouldBlock):
-            self._preview_send.send_nowait(payload[: min(64, len(payload))])
+            self._preview_send.send_nowait(jpeg)
         return receipt
+
+    @staticmethod
+    def _encode_preview_jpeg(idx: int) -> bytes:
+        """Encode a deterministic 64×48 grayscale gradient as JPEG.
+
+        Seeded by ``idx`` so successive frames differ; the operator sees
+        the tile shift each frame instead of a frozen static image.
+        Pillow is a transitive dep; the encode is ~200 µs and the
+        result is well under 1 KB.
+        """
+        offset = idx & 0xFF
+        # Row-wise gradient that scrolls with idx — cheap to compute and
+        # gives the preview tile a visible "movie" feel during recording.
+        pixels = bytes(((row * 4 + offset) & 0xFF) for row in range(48) for _ in range(64))
+        img = Image.frombytes("L", (64, 48), pixels)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=75)
+        return buf.getvalue()
 
     async def run_pump(self) -> None:
         """Run the frame pump until cancellation or :meth:`stop_recording`.

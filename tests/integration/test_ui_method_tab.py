@@ -173,7 +173,7 @@ def test_clear_resets_table_and_path(qtbot: Any) -> None:
     assert tab.current_method_name() == "untitled"
 
 
-def test_load_method_emits_methodChanged(qtbot: Any) -> None:
+def test_load_method_emits_methodChanged(qtbot: Any) -> None:  # noqa: N802
     """``methodChanged`` fires on both load and clear so the main window
     can refresh the tab title without coupling to MethodTab internals."""
     tab = MethodTab()

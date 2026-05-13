@@ -5,8 +5,10 @@ laid out in a flow grid. Tiles update at the adapter's throttled cadence
 (``WebcamAdapter`` caps at 2 Hz; see ``PREVIEW_INTERVAL_NS`` in that
 module). Cameras whose adapters do not declare
 :attr:`CameraCapability.LIVE_PREVIEW` show a static "no preview" placeholder
-and never receive frames — :func:`capa.experiment.cameras._drain_preview`
-gates participation on the capability flag.
+and never receive frames —
+:meth:`capa.runtime.camera_adapter.CameraDeviceAdapter.start_preview_channel`
+early-outs on the capability flag, so the pool-owned preview
+:class:`ThreadBridge` stays empty for those cameras.
 
 Three live surfaces:
 

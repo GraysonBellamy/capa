@@ -98,8 +98,8 @@ on_failure = "warn"
 fps = 30
 width = 1920
 height = 1080
-codec = "libx264"
-pix_fmt = "yuv420p"
+codec = "h264_qsv"
+pix_fmt = "nv12"
 input_format = "dshow"
 input_url = "video=Logitech Webcam C930e"
 

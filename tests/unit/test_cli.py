@@ -306,7 +306,7 @@ class TestVersion:
     def test_prints_version(self, runner: CliRunner) -> None:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        assert "engine" in result.stdout
+        assert "runtime" in result.stdout
 
 
 class TestDevicesDiscover:

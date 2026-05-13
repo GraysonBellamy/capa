@@ -35,14 +35,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from capa.core.clock import RunClock
 from capa.devices.camera.base import Camera, CameraCapability, CameraSpec
-from capa.devices.registry import _SingleCameraConfig
-from capa.experiment.cameras import construct_cameras
-from capa.experiment.engine import EngineState
-from capa.ui.async_util import schedule_bg
 from capa.ui.manual.cards.base import CommandTarget, DeviceCard
-from capa.ui.state import RunController
+from capa.ui.state import RunController, RunUiState
 from capa.ui.statusbar import OperatorIdProvider
 
 _logger = structlog.get_logger("capa.ui.manual.camera")
@@ -372,47 +367,39 @@ class FlirCard(DeviceCard):
     # ------------------------------------------------------------------ lifecycle
 
     async def _ensure_adapter(self) -> CommandTarget | None:
-        """Override the base's registry-acquire with a camera-specific
-        construct+open. Cameras are not routed through
-        :class:`DeviceRegistry` because their frame timestamps must
-        anchor to the run clock; the panel uses a fresh
-        :class:`RunClock` per construction and never records, so frame
-        timestamps simply don't matter here.
+        """Return the :class:`WorkerPool`-owned camera handle.
+
+        Phase 4 / migration doc §6: cameras are constructed inside the
+        pool's :class:`Worker` at :meth:`WorkerPool.open` time and
+        wrapped in :class:`CameraDeviceAdapter`. Cards reach the
+        underlying :class:`Camera` (for preview-stream subscription)
+        through :meth:`ManualClient.camera`. The card never owns the
+        camera's lifecycle — the pool does.
         """
         if self._adapter is not None:
             return self._adapter
-        try:
-            # Build a one-shot camera handle. Construction is sync.
-            cameras = construct_cameras(
-                _SingleCameraConfig(self._spec),  # type: ignore[arg-type]
-                clock=RunClock.now(),
-            )
-            if not cameras:
-                self._set_status("camera construction returned no instance", level="error")
-                return None
-            camera = cameras[0]
-            await camera.open()
-        except Exception as exc:
-            self._set_status(f"open failed: {exc}", level="error")
-            _logger.warning("manual.camera_open_failed", camera=self._spec.name, error=str(exc))
+        client = self._controller.manual_client
+        if client is None:
+            self._set_status("no config loaded — open a config first", level="warn")
+            return None
+        camera = client.camera(self._spec.name)
+        if camera is None:
+            self._set_status("camera not yet available (pool still opening?)", level="warn")
             return None
         self._adapter = camera
         return camera
 
     def _on_engine_state(self, state: object) -> None:
-        """Augment the base gate with auto-close-on-PREPARING. The engine
-        is about to acquire this camera with its own clock; if we hold the
-        handle open the OS will refuse the second open() (USB exclusive)."""
+        """Phase 4: the worker owns the camera handle for the duration of
+        the pool, so there is no per-run hand-off. The base class still
+        handles the manual-write gate (cards refuse dispatch during a
+        run); no camera-specific behavior is required here."""
         super()._on_engine_state(state)
-        if not isinstance(state, EngineState):
+        if not isinstance(state, RunUiState):
             return
-        if state is EngineState.PREPARING and isinstance(self._adapter, Camera):
-            # The engine is about to acquire this camera with its own
-            # run-clock; release our handle so the second open() succeeds.
-            # Best-effort fire-and-forget on the running asyncio loop.
-            camera = self._adapter
-            self._adapter = None
-            schedule_bg(_safe_close_camera(camera))
+        # Card-side cleanup intentionally absent: the pool owns the
+        # camera across runs, so preview can keep running through
+        # PREPARING and beyond.
 
 
 async def _safe_close_camera(camera: Camera) -> None:

@@ -1,0 +1,376 @@
+""":class:`WorkerRunner` — pluggable host for a worker's coroutine surface.
+
+Plan §3.1: every :class:`~capa.runtime.worker.Worker` is constructed with a
+:class:`WorkerRunner`. The runner owns the *thread + loop* dimension; the
+worker owns the *state machine + adapter handle* dimension. Splitting them
+along that seam lets the same :class:`Worker` code run two ways:
+
+* :class:`ThreadedRunner` — production. Spawns one ``threading.Thread`` with
+  a dedicated ``asyncio.new_event_loop()``. This is the model the migration
+  doc specifies in §4.1 lines 651-677.
+* :class:`InlineRunner` — unit tests. Runs the worker's coroutines on the
+  test's own loop. Deterministic; ~10× faster; no thread to join. Migration
+  doc §10.4 lines 1907-1913 calls this out as "the single biggest determinism
+  win available."
+
+Both runners satisfy the same :class:`WorkerRunner` protocol; the worker
+itself doesn't know which it has. Cross-runner test parameterization (plan
+risk register §7) catches semantic drift between the two implementations.
+
+The runner is a deliberately small surface — submit a coroutine factory,
+get back a future. It is **not** a general-purpose loop wrapper; it doesn't
+expose ``call_soon``, ``call_later``, or schedule helpers because the worker
+should never need them. If a worker needs them it has reached into the loop
+when it should be expressing intent through the runner.
+
+Phase 1 caveat: the :class:`Worker` uses the runner's :attr:`loop` directly
+when it builds loop-affine primitives (``asyncio.Event``, ``asyncio.Queue``,
+the outbound :class:`~capa.runtime.bridge.ThreadBridge`). That is by design:
+the worker constructs those *inside* a coroutine it submitted via
+:meth:`submit`, so the loop is the running loop at construction time. The
+:attr:`loop` property exists for the bridge's ``attach_*`` calls, which must
+quote a target loop explicitly to validate thread affinity.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import threading
+from collections.abc import Callable, Coroutine
+from concurrent.futures import Future
+from typing import Any, Protocol, TypeVar, runtime_checkable
+
+import structlog
+
+from capa.runtime.errors import RunnerStateError
+
+T = TypeVar("T")
+
+_logger = structlog.get_logger("capa.runtime.runner")
+
+
+@runtime_checkable
+class WorkerRunner(Protocol):
+    """Pluggable thread/loop host for a worker.
+
+    Methods are all sync; cross-thread communication uses
+    :class:`concurrent.futures.Future`. Async callers bridge with
+    :func:`asyncio.wrap_future`.
+
+    Lifecycle: :meth:`start` once, any number of :meth:`submit` calls while
+    started, :meth:`stop` once. After :meth:`stop`, no further :meth:`submit`
+    is permitted.
+    """
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        """The event loop this runner hosts.
+
+        For :class:`ThreadedRunner` this is the loop owned by the runner's
+        thread. For :class:`InlineRunner` it is whatever loop was running
+        when :meth:`start` was called. Callers building loop-affine
+        primitives (``asyncio.Queue``, ``ThreadBridge`` attach handshake)
+        quote this as the expected loop.
+        """
+        ...
+
+    @property
+    def thread_ident(self) -> int | None:
+        """Thread ID hosting the loop, or ``None`` for :class:`InlineRunner`.
+
+        Used by the worker for ``sys._current_frames()[thread_ident]`` when
+        capturing a stack on hard-stop (migration doc §3.8 Phase B line
+        442). Inline mode runs on the caller's thread, so the stack capture
+        would be self-referential and is skipped.
+        """
+        ...
+
+    def start(self) -> Future[None]:
+        """Bring the runner up. For :class:`ThreadedRunner` this spawns the
+        thread and constructs the loop; the future resolves once the loop
+        is running and ready to accept :meth:`submit`. For :class:`InlineRunner`
+        this just records the existing loop and resolves immediately.
+
+        Raises :class:`RunnerStateError` if called twice.
+        """
+        ...
+
+    def submit(self, coro_factory: Callable[[], Coroutine[Any, Any, T]]) -> Future[T]:
+        """Schedule a coroutine on the runner's loop and return a future.
+
+        The factory pattern (instead of "pass a coroutine") avoids
+        cross-thread coroutine construction: the coroutine is built *on*
+        the runner's loop. This matters because some coroutines capture
+        the running loop at construction (e.g. an ``asyncio.Event`` built
+        in the coroutine body would otherwise bind to the wrong loop).
+
+        Raises :class:`RunnerStateError` if the runner is not started or
+        has been stopped.
+        """
+        ...
+
+    def stop(self, *, grace_s: float = 5.0) -> Future[None]:
+        """Tear the runner down. Resolves once the loop has stopped and
+        (for :class:`ThreadedRunner`) the thread has joined.
+
+        ``grace_s`` bounds the thread join. On expiry the
+        :class:`ThreadedRunner` records a degraded state and lets the
+        thread persist as a daemon — see migration doc §3.8 Phase B for the
+        protocol. :class:`InlineRunner` ignores the grace; it just cancels
+        outstanding tasks on its loop.
+        """
+        ...
+
+
+class ThreadedRunner:
+    """Production runner: dedicated thread, dedicated asyncio loop.
+
+    Constructed but not started. Call :meth:`start` to spawn the thread.
+    The thread is non-daemon (``daemon=False``) per migration doc §4.1
+    line 659 so a misbehaving worker is visible at process exit rather
+    than silently dropped.
+    """
+
+    def __init__(self, *, name: str) -> None:
+        self._name = name
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._started = False
+        self._stopped = False
+        # Bound at start(); set when the loop is running and ready.
+        self._loop_ready: Future[None] = Future()
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop is None:
+            raise RunnerStateError(
+                f"ThreadedRunner {self._name!r}: loop not constructed; call start() first"
+            )
+        return self._loop
+
+    @property
+    def thread_ident(self) -> int | None:
+        return self._thread.ident if self._thread is not None else None
+
+    def start(self) -> Future[None]:
+        if self._started:
+            raise RunnerStateError(f"ThreadedRunner {self._name!r}: start() called twice")
+        self._started = True
+        self._thread = threading.Thread(
+            target=self._thread_main,
+            name=self._name,
+            daemon=False,
+        )
+        self._thread.start()
+        return self._loop_ready
+
+    def submit(self, coro_factory: Callable[[], Coroutine[Any, Any, T]]) -> Future[T]:
+        if not self._started:
+            raise RunnerStateError(f"ThreadedRunner {self._name!r}: submit() before start()")
+        if self._stopped:
+            raise RunnerStateError(f"ThreadedRunner {self._name!r}: submit() after stop()")
+        loop = self._loop
+        if loop is None:
+            raise RunnerStateError(
+                f"ThreadedRunner {self._name!r}: loop not yet ready; "
+                f"await start() future before submitting"
+            )
+
+        out: Future[T] = Future()
+
+        def _kick() -> None:
+            # Runs on the runner's loop. Constructs the coroutine here so
+            # any loop-affine primitives it builds bind to the right loop.
+            try:
+                coro = coro_factory()
+            except BaseException as exc:
+                out.set_exception(exc)
+                return
+            task: asyncio.Task[T] = loop.create_task(coro)
+
+            def _bridge(t: asyncio.Task[T]) -> None:
+                if t.cancelled():
+                    out.cancel()
+                    return
+                exc = t.exception()
+                if exc is not None:
+                    out.set_exception(exc)
+                else:
+                    out.set_result(t.result())
+
+            task.add_done_callback(_bridge)
+
+        loop.call_soon_threadsafe(_kick)
+        return out
+
+    def stop(self, *, grace_s: float = 5.0) -> Future[None]:
+        if not self._started:
+            raise RunnerStateError(f"ThreadedRunner {self._name!r}: stop() before start()")
+        out: Future[None] = Future()
+        if self._stopped:
+            # Idempotent; resolve immediately.
+            out.set_result(None)
+            return out
+        self._stopped = True
+
+        loop = self._loop
+        thread = self._thread
+        assert thread is not None
+
+        def _finalize_after_join() -> None:
+            thread.join(timeout=grace_s)
+            if thread.is_alive():
+                # Migration doc §3.8 Phase B / §5.10: the loop refused to
+                # stop within grace. Record and let the thread persist as
+                # daemon for the process lifetime. We can't safely interrupt
+                # a wedged native call.
+                _logger.warning(
+                    "runner.thread_did_not_join",
+                    name=self._name,
+                    grace_s=grace_s,
+                )
+            out.set_result(None)
+
+        if loop is None:
+            # start() finished but the loop never bound; nothing to stop.
+            _finalize_after_join()
+            return out
+
+        loop.call_soon_threadsafe(loop.stop)
+        # Joining blocks; do it on a tiny helper thread so the caller's
+        # thread isn't pinned. The helper completes ``out`` regardless of
+        # join success.
+        threading.Thread(
+            target=_finalize_after_join,
+            name=f"{self._name}-stop",
+            daemon=True,
+        ).start()
+        return out
+
+    # ----- thread entry -----
+
+    def _thread_main(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self._loop = loop
+        structlog.contextvars.bind_contextvars(thread=self._name)
+        with contextlib.suppress(BaseException):
+            # Signal readiness AFTER the loop is bound but BEFORE run_forever,
+            # so a submitter using call_soon_threadsafe always lands.
+            self._loop_ready.set_result(None)
+        try:
+            loop.run_forever()
+        finally:
+            try:
+                # Cancel any straggler tasks before closing the loop so we
+                # don't leak "Task was destroyed but it is pending!" warnings.
+                pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+                for t in pending:
+                    t.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except BaseException:  # pragma: no cover - defensive
+                pass
+            loop.close()
+
+
+class InlineRunner:
+    """Deterministic test runner: hosts the worker on the caller's loop.
+
+    Migration doc §10.4 lines 1907-1913. The runner doesn't own a thread; it
+    just records the loop that called :meth:`start` and routes
+    :meth:`submit` calls through that loop's ``create_task``.
+
+    Why ``loop`` is captured at :meth:`start` rather than at construction:
+    pytest-anyio constructs the runner before the test's event loop is
+    running. Lazy capture lets the same runner instance be reused after the
+    enclosing fixture starts the loop.
+    """
+
+    def __init__(self, *, name: str = "inline-runner") -> None:
+        self._name = name
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._started = False
+        self._stopped = False
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop is None:
+            raise RunnerStateError(
+                f"InlineRunner {self._name!r}: loop not captured; call start() first"
+            )
+        return self._loop
+
+    @property
+    def thread_ident(self) -> int | None:
+        # Same thread as the caller; stack capture would be self-referential.
+        return None
+
+    def start(self) -> Future[None]:
+        if self._started:
+            raise RunnerStateError(f"InlineRunner {self._name!r}: start() called twice")
+        self._started = True
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError as exc:
+            raise RunnerStateError(
+                f"InlineRunner {self._name!r}: start() must be called from "
+                f"within a running asyncio loop"
+            ) from exc
+        out: Future[None] = Future()
+        out.set_result(None)
+        return out
+
+    def submit(self, coro_factory: Callable[[], Coroutine[Any, Any, T]]) -> Future[T]:
+        if not self._started:
+            raise RunnerStateError(f"InlineRunner {self._name!r}: submit() before start()")
+        if self._stopped:
+            raise RunnerStateError(f"InlineRunner {self._name!r}: submit() after stop()")
+        loop = self._loop
+        assert loop is not None
+
+        out: Future[T] = Future()
+
+        # Same-loop submit: build the coroutine right now (we're on the
+        # loop) and create the task directly. No call_soon_threadsafe
+        # round-trip — it would still work but is needless indirection
+        # inline mode is supposed to avoid.
+        try:
+            coro = coro_factory()
+        except BaseException as exc:
+            out.set_exception(exc)
+            return out
+        task: asyncio.Task[T] = loop.create_task(coro)
+
+        def _bridge(t: asyncio.Task[T]) -> None:
+            if t.cancelled():
+                out.cancel()
+                return
+            exc = t.exception()
+            if exc is not None:
+                out.set_exception(exc)
+            else:
+                out.set_result(t.result())
+
+        task.add_done_callback(_bridge)
+        return out
+
+    def stop(self, *, grace_s: float = 5.0) -> Future[None]:
+        del grace_s  # inline runner doesn't have a thread to join
+        if not self._started:
+            raise RunnerStateError(f"InlineRunner {self._name!r}: stop() before start()")
+        out: Future[None] = Future()
+        if self._stopped:
+            out.set_result(None)
+            return out
+        self._stopped = True
+        out.set_result(None)
+        return out
+
+
+__all__ = [
+    "InlineRunner",
+    "ThreadedRunner",
+    "WorkerRunner",
+]

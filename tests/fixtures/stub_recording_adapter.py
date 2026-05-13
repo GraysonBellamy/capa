@@ -41,6 +41,7 @@ class StubRecordingAdapter:
 
     name: str
     capabilities: frozenset[Capability]
+    resource_id: str
 
     def __init__(
         self,
@@ -50,6 +51,11 @@ class StubRecordingAdapter:
         accept_kinds: list[str] | None = None,
     ) -> None:
         self.name = name
+        # The :class:`WorkerPool` groups adapters by ``resource_id``; the
+        # stub uses ``stub:<name>`` so each test device gets its own
+        # worker. Real adapters key on the underlying transport
+        # (``serial:<port>``, ``daqmx:chassis:<id>``, …).
+        self.resource_id = f"stub:{name}"
         flag_names = capabilities or [
             "HAS_TARE",
             "HAS_ZERO",

@@ -127,7 +127,7 @@ class MethodTab(QWidget):
     own model state; it does not reach into the controller or live run
     state. Methods are loaded/saved via :class:`QFileDialog`."""
 
-    methodChanged = Signal()
+    methodChanged = Signal()  # noqa: N815 - Qt signal naming convention
     """Emitted whenever the displayed method changes (load, clear, or
     open). Lets the main window mirror the current method name in the
     tab title without coupling MethodTab to its parent."""

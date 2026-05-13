@@ -7,8 +7,10 @@ cards are torn down, fresh ones are built for the new config's
 on the adapter's :class:`Capability` flagset — devices that advertise no
 manual-relevant capability are skipped.
 
-The dock does **not** open any adapter connections. Cards are lazy: they
-acquire from the controller's :class:`DeviceRegistry` on first action.
+The dock does **not** open any adapter connections. Cards dispatch through
+the controller's :class:`ManualClient`, which routes to the
+:class:`WorkerPool` (between runs) or to the :class:`Conductor` (during a
+run, with bundle recording + state gating).
 """
 
 from __future__ import annotations
@@ -122,14 +124,23 @@ class ManualControlDock(QDockWidget):
         ]
 
         any_added = False
-        registry = self._controller.device_registry
+        pool = self._controller.worker_pool
 
         for dev in config.hardware.devices:
-            # If the device is already open we can read its declared
-            # capabilities; otherwise fall back to the adapter-string
-            # fingerprint to pick the right card class.
-            opened = registry.opened_device(dev.name) if registry is not None else None
-            caps: frozenset[Capability] = opened.capabilities if opened is not None else frozenset()
+            # If the pool is open we can read the worker-hosted adapter's
+            # declared capabilities; otherwise (pool still opening, or
+            # opening failed) fall back to the adapter-string fingerprint
+            # to pick the right card class.
+            opened = None
+            if pool is not None:
+                try:
+                    worker = pool.worker_for(dev.name)
+                    opened = worker.adapters.get(dev.name)
+                except Exception:
+                    opened = None
+            caps: frozenset[Capability] = (
+                getattr(opened, "capabilities", frozenset()) if opened is not None else frozenset()
+            )
             if opened is not None and not has_any_capability(caps, device_caps_to_check):
                 continue  # adapter declared no manual controls; skip.
 

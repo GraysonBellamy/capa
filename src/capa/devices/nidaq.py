@@ -62,6 +62,7 @@ from capa.devices._helpers import (
     WatchdogState,
     build_channel_sample,
     channels_for_device,
+    daqmx_resource_id_from_channels,
     make_not_open_result,
     make_record_id,
     reject_unless_authorized,
@@ -345,6 +346,10 @@ class NIDAQAdapter:
             return self.params.timing.rate_hz * bound
         # Polled: one SourceRecord + one ChannelSample per bound channel.
         return self.params.rate_hz * (1 + bound)
+
+    @property
+    def resource_id(self) -> str:
+        return daqmx_resource_id_from_channels(ch.physical_channel for ch in self.params.channels)
 
     @property
     def task_spec(self) -> TaskSpec | None:

@@ -37,7 +37,7 @@ from capa.experiment.config import (
     ProcedureRef,
     SampleInfo,
 )
-from capa.experiment.engine import ExperimentEngine
+from capa.runtime.headless import run_headless
 
 pytestmark = [
     pytest.mark.hardware,
@@ -154,11 +154,9 @@ class TestRealWebcamEngineRun:
         )
 
         async def _go() -> Path:
-            engine = ExperimentEngine()
-            result = await engine.run(
+            result = await run_headless(
                 config,
                 runs_root=tmp_path / "runs",
-                configure_logging_for_bundle=False,
             )
             assert result.bundle_path is not None
             assert result.run_status == "completed", result.exit_reason

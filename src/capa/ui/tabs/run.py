@@ -5,9 +5,8 @@ PyQtGraph plot panes filling the body. Numerics live in a dock managed by
 :class:`MainWindow`, not here.
 
 P1 collapses Arm/Start into a single Start button — preflight runs inside
-:meth:`ExperimentEngine.run` (PREPARING state) and any failure is surfaced
-as the run's :class:`EngineResult`. The Method tab and a real Arm phase
-arrive in P3.
+:meth:`Conductor.start` (PREPARING state) and any failure is surfaced
+as the run's :class:`RunUiResult`.
 """
 
 from __future__ import annotations
@@ -29,9 +28,9 @@ from PySide6.QtWidgets import (
 
 from capa.core.ringbuffer import RingBufferRegistry
 from capa.experiment.config import ExperimentConfig
-from capa.experiment.engine import EngineResult, EngineState
+from capa.runtime.lifecycle import PoolState
 from capa.ui.plots.pane import PlotPane
-from capa.ui.state import RunController
+from capa.ui.state import RunController, RunUiResult, RunUiState
 from capa.ui.theme import (
     COLOR_FAIL,
     COLOR_IDLE,
@@ -44,23 +43,23 @@ from capa.ui.theme import (
 ELAPSED_REFRESH_MS: Final[int] = 1000
 
 _STATE_TEXT = {
-    EngineState.IDLE: "Idle",
-    EngineState.PREPARING: "Preparing…",
-    EngineState.RUNNING: "Running",
-    EngineState.ABORTING: "Aborting",
-    EngineState.FINALIZING: "Finalizing…",
-    EngineState.SEALED: "Sealed",
-    EngineState.FAILED: "Failed",
+    RunUiState.IDLE: "Idle",
+    RunUiState.PREPARING: "Preparing…",
+    RunUiState.RUNNING: "Running",
+    RunUiState.DRAINING: "Draining…",
+    RunUiState.FINALIZING: "Finalizing…",
+    RunUiState.SEALED: "Sealed",
+    RunUiState.FAILED: "Failed",
 }
 
 _STATE_COLOR = {
-    EngineState.IDLE: COLOR_IDLE,
-    EngineState.PREPARING: COLOR_WARN,
-    EngineState.RUNNING: COLOR_RUNNING,
-    EngineState.ABORTING: COLOR_WARN,
-    EngineState.FINALIZING: COLOR_WARN,
-    EngineState.SEALED: COLOR_OK,
-    EngineState.FAILED: COLOR_FAIL,
+    RunUiState.IDLE: COLOR_IDLE,
+    RunUiState.PREPARING: COLOR_WARN,
+    RunUiState.RUNNING: COLOR_RUNNING,
+    RunUiState.DRAINING: COLOR_WARN,
+    RunUiState.FINALIZING: COLOR_WARN,
+    RunUiState.SEALED: COLOR_OK,
+    RunUiState.FAILED: COLOR_FAIL,
 }
 
 
@@ -101,6 +100,11 @@ class RunTab(QWidget):
 
         self._controller.state_changed.connect(self._on_state)
         self._controller.run_finished.connect(self._on_run_finished)
+        # Re-evaluate the Start button whenever the pool finishes opening
+        # (or is torn down) so the operator can't click Start while the
+        # pool is still in PoolState.OPENING — which would crash the
+        # conductor's preparation phase with PoolStateError.
+        self._controller.pool_changed.connect(self._on_pool_changed)
 
     # ------------------------------------------------------------------ build
 
@@ -131,6 +135,7 @@ class RunTab(QWidget):
 
         self._start_btn = QPushButton("Start", header)
         self._start_btn.setMinimumSize(QSize(96, 36))
+        self._start_btn.setEnabled(False)
         self._start_btn.clicked.connect(self._on_start_clicked)
         h.addWidget(self._start_btn)
 
@@ -169,9 +174,15 @@ class RunTab(QWidget):
         for ch in config.hardware.channels:
             empty.register(ch.name, decimate_to_hz=ch.decimate_to_hz)
         self._set_plot_pane(empty, config)
+        # The pool may already be open (config reload reusing an OPEN
+        # pool) or still opening; sync the Start button either way.
+        self._start_btn.setEnabled(self.can_start())
 
     def can_start(self) -> bool:
-        return self._config is not None and not self._controller.is_active
+        if self._config is None or self._controller.is_active:
+            return False
+        pool = self._controller.worker_pool
+        return pool is not None and pool.state is PoolState.OPEN
 
     # ------------------------------------------------------------------ control
 
@@ -190,25 +201,33 @@ class RunTab(QWidget):
         self._abort_btn.setEnabled(True)
 
     def _on_abort_clicked(self, mode: str) -> None:
-        self._controller.request_abort(mode=mode)  # type: ignore[arg-type]
+        self._controller.request_abort(mode=mode)
+
+    def _on_pool_changed(self, _pool: object) -> None:
+        """``RunController.pool_changed`` fires when the pool finishes
+        opening (with the pool) or is torn down (with ``None``). Sync the
+        Start button to the new readiness state in either case."""
+        self._start_btn.setEnabled(self.can_start())
 
     # ------------------------------------------------------------------ slots
 
-    def _on_state(self, state: EngineState) -> None:
+    def _on_state(self, state: object) -> None:
+        if not isinstance(state, RunUiState):
+            return
         self._state_label.setText(_STATE_TEXT.get(state, str(state)))
         color = _STATE_COLOR.get(state, COLOR_IDLE)
         self._state_label.setStyleSheet(f"color: {color.name()};")
-        if state is EngineState.RUNNING:
+        if state is RunUiState.RUNNING:
             self._abort_btn.setEnabled(True)
             # Buffers were rebuilt during controller.start(); rebind the
             # plot pane now that the new registry is populated.
             if self._config is not None:
                 self._set_plot_pane(self._controller.buffers, self._config)
-        if state in (EngineState.SEALED, EngineState.FAILED):
+        if state in (RunUiState.SEALED, RunUiState.FAILED):
             self._abort_btn.setEnabled(False)
 
     def _on_run_finished(self, result: object) -> None:
-        if isinstance(result, EngineResult):
+        if isinstance(result, RunUiResult):
             if result.bundle_path is not None:
                 self._run_id_label.setText(f"run: {result.run_id}  ({result.run_status})")
             else:

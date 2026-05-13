@@ -43,8 +43,18 @@ import numpy as np
 from capa.devices.records import ChannelSample
 
 DEFAULT_CAPACITY: Final[int] = 6000
-"""Per-channel ring depth. At 10 Hz post-decimation that's ten minutes of
-history — enough to scroll back without paging the durable sink."""
+"""Floor for per-channel ring depth. Used when an explicit capacity is
+passed to :class:`ChannelRingBuffer` and as a minimum for the
+rate-derived capacity computed by :meth:`RingBufferRegistry.register`."""
+
+DEFAULT_HISTORY_S: Final[float] = 600.0
+"""Default history window targeted by :meth:`RingBufferRegistry.register`.
+The capacity allocated for a channel is sized so the ring can hold this
+many seconds of samples at the channel's ``decimate_to_hz`` without
+rolling over — so a 50 Hz channel ends up with a ~30 000-sample ring
+(10 min), not the 120 s a fixed 6000-sample buffer would give. Ten
+minutes is long enough to scroll back through a typical CAPA run
+without paging the durable sink."""
 
 
 class ChannelRingBuffer:
@@ -73,6 +83,7 @@ class ChannelRingBuffer:
         "_min_dt_ns",
         "_size",
         "_t",
+        "_total_kept",
         "_v",
     )
 
@@ -90,6 +101,7 @@ class ChannelRingBuffer:
         self._last_kept_t: int | None = None
         self._dropped_decimation = 0
         self._dropped_overflow = 0
+        self._total_kept = 0
 
     # ------------------------------------------------------------------ properties
 
@@ -113,6 +125,15 @@ class ChannelRingBuffer:
     @property
     def total_dropped(self) -> int:
         return self._dropped_decimation + self._dropped_overflow
+
+    @property
+    def total_kept(self) -> int:
+        """Monotonic count of samples accepted into the ring since
+        construction. Used by the plot pane to skip ``setData`` calls for
+        curves that have not received new samples between repaint ticks.
+        Never reset by :meth:`clear` — wraparound is not a concern at
+        plausible run lengths (1 kHz × 10 yr ≪ int64)."""
+        return self._total_kept
 
     # ------------------------------------------------------------------ producer
 
@@ -157,6 +178,7 @@ class ChannelRingBuffer:
         self._t[idx] = t_mono_ns
         self._v[idx] = value
         self._last_kept_t = t_mono_ns
+        self._total_kept += 1
 
     # ------------------------------------------------------------------ consumer
 
@@ -214,10 +236,23 @@ class RingBufferRegistry:
         self,
         channel: str,
         *,
-        capacity: int = DEFAULT_CAPACITY,
+        capacity: int | None = None,
         decimate_to_hz: float = 10.0,
+        history_s: float = DEFAULT_HISTORY_S,
     ) -> ChannelRingBuffer:
-        """Create-or-replace the buffer for ``channel``."""
+        """Create-or-replace the buffer for ``channel``.
+
+        When ``capacity`` is ``None`` (the default) the ring is sized to
+        hold ``history_s`` seconds at ``decimate_to_hz``, floored at
+        :data:`DEFAULT_CAPACITY`. This is what keeps a 50 Hz Sartorius
+        balance from overflowing two minutes into a run with the previous
+        fixed 6000-sample default: at ``decimate_to_hz=60`` it now gets a
+        36 000-sample ring (10 min) instead. Pass ``capacity`` explicitly
+        only when a test or caller needs an exact size.
+        """
+        if capacity is None:
+            rate_capacity = int(decimate_to_hz * history_s) if decimate_to_hz > 0 else 0
+            capacity = max(DEFAULT_CAPACITY, rate_capacity)
         buf = ChannelRingBuffer(capacity=capacity, decimate_to_hz=decimate_to_hz)
         self._buffers[channel] = buf
         return buf
@@ -242,6 +277,34 @@ class RingBufferRegistry:
         the status bar's "Dropped UI samples" readout (plan §10.4)."""
         return sum(b.total_dropped for b in self._buffers.values())
 
+    def total_overflow(self) -> int:
+        """Total ring rollovers across every buffer — samples evicted
+        because the ring was at capacity when a new push arrived.
+
+        **Not a UI-distress signal.** Plot snapshots are non-draining
+        copies, so a ring left running long enough will *always* roll
+        over once it has accumulated ``capacity`` samples — that's the
+        defining behavior of a ring buffer, not consumer slowness. For
+        actual backpressure use the conductor's saturation deadline,
+        loop-lag percentile, and worker-bridge depth metrics."""
+        return sum(b.dropped_overflow for b in self._buffers.values())
+
+    def total_decimated(self) -> int:
+        """Decimation-only drops across every buffer. By-design shedding
+        of samples that arrive faster than ``decimate_to_hz``; reported
+        separately so the status bar can distinguish 'plot decimation
+        working' from 'UI is overwhelmed'."""
+        return sum(b.dropped_decimation for b in self._buffers.values())
+
+    def per_channel_drops(self) -> dict[str, tuple[int, int]]:
+        """Return ``{channel: (overflow, decimated)}`` for every registered
+        buffer — used by the status bar to attribute drops to specific
+        producers in the pill tooltip."""
+        return {
+            name: (buf.dropped_overflow, buf.dropped_decimation)
+            for name, buf in self._buffers.items()
+        }
+
     def clear_all(self) -> None:
         for buf in self._buffers.values():
             buf.clear()
@@ -249,6 +312,7 @@ class RingBufferRegistry:
 
 __all__ = [
     "DEFAULT_CAPACITY",
+    "DEFAULT_HISTORY_S",
     "ChannelRingBuffer",
     "RingBufferRegistry",
 ]

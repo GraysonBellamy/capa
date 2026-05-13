@@ -306,6 +306,7 @@ class Camera(Protocol):
     spec: CameraSpec
     capabilities: frozenset[CameraCapability]
     kind: Literal["visible", "ir"]
+    resource_id: str
 
     async def discover(self) -> tuple[CameraInfo, ...]:
         """Enumerate connected cameras the adapter can drive.

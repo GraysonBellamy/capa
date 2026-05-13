@@ -3,7 +3,7 @@ hardware-day §6 — guarding against:
 
 * the plot pane being bound to the *empty* registry built in
   :meth:`RunTab.load_config` instead of the controller's freshly-rebuilt
-  buffers (the rebind must happen on the ``EngineState.RUNNING``
+  buffers (the rebind must happen on the ``RunUiState.RUNNING``
   transition, not at click time);
 * the Start button staying disabled forever after a run seals because
   ``RunController.is_active`` is still ``True`` when the
@@ -18,6 +18,7 @@ signals + properties.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -36,7 +37,8 @@ from capa.experiment.config import (
     ProcedureRef,
     SampleInfo,
 )
-from capa.experiment.engine import EngineResult, EngineState
+from capa.runtime.lifecycle import PoolState
+from capa.ui.state import RunUiResult, RunUiState
 from capa.ui.tabs.run import RunTab
 
 
@@ -88,6 +90,7 @@ class _FakeController(QObject):
     state_changed = Signal(object)
     event_received = Signal(object)
     run_finished = Signal(object)
+    pool_changed = Signal(object)
 
     def __init__(self, *, channels: tuple[str, ...]) -> None:
         super().__init__()
@@ -97,6 +100,11 @@ class _FakeController(QObject):
         for ch in channels:
             self._buffers.register(ch, decimate_to_hz=20.0)
         self.is_active = False
+        # RunTab.can_start() checks ``worker_pool.state is PoolState.OPEN``
+        # before enabling the Start button. Expose a minimal stub that
+        # always reports OPEN — these tests aren't exercising the pool
+        # readiness race, just the seal / rebind paths.
+        self.worker_pool: Any = SimpleNamespace(state=PoolState.OPEN)
 
     @property
     def buffers(self) -> RingBufferRegistry:
@@ -133,7 +141,7 @@ def test_plot_pane_rebound_to_controller_buffers_on_running(
     placeholder_registry = tab._plot_pane._registry
     assert placeholder_registry is not fake_controller.buffers
 
-    tab._on_state(EngineState.RUNNING)
+    tab._on_state(RunUiState.RUNNING)
 
     # After RUNNING: pane registry IS the controller's buffers.
     assert tab._plot_pane is not None
@@ -166,7 +174,7 @@ def test_start_button_reenables_after_seal_via_singleshot(
     # everything else is irrelevant for this slot.
     from pathlib import Path as _Path
 
-    sealed = EngineResult(
+    sealed = RunUiResult(
         run_id="2026-05-09_000000_UI-RT",
         bundle_path=_Path("/tmp/ui-rt-fake"),
         run_status="completed",
