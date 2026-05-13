@@ -189,7 +189,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.4" },
     { name = "tomli-w", specifier = ">=1.0" },
     { name = "typer", specifier = ">=0.12" },
-    { name = "watlowlib", specifier = ">=0.2.0,<0.3" },
+    { name = "watlowlib", specifier = ">=0.4.0,<0.5" },
 ]
 provides-extras = ["dev", "flir"]
 
@@ -1064,14 +1064,14 @@ wheels = [
 
 [[package]]
 name = "watlowlib"
-version = "0.2.0"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anymodbus" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/58/62/885ee8543969add1e35c54117a4281171a8d3cae6affac5a590ea0ecec07/watlowlib-0.2.0.tar.gz", hash = "sha256:6048ed4f035a7cf67b1411ba40d53663c0cc1cf60cda855e1c59a9c39cea07b9", size = 344389, upload-time = "2026-05-09T17:00:50.893Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/20/cfd32f4be7be626beee6dc3d869020030146a627e9e68d2aa13d7fd41fdc/watlowlib-0.4.0.tar.gz", hash = "sha256:24b863dcac48054b67423affdf84305be88032ba26455043f3c4b45097a34415", size = 364149, upload-time = "2026-05-13T20:56:01.603Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/d8/0d3f5bf8efebc898c2f5b7814ed2e7516a324e5e88d03e74604c164916ff/watlowlib-0.2.0-py3-none-any.whl", hash = "sha256:7b5b312828faf5f386adab2c8079f1a2d02009860d1e2d5cfb26ba5c4f7e89f4", size = 308803, upload-time = "2026-05-09T17:00:49.43Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/26/091c70056b3d4a810bde8a171caa121197419725b9687f35a58a693b0fb3/watlowlib-0.4.0-py3-none-any.whl", hash = "sha256:451ec5c613d8442219698b051e4a2910d94c12188b0d3db00beca42249446a95", size = 321996, upload-time = "2026-05-13T20:55:59.786Z" },
 ]

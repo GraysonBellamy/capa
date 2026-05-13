@@ -29,15 +29,18 @@ a serial port.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final, Literal
 
+import structlog
 import watlowlib
 from pydantic import BaseModel, ConfigDict, Field
 from watlowlib.devices.controller import Controller
 from watlowlib.devices.models import DeviceInfo, Reading
 from watlowlib.errors import WatlowError
 from watlowlib.protocol.base import ProtocolKind
+from watlowlib.registry.units import Unit
 from watlowlib.sinks.base import sample_to_row
 from watlowlib.streaming import OverflowPolicy, Sample
 from watlowlib.streaming.recorder import record as watlow_record
@@ -46,6 +49,7 @@ from watlowlib.transport.base import ByteSize, Parity, SerialSettings, StopBits
 from capa.channels.spec import ChannelSpec, WatlowParameter
 from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
+from capa.core.units import canonicalize_unit, units_compatible
 from capa.devices._helpers import (
     LastSampleTracker,
     WatchdogState,
@@ -62,11 +66,14 @@ from capa.devices.adapter import (
 )
 from capa.devices.records import (
     DeviceEmission,
+    DeviceEvent,
     DeviceSnapshot,
     SourceRecord,
 )
 
 ADAPTER_ID: Final[str] = "watlow"
+
+_logger = structlog.get_logger("capa.devices.watlow")
 
 ProtocolName = Literal["stdbus", "modbus_rtu", "auto"]
 """Lowercase string form accepted in TOML/YAML configs; mapped to
@@ -76,6 +83,19 @@ _PROTOCOL_BY_NAME: Final[dict[ProtocolName, ProtocolKind]] = {
     "stdbus": ProtocolKind.STDBUS,
     "modbus_rtu": ProtocolKind.MODBUS_RTU,
     "auto": ProtocolKind.AUTO,
+}
+
+
+# watlowlib 0.4.0 tags per-sample wire units from the operator-asserted
+# ``assert_wire_temperature_unit=`` (see :attr:`WatlowAdapterParams.wire_temperature_unit`).
+# When no assertion is configured, ``Sample.unit`` is ``None`` for temperature
+# parameters — the library refuses to guess after the 17050 firmware bug. The
+# mapping below converts the asserted unit into the pint string the channel
+# spec uses, so the drift-check can compare apples to apples.
+_WATLOW_UNIT_TO_PINT: Final[dict[Unit, str]] = {
+    Unit.CELSIUS: "degC",
+    Unit.FAHRENHEIT: "degF",
+    Unit.PERCENT: "percent",
 }
 
 
@@ -144,6 +164,27 @@ class WatlowAdapterParams(BaseModel):
     needs more than one tick to respond. Streaming reads ignore this
     knob; ``watlowlib.streaming.record`` always uses the library default."""
 
+    wire_temperature_unit: Literal["C", "F", "celsius", "fahrenheit", "degC", "degF"] | None = "F"
+    """Externally-verified scale of temperature values on the wire.
+
+    Default is ``"F"`` because the rig's PM3 (PM3R1CA fw=1) was
+    empirically verified to emit Fahrenheit values on the wire — with
+    the panel set to °C, the comms readback differed from the panel
+    by exactly the F↔C conversion (panel PV=18.7°C vs comms 65.65;
+    65.65°F = 18.69°C). Parameter 3005 controls only the panel
+    display, not the wire scale; parameter 17050 is label-only on at
+    least one firmware revision. The wire scale appears to be hardware-
+    pinned on this SKU.
+
+    If you bring up a different PM3 (or a different SKU/firmware)
+    whose wire is in °C, override this in the TOML
+    (``wire_temperature_unit = "C"``). Verify empirically with
+    ``watlow-diag probe-unit`` (compare a known panel reading against
+    the comms readback) before pinning it. Set to ``None`` to suppress
+    the assertion entirely — :attr:`Sample.unit` will be ``None`` for
+    temperature parameters and the per-channel drift check becomes a
+    no-op."""
+
     def to_serial_settings(self) -> SerialSettings:
         """Build the :class:`SerialSettings` watlowlib expects.
 
@@ -163,6 +204,37 @@ class WatlowAdapterParams(BaseModel):
 
     def protocol_kind(self) -> ProtocolKind:
         return _PROTOCOL_BY_NAME[self.protocol]
+
+
+# ---------------------------------------------------------------------------
+# Operator-facing readback snapshot
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class WatlowStateSnapshot:
+    """One-shot readback of the operator-facing values on a Watlow loop.
+
+    Built by :meth:`WatlowAdapter.read_state_snapshot` on the worker loop and
+    consumed by the manual-control card's setpoint widget on the qasync loop.
+    Values are wire-side: the card applies the bound channel's forward
+    calibration to render them in the user-facing unit. ``None`` means the
+    read was attempted but rejected by the device (or no controller is open).
+    """
+
+    setpoint: float | None = None
+    """Wire-side setpoint value for loop 1; ``None`` when the read failed."""
+
+    setpoint_unit: str | None = None
+    """The :class:`watlowlib.Unit` value (``"C"`` / ``"F"`` / ``"%"``) the
+    library tagged on the reading, or ``None`` when the device doesn't tag
+    it (typical for ``assert_wire_temperature_unit=None``)."""
+
+    process_value: float | None = None
+    """Wire-side PV value for loop 1."""
+
+    process_value_unit: str | None = None
+    """Wire-side unit tag for the PV read."""
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +273,9 @@ class WatlowAdapter:
         "_controller",
         "_controller_factory",
         "_device_info",
+        "_display_unit",
+        "_drift_event_buffer",
+        "_drift_skipped_channels",
         "_last_sample",
         "_last_snapshot_t_mono_ns",
         "_lifecycle",
@@ -234,11 +309,13 @@ class WatlowAdapter:
                 Capability.HAS_SETPOINT,
                 Capability.HAS_RAMP,
                 Capability.READS_PROCESS_VAR,
+                Capability.HAS_PARAMETER_CONFIG,
             }
         )
         self._controller_factory: ControllerFactory | None = controller_factory
         self._controller: Controller | None = None
         self._device_info: DeviceInfo | None = None
+        self._display_unit: Unit | None = None
         self._channels: list[ChannelSpec] = []
         self._clock: RunClock | None = None
         self._lifecycle = AdapterLifecycle()
@@ -247,6 +324,15 @@ class WatlowAdapter:
         self._last_snapshot_t_mono_ns = -(2**62)
         self._last_sample = LastSampleTracker()
         self._stop_requested = False
+        # Channels whose wire-side unit was checked against the declared
+        # channel unit and didn't match — we skip ChannelSample derivation
+        # for these so a misconfigured rig surfaces in events.sqlite rather
+        # than producing silently-wrong calibrated values.
+        self._drift_skipped_channels: set[str] = set()
+        # DeviceEvents queued by ``_channel_samples_for`` for emission in
+        # the next ``stream()`` iteration. Adapters cannot synchronously
+        # yield from a helper method, so the event buffer is the bridge.
+        self._drift_event_buffer: list[DeviceEvent] = []
 
     # ------------------------------------------------------------------ wiring
 
@@ -294,6 +380,15 @@ class WatlowAdapter:
                     query_configured_protocol=True,
                     timeout=self.params.io_timeout_s,
                 )
+                # Prime the session cache for parameter 17050's *label* so the
+                # snapshot shows what the device thinks its comms-display unit
+                # is. Best-effort: ``read_comms_unit_label`` returns ``None``
+                # on a device that rejects the read, and that ``None`` is
+                # itself useful state (it tells the snapshot we tried). Note
+                # this is diagnostic only — under watlowlib 0.4 the wire-side
+                # tag on Sample.unit comes from ``wire_temperature_unit``, not
+                # this label.
+                self._display_unit = await self._controller.read_comms_unit_label()
         except WatlowError as exc:
             await self._safe_close_controller()
             raise AdapterError(
@@ -318,6 +413,10 @@ class WatlowAdapter:
         # Force a snapshot on the first stream tick so the manifest sees a
         # device-health row from the start.
         self._last_snapshot_t_mono_ns = -(2**62)
+        # New run, fresh drift-check state — a misconfig that was fixed
+        # between runs should not stay quarantined.
+        self._drift_skipped_channels.clear()
+        self._drift_event_buffer.clear()
 
     async def stop(self) -> None:
         """Request the streaming loop to exit cleanly.
@@ -408,6 +507,13 @@ class WatlowAdapter:
                         self._last_sample.mark(record.t_mono_ns)
                         for cs in self._channel_samples_for(sample, record.record_id):
                             yield cs
+                    # Drain any drift-mismatch events queued by
+                    # ``_channel_samples_for``. Emitting after the batch (vs.
+                    # inline) keeps record/sample ordering deterministic and
+                    # lets the test assertion on event count match
+                    # one-event-per-channel exactly.
+                    while self._drift_event_buffer:
+                        yield self._drift_event_buffer.pop(0)
                     # Periodic snapshot — cadence-bounded, never per-tick.
                     if self._snapshot_due():
                         snap = await self.snapshot()
@@ -474,10 +580,32 @@ class WatlowAdapter:
         if kind == "set_setpoint":
             value = float(cmd.payload["value"])
             instance = int(cmd.payload.get("instance", 1))
+            # Setpoint values arrive in the bound channel's user-facing unit
+            # (``derived_unit``). The wire expects ``unit`` — invert the
+            # channel calibration so the operator sees a Celsius API even
+            # when the device speaks Fahrenheit. No-op if no matching
+            # channel is configured (raw command from a test or diagnostic)
+            # or the calibration is identity.
+            wire_value = self._invert_setpoint(value, instance=instance)
             reading = await self._controller.set_setpoint(
-                value, instance=instance, confirm=True, timeout=timeout
+                wire_value, instance=instance, confirm=True, timeout=timeout
             )
-            return f"set_setpoint instance={instance} echoed={reading.value!r}"
+            # Round the human-facing values in the detail string. Float
+            # noise from the inverse-calibration math (e.g. ``(100 -
+            # -17.778) / 0.5556`` lands at 211.9999…, not 212.0) is
+            # surprising in operator-facing logs even though the value
+            # going to the controller is mathematically correct.
+            echoed_value = reading.value
+            echoed_str = (
+                f"{round(float(echoed_value), 4)!r}"
+                if isinstance(echoed_value, int | float)
+                else f"{echoed_value!r}"
+            )
+            return (
+                f"set_setpoint instance={instance} "
+                f"user={round(value, 4)!r} wire={round(wire_value, 4)!r} "
+                f"echoed={echoed_str}"
+            )
         if kind in ("write_parameter", "set_parameter"):
             name = str(cmd.payload["name"])
             value = cmd.payload["value"]
@@ -486,6 +614,24 @@ class WatlowAdapter:
                 name, value, instance=instance, confirm=True, timeout=timeout
             )
             return f"write_parameter {name} instance={instance} echoed={entry.value!r}"
+        if kind == "set_display_units":
+            unit_arg = cmd.payload["unit"]
+            # Writes parameter 17050 (the comms-display *label*). RWE /
+            # persistent; the authorization gate above already accepted, so
+            # we pass confirm=True through to watlowlib's own gate. Under
+            # watlowlib 0.4 this is label-only — it does NOT change the
+            # scale of values on the wire, only what the device reports for
+            # 17050. We still cache the echoed value for the snapshot and
+            # clear the drift-skip set in case the operator's
+            # ``wire_temperature_unit`` assertion was wrong and is being
+            # corrected via a re-open elsewhere.
+            echoed = await self._controller.set_comms_unit_label(
+                unit_arg, confirm=True, timeout=timeout
+            )
+            self._display_unit = echoed
+            self._drift_skipped_channels.clear()
+            echoed_str = echoed.value if echoed is not None else None
+            return f"set_display_units echoed={echoed_str!r}"
         raise AdapterError(
             f"watlow {self.name!r}: unknown command kind {kind!r}",
             device=self.name,
@@ -549,6 +695,109 @@ class WatlowAdapter:
                 f"watlow {self.name!r} read_pv failed: {exc}", device=self.name
             ) from exc
 
+    async def read_state_snapshot(self) -> WatlowStateSnapshot | None:
+        """One-shot read of setpoint + PV for the manual-control card.
+
+        Returns ``None`` when no controller is open (card built before the
+        pool finished its initial open()). Individual reads that fail are
+        captured as ``None`` fields rather than raising — a temporarily
+        unreachable parameter shouldn't kill the whole snapshot.
+
+        No authorization gate (read-only), no shield (no half-transaction
+        failure mode). The watlowlib session serializes commands so this
+        won't race the streaming recorder on the same bus.
+        """
+        if self._controller is None:
+            return None
+        snapshot = WatlowStateSnapshot()
+        timeout = self.params.io_timeout_s
+        sp_value: float | None = None
+        sp_unit: str | None = None
+        try:
+            sp = await self._controller.read_setpoint(instance=1, timeout=timeout)
+            sp_value = float(sp.value) if isinstance(sp.value, int | float) else None
+            sp_unit = sp.unit.value if isinstance(sp.unit, Unit) else None
+        except WatlowError as exc:
+            _logger.debug(
+                "watlow.read_setpoint_failed",
+                device=self.name,
+                error=str(exc),
+            )
+        pv_value: float | None = None
+        pv_unit: str | None = None
+        try:
+            pv = await self._controller.read_pv(instance=1, timeout=timeout)
+            pv_value = float(pv.value) if isinstance(pv.value, int | float) else None
+            pv_unit = pv.unit.value if isinstance(pv.unit, Unit) else None
+        except WatlowError as exc:
+            _logger.debug(
+                "watlow.read_pv_failed",
+                device=self.name,
+                error=str(exc),
+            )
+        return WatlowStateSnapshot(
+            setpoint=sp_value,
+            setpoint_unit=sp_unit,
+            process_value=pv_value,
+            process_value_unit=pv_unit,
+        )
+
+    async def set_display_units(
+        self,
+        unit: Unit | str,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Write the comms display unit (parameter 17050). RWE / persistent.
+
+        Accepts a :class:`Unit` or a case-insensitive string alias
+        (``"C"`` / ``"F"`` / ``"celsius"`` / ``"degF"`` / ``"°C"``).
+        Mirrors :meth:`sartoriuslib.Balance.set_display_unit` in shape so
+        the manual-control card's dispatch site is uniform across adapters.
+        """
+        return await self.command(
+            DeviceCommand(
+                kind="set_display_units",
+                target="display_units",
+                payload={"unit": unit if isinstance(unit, str) else unit.value},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def read_display_units(self) -> Unit | None:
+        """Read the cached comms-display *label* (parameter 17050).
+
+        Under watlowlib 0.4 this is the label-only register, not the
+        wire-side unit — see :attr:`WatlowAdapterParams.wire_temperature_unit`
+        for the latter. The cached value is primed at :meth:`open` and
+        refreshed on every call here / on :meth:`set_display_units`.
+        """
+        if self._controller is None:
+            raise AdapterError(
+                f"watlow {self.name!r} read_display_units() requires open() first",
+                device=self.name,
+            )
+        try:
+            self._display_unit = await self._controller.read_comms_unit_label()
+        except WatlowError as exc:
+            raise AdapterError(
+                f"watlow {self.name!r} read_display_units failed: {exc}", device=self.name
+            ) from exc
+        return self._display_unit
+
+    @property
+    def display_unit(self) -> Unit | None:
+        """The cached comms-display *label* (parameter 17050) from the last
+        :meth:`open` / :meth:`read_display_units` / :meth:`set_display_units`.
+        ``None`` until the adapter has been opened, or when the device
+        rejects the read. Diagnostic only — the wire-side scale comes from
+        :attr:`WatlowAdapterParams.wire_temperature_unit`."""
+        return self._display_unit
+
     # ------------------------------------------------------------------ helpers
 
     async def _build_controller(self) -> Controller:
@@ -565,6 +814,7 @@ class WatlowAdapter:
             protocol=self.params.protocol_kind(),
             address=self.params.address,
             serial_settings=self.params.to_serial_settings(),
+            assert_wire_temperature_unit=self.params.wire_temperature_unit,
         )
 
     async def _enter_controller(self, controller: Controller) -> None:
@@ -616,9 +866,44 @@ class WatlowAdapter:
             metadata={"parameter_id": sample.parameter_id, "tick_first": tick_first},
         )
 
+    def _invert_setpoint(self, value: float, *, instance: int) -> float:
+        """Return the wire-unit value corresponding to a user-facing
+        ``value`` for the setpoint channel bound at ``instance``.
+
+        Looks up the configured channel whose binding is
+        ``(parameter="setpoint", instance=instance)`` and inverts its
+        calibration. Returns ``value`` unchanged when no such channel
+        is configured (the adapter is being driven directly without a
+        channel mapping — e.g. a one-shot diagnostic) or when the
+        calibration doesn't expose an ``invert`` (Polynomial, Lookup,
+        CustomCallable, Piecewise — those calibrations don't have a
+        unique inverse and should be re-configured as LinearTwoPoint
+        when used on a setpoint channel).
+        """
+        for spec in self._channels:
+            binding = spec.source
+            assert isinstance(binding, WatlowParameter)
+            if binding.parameter != "setpoint" or binding.instance != instance:
+                continue
+            invert = getattr(spec.calibration, "invert", None)
+            if invert is None:
+                return value
+            return float(invert(value))
+        return value
+
     def _channel_samples_for(self, sample: Sample, record_id: str) -> list[DeviceEmission]:
         """Map ``sample`` against the configured :class:`WatlowParameter`
-        bindings. Yields one :class:`ChannelSample` per matching channel."""
+        bindings. Yields one :class:`ChannelSample` per matching channel.
+
+        Performs a one-shot drift check per channel: when ``sample.unit`` is
+        a known :class:`Unit`, verify dimensional compatibility with the
+        channel's declared ``unit``. On mismatch we quarantine the channel
+        (skip :class:`ChannelSample` derivation until the next ``start()``
+        or successful ``set_display_units``) and queue a
+        :class:`DeviceEvent` for the next ``stream()`` iteration to yield.
+        Native row stays in ``device_records/watlow.parquet`` so an analyst
+        can still see what the device was reporting.
+        """
         assert self._clock is not None
         if sample.value is None or isinstance(sample.value, str):
             # Sensor-fail / overload / textual values cannot be calibrated;
@@ -630,17 +915,81 @@ class WatlowAdapter:
         for spec in self._channels:
             binding = spec.source
             assert isinstance(binding, WatlowParameter)
-            if binding.parameter == sample.parameter and binding.instance == sample.instance:
-                emissions.append(
-                    build_channel_sample(
-                        spec=spec,
-                        raw_value=float(sample.value),
-                        t_mono_ns=t_mono_ns,
-                        source_record_id=record_id,
-                        source_field=sample.parameter,
-                    )
+            if binding.parameter != sample.parameter or binding.instance != sample.instance:
+                continue
+            if spec.name in self._drift_skipped_channels:
+                continue
+            if self._unit_mismatch(spec, sample):
+                # Quarantine and queue an event; surfaces in the events
+                # dock and events.sqlite at the next stream iteration.
+                self._drift_skipped_channels.add(spec.name)
+                self._drift_event_buffer.append(self._drift_event(spec, sample, t_mono_ns))
+                continue
+            emissions.append(
+                build_channel_sample(
+                    spec=spec,
+                    raw_value=float(sample.value),
+                    t_mono_ns=t_mono_ns,
+                    source_record_id=record_id,
+                    source_field=sample.parameter,
                 )
+            )
         return emissions
+
+    def _unit_mismatch(self, spec: ChannelSpec, sample: Sample) -> bool:
+        """``True`` when ``sample.unit`` is a known :class:`Unit` whose pint
+        equivalent disagrees with ``spec.unit``.
+
+        Compares canonical pint names (``"degC"`` vs ``"celsius"`` collapse;
+        ``degC`` vs ``degF`` do not). Dimensional-only compatibility would
+        accept °C vs °F — pint treats both as temperature — but a wire
+        reporting °F into a channel declared °C is exactly the misconfig the
+        check exists to catch, so we go stricter.
+
+        ``sample.unit is None`` (registry has no unit kind for this parameter,
+        or device rejected the 17050 read) → no check, returns ``False``.
+        Free-form string units (sims, cross-vendor rows) are also skipped.
+        """
+        if not isinstance(sample.unit, Unit):
+            return False
+        pint_unit = _WATLOW_UNIT_TO_PINT.get(sample.unit)
+        if pint_unit is None:
+            return False
+        # A dimensional mismatch (g vs degC) and a scale mismatch (degC vs
+        # degF) are both genuine misconfigs. The dimensional check fires
+        # first because canonicalization of incompatible-dimension units
+        # would still produce two valid pint names; we want the dimensional
+        # branch to phrase the error so we keep both checks.
+        if not units_compatible(pint_unit, spec.unit):
+            return True
+        return canonicalize_unit(pint_unit) != canonicalize_unit(spec.unit)
+
+    def _drift_event(self, spec: ChannelSpec, sample: Sample, t_mono_ns: int) -> DeviceEvent:
+        """Build the :class:`DeviceEvent` for a wire/declared unit mismatch."""
+        wire_unit = sample.unit
+        assert isinstance(wire_unit, Unit)  # _unit_mismatch guards this
+        wire_str = _WATLOW_UNIT_TO_PINT[wire_unit]
+        return DeviceEvent(
+            adapter=ADAPTER_ID,
+            device=self.name,
+            t_mono_ns=t_mono_ns,
+            t_utc=datetime.now(UTC),
+            kind="unit_mismatch",
+            severity="error",
+            message=(
+                f"channel {spec.name!r} declares unit {spec.unit!r} but wire-side "
+                f"unit is {wire_unit.value!r} ({wire_str!r}); ChannelSample "
+                f"derivation skipped. Fix the channel config or the device's "
+                f"parameter 17050 (set_display_units) to recover."
+            ),
+            metadata={
+                "channel": spec.name,
+                "parameter": sample.parameter,
+                "instance": sample.instance,
+                "declared_unit": spec.unit,
+                "wire_unit": wire_unit.value,
+            },
+        )
 
     def watchdog_state(self) -> WatchdogState:
         """Watchdog view consumed by the engine's silent-device task (plan §13.2)."""
@@ -664,6 +1013,7 @@ class WatlowAdapter:
             "protocol": self.params.protocol,
             "channel_count": len(self._channels),
             "state": self._lifecycle.state,
+            "display_unit": self._display_unit.value if self._display_unit is not None else None,
         }
         if info is not None:
             out["part_number"] = info.part_number.raw or None
@@ -697,15 +1047,19 @@ async def handshake(params: dict[str, Any]) -> str:
             protocol=parsed.protocol_kind(),
             address=parsed.address,
             serial_settings=parsed.to_serial_settings(),
+            assert_wire_temperature_unit=parsed.wire_temperature_unit,
         )
         async with controller as ctrl:
             info = await ctrl.identify(query_configured_protocol=True)
+            display_unit = await ctrl.read_comms_unit_label()
     except WatlowError as exc:
         raise AdapterError(f"watlow handshake failed at {parsed.port}: {exc}") from exc
+    unit_str = display_unit.value if display_unit is not None else "?"
     return (
         f"watlow part={info.part_number.raw or '?'} "
         f"fw={info.firmware_id} hw={info.hardware_id} "
-        f"family={info.family.value} health={info.health.value}"
+        f"family={info.family.value} health={info.health.value} "
+        f"display_unit={unit_str}"
     )
 
 
@@ -713,5 +1067,6 @@ __all__ = [
     "ADAPTER_ID",
     "WatlowAdapter",
     "WatlowAdapterParams",
+    "WatlowStateSnapshot",
     "handshake",
 ]

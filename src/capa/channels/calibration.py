@@ -113,6 +113,12 @@ class Identity(_CalibrationBase):
 
     kind: Literal["identity"] = "identity"
 
+    def invert(self, value: float) -> float:
+        """Identity inversion: ``raw == value``. Used by the setpoint
+        write path so a derived-unit value round-trips through the
+        identity calibration unchanged."""
+        return value
+
     @model_validator(mode="after")
     def _check_units(self) -> Identity:
         if not units_compatible(self.input_unit, self.output_unit):
@@ -156,6 +162,13 @@ class LinearTwoPoint(_CalibrationBase):
 
     def evaluate(self, raw: float) -> float:
         return self.slope * raw + self.intercept
+
+    def invert(self, value: float) -> float:
+        """Solve ``value = slope*raw + intercept`` for ``raw``. Used on
+        the setpoint write path to convert a user-facing (``output_unit``)
+        value back into the wire-unit (``input_unit``) the device
+        expects."""
+        return (value - self.intercept) / self.slope
 
 
 class Polynomial(_CalibrationBase):

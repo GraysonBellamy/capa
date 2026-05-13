@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from watlowlib import PARAMETERS
+from watlowlib import PARAMETERS, Unit
 from watlowlib.devices.capability import Capability as WatlowCapability
 from watlowlib.devices.models import (
     DeviceHealth,
@@ -35,6 +35,7 @@ from watlowlib.errors import (
 )
 from watlowlib.protocol.base import ProtocolKind
 from watlowlib.registry.families import ControllerFamily
+from watlowlib.registry.units import resolve_unit
 from watlowlib.streaming.sample import Sample
 from watlowlib.transport.base import SerialSettings
 
@@ -44,7 +45,7 @@ from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
 from capa.devices.adapter import Capability as CapaCapability
 from capa.devices.adapter import DeviceCommand
-from capa.devices.records import ChannelSample, DeviceSnapshot, SourceRecord
+from capa.devices.records import ChannelSample, DeviceEvent, DeviceSnapshot, SourceRecord
 from capa.devices.watlow import ADAPTER_ID, WatlowAdapter, WatlowAdapterParams
 
 pytestmark = pytest.mark.anyio
@@ -87,9 +88,12 @@ class StubWatlowController:
         *,
         signals: dict[tuple[str, int], float | int | None],
         info: DeviceInfo | None = None,
+        display_unit: Unit | None = Unit.CELSIUS,
     ) -> None:
         self.signals = signals
         self.info = info or _make_device_info()
+        self.display_unit: Unit | None = display_unit
+        self.set_display_unit_calls: list[dict[str, Any]] = []
         self.aentered = False
         self.aexited = False
         self.set_setpoint_calls: list[dict[str, Any]] = []
@@ -141,7 +145,7 @@ class StubWatlowController:
                         parameter_id=spec.parameter_id,
                         instance=inst,
                         value=value,
-                        unit=None,
+                        unit=resolve_unit(spec.unit_kind, self.display_unit),
                         monotonic_ns=mono,
                         requested_at=now,
                         received_at=now,
@@ -166,9 +170,10 @@ class StubWatlowController:
             exc = self.raise_on_set_setpoint
             self.raise_on_set_setpoint = None
             raise exc
+        spec = PARAMETERS.resolve("setpoint")
         return Reading(
             value=value,
-            unit=None,
+            unit=resolve_unit(spec.unit_kind, self.display_unit),
             received_at=datetime.now(UTC),
             monotonic_ns=time.monotonic_ns(),
             raw=b"",
@@ -195,14 +200,36 @@ class StubWatlowController:
         del timeout
         self.read_pv_calls += 1
         value = self.signals.get(("process_value", instance), 0.0)
+        spec = PARAMETERS.resolve("process_value")
         return Reading(
             value=float(value) if value is not None else None,
-            unit=None,
+            unit=resolve_unit(spec.unit_kind, self.display_unit),
             received_at=datetime.now(UTC),
             monotonic_ns=time.monotonic_ns(),
             raw=b"",
             protocol=ProtocolKind.STDBUS,
         )
+
+    async def read_comms_unit_label(self, *, timeout: float | None = None) -> Unit | None:
+        del timeout
+        return self.display_unit
+
+    async def set_comms_unit_label(
+        self,
+        unit: Unit | str,
+        *,
+        confirm: bool = False,
+        timeout: float | None = None,
+    ) -> Unit | None:
+        del timeout
+        self.set_display_unit_calls.append({"unit": unit, "confirm": confirm})
+        if isinstance(unit, Unit):
+            self.display_unit = unit
+        else:
+            from watlowlib.registry.units import coerce_unit
+
+            self.display_unit = coerce_unit(unit)
+        return self.display_unit
 
 
 # ---------------------------------------------------------------------------
@@ -487,7 +514,14 @@ class TestStreaming:
                 uncertainty=UncertaintySpec(kind="absolute", value=2.0),
             ),
         )
-        stub = StubWatlowController(signals={("process_value", 1): 50.0})
+        # Channel models a non-physical 0..100 V → 0..1000 degC mapping; the
+        # wire-side unit would clash with that, so the stub is configured to
+        # report no unit (display_unit=None) and the adapter's drift check
+        # stays silent.
+        stub = StubWatlowController(
+            signals={("process_value", 1): 50.0},
+            display_unit=None,
+        )
 
         async def factory() -> Any:
             return stub
@@ -708,6 +742,90 @@ class TestCommands:
             await adapter.set_setpoint(100.0, issued_by="abr", authorization_id="run-1")
         await adapter.close()
 
+    async def test_set_setpoint_inverts_calibration(self) -> None:
+        """User-facing °C value is inverted to °F before reaching the wire.
+
+        Pins the contract behind ``wire_temperature_unit = "F"`` rigs:
+        the operator types Celsius, the adapter walks the channel
+        calibration backwards to compute the Fahrenheit value the
+        device expects. Without this, setpoint writes silently land in
+        the wire unit and the rig overshoots by ~18°C (32°F).
+        """
+        stub = StubWatlowController(signals={("setpoint", 1): 0.0})
+
+        async def factory() -> Any:
+            return stub
+
+        adapter = WatlowAdapter(
+            name="heater",
+            port="fake://stub",
+            rate_hz=50.0,
+            controller_factory=factory,
+        )
+        # Setpoint channel: degF wire -> degC user-facing via F/C definition points.
+        f_to_c = LinearTwoPoint(
+            input_unit="degF",
+            output_unit="degC",
+            ref_low_raw=32.0,
+            ref_low_value=0.0,
+            ref_high_raw=212.0,
+            ref_high_value=100.0,
+        )
+        adapter.configure_channels(
+            [
+                ChannelSpec(
+                    name="heater.setpoint",
+                    kind=ChannelKind.SETPOINT,
+                    source=WatlowParameter(device="heater", parameter="setpoint", instance=1),
+                    unit="degF",
+                    derived_unit="degC",
+                    calibration=f_to_c,
+                ),
+            ]
+        )
+        await adapter.open()
+        result = await adapter.set_setpoint(100.0, issued_by="abr", authorization_id="run-1")
+        assert result.accepted is True
+        # 100 °C should land on the wire as 212 °F.
+        assert stub.set_setpoint_calls[0]["value"] == pytest.approx(212.0)
+        # Detail string carries both the user value and the wire value so
+        # operator-facing logs are unambiguous.
+        assert "user=100.0" in result.detail
+        assert "wire=212.0" in result.detail
+        await adapter.close()
+
+    async def test_set_setpoint_identity_passthrough(self) -> None:
+        """Identity calibration on the setpoint channel: value passes
+        through unchanged. Pins the no-op branch of the inversion logic
+        so rigs without a unit-conversion calibration don't accidentally
+        get a transformation applied."""
+        adapter, stub = _make_adapter()  # default channels use Identity
+        await adapter.open()
+        await adapter.set_setpoint(420.0, issued_by="abr", authorization_id="run-1")
+        assert stub.set_setpoint_calls[0]["value"] == pytest.approx(420.0)
+        await adapter.close()
+
+    async def test_set_setpoint_no_channel_passthrough(self) -> None:
+        """Adapter driven without any configured channels (one-shot
+        diagnostic or test harness): no inversion possible, value passes
+        through unchanged. The adapter must not refuse to dispatch."""
+        stub = StubWatlowController(signals={("setpoint", 1): 0.0})
+
+        async def factory() -> Any:
+            return stub
+
+        adapter = WatlowAdapter(
+            name="heater",
+            port="fake://stub",
+            rate_hz=50.0,
+            controller_factory=factory,
+        )
+        # Intentionally do NOT call configure_channels.
+        await adapter.open()
+        await adapter.set_setpoint(123.0, issued_by="abr", authorization_id="run-1")
+        assert stub.set_setpoint_calls[0]["value"] == pytest.approx(123.0)
+        await adapter.close()
+
 
 # ---------------------------------------------------------------------------
 # read_pv (read-only, no authorization gate)
@@ -727,3 +845,270 @@ class TestReadPV:
         adapter, _ = _make_adapter()
         with pytest.raises(AdapterError):
             await adapter.read_pv()
+
+
+# ---------------------------------------------------------------------------
+# Display unit (parameter 17050) — watlowlib 0.3.0 typed-units integration
+# ---------------------------------------------------------------------------
+
+
+class TestDisplayUnits:
+    async def test_open_caches_display_unit(self) -> None:
+        adapter, _stub = _make_adapter()
+        await adapter.open()
+        try:
+            # Default stub display unit is Unit.CELSIUS; open() primes the
+            # adapter's local cache so snapshot can render it without I/O.
+            assert adapter.display_unit is Unit.CELSIUS
+        finally:
+            await adapter.close()
+
+    async def test_snapshot_includes_display_unit(self) -> None:
+        adapter, _ = _make_adapter(rate_hz=100.0)
+        await adapter.open()
+        await adapter.start()
+        emissions = await _drain(adapter, max_records=2)
+        await adapter.close()
+        _r, _s, snaps = _split(emissions)
+        assert snaps
+        assert snaps[0].fields.get("display_unit") == "C"
+
+    async def test_snapshot_display_unit_none_when_device_rejects(self) -> None:
+        # display_unit=None on the stub means read_display_units returns
+        # None, mirroring a device that doesn't expose 17050.
+        stub = StubWatlowController(
+            signals={("process_value", 1): 100.0, ("setpoint", 1): 110.0},
+            display_unit=None,
+        )
+
+        async def factory() -> Any:
+            return stub
+
+        adapter = WatlowAdapter(
+            name="heater",
+            port="fake://test",
+            rate_hz=100.0,
+            snapshot_period_s=1e6,
+            controller_factory=factory,
+        )
+        adapter.configure_channels(_channels_for_heater())
+        await adapter.open()
+        await adapter.start()
+        emissions = await _drain(adapter, max_records=2)
+        await adapter.close()
+        _r, _s, snaps = _split(emissions)
+        assert snaps
+        assert snaps[0].fields.get("display_unit") is None
+
+    async def test_read_display_units_helper(self) -> None:
+        adapter, _ = _make_adapter()
+        await adapter.open()
+        try:
+            unit = await adapter.read_display_units()
+            assert unit is Unit.CELSIUS
+        finally:
+            await adapter.close()
+
+    async def test_set_display_units_dispatches(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        result = await adapter.set_display_units(
+            Unit.FAHRENHEIT,
+            issued_by="abr",
+            authorization_id="run-7",
+        )
+        assert result.accepted is True
+        assert len(stub.set_display_unit_calls) == 1
+        call = stub.set_display_unit_calls[0]
+        assert call["unit"] == "F"  # serialized through DeviceCommand payload
+        assert call["confirm"] is True
+        # Adapter cache reflects the post-write echo.
+        assert adapter.display_unit is Unit.FAHRENHEIT
+        await adapter.close()
+
+    async def test_set_display_units_string_alias(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        result = await adapter.set_display_units(
+            "celsius",
+            issued_by="abr",
+            authorization_id="run-7",
+        )
+        assert result.accepted is True
+        assert stub.set_display_unit_calls[0]["unit"] == "celsius"
+        assert adapter.display_unit is Unit.CELSIUS
+        await adapter.close()
+
+    async def test_set_display_units_unauthorized_rejected(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        result = await adapter.command(
+            DeviceCommand(
+                kind="set_display_units",
+                payload={"unit": "F"},
+                issued_by="abr",
+            )
+        )
+        assert result.accepted is False
+        assert stub.set_display_unit_calls == []
+        await adapter.close()
+
+
+# ---------------------------------------------------------------------------
+# Wire-side / declared-unit drift check
+# ---------------------------------------------------------------------------
+
+
+def _channels_for_heater_with_fahrenheit() -> list[ChannelSpec]:
+    """Channels declare degF; coupled with the default Unit.CELSIUS stub,
+    every sample lands as a drift mismatch."""
+    return [
+        ChannelSpec(
+            name="heater.pv",
+            kind=ChannelKind.PROCESS_VAR,
+            source=WatlowParameter(device="heater", parameter="process_value", instance=1),
+            unit="degF",
+            derived_unit="degF",
+            calibration=Identity(input_unit="degF", output_unit="degF"),
+        ),
+    ]
+
+
+def _channels_for_heater_with_mass_unit() -> list[ChannelSpec]:
+    """Channels declare grams; coupled with Unit.CELSIUS, every sample
+    is *dimensionally* incompatible — sharper assert than degF vs degC."""
+    return [
+        ChannelSpec(
+            name="heater.pv",
+            kind=ChannelKind.PROCESS_VAR,
+            source=WatlowParameter(device="heater", parameter="process_value", instance=1),
+            unit="g",
+            derived_unit="g",
+            calibration=Identity(input_unit="g", output_unit="g"),
+        ),
+    ]
+
+
+class TestUnitDrift:
+    async def test_compatible_units_emit_channel_samples(self) -> None:
+        # degC channel + Unit.CELSIUS wire → no drift; happy path.
+        adapter, _ = _make_adapter(rate_hz=100.0)
+        await adapter.open()
+        await adapter.start()
+        emissions = await _drain(adapter, max_records=4)
+        await adapter.close()
+        _r, samples, _ = _split(emissions)
+        # Two channels (pv + setpoint), Unit.CELSIUS matches degC, so we
+        # expect ChannelSamples on every tick.
+        assert samples
+        events = [e for e in emissions if isinstance(e, DeviceEvent)]
+        assert events == []
+
+    async def test_mismatch_skips_channel_samples_and_emits_event(self) -> None:
+        # Channel declares grams; wire reports °C — dimensionally incompatible.
+        stub = StubWatlowController(
+            signals={("process_value", 1): 400.0},
+            display_unit=Unit.CELSIUS,
+        )
+
+        async def factory() -> Any:
+            return stub
+
+        adapter = WatlowAdapter(
+            name="heater",
+            port="fake://test",
+            parameters=("process_value",),
+            rate_hz=100.0,
+            snapshot_period_s=1e6,
+            controller_factory=factory,
+        )
+        adapter.configure_channels(_channels_for_heater_with_mass_unit())
+        await adapter.open()
+        await adapter.start()
+        emissions = await _drain(adapter, max_records=4)
+        await adapter.close()
+
+        records, samples, _ = _split(emissions)
+        events = [e for e in emissions if isinstance(e, DeviceEvent)]
+        # Native row preserved for every tick…
+        assert len(records) >= 4
+        # …but no ChannelSamples derived (channel quarantined).
+        assert samples == []
+        # …and exactly one event (one-shot per channel; not per tick).
+        unit_events = [e for e in events if e.kind == "unit_mismatch"]
+        assert len(unit_events) == 1
+        ev = unit_events[0]
+        assert ev.severity == "error"
+        assert ev.metadata.get("channel") == "heater.pv"
+        assert ev.metadata.get("declared_unit") == "g"
+        assert ev.metadata.get("wire_unit") == "C"
+
+    async def test_degf_vs_degc_is_a_drift(self) -> None:
+        # The realistic misconfig: same dimension, different scale. The
+        # adapter compares canonical pint names (not just dimensionality)
+        # so this fires.
+        stub = StubWatlowController(
+            signals={("process_value", 1): 400.0},
+            display_unit=Unit.CELSIUS,
+        )
+
+        async def factory() -> Any:
+            return stub
+
+        adapter = WatlowAdapter(
+            name="heater",
+            port="fake://test",
+            parameters=("process_value",),
+            rate_hz=100.0,
+            snapshot_period_s=1e6,
+            controller_factory=factory,
+        )
+        adapter.configure_channels(_channels_for_heater_with_fahrenheit())
+        await adapter.open()
+        await adapter.start()
+        emissions = await _drain(adapter, max_records=2)
+        await adapter.close()
+        events = [e for e in emissions if isinstance(e, DeviceEvent)]
+        unit_events = [e for e in events if e.kind == "unit_mismatch"]
+        assert len(unit_events) == 1
+        assert unit_events[0].metadata.get("declared_unit") == "degF"
+        assert unit_events[0].metadata.get("wire_unit") == "C"
+
+    async def test_set_display_units_clears_drift_quarantine(self) -> None:
+        # Start with a mismatch; quarantine the channel. Then call
+        # set_display_units; the adapter clears its quarantine set so the
+        # next tick re-evaluates. We don't drive a new mismatch here; the
+        # cache-clear is the contract.
+        stub = StubWatlowController(
+            signals={("process_value", 1): 400.0},
+            display_unit=Unit.CELSIUS,
+        )
+
+        async def factory() -> Any:
+            return stub
+
+        adapter = WatlowAdapter(
+            name="heater",
+            port="fake://test",
+            parameters=("process_value",),
+            rate_hz=100.0,
+            snapshot_period_s=1e6,
+            controller_factory=factory,
+        )
+        adapter.configure_channels(_channels_for_heater_with_mass_unit())
+        await adapter.open()
+        await adapter.start()
+        await _drain(adapter, max_records=2)
+        # Mismatch is now recorded in the adapter's quarantine set.
+        assert "heater.pv" in adapter._drift_skipped_channels  # type: ignore[attr-defined]
+        await adapter.close()
+
+        # Re-open to call set_display_units (the stream loop has finished).
+        await adapter.open()
+        await adapter.set_display_units(
+            Unit.FAHRENHEIT,
+            issued_by="abr",
+            authorization_id="run-1",
+        )
+        assert adapter._drift_skipped_channels == set()  # type: ignore[attr-defined]
+        await adapter.close()

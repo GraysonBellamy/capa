@@ -21,6 +21,13 @@ rate_hz = 1.0
 auto_reconnect = true
 snapshot_period_s = 30.0
 identify_on_open = true
+# Operator-asserted wire scale (watlowlib 0.4 requires this).
+# Empirically verified on PM3R1CA fw=1: with panel set to °C, panel
+# reads PV=18.7 and SP=-6.7 while comms reports 65.65 and 20.0 —
+# 65.65°F = 18.69°C, 20°F = -6.67°C. The wire is in Fahrenheit
+# regardless of what panel-display registers (3005/17050) report. The
+# heater channel calibrations convert F → C so downstream stays in °C.
+wire_temperature_unit = "F"
 
 # --- Real carrier MFC ---
 [[devices]]
@@ -77,10 +84,14 @@ input_url = "video=Logitech Webcam C930e"
 
 # --- Controller channels (heater) ---
 
+# Wire is °F (see wire_temperature_unit on the heater device above);
+# the two-point linear calibration converts to °C for downstream.
+# Reference pairs are the F/C definition points: (32 °F, 0 °C) and
+# (212 °F, 100 °C).
 [[channels]]
 name = "heater.pv"
 kind = "process_var"
-unit = "degC"
+unit = "degF"
 derived_unit = "degC"
 plot_group = "temperatures"
 [channels.metadata]
@@ -91,14 +102,18 @@ device = "heater"
 parameter = "process_value"
 instance = 1
 [channels.calibration]
-kind = "identity"
-input_unit = "degC"
+kind = "linear_two_point"
+input_unit = "degF"
 output_unit = "degC"
+ref_low_raw = 32.0
+ref_low_value = 0.0
+ref_high_raw = 212.0
+ref_high_value = 100.0
 
 [[channels]]
 name = "heater.setpoint"
 kind = "setpoint"
-unit = "degC"
+unit = "degF"
 derived_unit = "degC"
 plot_group = "temperatures"
 [channels.metadata]
@@ -109,9 +124,13 @@ device = "heater"
 parameter = "setpoint"
 instance = 1
 [channels.calibration]
-kind = "identity"
-input_unit = "degC"
+kind = "linear_two_point"
+input_unit = "degF"
 output_unit = "degC"
+ref_low_raw = 32.0
+ref_low_value = 0.0
+ref_high_raw = 212.0
+ref_high_value = 100.0
 
 # --- Carrier gas (real Alicat) ---
 

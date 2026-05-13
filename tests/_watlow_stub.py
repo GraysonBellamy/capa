@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from watlowlib import PARAMETERS
+from watlowlib import PARAMETERS, Unit
 from watlowlib.devices.capability import Capability as WatlowCapability
 from watlowlib.devices.models import (
     DeviceHealth,
@@ -27,6 +27,7 @@ from watlowlib.devices.models import (
 )
 from watlowlib.protocol.base import ProtocolKind
 from watlowlib.registry.families import ControllerFamily
+from watlowlib.registry.units import resolve_unit
 from watlowlib.streaming.sample import Sample
 from watlowlib.transport.base import SerialSettings
 
@@ -65,9 +66,17 @@ class StubWatlowController:
         *,
         signals: dict[tuple[str, int], float | int | None],
         info: DeviceInfo | None = None,
+        display_unit: Unit | None = Unit.CELSIUS,
     ) -> None:
         self.signals = signals
         self.info = info or make_pm_device_info()
+        # Sample.unit / Reading.unit are derived from the registry's
+        # per-parameter ``unit_kind`` resolved against this stub's display
+        # unit. Set to ``None`` for tests that exercise non-physical signals
+        # (e.g. mock-voltage calibration paths) where the drift check should
+        # not fire.
+        self.display_unit: Unit | None = display_unit
+        self.set_display_unit_calls: list[dict[str, Any]] = []
         self.aentered = False
         self.aexited = False
         self.set_setpoint_calls: list[dict[str, Any]] = []
@@ -119,7 +128,7 @@ class StubWatlowController:
                         parameter_id=spec.parameter_id,
                         instance=inst,
                         value=value,
-                        unit=None,
+                        unit=resolve_unit(spec.unit_kind, self.display_unit),
                         monotonic_ns=mono,
                         requested_at=now,
                         received_at=now,
@@ -144,9 +153,10 @@ class StubWatlowController:
             exc = self.raise_on_set_setpoint
             self.raise_on_set_setpoint = None
             raise exc
+        spec = PARAMETERS.resolve("setpoint")
         return Reading(
             value=value,
-            unit=None,
+            unit=resolve_unit(spec.unit_kind, self.display_unit),
             received_at=datetime.now(UTC),
             monotonic_ns=time.monotonic_ns(),
             raw=b"",
@@ -173,14 +183,50 @@ class StubWatlowController:
         del timeout
         self.read_pv_calls += 1
         value = self.signals.get(("process_value", instance), 0.0)
+        spec = PARAMETERS.resolve("process_value")
         return Reading(
             value=float(value) if value is not None else None,
-            unit=None,
+            unit=resolve_unit(spec.unit_kind, self.display_unit),
             received_at=datetime.now(UTC),
             monotonic_ns=time.monotonic_ns(),
             raw=b"",
             protocol=ProtocolKind.STDBUS,
         )
+
+    async def read_setpoint(self, *, instance: int = 1, timeout: float | None = None) -> Reading:
+        del timeout
+        value = self.signals.get(("setpoint", instance), 0.0)
+        spec = PARAMETERS.resolve("setpoint")
+        return Reading(
+            value=float(value) if value is not None else None,
+            unit=resolve_unit(spec.unit_kind, self.display_unit),
+            received_at=datetime.now(UTC),
+            monotonic_ns=time.monotonic_ns(),
+            raw=b"",
+            protocol=ProtocolKind.STDBUS,
+        )
+
+    async def read_comms_unit_label(self, *, timeout: float | None = None) -> Unit | None:
+        del timeout
+        return self.display_unit
+
+    async def set_comms_unit_label(
+        self,
+        unit: Unit | str,
+        *,
+        confirm: bool = False,
+        timeout: float | None = None,
+    ) -> Unit | None:
+        del timeout
+        self.set_display_unit_calls.append({"unit": unit, "confirm": confirm})
+        # Mirror the real controller: accept Unit-or-alias, normalize to Unit.
+        if isinstance(unit, Unit):
+            self.display_unit = unit
+        else:
+            from watlowlib.registry.units import coerce_unit
+
+            self.display_unit = coerce_unit(unit)
+        return self.display_unit
 
 
 __all__ = ["StubWatlowController", "make_pm_device_info"]

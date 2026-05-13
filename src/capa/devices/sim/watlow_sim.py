@@ -13,7 +13,9 @@ from dataclasses import dataclass, field
 from typing import Final, cast
 
 import anyio
+from watlowlib.errors import WatlowValidationError
 from watlowlib.protocol.base import ProtocolKind
+from watlowlib.registry.units import Unit, coerce_unit
 from watlowlib.sinks.base import sample_to_row
 from watlowlib.streaming import Sample as WatlowSample
 
@@ -64,11 +66,15 @@ class WatlowSim:
     """``{(parameter_name, instance): signal}`` — e.g.
     ``{("process_value", 1): Sine(amplitude=5, frequency_hz=0.05, offset=400)}``.
     """
-    parameter_units: dict[str, str | None] = field(default_factory=dict)
-    """Map parameter name → display unit. Watlow's ``Sample.unit`` is often
-    ``None`` (the registry doesn't carry per-parameter units yet); set
-    explicitly here when the test wants a unit string preserved into the
-    SourceRecord row."""
+    parameter_units: dict[str, Unit | str | None] = field(default_factory=dict)
+    """Map parameter name → display unit. The real adapter populates
+    :attr:`watlowlib.streaming.Sample.unit` with a :class:`Unit` enum for
+    every temperature / output read (parameter 17050 — see
+    :mod:`watlowlib.registry.units`). The sim mirrors that: callers pass
+    a :class:`Unit`, a known alias (``"C"`` / ``"degC"`` / ``"celsius"`` /
+    ``"%"``) which is coerced via :func:`watlowlib.coerce_unit`, or any
+    other string (preserved verbatim — escape hatch for cross-vendor or
+    custom-unit rows). ``None`` means the parameter has no unit."""
     parameter_ids: dict[str, int] = field(default_factory=dict)
     """Optional override of registry ``parameter_id`` per parameter name. The
     real registry assigns these (e.g. ``"process_value" -> 4001``); sims
@@ -102,15 +108,22 @@ class WatlowSim:
         ``signals`` maps ``"<parameter>/<instance>"`` (e.g. ``"setpoint/1"``)
         to a serialisable signal spec — see
         :func:`capa.devices.sim._signals.signal_from_dict`. Bare
-        ``"process_value"`` defaults to instance 1."""
+        ``"process_value"`` defaults to instance 1.
+
+        ``parameter_units`` entries that match a known watlowlib alias are
+        coerced to :class:`Unit`; unknown strings pass through unchanged so
+        the sim retains its cross-vendor escape hatch."""
         out_signals = watlow_signals_from_mapping(cast(dict[object, object], signals or {}))
+        coerced_units: dict[str, Unit | str | None] = {}
+        for param, raw in (parameter_units or {}).items():
+            coerced_units[param] = _coerce_sim_unit(raw)
         return cls(
             name=name,
             address=address,
             protocol=ProtocolKind(protocol) if protocol is not None else ProtocolKind.STDBUS,
             tick_period_s=tick_period_s,
             signals=out_signals,
-            parameter_units=parameter_units or {},
+            parameter_units=coerced_units,
             parameter_ids=parameter_ids or {},
         )
 
@@ -194,7 +207,11 @@ class WatlowSim:
                 clock
             )
             value = float(signal(t_now_s))
-            unit = self.parameter_units.get(parameter)
+            # Coerce here so direct WatlowSim(parameter_units={"process_value":
+            # "degC"}, ...) construction (bypassing from_params) still
+            # produces Unit.CELSIUS on the wire — sim/real parity for
+            # device_records/watlow.parquet.
+            unit = _coerce_sim_unit_value(self.parameter_units.get(parameter))
             parameter_id = self.parameter_ids.get(parameter, _stable_param_id(parameter))
 
             sample = WatlowSample(
@@ -285,6 +302,35 @@ class WatlowSim:
 def _stable_param_id(parameter: str) -> int:
     """Deterministic small-int parameter id for sims, derived from the name."""
     return abs(hash(parameter)) % 99999
+
+
+def _coerce_sim_unit(value: str | None) -> Unit | str | None:
+    """Try to coerce a string unit to a watlowlib :class:`Unit`; on miss,
+    return the original string unchanged so cross-vendor / custom-unit
+    sims still preserve their tag verbatim. ``None`` passes through.
+
+    The ``str | None`` signature matches the ``from_params`` TOML-loader
+    shape; for the broader sample-build path use
+    :func:`_coerce_sim_unit_value` (which also accepts an already-coerced
+    :class:`Unit`).
+    """
+    if value is None:
+        return None
+    try:
+        return coerce_unit(value)
+    except WatlowValidationError:
+        return value
+
+
+def _coerce_sim_unit_value(value: Unit | str | None) -> Unit | str | None:
+    """Same coercion as :func:`_coerce_sim_unit` but tolerant of an
+    already-coerced :class:`Unit` (which it returns unchanged)."""
+    if value is None or isinstance(value, Unit):
+        return value
+    try:
+        return coerce_unit(value)
+    except WatlowValidationError:
+        return value
 
 
 __all__ = ["ADAPTER_ID", "WatlowSim"]

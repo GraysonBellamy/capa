@@ -370,14 +370,15 @@ class TestAlicatCard:
 
 
 class TestManualControlDock:
-    def test_no_relevant_devices_renders_empty_placeholder(
+    def test_watlow_sim_renders_heater_card(
         self,
         qtbot: Any,
         controller: RunController,
         op_provider: OperatorIdProvider,
     ) -> None:
-        # A device whose adapter import path matches neither sartorius nor
-        # alicat — no card class will pick it up.
+        # Watlow adapters (sim or real) render a HeaterCard. The card
+        # exposes setpoint, display-unit toggle (param 17050), and a raw
+        # write_parameter row.
         cfg = ExperimentConfig(
             hardware=HardwareProfile(
                 name="x",
@@ -417,11 +418,10 @@ class TestManualControlDock:
         dock = ManualControlDock(controller=controller, operator_provider=op_provider)
         qtbot.addWidget(dock)
         dock.load_config(cfg)
-        # Empty-state placeholder visible; no cards. (isVisible() requires
-        # the dock to be shown on screen, which it isn't in tests, so we
-        # check the label's text and the cards dict.)
-        assert not dock._empty_label.isHidden()
-        assert len(dock._cards_by_name) == 0
+        from capa.ui.manual.cards.watlow import HeaterCard
+
+        assert set(dock._cards_by_name.keys()) == {"heater"}
+        assert isinstance(dock._cards_by_name["heater"], HeaterCard)
         _close_pool_sync(controller)
 
     def test_balance_and_alicat_specs_render_one_card_each(

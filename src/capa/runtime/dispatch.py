@@ -334,6 +334,25 @@ class ManualClient:
             raise UnknownDeviceError(device_name) from exc
         return await asyncio.wrap_future(fut)
 
+    async def device_readback(self, device_name: str) -> object:
+        """Probe a device's ``read_state_snapshot()`` across loops.
+
+        Returns the adapter-specific snapshot (e.g.
+        :class:`~capa.devices.watlow.WatlowStateSnapshot`) or ``None`` for
+        adapters that don't implement it. Card code treats ``None`` as
+        "fall back to widget defaults".
+
+        Does **not** route through the conductor: this is a pool-resident
+        read used by manual-control cards to prefill their widgets, with no
+        run-state semantics. Submits to the worker that owns ``device_name``
+        and bridges the future back to the caller's loop.
+        """
+        try:
+            fut = self._pool.device_readback(device_name)
+        except KeyError as exc:
+            raise UnknownDeviceError(device_name) from exc
+        return await asyncio.wrap_future(fut)
+
     def _active_conductor(self) -> Conductor | None:
         """Return the conductor only when it can accept a dispatch.
 

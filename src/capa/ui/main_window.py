@@ -29,6 +29,7 @@ from capa.storage.catalog import RunCatalog
 from capa.ui.docks.camera_preview import CameraPreviewDock
 from capa.ui.docks.diagnostics import DiagnosticsDock
 from capa.ui.docks.events import EventsDock
+from capa.ui.docks.log import LogDock
 from capa.ui.docks.manual_control import ManualControlDock
 from capa.ui.docks.numerics import NumericsDock
 from capa.ui.shutdown import (
@@ -139,6 +140,15 @@ class MainWindow(QMainWindow):
         self._diagnostics_toggle: QAction | None = None
         self._events_dock = EventsDock(self)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._events_dock)
+
+        # Log dock — mirrors structlog stdout into the GUI so the
+        # operator can diagnose pool/conductor/run-lifecycle activity
+        # without watching the terminal. Sits side-by-side with the
+        # Events dock at equal width via splitDockWidget + resizeDocks.
+        self._log_dock = LogDock(self)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
+        self.splitDockWidget(self._events_dock, self._log_dock, Qt.Orientation.Horizontal)
+        self.resizeDocks([self._events_dock, self._log_dock], [1, 1], Qt.Orientation.Horizontal)
 
         # Manual control dock — single dock with per-device cards. Hidden
         # by default; the Devices menu toggles visibility. Rebuilt on
@@ -469,6 +479,10 @@ class MainWindow(QMainWindow):
     @property
     def events_dock(self) -> EventsDock:
         return self._events_dock
+
+    @property
+    def log_dock(self) -> LogDock:
+        return self._log_dock
 
     @property
     def numerics_dock(self) -> NumericsDock | None:

@@ -44,6 +44,10 @@ from capa.ui.manual.cards.camera import (
     FlirCard,
     camera_has_manual_controls,
 )
+from capa.ui.manual.cards.watlow import (
+    HeaterCard,
+    is_heater_device,
+)
 from capa.ui.manual.cards.webcam import (
     WebcamCard,
     is_webcam_camera,
@@ -153,6 +157,12 @@ class ManualControlDock(QDockWidget):
                 )
             elif is_alicat_device(dev):
                 card = AlicatCard(
+                    spec=dev,
+                    controller=self._controller,
+                    operator_provider=self._operator_provider,
+                )
+            elif is_heater_device(dev):
+                card = HeaterCard(
                     spec=dev,
                     controller=self._controller,
                     operator_provider=self._operator_provider,

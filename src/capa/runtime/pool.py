@@ -38,6 +38,7 @@ import asyncio
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future
 from types import MappingProxyType
+from typing import Any
 
 import structlog
 
@@ -715,6 +716,18 @@ class WorkerPool:
         """
         worker = self.worker_for(device)
         return worker.camera_metadata(device)
+
+    def device_readback(self, device: str) -> Future[Any]:
+        """Probe one device's ``read_state_snapshot()`` on the owning worker.
+
+        Future resolves to whatever the adapter returns from its
+        :meth:`read_state_snapshot` (e.g. :class:`WatlowStateSnapshot`),
+        or ``None`` when the adapter doesn't implement that surface.
+        Used by manual-control cards to prefill their widgets with the
+        device's current operator-facing values.
+        """
+        worker = self.worker_for(device)
+        return worker.device_readback(device)
 
     # ------------------------------------------------------------------
     # Internal helpers

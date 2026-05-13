@@ -423,6 +423,25 @@ class Worker:
             )
         return self._runner.submit(lambda: self._camera_metadata_impl(adapter_name))
 
+    def device_readback(self, adapter_name: str) -> Future[Any]:
+        """Probe an adapter's ``read_state_snapshot()`` on the worker loop.
+
+        Operator-facing live values (current setpoint, PV, etc.) that the
+        manual-control card uses to prefill its widgets. Returns ``None``
+        for adapters that don't expose ``read_state_snapshot`` — the card
+        falls back to its static defaults in that case.
+
+        Read-only, but does involve I/O against the device, so the worker
+        state is gated (DRAINING / CLOSED reject). The watlowlib session
+        serializes commands so this won't race a streaming recorder on
+        the same bus.
+        """
+        if adapter_name not in self._adapters:
+            return _failed_future(
+                UnknownDeviceError(adapter_name, configured_names=tuple(self._adapters))
+            )
+        return self._runner.submit(lambda: self._device_readback_impl(adapter_name))
+
     # =========================================================================
     # Worker-loop implementations. Every method here runs on the worker loop.
     # =========================================================================
@@ -1013,6 +1032,21 @@ class Worker:
         if not isinstance(result, WebcamMetadata):
             return None
         return result
+
+    async def _device_readback_impl(self, adapter_name: str) -> Any:
+        """Worker-side ``adapter.read_state_snapshot()`` probe.
+
+        Adapters that don't implement the duck-typed coroutine return
+        ``None``. State-gated (DRAINING / CLOSED reject) because this
+        does I/O against the device — see :meth:`device_readback`.
+        """
+        if self._state in (WorkerState.DRAINING, WorkerState.CLOSED):
+            return None
+        adapter = self._adapters[adapter_name]
+        probe = getattr(adapter, "read_state_snapshot", None)
+        if not callable(probe):
+            return None
+        return await probe()
 
 
 def _failed_future(exc: BaseException) -> Future[Any]:
