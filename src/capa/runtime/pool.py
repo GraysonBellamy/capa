@@ -42,7 +42,7 @@ from typing import Any
 
 import structlog
 
-from capa.devices.adapter import CommandResult, DeviceCommand
+from capa.devices.adapter import CommandResult, DeviceAdapter, DeviceCommand
 from capa.devices.camera.metadata import WebcamMetadata
 from capa.devices.records import DeviceEmission
 from capa.experiment.config import ExperimentConfig
@@ -57,6 +57,7 @@ from capa.runtime.lifecycle import (
 )
 from capa.runtime.metrics import DisarmResult
 from capa.runtime.preview import PreviewFrame
+from capa.runtime.progress import DeviceInitProgress, DeviceInitStatus, OpenProgressCallback
 from capa.runtime.runcontext import RunContext
 from capa.runtime.runner import WorkerRunner
 from capa.runtime.shutdown import PoolCloseResult, WorkerCloseResult
@@ -239,11 +240,40 @@ class WorkerPool:
         )
         self._state = target
 
+    def _emit_open_progress(
+        self,
+        callback: OpenProgressCallback | None,
+        *,
+        worker: Worker,
+        adapter: DeviceAdapter,
+        status: DeviceInitStatus,
+        detail: str,
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            callback(
+                DeviceInitProgress(
+                    name=adapter.name,
+                    adapter=type(adapter).__name__,
+                    resource_id=worker.resource_id,
+                    status=status,
+                    detail=detail,
+                )
+            )
+        except Exception as exc:
+            _logger.warning(
+                "pool.open_progress_callback_failed",
+                resource_id=worker.resource_id,
+                adapter=adapter.name,
+                error=str(exc),
+            )
+
     # ------------------------------------------------------------------
     # Config-lifetime methods
     # ------------------------------------------------------------------
 
-    async def open(self) -> None:
+    async def open(self, progress_callback: OpenProgressCallback | None = None) -> None:
         """Start every worker; on first failure, roll back in reverse order.
 
         Workers start in parallel — bus-collision avoidance is the
@@ -263,7 +293,9 @@ class WorkerPool:
             # concurrent.futures.Futures from the runner — wrap each.
             start_tasks: list[tuple[Worker, asyncio.Future[None]]] = []
             for worker in self._workers.values():
-                task = asyncio.ensure_future(asyncio.wrap_future(worker.start()))
+                task = asyncio.ensure_future(
+                    asyncio.wrap_future(worker.start(progress_callback=progress_callback))
+                )
                 start_tasks.append((worker, task))
 
             # Wait for ALL to complete (success or failure). We don't want
@@ -316,6 +348,14 @@ class WorkerPool:
                         resource_id=worker.resource_id,
                         error=str(rollback_exc),
                     )
+                    for adapter in worker.adapters.values():
+                        self._emit_open_progress(
+                            progress_callback,
+                            worker=worker,
+                            adapter=adapter,
+                            status=DeviceInitStatus.ROLLED_BACK,
+                            detail=f"rollback close failed: {rollback_exc}",
+                        )
                     continue
                 if not rollback_result.runner_stop.joined or (rollback_result.adapter_close_errors):
                     _logger.warning(
@@ -323,6 +363,17 @@ class WorkerPool:
                         resource_id=worker.resource_id,
                         adapter_close_errors=rollback_result.adapter_close_errors,
                         runner_joined=rollback_result.runner_stop.joined,
+                    )
+                detail = "rolled back after another device failed"
+                if rollback_result.adapter_close_errors or not rollback_result.runner_stop.joined:
+                    detail = "rollback degraded; see logs"
+                for adapter in worker.adapters.values():
+                    self._emit_open_progress(
+                        progress_callback,
+                        worker=worker,
+                        adapter=adapter,
+                        status=DeviceInitStatus.ROLLED_BACK,
+                        detail=detail,
                     )
             # Close preview bridges too — producers are gone now, so any
             # pending UI-side drainer wakes with ThreadBridgeClosedError

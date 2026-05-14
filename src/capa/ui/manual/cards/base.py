@@ -120,6 +120,9 @@ class DeviceCard(QGroupBox):
 
         # React to engine-state transitions.
         self._controller.state_changed.connect(self._on_engine_state)
+        ready_signal = getattr(self._controller, "hardware_ready_changed", None)
+        if ready_signal is not None:
+            ready_signal.connect(self._on_hardware_ready_changed)
 
     # ------------------------------------------------------------------ subclass hooks
 
@@ -151,6 +154,7 @@ class DeviceCard(QGroupBox):
         """Subclasses register every button / payload widget here so the
         base can disable them as a group when the engine blocks writes."""
         self._action_widgets.append(widget)
+        widget.setEnabled(self._manual_controls_enabled())
 
     # ------------------------------------------------------------------ adapter handle
 
@@ -204,6 +208,9 @@ class DeviceCard(QGroupBox):
         # widgets so this is belt-and-braces.
         if self._engine_blocks_writes():
             self._set_status("run in progress — manual writes disabled", level="warn")
+            return None
+        if not self._hardware_ready_for_writes():
+            self._set_status("hardware initializing — manual writes disabled", level="warn")
             return None
 
         operator = self._operator_provider.current_operator_id()
@@ -309,21 +316,39 @@ class DeviceCard(QGroupBox):
 
     # ------------------------------------------------------------------ state surface
 
-    def _engine_blocks_writes(self) -> bool:
-        return self._controller.state in _WRITE_BLOCKED_STATES
+    def _engine_blocks_writes(self, state: RunUiState | None = None) -> bool:
+        return (state or self._controller.state) in _WRITE_BLOCKED_STATES
+
+    def _hardware_ready_for_writes(self) -> bool:
+        return bool(getattr(self._controller, "hardware_ready", True))
+
+    def _manual_controls_enabled(self, state: RunUiState | None = None) -> bool:
+        return self._hardware_ready_for_writes() and not self._engine_blocks_writes(state)
+
+    def _sync_action_widgets(self, state: RunUiState | None = None) -> None:
+        enabled = self._manual_controls_enabled(state)
+        for widget in self._action_widgets:
+            widget.setEnabled(enabled)
 
     def _on_engine_state(self, state: object) -> None:
         if not isinstance(state, RunUiState):
             return
         blocked = state in _WRITE_BLOCKED_STATES
-        for widget in self._action_widgets:
-            widget.setEnabled(not blocked)
+        self._sync_action_widgets(state)
         if blocked:
             self._set_status(f"run {state.value} — manual writes disabled", level="warn")
         elif self._status_label.text().endswith("manual writes disabled"):
             # Clear the gate message on return to idle so the next action
             # starts from a clean slate.
             self._set_status("ready", level="idle")
+
+    def _on_hardware_ready_changed(self, ready: bool) -> None:
+        self._sync_action_widgets()
+        if ready:
+            if self._status_label.text().endswith("manual writes disabled"):
+                self._set_status("ready", level="idle")
+        else:
+            self._set_status("hardware initializing — manual writes disabled", level="warn")
 
     # ------------------------------------------------------------------ status surface
 

@@ -53,11 +53,13 @@ from capa.runtime.emissions import WorkerEmission
 from capa.runtime.lifecycle import PoolState
 from capa.runtime.pool import WorkerPool
 from capa.runtime.preview import PreviewFrame
+from capa.runtime.progress import DeviceInitProgress, DeviceInitStatus
 from capa.runtime.session import RealRunSession
 from capa.runtime.shutdown import PoolCloseResult
 from capa.runtime.state import ConductorState
 from capa.storage.catalog import RunCatalog
 from capa.storage.manifest import BundleManifest
+from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress
 from capa.ui.lifecycle import LifecycleKind, LifecycleRegistry
 
 if TYPE_CHECKING:
@@ -255,6 +257,15 @@ class RunController(QObject):
     """``WorkerPool | None`` — fires when the pool is rebuilt on
     config-load or cleared on aclose."""
 
+    config_load_started = Signal(object)
+    """``ConfigLoadProgress`` emitted when a config begins hardware prep."""
+    config_load_progress = Signal(object)
+    """``ConfigLoadProgress`` emitted as devices move through open states."""
+    config_load_finished = Signal(object)
+    """Terminal ``ConfigLoadProgress`` for ready or failed initialization."""
+    hardware_ready_changed = Signal(bool)
+    """``True`` when the loaded config's worker pool is open and usable."""
+
     def __init__(
         self,
         *,
@@ -282,6 +293,10 @@ class RunController(QObject):
         self._last_result: RunUiResult | None = None
         self._ui_state: RunUiState = RunUiState.IDLE
         self._state_poll_task: asyncio.Task[None] | None = None
+        self._hardware_ready: bool = False
+        self._config_load_phase: ConfigLoadPhase = ConfigLoadPhase.IDLE
+        self._config_load_path: Path | None = None
+        self._config_load_rows: dict[str, DeviceInitProgress] = {}
         # Latched abort request from before the conductor exists.
         # ``request_abort()`` sets this when ``_conductor is None`` but
         # ``_task`` is still active (i.e. ``_run()`` is preparing the
@@ -339,9 +354,18 @@ class RunController(QObject):
     @property
     def manual_client(self) -> ManualClient | None:
         """Single :class:`ManualClient` for UI cards. ``None`` until
-        :meth:`set_active_config` has been called (which builds the
-        pool)."""
+        the current config's pool is open."""
         return self._manual_client
+
+    @property
+    def hardware_ready(self) -> bool:
+        """``True`` once the current config's pool is open and dispatchable."""
+        pool = self._worker_pool
+        return self._hardware_ready or (pool is not None and pool.state is PoolState.OPEN)
+
+    @property
+    def config_load_phase(self) -> ConfigLoadPhase:
+        return self._config_load_phase
 
     @property
     def conductor(self) -> Conductor | None:
@@ -393,7 +417,62 @@ class RunController(QObject):
 
     # ------------------------------------------------------------------ config lifecycle
 
-    def set_active_config(self, config: ExperimentConfig) -> None:
+    def _set_hardware_ready(self, ready: bool) -> None:
+        if ready == self._hardware_ready:
+            return
+        self._hardware_ready = ready
+        self.hardware_ready_changed.emit(ready)
+
+    def _pending_progress_rows(self, pool: WorkerPool) -> dict[str, DeviceInitProgress]:
+        rows: dict[str, DeviceInitProgress] = {}
+        for worker in pool.workers.values():
+            for adapter in worker.adapters.values():
+                rows[adapter.name] = DeviceInitProgress(
+                    name=adapter.name,
+                    adapter=type(adapter).__name__,
+                    resource_id=worker.resource_id,
+                    status=DeviceInitStatus.PENDING,
+                    detail="waiting",
+                )
+        return rows
+
+    def _progress_snapshot(
+        self,
+        phase: ConfigLoadPhase,
+        message: str,
+    ) -> ConfigLoadProgress:
+        self._config_load_phase = phase
+        return ConfigLoadProgress(
+            phase=phase,
+            message=message,
+            path=self._config_load_path,
+            devices=tuple(self._config_load_rows.values()),
+        )
+
+    def _emit_config_progress(
+        self,
+        phase: ConfigLoadPhase,
+        message: str,
+    ) -> ConfigLoadProgress:
+        progress = self._progress_snapshot(phase, message)
+        self.config_load_progress.emit(progress)
+        return progress
+
+    def _record_device_progress(self, row: DeviceInitProgress) -> None:
+        self._config_load_rows[row.name] = row
+        self.config_load_progress.emit(
+            self._progress_snapshot(
+                self._config_load_phase,
+                row.detail or row.status.value.replace("_", " "),
+            )
+        )
+
+    def set_active_config(
+        self,
+        config: ExperimentConfig,
+        *,
+        config_path: Path | None = None,
+    ) -> None:
         """Bind a freshly-loaded config: rebuild the :class:`WorkerPool`.
 
         Builds a new pool synchronously and schedules its async
@@ -413,6 +492,18 @@ class RunController(QObject):
             _logger.info("ui.controller.set_active_config_during_shutdown_ignored")
             return
         old_pool = self._worker_pool
+        old_manual_client = self._manual_client
+        old_ready = self._hardware_ready
+        self._config_load_path = config_path
+        self._config_load_rows = {}
+        self._set_hardware_ready(False)
+        self._manual_client = None
+        self.config_load_started.emit(
+            self._progress_snapshot(
+                ConfigLoadPhase.BUILDING_POOL,
+                "Building worker pool",
+            )
+        )
         # set_active_config runs on the qasync loop (called from a UI
         # signal handler), so the running loop is the consumer loop for
         # preview bridges. Pass it so from_config wires the bridges
@@ -432,14 +523,24 @@ class RunController(QObject):
                 error=str(exc),
                 error_type=type(exc).__name__,
             )
+            self._manual_client = old_manual_client
+            self._hardware_ready = old_ready
+            self.hardware_ready_changed.emit(self.hardware_ready)
+            failed = self._progress_snapshot(
+                ConfigLoadPhase.FAILED,
+                f"Worker pool build failed: {exc}",
+            )
+            self.config_load_finished.emit(failed)
             # Leave the previous pool in place; surface to the menu/dialog
             # caller by re-raising.
             raise
         self._active_config = config
         self._worker_pool = new_pool
-        self._manual_client = ManualClient(
-            pool=new_pool,
-            conductor_provider=lambda: self._conductor,
+        self._manual_client = None
+        self._config_load_rows = self._pending_progress_rows(new_pool)
+        self._emit_config_progress(
+            ConfigLoadPhase.OPENING_DEVICES,
+            "Opening devices",
         )
 
         # Old-pool close runs as its OWN registered task so the shutdown
@@ -517,8 +618,16 @@ class RunController(QObject):
         #    registered lifecycle entry — but we MUST wait for it to
         #    finish before the new pool touches a shared serial bus.
         if old_close_task is not None:
+            self._emit_config_progress(
+                ConfigLoadPhase.CLOSING_PREVIOUS,
+                "Closing previous hardware",
+            )
             with contextlib.suppress(asyncio.CancelledError):
                 await old_close_task
+            self._emit_config_progress(
+                ConfigLoadPhase.OPENING_DEVICES,
+                "Opening devices",
+            )
 
         # 2. Attach preview consumers BEFORE pool.open. The worker
         #    threads attach producers inside _open_all_impl; the
@@ -528,9 +637,15 @@ class RunController(QObject):
 
         # 3. Open the pool. On failure, close the (still-attached)
         #    bridges so any pending consumer-side iteration unwinds.
+        ui_loop = asyncio.get_running_loop()
+
+        def _progress_from_worker(row: DeviceInitProgress) -> None:
+            ui_loop.call_soon_threadsafe(self._record_device_progress, row)
+
         try:
-            await new_pool.open()
+            await new_pool.open(progress_callback=_progress_from_worker)
         except Exception as exc:
+            await asyncio.sleep(0)
             _logger.error(
                 "ui.controller.pool_open_failed",
                 error=str(exc),
@@ -539,8 +654,16 @@ class RunController(QObject):
             new_pool.close_preview_bridges()
             self._worker_pool = None
             self._manual_client = None
+            self._active_config = None
+            self._set_hardware_ready(False)
             self.pool_changed.emit(None)
+            failed = self._progress_snapshot(
+                ConfigLoadPhase.FAILED,
+                f"Device initialization failed: {exc}",
+            )
+            self.config_load_finished.emit(failed)
             return
+        await asyncio.sleep(0)
 
         # 4. Spawn one UI-side drainer per preview bridge. Each loops
         #    over PreviewFrame items and re-emits preview_received on
@@ -562,7 +685,17 @@ class RunController(QObject):
                 task,
                 critical=False,
             )
+        self._manual_client = ManualClient(
+            pool=new_pool,
+            conductor_provider=lambda: self._conductor,
+        )
         self.pool_changed.emit(new_pool)
+        self._set_hardware_ready(True)
+        ready = self._progress_snapshot(
+            ConfigLoadPhase.READY,
+            "All devices initialized",
+        )
+        self.config_load_finished.emit(ready)
 
     async def _drain_preview(self, bridge: ThreadBridge[PreviewFrame]) -> None:
         """Drain one preview bridge; emit :attr:`preview_received` per frame.
@@ -613,6 +746,7 @@ class RunController(QObject):
         self._worker_pool = None
         self._manual_client = None
         self._active_config = None
+        self._set_hardware_ready(False)
         self.pool_changed.emit(None)
         # Cancel UI-side preview drainers before pool.close so they
         # don't observe a half-closed bridge mid-iteration.

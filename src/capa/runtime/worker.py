@@ -53,6 +53,13 @@ from capa.runtime.lifecycle import (
 )
 from capa.runtime.metrics import DisarmResult, WorkerMetrics
 from capa.runtime.preview import PreviewFrame
+from capa.runtime.progress import (
+    DeviceInitProgress,
+    DeviceInitStatus,
+    OpenProgressCallback,
+    identity_from_device_info,
+    identity_summary,
+)
 from capa.runtime.runcontext import RunContext
 from capa.runtime.runner import ThreadedRunner, WorkerRunner
 from capa.runtime.shutdown import (
@@ -186,7 +193,7 @@ class Worker:
 
     # ---- config-lifetime sync facade ------------------------------------
 
-    def start(self) -> Future[None]:
+    def start(self, progress_callback: OpenProgressCallback | None = None) -> Future[None]:
         """Bring the runner up; open every adapter inside the worker loop.
 
         Resolves when the worker reaches :attr:`WorkerState.IDLE`. On any
@@ -220,7 +227,7 @@ class Worker:
         # surfacing the exception, otherwise the worker thread leaks (Phase 1
         # done-criterion: no thread leaks on rollback). The bridge below
         # serializes the two futures.
-        impl_fut = self._runner.submit(self._open_all_impl)
+        impl_fut = self._runner.submit(lambda: self._open_all_impl(progress_callback))
         out: Future[None] = Future()
 
         def _on_open_done(f: Future[None]) -> None:
@@ -469,7 +476,48 @@ class Worker:
         self._state = target
         self._metrics.state = target
 
-    async def _open_all_impl(self) -> None:
+    def _emit_open_progress(
+        self,
+        callback: OpenProgressCallback | None,
+        adapter: DeviceAdapter,
+        status: DeviceInitStatus,
+        *,
+        detail: str = "",
+        error_type: str | None = None,
+    ) -> None:
+        """Emit one adapter-open progress event.
+
+        Runs on the worker loop/thread. Callbacks provided by UI code must be
+        thread-safe; :class:`RunController` marshals these back onto qasync.
+        """
+        if callback is None:
+            return
+        identity = None
+        if status is DeviceInitStatus.READY:
+            identity = identity_from_device_info(getattr(adapter, "device_info", None))
+            if not detail:
+                detail = identity_summary(identity)
+        try:
+            callback(
+                DeviceInitProgress(
+                    name=adapter.name,
+                    adapter=type(adapter).__name__,
+                    resource_id=self._resource_id,
+                    status=status,
+                    detail=detail,
+                    error_type=error_type,
+                    identity=identity,
+                )
+            )
+        except Exception as exc:
+            _logger.warning(
+                "worker.open_progress_callback_failed",
+                resource_id=self._resource_id,
+                adapter=adapter.name,
+                error=str(exc),
+            )
+
+    async def _open_all_impl(self, progress_callback: OpenProgressCallback | None) -> None:
         """CLOSED → IDLE. Open every adapter in declaration order.
 
         On any failure: close already-opened adapters in reverse order,
@@ -485,21 +533,44 @@ class Worker:
         opened: list[DeviceAdapter] = []
         try:
             for adapter in self._adapter_list:
-                await adapter.open()
-                opened.append(adapter)
-                camera_adapter = _as_camera_adapter(adapter)
-                if camera_adapter is not None:
-                    bridge = self._preview_bridges.get(camera_adapter.name)
-                    if bridge is not None:
-                        await camera_adapter.start_preview_channel(bridge)
-                    await camera_adapter.start_idle_preview_source()
+                self._emit_open_progress(
+                    progress_callback,
+                    adapter,
+                    DeviceInitStatus.OPENING,
+                    detail="opening connection",
+                )
+                try:
+                    await adapter.open()
+                    opened.append(adapter)
+                    camera_adapter = _as_camera_adapter(adapter)
+                    if camera_adapter is not None:
+                        bridge = self._preview_bridges.get(camera_adapter.name)
+                        if bridge is not None:
+                            await camera_adapter.start_preview_channel(bridge)
+                        await camera_adapter.start_idle_preview_source()
+                except BaseException as exc:
+                    self._emit_open_progress(
+                        progress_callback,
+                        adapter,
+                        DeviceInitStatus.FAILED,
+                        detail=str(exc),
+                        error_type=type(exc).__name__,
+                    )
+                    raise
+                self._emit_open_progress(
+                    progress_callback,
+                    adapter,
+                    DeviceInitStatus.READY,
+                )
         except BaseException:
             for adapter in reversed(opened):
+                rollback_detail = "rolled back after open failure"
                 camera_adapter = _as_camera_adapter(adapter)
                 if camera_adapter is not None:
                     try:
                         await camera_adapter.stop_idle_preview_source()
                     except BaseException as src_exc:
+                        rollback_detail = f"rollback degraded: {src_exc!r}"
                         _logger.warning(
                             "worker.open_rollback_stop_source_failed",
                             resource_id=self._resource_id,
@@ -509,6 +580,7 @@ class Worker:
                     try:
                         await camera_adapter.stop_preview_channel()
                     except BaseException as ch_exc:
+                        rollback_detail = f"rollback degraded: {ch_exc!r}"
                         _logger.warning(
                             "worker.open_rollback_stop_channel_failed",
                             resource_id=self._resource_id,
@@ -518,12 +590,19 @@ class Worker:
                 try:
                     await adapter.close()
                 except BaseException as close_exc:
+                    rollback_detail = f"rollback close failed: {close_exc!r}"
                     _logger.warning(
                         "worker.open_rollback_close_failed",
                         resource_id=self._resource_id,
                         adapter=adapter.name,
                         error=str(close_exc),
                     )
+                self._emit_open_progress(
+                    progress_callback,
+                    adapter,
+                    DeviceInitStatus.ROLLED_BACK,
+                    detail=rollback_detail,
+                )
             raise
         self._transition(WorkerState.IDLE)
 

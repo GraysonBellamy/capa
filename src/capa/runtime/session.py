@@ -54,6 +54,7 @@ from capa.core.logging import (
 from capa.experiment.authorization import Authorization
 from capa.runtime.bundle_ref import BundleWriterRef
 from capa.runtime.conductor import RunOutcome
+from capa.runtime.progress import identity_from_device_info as _identity_from_device_info
 from capa.runtime.recovery import (
     ActiveCheckpoint,
     delete_active_checkpoint,
@@ -95,11 +96,6 @@ def make_run_id(*, sample_id: str, started_utc: datetime | None = None) -> str:
     return f"{stamp}_{slug}"
 
 
-# ---------------------------------------------------------------------------
-# Identity probe (mirrors engine._identity_from_device_info)
-# ---------------------------------------------------------------------------
-
-
 def _stamp_clock_anchor(writer: RunBundleWriter, clock: RunClock) -> None:
     """Re-write ``manifest.json`` with the clock's anchor pair.
 
@@ -118,45 +114,6 @@ def _stamp_clock_anchor(writer: RunBundleWriter, clock: RunClock) -> None:
         }
     )
     manifest.write(manifest_path)
-
-
-def _identity_from_device_info(info: Any) -> dict[str, Any] | None:
-    """Best-effort identity extraction from an adapter's ``device_info``.
-
-    Mirrors :func:`capa.experiment.engine._identity_from_device_info` so
-    equipment.toml blocks are bit-identical across the Engine / Conductor
-    paths. Lifted here so this module doesn't import from engine.py.
-
-    Non-primitive values (e.g. alicatlib / sartoriuslib ``FirmwareVersion``
-    objects) are coerced via ``str()`` so the downstream ``tomli_w.dumps``
-    in :class:`RunBundleWriter` doesn't reject them.
-    """
-    if info is None:
-        return None
-    out: dict[str, Any] = {}
-    for attr in (
-        "vendor",
-        "model",
-        "model_number",
-        "serial",
-        "serial_number",
-        "firmware",
-        "firmware_version",
-        "device_id",
-        "v4l2_id",
-        "bus",
-        "uri",
-    ):
-        value = getattr(info, attr, None)
-        if value is None:
-            continue
-        if not isinstance(value, str | int | float | bool):
-            value = str(value)
-        out[attr] = value
-    if not out:
-        return None
-    return out
-
 
 # ---------------------------------------------------------------------------
 # RealRunSession

@@ -20,6 +20,7 @@ import pytest
 from capa.runtime.errors import PoolStateError, UnknownDeviceError
 from capa.runtime.lifecycle import PoolState, WorkerState
 from capa.runtime.pool import WorkerPool
+from capa.runtime.progress import DeviceInitProgress, DeviceInitStatus
 from capa.runtime.runner import ThreadedRunner
 from capa.runtime.worker import Worker
 from tests.integration.runtime.fakes import (
@@ -71,6 +72,25 @@ class TestOpenClose:
                 assert worker.state is WorkerState.IDLE
             for adapter in adapters:
                 assert adapter.open_calls == 1
+        finally:
+            await pool.close()
+
+    @pytest.mark.anyio
+    async def test_open_emits_device_progress(self) -> None:
+        adapters = [make_fake_adapter(f"dev{i}", resource_id=f"sim:dev{i}") for i in range(2)]
+        pool = _build_pool(adapters)
+        events: list[DeviceInitProgress] = []
+
+        await pool.open(progress_callback=events.append)
+        try:
+            by_name: dict[str, list[DeviceInitStatus]] = {}
+            for event in events:
+                by_name.setdefault(event.name, []).append(event.status)
+
+            assert set(by_name) == {"dev0", "dev1"}
+            for statuses in by_name.values():
+                assert statuses[0] is DeviceInitStatus.OPENING
+                assert statuses[-1] is DeviceInitStatus.READY
         finally:
             await pool.close()
 

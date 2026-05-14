@@ -14,6 +14,7 @@ import pytest
 
 from capa.runtime.lifecycle import PoolState
 from capa.runtime.pool import WorkerPool
+from capa.runtime.progress import DeviceInitProgress, DeviceInitStatus
 from capa.runtime.runner import ThreadedRunner
 from capa.runtime.worker import Worker
 from tests.integration.runtime.fakes import (
@@ -77,6 +78,21 @@ class TestRollback:
         with pytest.raises(RuntimeError):
             await pool.open()
         assert pool.state is PoolState.CLOSED
+
+    @pytest.mark.anyio
+    async def test_open_partial_failure_emits_failed_and_rolled_back_progress(self) -> None:
+        pool, _ = _pool_with_one_failure()
+        events: list[DeviceInitProgress] = []
+
+        with pytest.raises(RuntimeError):
+            await pool.open(progress_callback=events.append)
+
+        by_name: dict[str, list[DeviceInitStatus]] = {}
+        for event in events:
+            by_name.setdefault(event.name, []).append(event.status)
+
+        assert DeviceInitStatus.FAILED in by_name["bad"]
+        assert DeviceInitStatus.ROLLED_BACK in by_name["good"]
 
     @pytest.mark.anyio
     async def test_open_after_rollback_not_supported(self) -> None:

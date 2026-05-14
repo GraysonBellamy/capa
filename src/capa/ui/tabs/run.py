@@ -105,6 +105,9 @@ class RunTab(QWidget):
         # pool is still in PoolState.OPENING — which would crash the
         # conductor's preparation phase with PoolStateError.
         self._controller.pool_changed.connect(self._on_pool_changed)
+        ready_signal = getattr(self._controller, "hardware_ready_changed", None)
+        if ready_signal is not None:
+            ready_signal.connect(self._on_hardware_ready_changed)
 
     # ------------------------------------------------------------------ build
 
@@ -181,6 +184,8 @@ class RunTab(QWidget):
     def can_start(self) -> bool:
         if self._config is None or self._controller.is_active:
             return False
+        if not bool(getattr(self._controller, "hardware_ready", True)):
+            return False
         pool = self._controller.worker_pool
         return pool is not None and pool.state is PoolState.OPEN
 
@@ -207,6 +212,9 @@ class RunTab(QWidget):
         """``RunController.pool_changed`` fires when the pool finishes
         opening (with the pool) or is torn down (with ``None``). Sync the
         Start button to the new readiness state in either case."""
+        self._start_btn.setEnabled(self.can_start())
+
+    def _on_hardware_ready_changed(self, _ready: bool) -> None:
         self._start_btn.setEnabled(self.can_start())
 
     # ------------------------------------------------------------------ slots

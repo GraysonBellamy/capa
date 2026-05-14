@@ -7,17 +7,19 @@ persists to ``~/.capa/window_state.json``.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 from pathlib import Path
 from typing import Final
 
 import structlog
-from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QStatusBar,
     QTabWidget,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
 from capa.core.errors import CapaError
 from capa.experiment.config import ExperimentConfig
 from capa.storage.catalog import RunCatalog
+from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress, HardwareInitDialog
 from capa.ui.docks.camera_preview import CameraPreviewDock
 from capa.ui.docks.diagnostics import DiagnosticsDock
 from capa.ui.docks.events import EventsDock
@@ -87,6 +90,10 @@ class MainWindow(QMainWindow):
         # deadlines and the hard wall-clock fuse.
         self._shutdown_started: bool = False
         self._shutdown_complete: bool = False
+        self._config_loading: bool = False
+        self._open_config_action: QAction | None = None
+        self._hardware_dialog: HardwareInitDialog | None = None
+        self._devices_menu: QMenu
 
         self._controller = RunController(
             runs_root=runs_root,
@@ -168,6 +175,10 @@ class MainWindow(QMainWindow):
         self._controller.manual_event.connect(self._events_dock.append_event)
         self._controller.run_finished.connect(self._on_run_finished)
         self._controller.state_changed.connect(self._on_state)
+        self._controller.config_load_started.connect(self._on_config_load_started)
+        self._controller.config_load_progress.connect(self._on_config_load_progress)
+        self._controller.config_load_finished.connect(self._on_config_load_finished)
+        self._controller.hardware_ready_changed.connect(self._on_hardware_ready_changed)
 
         # Status bar.
         status = CapaStatusBar(
@@ -181,13 +192,17 @@ class MainWindow(QMainWindow):
 
         # Menu bar.
         self._build_menus()
+        self._set_config_loading_ui(False)
 
         # Restore prior layout if any.
         self._restore_window_state()
 
         # Optional initial config (when launched with a positional path).
         if initial_config is not None:
-            self._apply_loaded_config(initial_config, initial_config_path)
+            QTimer.singleShot(
+                0,
+                lambda: self._apply_loaded_config(initial_config, initial_config_path),
+            )
 
     # ------------------------------------------------------------------ build
 
@@ -198,6 +213,7 @@ class MainWindow(QMainWindow):
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._on_open_config)
         file_menu.addAction(open_action)
+        self._open_config_action = open_action
 
         file_menu.addSeparator()
 
@@ -221,6 +237,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ slots
 
     def _on_open_config(self) -> None:
+        if self._config_loading:
+            self._status.showMessage("Config is still loading; wait for hardware initialization.")
+            return
+        if self._controller.shutdown_requested:
+            self._status.showMessage("Shutdown is in progress; cannot open a new config.")
+            return
         path_str, _ = QFileDialog.getOpenFileName(
             self,
             "Open experiment config",
@@ -242,7 +264,17 @@ class MainWindow(QMainWindow):
         # Bind the controller's DeviceRegistry to the new config FIRST so
         # any consumer (manual control dock) that reacts to load_config
         # already sees the new registry.
-        self._controller.set_active_config(cfg)
+        try:
+            self._controller.set_active_config(cfg, config_path=path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Config error", str(exc))
+            _logger.warning(
+                "ui.config_apply_failed",
+                path=str(path) if path else None,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return
 
         self._setup_tab.load_config(cfg)
         self._run_tab.load_config(cfg)
@@ -333,7 +365,68 @@ class MainWindow(QMainWindow):
 
     def _on_device_action(self, name: str) -> None:
         """Handle "Open Manual Control" from the Setup tab right-click menu."""
+        if not self._controller.hardware_ready:
+            self._status.showMessage("Hardware is still initializing; manual controls are disabled.")
+            return
         self._manual_dock.reveal(name)
+
+    def _on_config_load_started(self, progress: object) -> None:
+        if not self._config_load_ui_available():
+            return
+        self._set_config_loading_ui(True)
+        self._status.showMessage("Preparing hardware…")
+        if isinstance(progress, ConfigLoadProgress):
+            self._show_or_update_hardware_dialog(progress)
+
+    def _on_config_load_progress(self, progress: object) -> None:
+        if isinstance(progress, ConfigLoadProgress):
+            self._show_or_update_hardware_dialog(progress)
+
+    def _on_config_load_finished(self, progress: object) -> None:
+        if isinstance(progress, ConfigLoadProgress):
+            self._show_or_update_hardware_dialog(progress)
+            if progress.phase is ConfigLoadPhase.READY:
+                self._status.showMessage("Hardware ready.")
+            elif progress.phase is ConfigLoadPhase.FAILED:
+                self._status.showMessage(progress.message)
+        self._set_config_loading_ui(False)
+
+    def _on_hardware_ready_changed(self, ready: bool) -> None:
+        if self._config_loading:
+            return
+        self._manual_dock.setEnabled(ready)
+        self._devices_menu.setEnabled(ready)
+
+    def _set_config_loading_ui(self, loading: bool) -> None:
+        self._config_loading = loading
+        hardware_ready = self._controller.hardware_ready
+        if self._open_config_action is not None:
+            self._open_config_action.setEnabled(
+                not loading
+                and not self._shutdown_started
+                and not self._controller.shutdown_requested
+            )
+        self._manual_dock.setEnabled(hardware_ready and not loading)
+        self._devices_menu.setEnabled(hardware_ready and not loading)
+
+    def _config_load_ui_available(self) -> bool:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        return True
+
+    def _show_or_update_hardware_dialog(self, progress: ConfigLoadProgress) -> None:
+        if not self._config_load_ui_available():
+            return
+        if self._hardware_dialog is None:
+            self._hardware_dialog = HardwareInitDialog(self)
+            self._hardware_dialog.finished.connect(self._on_hardware_dialog_finished)
+            self._hardware_dialog.open()
+        self._hardware_dialog.update_progress(progress)
+
+    def _on_hardware_dialog_finished(self, _result: int = 0) -> None:
+        self._hardware_dialog = None
 
     def _update_method_tab_title(self) -> None:
         """Decorate the Method tab label with the loaded method's name so

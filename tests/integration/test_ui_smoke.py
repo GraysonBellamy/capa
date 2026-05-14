@@ -42,6 +42,8 @@ from capa.experiment.config import (
     ProcedureRef,
     SampleInfo,
 )
+from capa.runtime.progress import DeviceInitStatus
+from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress
 from capa.ui.state import RunController, RunUiResult, RunUiState
 
 
@@ -209,6 +211,46 @@ def test_run_controller_request_abort_with_no_active_run_is_noop(
     assert controller.conductor is None
 
 
+@pytest.mark.anyio
+async def test_run_controller_config_load_progress_reaches_ready(
+    qapp: Any,
+    tmp_path: Path,
+) -> None:
+    config = _make_config(sample_id="CTRL-LOAD", duration_s=0.1, channels=1)
+    controller = RunController(runs_root=tmp_path, configure_logging_for_bundle=False)
+
+    started: list[ConfigLoadProgress] = []
+    progress: list[ConfigLoadProgress] = []
+    finished: list[ConfigLoadProgress] = []
+    ready: list[bool] = []
+    controller.config_load_started.connect(started.append)
+    controller.config_load_progress.connect(progress.append)
+    controller.config_load_finished.connect(finished.append)
+    controller.hardware_ready_changed.connect(ready.append)
+
+    controller.set_active_config(config, config_path=tmp_path / "sim.toml")
+    try:
+        for _ in range(200):
+            if finished:
+                break
+            await anyio.sleep(0.01)
+
+        assert started
+        assert progress
+        assert finished
+        assert finished[-1].phase is ConfigLoadPhase.READY
+        assert ready[-1] is True
+        assert controller.hardware_ready is True
+        assert any(snapshot.phase is ConfigLoadPhase.OPENING_DEVICES for snapshot in progress)
+        assert any(
+            row.name == "heater" and row.status is DeviceInitStatus.READY
+            for snapshot in progress
+            for row in snapshot.devices
+        )
+    finally:
+        await controller.aclose_pool()
+
+
 # ---------------------------------------------------------------------------
 # MainWindow smoke
 # ---------------------------------------------------------------------------
@@ -227,6 +269,7 @@ def test_main_window_renders_with_initial_config(qtbot: Any, tmp_path: Path) -> 
     qtbot.addWidget(window)
     window.show()
     qtbot.waitExposed(window)
+    qtbot.waitUntil(lambda: window.numerics_dock is not None, timeout=1000)
 
     # Setup tab populated.
     setup = window.setup_tab
