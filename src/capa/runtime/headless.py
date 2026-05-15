@@ -69,17 +69,13 @@ _logger = structlog.get_logger("capa.runtime.headless")
 
 
 # ---------------------------------------------------------------------------
-# Result type — shape-compatible with EngineResult for CLI exit-code parity
+# Result type
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
 class HeadlessResult:
-    """Outcome of one :func:`run_headless` invocation.
-
-    The shape mirrors :class:`capa.experiment.engine.EngineResult` so the
-    CLI's exit-code logic doesn't branch on which path produced the run.
-    """
+    """Outcome of one :func:`run_headless` invocation."""
 
     run_id: str
     bundle_path: Path | None

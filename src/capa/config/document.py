@@ -171,11 +171,6 @@ class ConfigDocument:
             doc.method_mode = "none"
             doc.method_payload = None
 
-        # Strip the legacy source-path keys if they leaked into the file
-        # (they're excluded from serialisation but defensive).
-        doc.experiment_payload.pop("method_source_path", None)
-        doc.experiment_payload.pop("hardware_source_path", None)
-
         return doc
 
     @classmethod

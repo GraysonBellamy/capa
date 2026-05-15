@@ -171,6 +171,14 @@ def _default_device_for(descriptor: AdapterDescriptor, existing_names: list[str]
     }
 
 
+def _is_sim(descriptor: AdapterDescriptor) -> bool:
+    # The "sim" family covers most simulators, but the FLIR IR sim
+    # advertises family="camera_ir" so it pairs UI-side with the real
+    # FLIR adapter. Detect sims by module-path prefix so neither
+    # grouping nor sort order misses them.
+    return descriptor.family == "sim" or descriptor.id.startswith("capa.devices.sim.")
+
+
 class DevicesSection(SectionWidget):
     """Devices table + detail editor.
 
@@ -183,6 +191,10 @@ class DevicesSection(SectionWidget):
 
     handshakeRequested = Signal(str)  # noqa: N815 — Qt signal naming convention
     """Operator clicked Test Connection on a device row."""
+
+    deviceActionRequested = Signal(str)  # noqa: N815 — Qt signal naming convention
+    """Operator chose "Open manual control" for a device row. Carries
+    the device name; the SetupTab forwards to MainWindow."""
 
     def __init__(self, parent: Any = None) -> None:
         super().__init__(parent)
@@ -431,38 +443,44 @@ class DevicesSection(SectionWidget):
             return
         name = device.get("name", "")
         if isinstance(name, str) and name:
-            tab = self.parent()
-            # Walk up until we find a widget that exposes
-            # ``device_action_requested`` (the SetupTab does).
-            while tab is not None and not hasattr(tab, "device_action_requested"):
-                tab = tab.parent()
-            if tab is not None:
-                tab.device_action_requested.emit(name)
+            self.deviceActionRequested.emit(name)
 
     # -- internals ----------------------------------------------------------
 
     def _rebuild_add_menu(self) -> None:
         self._add_menu.clear()
-        # Group descriptors by family for readability — Sim adapters get
-        # their own group so the operator doesn't have to scan a long
-        # flat list.
-        groups: dict[str, list[AdapterDescriptor]] = {}
+        # Group real-hardware descriptors by family; collect ALL sim
+        # descriptors (including camera sims like the FLIR IR sim, whose
+        # family is "camera_ir") into a single bucket so they land at the
+        # bottom under a clear "Simulated (testing only)" header. This is
+        # production tooling — sims exist for tests and offline dev and
+        # should not crowd out the real adapters.
+        real_groups: dict[str, list[AdapterDescriptor]] = {}
+        sim_descriptors: list[AdapterDescriptor] = []
         for descriptor in ADAPTERS.values():
-            groups.setdefault(descriptor.family, []).append(descriptor)
+            if _is_sim(descriptor):
+                sim_descriptors.append(descriptor)
+            else:
+                real_groups.setdefault(descriptor.family, []).append(descriptor)
 
-        # Stable family order: sim first (most common starting point),
-        # then real adapters by family alpha.
-        family_order = sorted(groups.keys(), key=lambda f: (f != "sim", f))
-        for family in family_order:
-            descs = sorted(groups[family], key=lambda d: d.label)
+        for family in sorted(real_groups):
             section = self._add_menu.addAction(family.upper())
             section.setEnabled(False)
-            for descriptor in descs:
+            for descriptor in sorted(real_groups[family], key=lambda d: d.label):
                 action = self._add_menu.addAction(descriptor.label)
                 action.triggered.connect(
                     lambda _checked=False, d=descriptor: self._on_add_device(d)
                 )
             self._add_menu.addSeparator()
+
+        if sim_descriptors:
+            section = self._add_menu.addAction("SIMULATED (TESTING ONLY)")
+            section.setEnabled(False)
+            for descriptor in sorted(sim_descriptors, key=lambda d: d.label):
+                action = self._add_menu.addAction(descriptor.label)
+                action.triggered.connect(
+                    lambda _checked=False, d=descriptor: self._on_add_device(d)
+                )
 
     def _on_add_device(self, descriptor: AdapterDescriptor) -> None:
         existing = [d.get("name", "") for d in self._model.devices()]
@@ -497,18 +515,25 @@ class DevicesSection(SectionWidget):
 
     def _populate_adapter_combo(self, current_adapter: str) -> None:
         self._adapter_combo.clear()
-        descriptors = sorted(ADAPTERS.values(), key=lambda d: (d.family, d.label))
+        # Sims demoted to the bottom — real hardware comes first. The
+        # sim flag is detected by module-path prefix so non-"sim"-family
+        # simulators (e.g. the FLIR IR sim in family="camera_ir") are
+        # also pushed down.
+        descriptors = sorted(
+            ADAPTERS.values(),
+            key=lambda d: (_is_sim(d), d.family, d.label),
+        )
         idx_to_select = 0
         for i, descriptor in enumerate(descriptors):
-            self._adapter_combo.addItem(descriptor.label, descriptor.id)
+            label = f"{descriptor.label}  (sim)" if _is_sim(descriptor) else descriptor.label
+            self._adapter_combo.addItem(label, descriptor.id)
             if descriptor.id == current_adapter:
                 idx_to_select = i
-        # Adapters not in the registry (legacy / plugin without
-        # DESCRIPTOR) still need to round-trip — surface them as a final
-        # entry so the operator can edit the row without losing the
-        # adapter id.
+        # An adapter id not in the registry is a hard error (Layer 2
+        # validation surfaces it). Show the unknown id so the operator
+        # can see/edit it without silently rewriting the row.
         if current_adapter and not any(d.id == current_adapter for d in descriptors):
-            self._adapter_combo.addItem(f"{current_adapter} (no descriptor)", current_adapter)
+            self._adapter_combo.addItem(f"{current_adapter} (unknown adapter)", current_adapter)
             idx_to_select = self._adapter_combo.count() - 1
         self._adapter_combo.setCurrentIndex(idx_to_select)
 

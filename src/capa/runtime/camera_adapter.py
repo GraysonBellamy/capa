@@ -21,9 +21,9 @@ takes the cheaper path: a thin wrapper that **implements**
    underlying Camera for UI cards (preview path unchanged).
 2. Translates ``start(run_context)`` into the camera's
    ``start_recording(output_path)``, computing the path via
-   :func:`~capa.experiment.cameras.camera_output_path`. The wrapper
-   takes a :class:`RunContext` parameter rather than just a
-   :class:`RunClock` so it can derive the bundle path + run id —
+   :meth:`_resolve_output_path`. The wrapper takes a
+   :class:`RunContext` parameter rather than just a :class:`RunClock`
+   so it can derive the bundle path + run id —
    :meth:`Worker._adapter_start` falls back from ``start(ctx)`` →
    ``start(clock)`` → ``start()`` for non-camera adapters.
 3. Late-binds the run-authoritative :class:`RunClock`. Cameras are
@@ -97,18 +97,6 @@ already provides cross-thread backpressure; this queue is purely
 loop-local and only needs enough headroom to absorb the small burst
 between ``stop_recording`` and ``run_pump`` exiting (typically 1–3
 trailing frames + the ``recording_stopped`` event)."""
-
-_IDLE_SOURCE_MAX_ATTEMPTS: Final[int] = 3
-"""Wrapper-level retry budget for the idle preview source. The
-camera's own ``_open_input_with_retry`` has an 8 s deadline; with 3
-attempts and progressive backoff we cover up to ~30 s of post-disarm
-DirectShow filter-graph hold-time. After this we give up — the
-camera is genuinely held by another process."""
-
-_IDLE_SOURCE_BACKOFF_S: Final[float] = 3.0
-"""Per-attempt backoff multiplier. Attempt N waits ``N * 3 s`` before
-retrying — long enough for DirectShow to release the graph without
-being so long the operator notices preview gap > stale threshold."""
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +212,6 @@ class CameraDeviceAdapter:
         "_preview_bridge",
         "_recording",
         "_run_id",
-        "_source_task",
         "_spec",
     )
 
@@ -261,8 +248,6 @@ class CameraDeviceAdapter:
         # Preview channel (drainer) — open()..close() lifetime.
         self._preview_bridge: ThreadBridge[PreviewFrame] | None = None
         self._channel_task: asyncio.Task[None] | None = None
-        # Idle preview source (pump) — IDLE-only lifetime.
-        self._source_task: asyncio.Task[None] | None = None
 
     # ---- DeviceAdapter Protocol surface --------------------------------
 
@@ -530,20 +515,10 @@ class CameraDeviceAdapter:
     async def snapshot(self) -> DeviceSnapshot:
         """Translate :class:`CameraHealth` into a :class:`DeviceSnapshot`.
 
-        The two have overlapping but distinct field sets. We map:
-
-        * ``healthy`` → :attr:`DeviceSnapshot.healthy` and
-          :attr:`health` (``"ok"`` / ``"degraded"`` based on the
-          health flag + presence of an error).
-        * Carry ``frame_count``, ``file_size_bytes``,
-          ``last_frame_t_mono_ns``, ``dropped_frames``,
-          ``recording`` into :attr:`fields` so a downstream consumer
-          can reconstruct what a snapshot of the camera looked like
-          at this moment.
-
-        Used by the procedure's status checks; not the periodic
-        bundle-status path (which still goes through the Camera's
-        own snapshot path).
+        Maps :attr:`CameraHealth.healthy` to the tri-state
+        :attr:`DeviceSnapshot.health` pill and carries ``frame_count``,
+        ``file_size_bytes``, ``last_frame_t_mono_ns``,
+        ``dropped_frames``, ``recording`` into :attr:`fields`.
         """
         health: CameraHealth = await self._camera.snapshot()
         return DeviceSnapshot(
@@ -551,7 +526,6 @@ class CameraDeviceAdapter:
             device=health.name,
             t_mono_ns=health.t_mono_ns,
             t_utc=health.t_utc,
-            healthy=health.healthy,
             health="ok" if health.healthy else "degraded",
             fields={
                 "recording": health.recording,
@@ -601,20 +575,13 @@ class CameraDeviceAdapter:
 
     # ---- preview lifecycle ---------------------------------------------
     #
-    # Two independent task scopes:
-    #
-    # * channel (drainer): camera.preview_stream() → bridge. Lifetime =
-    #   open()..close(); survives IDLE/ARMED/SAMPLING/DRAINING. Forwards
-    #   JPEGs from the camera's preview stream onto the pool-owned
-    #   ThreadBridge regardless of run state.
-    # * source (pump): retained as no-op hooks for cameras with a long-
-    #   lived input pump owned by the camera itself (the visible
-    #   :class:`WebcamAdapter` runs one continuous av.open for the entire
-    #   adapter-open lifetime; see :meth:`open`). For legacy cameras that
-    #   exposed ``run_preview_pump`` / ``start_preview`` as separate IDLE-
-    #   only routines this still drives them via getattr-probing — kept
-    #   so future adapters can opt into the old shape without redesigning
-    #   the worker calls.
+    # One long-lived drainer per adapter-open. The drainer pumps
+    # ``camera.preview_stream()`` onto the worker-owned
+    # :class:`ThreadBridge` for the entire IDLE/ARMED/SAMPLING/DRAINING
+    # lifecycle. Cameras that need a continuous input pump (the visible
+    # :class:`WebcamAdapter`) own one themselves and start it from
+    # :meth:`open` via ``camera.start_input_pump`` (see :meth:`open`
+    # above); the wrapper does not manage a per-state preview source.
 
     async def start_preview_channel(self, bridge: ThreadBridge[PreviewFrame]) -> None:
         """Start the long-lived drainer that pumps
@@ -622,9 +589,9 @@ class CameraDeviceAdapter:
 
         Called by :meth:`Worker._open_all_impl` once per pool open, after
         :meth:`Camera.open` returns. The drainer keeps running across
-        every subsequent arm/sample/disarm cycle; preview JPEGs arriving
-        from the recording pump during SAMPLING flow through the same
-        channel as JPEGs from ``run_preview_pump`` during IDLE.
+        every subsequent arm/sample/disarm cycle; the camera's own pump
+        (when present) feeds the preview stream during both IDLE and
+        SAMPLING.
 
         Early-out: if :attr:`CameraCapability.LIVE_PREVIEW` is not in
         ``camera.capabilities``, this method is a no-op and no task is
@@ -653,10 +620,7 @@ class CameraDeviceAdapter:
         """Cancel the drainer task; await its exit. Idempotent.
 
         Called by :meth:`Worker._close_all_impl` exactly once, on the
-        IDLE→CLOSED edge, BEFORE :meth:`Camera.close`. Does NOT touch
-        the idle source — that must already have been stopped on the
-        ARMED→SAMPLING transition or by :meth:`stop_idle_preview_source`
-        on the close path.
+        IDLE→CLOSED edge, BEFORE :meth:`Camera.close`.
         """
         task = self._channel_task
         self._channel_task = None
@@ -668,129 +632,12 @@ class CameraDeviceAdapter:
         with contextlib.suppress(BaseException):
             await task
 
-    async def start_idle_preview_source(self) -> None:
-        """Start the IDLE-only preview source for adapters that have one.
-
-        For :class:`WebcamAdapter`: ``await camera.start_preview()``;
-        spawn ``run_preview_pump()``. For adapters without a separate
-        preview pump (FLIR Atlas, IR sim) this is a no-op.
-
-        Called by :meth:`Worker` on every entry into IDLE:
-
-        * CLOSED → IDLE (right after :meth:`start_preview_channel`), and
-        * DRAINING → IDLE (after the recording pump has released the
-          input container).
-
-        Idempotent: a second call while the source is running returns
-        without action.
-        """
-        if self._source_task is not None and not self._source_task.done():
-            return
-        camera = self._camera
-        pump = getattr(camera, "run_preview_pump", None)
-        if not callable(pump):
-            return
-        start_preview = getattr(camera, "start_preview", None)
-        if callable(start_preview):
-            try:
-                await start_preview()
-            except anyio.get_cancelled_exc_class():
-                raise
-            except BaseException as exc:
-                _logger.warning(
-                    "camera_adapter.start_preview_failed",
-                    camera=self._spec.name,
-                    error=str(exc),
-                )
-                return
-
-        async def _run_source() -> None:
-            # Retry the pump on failure: after a DRAINING→IDLE
-            # transition, Windows DirectShow holds the filter graph
-            # for several seconds after the recording pump's
-            # ``in_container.close``. The camera's own
-            # ``_open_input_with_retry`` is bounded (~8 s); on a slow
-            # release the first ``pump()`` call hits its deadline and
-            # raises. Without a wrapper-level retry the operator would
-            # see "preview unavailable" until they reload the config.
-            #
-            # The backoff lets the OS settle between attempts and
-            # cumulatively covers the worst-case observed C930e
-            # release latency (~15 s end-to-end). A cancellation from
-            # ``stop_idle_preview_source`` interrupts either the pump
-            # or the sleep and propagates cleanly.
-            attempts = 0
-            while True:
-                try:
-                    await pump()
-                    return
-                except anyio.get_cancelled_exc_class():
-                    raise
-                except BaseException as exc:
-                    attempts += 1
-                    if attempts >= _IDLE_SOURCE_MAX_ATTEMPTS:
-                        _logger.warning(
-                            "camera_adapter.preview_pump_failed",
-                            camera=self._spec.name,
-                            attempts=attempts,
-                            error=str(exc),
-                        )
-                        return
-                    backoff = _IDLE_SOURCE_BACKOFF_S * attempts
-                    _logger.debug(
-                        "camera_adapter.preview_pump_retry",
-                        camera=self._spec.name,
-                        attempt=attempts,
-                        backoff_s=backoff,
-                        error=str(exc),
-                    )
-                    await anyio.sleep(backoff)
-
-        loop = asyncio.get_running_loop()
-        self._source_task = loop.create_task(
-            _run_source(),
-            name=f"preview-source-{self._spec.name}",
-        )
-
-    async def stop_idle_preview_source(self) -> None:
-        """Cancel the source task; await its exit; call
-        :meth:`Camera.stop_preview` if the camera exposes it.
-
-        Called on the IDLE→ARMED edge (before :meth:`_adapter_start`
-        runs :meth:`Camera.start_recording`) and on the IDLE→CLOSED edge
-        before :meth:`stop_preview_channel`.
-
-        Mutually-exclusive guarantee: when this returns, the input
-        container is released. The recording pump can safely claim it.
-        Idempotent.
-        """
-        task = self._source_task
-        self._source_task = None
-        if task is not None and not task.done():
-            task.cancel()
-            with contextlib.suppress(BaseException):
-                await task
-        stop_preview = getattr(self._camera, "stop_preview", None)
-        if callable(stop_preview):
-            try:
-                await stop_preview()
-            except anyio.get_cancelled_exc_class():
-                raise
-            except BaseException as exc:
-                _logger.warning(
-                    "camera_adapter.stop_preview_failed",
-                    camera=self._spec.name,
-                    error=str(exc),
-                )
-
     # ---- internals -----------------------------------------------------
 
     def _resolve_output_path(self, run_context: RunContext) -> Path:
         """Compute the camera's container path.
 
-        Mirrors :func:`capa.experiment.cameras.camera_output_path`
-        without importing it (avoids the experiment → runtime cycle the
-        rest of build.py already dances around). Layout:
+        Layout:
 
         * Default: ``<bundle_root>/video/<name>.<ext>``
         * With ``spec.output_root``: ``<output_root>/<run_id>/video/<name>.<ext>``
@@ -825,9 +672,6 @@ def make_camera_adapter(
     extra_params: dict[str, Any] | None = None,
 ) -> CameraDeviceAdapter:
     """Build a :class:`CameraDeviceAdapter` from class + spec.
-
-    Mirrors :func:`capa.experiment.cameras.construct_cameras`'s
-    resolution rules but produces a wrapper instead of a bare camera:
 
     1. A :class:`_ClockProxy` is minted first so the camera's
        constructor receives something clock-shaped.

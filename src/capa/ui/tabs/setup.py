@@ -1,9 +1,8 @@
 """``SetupTab`` — editor shell.
 
-Replaces the legacy read-only inspector. The tab owns a
-:class:`SetupDraft`, surfaces an outline / main-editor / Problems
-three-region layout, and exposes Save / Save As / Validate against
-the underlying :class:`ConfigDocument`.
+The tab owns a :class:`SetupDraft`, surfaces an outline / main-editor /
+Problems three-region layout, and exposes Save / Save As / Validate
+against the underlying :class:`ConfigDocument`.
 """
 
 from __future__ import annotations
@@ -109,14 +108,10 @@ class SetupTab(QWidget):
     every Open / New / Save As cycle reuses the same widget instance.
     """
 
-    # -- legacy signal -----------------------------------------------------
-
-    device_action_requested = Signal(str)
-    """Re-exported for backward compatibility with MainWindow's
-    ``_on_device_action`` slot. The Setup tab does not emit this — the
-    Devices table emits its own routed signal."""
-
-    # -- new signals -------------------------------------------------------
+    deviceActionRequested = Signal(str)  # noqa: N815 — Qt signal naming convention
+    """Forwarded from the Devices section: operator chose "Open manual
+    control" for a device row. The :class:`MainWindow` switches to the
+    Manual tab and surfaces the named device."""
 
     saved = Signal()
     """Fires after a successful save. The main window watches this to
@@ -353,9 +348,8 @@ class SetupTab(QWidget):
     def load_config(self, config: ExperimentConfig, *, path: Path | None = None) -> None:
         """Seed the tab from an already-validated :class:`ExperimentConfig`.
 
-        Called by ``MainWindow._apply_loaded_config`` so the legacy
-        File > Open Config flow still populates the Setup tab. When a
-        path is supplied, prefer :meth:`load_path` semantics (full
+        Called by ``MainWindow._apply_loaded_config``. When a path is
+        supplied, prefer :meth:`load_path` semantics (full
         :class:`ConfigDocument.load` round-trip) so the source-layout
         info matches the on-disk shape. Otherwise build a synthetic
         ``ConfigDocument`` from the model dump — used by tests that
@@ -369,10 +363,6 @@ class SetupTab(QWidget):
         dump = config.model_dump(mode="python")
         hardware = dump.pop("hardware", {}) or {}
         method = dump.pop("method", None)
-        # ConfigDocument strips these — drop here too so we don't carry
-        # forward the legacy snake-case keys that aren't serialised.
-        dump.pop("hardware_source_path", None)
-        dump.pop("method_source_path", None)
         document = ConfigDocument(
             experiment_payload=dump,
             hardware_payload=dict(hardware),
@@ -1085,7 +1075,9 @@ class SetupTab(QWidget):
         if section_id == "devices":
             from capa.ui.tabs.setup_sections.devices import DevicesSection  # noqa: PLC0415
 
-            return DevicesSection(self)
+            devices = DevicesSection(self)
+            devices.deviceActionRequested.connect(self.deviceActionRequested)
+            return devices
         if section_id == "channels":
             from capa.ui.tabs.setup_sections.channels import ChannelsSection  # noqa: PLC0415
 

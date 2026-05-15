@@ -33,12 +33,10 @@ def discoverable_descriptors(
     adapter: str | None = None,
     include_cameras: bool = True,
 ) -> list[AdapterDescriptor]:
-    """Return discoverable descriptors, optionally filtered by id/family.
+    """Return discoverable descriptors, optionally filtered by id or family.
 
     ``adapter`` accepts either a full descriptor id
-    (``"capa.devices.alicat"``), a family (``"alicat"``), or the final module
-    leaf (``"alicat"`` / ``"webcam"``). The leaf fallback keeps the older CLI
-    spelling usable without carrying the legacy registry around.
+    (``"capa.devices.alicat"``) or a family (``"alicat"``).
     """
 
     ensure_adapters_loaded()
@@ -49,7 +47,7 @@ def discoverable_descriptors(
     ]
     if adapter is None:
         return descriptors
-    return [d for d in descriptors if _matches_descriptor(d, adapter)]
+    return [d for d in descriptors if d.id == adapter or d.family == adapter]
 
 
 async def discover_descriptor(descriptor: AdapterDescriptor) -> DiscoveryResult:
@@ -88,12 +86,6 @@ async def discover_descriptor(descriptor: AdapterDescriptor) -> DiscoveryResult:
         if isinstance(row, dict):
             out.append(row)
     return DiscoveryResult(descriptor=descriptor, rows=out)
-
-
-def _matches_descriptor(descriptor: AdapterDescriptor, value: str) -> bool:
-    if descriptor.id == value or descriptor.family == value:
-        return True
-    return descriptor.id.rsplit(".", 1)[-1] == value
 
 
 __all__ = [

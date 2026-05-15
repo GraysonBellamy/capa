@@ -4,9 +4,10 @@ The Discover button on the Setup toolbar opens this dialog. It runs
 each discoverable adapter's module-level discovery coroutine
 against the local machine, aggregates the results into a table, and
 offers one ``[Add]`` button per row. Adding a row emits a
-:attr:`deviceAdded` signal with a device-config-shaped payload; the
-Setup tab merges that into ``hardware_payload["devices"]`` and marks
-the section dirty.
+:attr:`entryAdded` signal carrying the target section
+(``"devices"`` / ``"cameras"``) and a spec-shaped payload; the Setup
+tab merges that into ``hardware_payload`` and marks the section
+dirty.
 
 The dialog is *non-destructive*: it never writes to disk, never opens
 a worker pool, and only reads from serial / USB enumeration APIs (the
@@ -225,18 +226,11 @@ class DiscoveryDialog(QDialog):
     completes; results are appended to the table in arrival order.
     """
 
-    deviceAdded = Signal(dict)  # noqa: N815 — Qt signal naming convention
-    """Emitted when the operator clicks [Add] on a *device* row. The
-    payload is a device-config-shaped dict (``name`` / ``adapter`` /
-    ``params``) the Setup tab merges into ``hardware.devices``.
-
-    Kept for backwards compatibility with older callers; new code
-    should connect :attr:`entryAdded` which also covers cameras."""
-
     entryAdded = Signal(str, dict)  # noqa: N815 — Qt signal naming convention
     """Emitted when the operator clicks [Add] on any discovered row.
     First argument is the target section (``"devices"`` or
-    ``"cameras"``); second is the spec-shaped payload."""
+    ``"cameras"``); second is the spec-shaped payload the Setup tab
+    merges into ``hardware.devices`` / ``hardware.cameras``."""
 
     def __init__(
         self,
@@ -646,9 +640,6 @@ class DiscoveryDialog(QDialog):
             name=payload["name"],
         )
         self.entryAdded.emit(section, payload)
-        if section == "devices":
-            # Backwards-compatible signal for older listeners.
-            self.deviceAdded.emit(payload)
 
 
 __all__ = [

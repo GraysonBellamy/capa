@@ -474,7 +474,6 @@ class Worker:
                         bridge = self._preview_bridges.get(camera_adapter.name)
                         if bridge is not None:
                             await camera_adapter.start_preview_channel(bridge)
-                        await camera_adapter.start_idle_preview_source()
                 except BaseException as exc:
                     self._emit_open_progress(
                         progress_callback,
@@ -494,16 +493,6 @@ class Worker:
                 rollback_detail = "rolled back after open failure"
                 camera_adapter = _as_camera_adapter(adapter)
                 if camera_adapter is not None:
-                    try:
-                        await camera_adapter.stop_idle_preview_source()
-                    except BaseException as src_exc:
-                        rollback_detail = f"rollback degraded: {src_exc!r}"
-                        _logger.warning(
-                            "worker.open_rollback_stop_source_failed",
-                            resource_id=self._resource_id,
-                            adapter=camera_adapter.name,
-                            error=str(src_exc),
-                        )
                     try:
                         await camera_adapter.stop_preview_channel()
                     except BaseException as ch_exc:
@@ -543,45 +532,15 @@ class Worker:
         native call cannot pin the worker thread; on timeout the error
         is recorded and the next adapter is attempted.
 
-        For each :class:`CameraDeviceAdapter` we tear down the preview
-        machinery in two steps before :meth:`Camera.close`: source first
-        (releases the input container; idempotent), channel last (the
-        long-lived sink). Order matters — closing the channel first
-        would leave the drainer task missing if the source somehow
-        wedges and is cancelled.
+        For each :class:`CameraDeviceAdapter` we cancel the long-lived
+        preview drainer before :meth:`Camera.close` so the camera owns
+        the input container during teardown.
         """
         errors: list[str] = []
         cfg = self._shutdown_config
         for adapter in reversed(self._adapter_list):
             camera_adapter = _as_camera_adapter(adapter)
             if camera_adapter is not None:
-                try:
-                    await asyncio.wait_for(
-                        camera_adapter.stop_idle_preview_source(),
-                        timeout=cfg.adapter_close_grace_s,
-                    )
-                except TimeoutError:
-                    errors.append(
-                        f"adapter {camera_adapter.name!r} stop_idle_preview_source "
-                        f"timeout after {cfg.adapter_close_grace_s}s"
-                    )
-                    _logger.warning(
-                        "worker.close_stop_source_timeout",
-                        resource_id=self._resource_id,
-                        adapter=camera_adapter.name,
-                        grace_s=cfg.adapter_close_grace_s,
-                    )
-                except BaseException as src_exc:
-                    errors.append(
-                        f"adapter {camera_adapter.name!r} stop_idle_preview_source "
-                        f"failed: {src_exc!r}"
-                    )
-                    _logger.warning(
-                        "worker.close_stop_source_failed",
-                        resource_id=self._resource_id,
-                        adapter=camera_adapter.name,
-                        error=str(src_exc),
-                    )
                 try:
                     await asyncio.wait_for(
                         camera_adapter.stop_preview_channel(),
@@ -682,17 +641,6 @@ class Worker:
         # Disarm event lives on the worker loop; stream tasks race it
         # against adapter.stream() exhaustion.
         self._disarm_event = asyncio.Event()
-
-        # Stop the idle preview source for every camera BEFORE the
-        # recording pump starts. ``run_pump`` and ``run_preview_pump``
-        # both call ``av.open(input_url)``; two of them at once on the
-        # same UVC pin is undefined. The channel drainer keeps running
-        # — it doesn't care whether the recording pump or the preview
-        # pump fills ``_preview_send``.
-        for adapter in self._adapter_list:
-            camera_adapter = _as_camera_adapter(adapter)
-            if camera_adapter is not None:
-                await camera_adapter.stop_idle_preview_source()
 
         # Start each adapter. If any start() raises, stop the ones that
         # started, drop the bridge, and bubble the exception.
@@ -881,24 +829,6 @@ class Worker:
         self._disarm_event = None
         self._run_context = None
         self._transition(WorkerState.IDLE)
-
-        # DRAINING → IDLE: the recording pump has released the input
-        # container (adapter.stop above flipped recording=False and
-        # awaited the camera pump to drain). Restart the idle preview
-        # source for cameras that have one so the operator gets a live
-        # tile between runs. The channel drainer was never stopped.
-        for adapter in self._adapter_list:
-            camera_adapter = _as_camera_adapter(adapter)
-            if camera_adapter is not None:
-                try:
-                    await camera_adapter.start_idle_preview_source()
-                except BaseException as exc:
-                    _logger.warning(
-                        "worker.disarm_restart_source_failed",
-                        resource_id=self._resource_id,
-                        adapter=camera_adapter.name,
-                        error=str(exc),
-                    )
         self._last_disarm_result = result
         return result
 

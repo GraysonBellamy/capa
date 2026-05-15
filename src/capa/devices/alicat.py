@@ -349,7 +349,6 @@ class AlicatAdapter:
             device=self.name,
             t_mono_ns=clock.t_mono_ns(),
             t_utc=datetime.now(UTC),
-            healthy=self._lifecycle.state in ("open", "running"),
             health=self._compute_health(clock=clock),
             fields=self._snapshot_fields(),
         )

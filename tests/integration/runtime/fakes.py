@@ -287,7 +287,7 @@ class FakeAdapter:
             device=self.name,
             t_mono_ns=clock.t_mono_ns(),
             t_utc=datetime.now(UTC),
-            healthy=self.healthy,
+            health="ok" if self.healthy else "down",
             fields={"seq": self._seq, "state": self._lifecycle.state},
         )
 
@@ -388,7 +388,7 @@ class HangingCloseAdapter:
             device=self.name,
             t_mono_ns=0,
             t_utc=datetime.now(UTC),
-            healthy=True,
+            health="ok",
             fields={},
         )
 
@@ -449,7 +449,7 @@ class HangingStopAdapter:
             device=self.name,
             t_mono_ns=0,
             t_utc=datetime.now(UTC),
-            healthy=True,
+            health="ok",
             fields={},
         )
         self._stream_park = asyncio.Event()
@@ -461,7 +461,7 @@ class HangingStopAdapter:
             device=self.name,
             t_mono_ns=0,
             t_utc=datetime.now(UTC),
-            healthy=True,
+            health="ok",
             fields={},
         )
 
@@ -524,7 +524,7 @@ class CancelIgnoringStreamAdapter:
                     device=self.name,
                     t_mono_ns=0,
                     t_utc=datetime.now(UTC),
-                    healthy=True,
+                    health="ok",
                     fields={},
                 )
                 await asyncio.sleep(0.01)
@@ -542,7 +542,7 @@ class CancelIgnoringStreamAdapter:
             device=self.name,
             t_mono_ns=0,
             t_utc=datetime.now(UTC),
-            healthy=True,
+            health="ok",
             fields={},
         )
 

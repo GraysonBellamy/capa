@@ -446,7 +446,7 @@ class WatlowAdapter:
             device=self.name,
             t_mono_ns=clock.t_mono_ns(),
             t_utc=datetime.now(UTC),
-            healthy=self._lifecycle.state in ("open", "running"),
+            health="ok" if self._lifecycle.state in ("open", "running") else "down",
             fields=self._snapshot_fields(),
         )
 

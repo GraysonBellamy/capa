@@ -198,12 +198,8 @@ class DeviceSnapshot(BaseModel):
     device: str
     t_mono_ns: int
     t_utc: datetime
-    healthy: bool
-    """Coarse-grained boolean kept for back-compat with older snapshot shapes.
-    Newer surfaces consume :attr:`health` instead."""
-    health: DeviceHealth = "ok"
-    """Tri-state health pill. Defaults to ``"ok"`` so existing snapshots
-    constructed without the field round-trip cleanly through the schema."""
+    health: DeviceHealth
+    """Tri-state health pill: ``"ok"`` / ``"degraded"`` / ``"down"``."""
     fields: dict[str, float | int | str | bool | None] = Field(default_factory=dict)
 
 

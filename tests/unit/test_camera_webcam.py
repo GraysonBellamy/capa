@@ -67,10 +67,7 @@ def _solid_frame(width: int, height: int, color: tuple[int, int, int]) -> np.nda
 class TestWebcamPreviewBetweenRuns:
     """Preview emission is unconditional in the unified-pump design:
     ``push_frame`` produces a 2 Hz preview JPEG whether or not recording
-    is active, so the live tile stays current between runs without a
-    separate ``start_preview`` / ``run_preview_pump`` lifecycle. This
-    replaces the legacy two-pump model where DirectShow filter-graph
-    hold-time froze the tile for several seconds after every run-stop.
+    is active, so the live tile stays current between runs.
     """
 
     async def test_push_frame_emits_preview_without_recording(self) -> None:

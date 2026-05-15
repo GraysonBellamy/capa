@@ -390,8 +390,7 @@ class TestSnapshot:
             assert isinstance(snap, DeviceSnapshot)
             assert snap.adapter == "camera"
             assert snap.device == "ir_cam0"
-            # Pre-recording: healthy=True, recording=False, frame_count=0
-            assert snap.healthy is True
+            # Pre-recording: health="ok", recording=False, frame_count=0
             assert snap.health == "ok"
             assert snap.fields["recording"] is False
             assert snap.fields["frame_count"] == 0
@@ -431,7 +430,6 @@ class TestSnapshot:
             clock_proxy=_ClockProxy(),
         )
         snap = await wrapper.snapshot()
-        assert snap.healthy is False
         assert snap.health == "degraded"
         assert snap.fields["error"] == "sensor dropout"
         assert snap.fields["dropped_frames"] == 3

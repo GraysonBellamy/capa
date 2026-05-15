@@ -571,7 +571,7 @@ class TestStreaming:
         assert len(snapshots) >= 1
         snap0 = snapshots[0]
         assert snap0.adapter == ADAPTER_ID
-        assert snap0.healthy is True
+        assert snap0.health == "ok"
         # Identity captured at open() flows through into the snapshot fields
         assert snap0.fields.get("part_number") == "PM3C1AJ-AAAAAAA"
         assert snap0.fields.get("firmware_id") == 5678

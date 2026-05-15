@@ -123,10 +123,10 @@ class TestDeviceEvents:
             device="heater",
             t_mono_ns=0,
             t_utc=NOW,
-            healthy=True,
+            health="ok",
             fields={"firmware": "PM6", "alarms": 0},
         )
-        assert snap.healthy is True
+        assert snap.health == "ok"
 
 
 class TestAdapterContract:

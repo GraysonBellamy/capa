@@ -99,10 +99,8 @@ class NIDAQDeviceInfo:
     Populated lazily during :meth:`NIDAQAdapter.open` by enumerating the local
     NI system via :func:`nidaqlib.system.discovery.list_devices` and matching
     the first declared ``physical_channel`` against the returned device names.
-    Field names are chosen to align with
-    :data:`capa.experiment.engine._IDENTITY_FIELDS` so the manifest's
-    ``devices[*].identity`` block surfaces them automatically — hardware-day
-    2026-05-09 followup #3 (``manifest.json.devices`` was empty for NI-DAQ).
+    Field names align with the manifest writer's identity fields so the
+    ``manifest.json.devices[*].identity`` block surfaces them automatically.
     """
 
     product_type: str | None
@@ -167,9 +165,8 @@ class NIDAQAdapterParams(BaseModel):
     the validating model from
     :mod:`capa.devices.nidaq_channels`. NI enum-typed fields
     (``thermocouple_type``, ``cjc_source``, ``units``, ``adc_timing_mode``,
-    ``auto_zero_mode``, ``terminal_config``) accept the canonical NI name
-    (``"K"``, ``"BUILT_IN"``, ``"DEG_C"``) as well as the raw ``int`` value
-    for backwards compatibility with older run-bundle TOMLs."""
+    ``auto_zero_mode``, ``terminal_config``) take the canonical NI name
+    only (``"K"``, ``"BUILT_IN"``, ``"DEG_C"``)."""
 
     timing: NIDAQTimingParams | None = None
     """Hardware-clocked timing config. ``None`` means software-timed
@@ -449,7 +446,6 @@ class NIDAQAdapter:
             device=self.name,
             t_mono_ns=clock.t_mono_ns(),
             t_utc=datetime.now(UTC),
-            healthy=self._lifecycle.state in ("open", "running"),
             health=self._compute_health(clock=clock),
             fields=self._snapshot_fields(),
         )

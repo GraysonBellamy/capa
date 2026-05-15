@@ -31,7 +31,7 @@ from capa.experiment.config import (
 )
 from capa.runtime.build import (
     _construct_camera_adapters_from_config,
-    _import_camera_class,
+    _resolve_camera_class,
     build_workers,
 )
 from capa.runtime.camera_adapter import CameraDeviceAdapter
@@ -64,22 +64,28 @@ def _config_with_cameras(camera_blocks: list[dict[str, object]]) -> ExperimentCo
 
 
 # ---------------------------------------------------------------------------
-# _import_camera_class
+# _resolve_camera_class
 # ---------------------------------------------------------------------------
 
 
-class TestImportCameraClass:
+class TestResolveCameraClass:
     def test_resolves_flir_sim(self) -> None:
-        cls = _import_camera_class("capa.devices.sim.flir_ir_sim")
+        from capa.devices.registry import ensure_adapters_loaded
+
+        ensure_adapters_loaded()
+        cls = _resolve_camera_class("capa.devices.sim.flir_ir_sim")
         assert cls.__name__ == "FlirIrSim"
 
     def test_resolves_webcam(self) -> None:
-        cls = _import_camera_class("capa.devices.camera.webcam")
+        from capa.devices.registry import ensure_adapters_loaded
+
+        ensure_adapters_loaded()
+        cls = _resolve_camera_class("capa.devices.camera.webcam")
         assert cls.__name__ == "WebcamAdapter"
 
-    def test_raises_on_unimportable_module(self) -> None:
-        with pytest.raises(ResourceConflict, match="not importable"):
-            _import_camera_class("capa.devices.does_not_exist")
+    def test_raises_on_unknown_adapter(self) -> None:
+        with pytest.raises(ResourceConflict, match="no AdapterDescriptor"):
+            _resolve_camera_class("capa.devices.does_not_exist")
 
 
 # ---------------------------------------------------------------------------

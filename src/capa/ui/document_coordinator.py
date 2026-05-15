@@ -74,6 +74,7 @@ class DocumentCoordinator(QObject):
         self._setup_tab.methodRefChanged.connect(self.on_setup_method_ref_changed)
         self._setup_tab.draftLoaded.connect(self._on_setup_draft_loaded)
         self._method_tab.methodChanged.connect(self._on_method_tab_changed)
+        self._method_tab.methodSaved.connect(self.on_method_tab_saved)
 
         # Initial sync (in case the tabs were already populated before
         # the coordinator was wired in).
@@ -157,10 +158,7 @@ class DocumentCoordinator(QObject):
         """The Method tab wrote a file. Mirror the path + payload into
         the Setup draft so a Setup-side save stays consistent.
 
-        Called manually for now — the MethodTab doesn't yet emit a
-        ``saved`` signal. ``on_method_tab_changed`` handles the
-        in-memory change path; this slot is reserved for the explicit
-        post-write hook the Save flow will fire once we add it.
+        Wired to :attr:`MethodTab.methodSaved`.
         """
         if self._applying:
             return

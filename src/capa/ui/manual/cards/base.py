@@ -166,9 +166,9 @@ class DeviceCard(QGroupBox):
         :class:`WorkerPool`'s worker for the device. The wrapper / adapter
         instance lives in the worker thread; cards never see it directly.
 
-        Returns a sentinel non-``None`` to satisfy the legacy contract that
-        cards check before dispatch (camera subclasses override this to
-        return the live :class:`Camera` handle they need for preview
+        Returns a sentinel non-``None`` to satisfy the contract that
+        cards check before dispatch (camera subclasses override this
+        to return the live :class:`Camera` handle they need for preview
         subscriptions). For device cards the actual dispatch happens via
         :meth:`dispatch` → ``ManualClient.dispatch``, which doesn't need
         the cached handle.

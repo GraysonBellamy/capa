@@ -78,19 +78,13 @@ if TYPE_CHECKING:
 _logger = structlog.get_logger("capa.runtime.session")
 
 
-# Run-id minting — kept here so RealRunSession is self-contained and
-# doesn't pull from the legacy ``capa.experiment.engine``. Format is
-# byte-identical to ``engine.make_run_id`` to keep bundle paths
-# diff-friendly across the cutover.
+# Run-id minting. Format must stay stable: existing bundles in the
+# catalog are keyed on it.
 _INVALID_RUN_ID_CHARS: Final = re.compile(r"[^A-Za-z0-9._-]")
 
 
 def make_run_id(*, sample_id: str, started_utc: datetime | None = None) -> str:
-    """Directory shape: ``YYYY-MM-DD_HHMMSS_<sample-slug>``.
-
-    Identical output to :func:`capa.experiment.engine.make_run_id` so
-    headless cutover bundles drop into the same catalog rows.
-    """
+    """Directory shape: ``YYYY-MM-DD_HHMMSS_<sample-slug>``."""
     started = started_utc or datetime.now(UTC)
     stamp = started.strftime("%Y-%m-%d_%H%M%S")
     slug = _INVALID_RUN_ID_CHARS.sub("-", sample_id) or "sample"
@@ -103,7 +97,7 @@ def _stamp_clock_anchor(writer: RunBundleWriter, clock: RunClock) -> None:
     The writer's :meth:`open` writes an initial manifest with
     ``started_mono_ns_anchor=0``; once :class:`RunClock.now` is captured we
     update the manifest so downstream readers can correlate ``t_mono_ns``
-    columns with wall time. Lifted from :mod:`capa.experiment.engine`.
+    columns with wall time.
     """
     manifest_path = writer.bundle_path / "manifest.json"
     manifest = BundleManifest.read(manifest_path)
@@ -470,8 +464,8 @@ class RealRunSession:
         writer_snapshot: dict[str, float] | None = None
         run_status = run_status_for_outcome(self._outcome)
 
-        # Log before stopping the writer / finalizing sinks so run.log keeps
-        # the same start/end audit envelope as the legacy engine path.
+        # Log before stopping the writer / finalizing sinks so run.log
+        # captures the run-end audit record before the file rotates closed.
         if self._bundle_writer is not None and self._bundle_writer.is_open:
             self._logger.info(
                 "engine.run.end",

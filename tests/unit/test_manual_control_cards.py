@@ -8,7 +8,7 @@ asserts that:
 * the destructive-confirm dialog suppresses the dispatch on decline,
 * an empty operator id blocks dispatch without raising,
 * the dock builds and tears down cards on each ``load_config`` call,
-* :class:`SetupTab` emits ``device_action_requested`` on right-click.
+* :class:`SetupTab` emits ``deviceActionRequested`` on right-click.
 """
 
 from __future__ import annotations
@@ -133,8 +133,7 @@ def _close_pool_sync(controller: RunController) -> None:
 
 
 def _adapter_for(controller: RunController, name: str) -> Any:
-    """Return the worker-hosted adapter for ``name``. Stand-in for the
-    legacy ``registry.opened_device``."""
+    """Return the worker-hosted adapter for ``name`` (for assertions)."""
     pool = controller._worker_pool
     assert pool is not None
     worker = pool.worker_for(name)
@@ -474,22 +473,15 @@ class TestManualControlDock:
 
 class TestSetupTabContextMenu:
     def test_device_action_signal_routes_to_listener(self, qtbot: Any) -> None:
-        """``device_action_requested`` is preserved across the SetupTab rewrite.
-
-        The legacy read-only inspector emitted this signal from a right-
-        click on a device row in its tree. The new editor shell preserves
-        the signal on SetupTab so MainWindow's ``_on_device_action`` wiring
-        keeps working; it is re-emitted from the Devices table once that
-        section lands.
-        """
+        """``deviceActionRequested`` carries the device name to MainWindow."""
         from capa.ui.tabs.setup import SetupTab
 
         tab = SetupTab()
         qtbot.addWidget(tab)
 
         captured: list[str] = []
-        tab.device_action_requested.connect(captured.append)
-        tab.device_action_requested.emit("balance.main")
+        tab.deviceActionRequested.connect(captured.append)
+        tab.deviceActionRequested.emit("balance.main")
         assert captured == ["balance.main"]
 
 

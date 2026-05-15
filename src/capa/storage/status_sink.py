@@ -29,8 +29,7 @@ CREATE TABLE IF NOT EXISTS status (
     device      TEXT    NOT NULL,
     t_mono_ns   INTEGER NOT NULL,
     t_utc       TEXT    NOT NULL,
-    healthy     INTEGER NOT NULL,
-    health      TEXT    NOT NULL DEFAULT 'ok',
+    health      TEXT    NOT NULL,
     fields_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_status_device ON status (adapter, device, t_mono_ns);
@@ -71,15 +70,14 @@ class StatusSink:
         self._conn.execute(
             """
             INSERT INTO status
-            (adapter, device, t_mono_ns, t_utc, healthy, health, fields_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?);
+            (adapter, device, t_mono_ns, t_utc, health, fields_json)
+            VALUES (?, ?, ?, ?, ?, ?);
             """,
             (
                 snapshot.adapter,
                 snapshot.device,
                 int(snapshot.t_mono_ns),
                 snapshot.t_utc.isoformat(),
-                int(snapshot.healthy),
                 snapshot.health,
                 fields_json,
             ),

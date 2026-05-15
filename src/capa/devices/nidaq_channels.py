@@ -1,26 +1,20 @@
 """Typed Pydantic channel models for the NI-DAQ adapter.
 
 The :class:`~capa.devices.nidaq.NIDAQAdapter` consumes ``[[devices.params.channels]]``
-TOML blocks. Historically those blocks carried raw ``int`` values for NI enum
-fields::
-
-    thermocouple_type = 10073    # ThermocoupleType.K
-    cjc_source = 10200           # CJCSource.BUILT_IN
-    units = 10143                # TemperatureUnits.DEG_C
-
-That works but is unreadable in configs and equipment manifests. The models in
-this module accept the canonical NI enum **name** instead::
+TOML blocks. NI enum-typed fields take the canonical UPPER_SNAKE member
+name from :mod:`nidaqmx.constants`::
 
     thermocouple_type = "K"
     cjc_source = "BUILT_IN"
     units = "DEG_C"
-    adc_timing_mode = "HIGH_RESOLUTION"   # NI 9214 default; nidaqlib v0.2.0 knob
+    adc_timing_mode = "HIGH_RESOLUTION"   # NI 9214 default
     auto_zero_mode = "ONCE"
 
-Names match :mod:`nidaqmx.constants` exactly (UPPER_SNAKE, case-sensitive). For
-backwards compatibility with existing run-bundle ``equipment.toml`` snapshots,
-the validators also accept the raw integer ``.value`` and canonicalise to the
-name. Anything else fails fast at config-load time with a list of valid names.
+Names are case-sensitive — ``"k"`` (Kelvin) and ``"K"`` (K-type alloy)
+mean different things on different fields, so a forgiving validator
+would let typos parse as something the operator didn't intend. Anything
+that isn't a valid name fails fast at config-load time with the list
+of valid names.
 
 Channel kinds without a typed model (``digital_input``, ``digital_output``,
 ``ao_voltage``, the counter family) flow through :class:`NIDAQRawChannelConfig`
@@ -48,14 +42,9 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Discriminator, Fiel
 def _enum_name_validator(enum_cls: Any) -> Callable[[object], str]:
     """Return a Pydantic ``BeforeValidator`` callable for an NI enum.
 
-    Accepts either the canonical UPPER_SNAKE member name (case-sensitive) or
-    the integer ``.value``. Returns the canonical name. Anything else raises
-    ``ValueError`` listing the valid names.
-
-    The strict UPPER_SNAKE match is intentional: ``"k"`` vs ``"K"`` would mean
-    different things on different fields (``TemperatureUnits.K`` is Kelvin,
-    ``ThermocoupleType.K`` is the K-type alloy), and a forgiving validator would
-    let typos like ``"BUITL_IN"`` parse as something the user didn't intend.
+    Accepts the canonical UPPER_SNAKE member name (case-sensitive) and
+    returns it unchanged. Anything else raises ``ValueError`` listing
+    the valid names.
     """
     valid_names = tuple(m.name for m in enum_cls)
 
@@ -66,19 +55,8 @@ def _enum_name_validator(enum_cls: Any) -> Callable[[object], str]:
                     f"unknown {enum_cls.__name__} {value!r}; valid names: {valid_names}"
                 )
             return value
-        if isinstance(value, bool):
-            raise ValueError(f"{enum_cls.__name__} cannot be a bool; use one of {valid_names}")
-        if isinstance(value, int):
-            try:
-                # nidaqmx enums resolve to Any (no py.typed); the cast asserts
-                # the runtime invariant that ``Enum.name`` is always a str.
-                return str(enum_cls(value).name)
-            except ValueError as exc:
-                raise ValueError(
-                    f"unknown {enum_cls.__name__} value {value!r}; valid names: {valid_names}"
-                ) from exc
         raise ValueError(
-            f"{enum_cls.__name__} must be a string name or int value; got {type(value).__name__}"
+            f"{enum_cls.__name__} must be one of {valid_names}; got {type(value).__name__}"
         )
 
     return coerce
@@ -144,7 +122,7 @@ class NIDAQThermocoupleConfig(_AnalogInputBase):
 
     kind: Literal["thermocouple"]
     thermocouple_type: ThermocoupleTypeName
-    """Required. Common: ``"K"`` (general purpose), ``"J"`` (legacy iron/constantan),
+    """Required. Common: ``"K"`` (general purpose), ``"J"`` (iron/constantan),
     ``"T"`` (cryogenic). See :data:`ThermocoupleTypeName`."""
     min_val: float
     """Lower limit of expected temperature, in :attr:`units`."""

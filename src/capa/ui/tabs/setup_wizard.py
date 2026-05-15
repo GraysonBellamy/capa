@@ -37,7 +37,7 @@ MethodChoice = Literal["new", "attach", "none"]
 class _Spec:
     """Mutable accumulator for the wizard's collected choices."""
 
-    starting_point: StartingPoint = "sim_capa"
+    starting_point: StartingPoint = "real_capa"
     layout: SourceLayoutKind = "yaml_ext_toml"
     method_choice: MethodChoice = "none"
     method_path: Path | None = None
@@ -71,12 +71,15 @@ class _StartingPointPage(QWizardPage):
         layout = QVBoxLayout(self)
         self._group = QButtonGroup(self)
 
+        # Real-hardware options come first — sims are a testing affordance,
+        # not the primary path. The wizard still ships sim seeds so an
+        # operator can drive the app without instruments attached.
         self._options: list[tuple[StartingPoint, str]] = [
-            ("sim_capa", "CAPA pyrolysis — simulated rig (recommended for first run)"),
-            ("real_capa", "CAPA pyrolysis — real rig (Watlow + Alicat + Sartorius)"),
-            ("free_sim", "Free run — simulated"),
+            ("real_capa", "CAPA pyrolysis — real rig (recommended; Watlow + Alicat + Sartorius)"),
             ("free_real", "Free run — real rig"),
             ("blank", "Blank (no devices, no channels)"),
+            ("sim_capa", "CAPA pyrolysis — simulated rig (testing only)"),
+            ("free_sim", "Free run — simulated (testing only)"),
         ]
         for idx, (value, label) in enumerate(self._options):
             btn = QRadioButton(label, self)
@@ -294,6 +297,11 @@ class SetupWizard(QWizard):
         super().__init__(parent)
         self.setWindowTitle("New Setup")
         self.setMinimumSize(600, 420)
+        # AeroStyle (Qt's default on Windows) renders the page area as a
+        # blank white panel on Win11 because DWM glass composition no
+        # longer behaves the way Qt expects. ModernStyle paints a normal
+        # title/subtitle banner and works on every platform.
+        self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
         self._spec = _Spec()
         self.addPage(_StartingPointPage(self._spec))
         self.addPage(_LayoutPage(self._spec))

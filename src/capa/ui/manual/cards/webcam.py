@@ -443,9 +443,8 @@ class WebcamCard(DeviceCard):
     def _on_engine_state(self, state: object) -> None:
         """The pool owns the webcam handle across runs, so there
         is no per-run hand-off and no preview to tear down on PREPARING.
-        :class:`WebcamAdapter` supports preview running concurrently with
-        recording — the pre-run release dance the legacy card needed is
-        gone."""
+        :class:`WebcamAdapter` runs preview concurrently with recording.
+        """
         super()._on_engine_state(state)
         if not isinstance(state, RunUiState):
             return

@@ -357,8 +357,7 @@ class WebcamAdapter:
         :class:`WebcamCard._apply_metadata`. Keeping the snapshot
         construction inside the adapter means the wrapper stays generic
         — it forwards via a ``getattr(camera, "snapshot_metadata", None)``
-        probe, the same capability-style pattern used for ``run_preview_pump``
-        and ``start_preview``.
+        capability-style probe.
 
         Safe to call before duvc-ctl has probed (``self._uvc is None``):
         the ``uvc_ranges`` mapping is empty and the card keeps its wide
@@ -487,7 +486,7 @@ class WebcamAdapter:
         # RunClock immediately before start_recording, so any prior
         # value of ``_last_preview_t_mono_ns`` is in the *old* anchor's
         # units. Resetting here makes the first in-run frame fire the
-        # preview encode immediately (matching :meth:`start_preview`).
+        # preview encode immediately when recording begins.
         # Without this, ``t_mono_ns - _last_preview_t_mono_ns`` is a
         # large negative number until the new clock advances past the
         # stale value, so previews stay dark for the early part of the
@@ -1448,7 +1447,7 @@ def _build_descriptor() -> AdapterDescriptor:
         id="capa.devices.camera.webcam",
         label="USB webcam (visible)",
         family="camera_visible",
-        adapter_factory=None,  # Cameras are constructed via make_camera_adapter
+        adapter_factory=WebcamAdapter,
         params_model=WebcamParams,
         supported_binding_sources=(),  # Cameras don't bind via SourceBinding
         default_params={

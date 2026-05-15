@@ -89,9 +89,8 @@ RUNTIME_VERSION: Final[str] = "0.2.0-p4a"
 """Runtime code revision marker.
 
 Bumped when conductor / worker / pool semantics change in a way that
-affects bundle interpretation. Mirrors the legacy ``engine.ENGINE_VERSION``
-field — newly-sealed bundles carry this in ``capa_block.engine_version``
-for cross-version diagnostics."""
+affects bundle interpretation. Newly-sealed bundles carry this in
+``capa_block.engine_version`` for cross-version diagnostics."""
 
 __all__ = [
     "DEFAULT_EVENT_SOURCE",

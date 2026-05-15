@@ -132,6 +132,11 @@ class MethodTab(QWidget):
     open). Lets the main window mirror the current method name in the
     tab title without coupling MethodTab to its parent."""
 
+    methodSaved = Signal(object)  # noqa: N815 - Qt signal naming convention
+    """``Path`` — emitted after a successful Save / Save As. The
+    :class:`DocumentCoordinator` consumes this to mirror the path back
+    into the Setup draft so a Setup-side save stays consistent."""
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._method_path: Path | None = None
@@ -292,6 +297,8 @@ class MethodTab(QWidget):
         err = self._save_to(self._method_path)
         if err is not None:
             self._show_save_error(err)
+            return
+        self.methodSaved.emit(self._method_path)
 
     def _on_save_as(self) -> None:
         path_str, _ = QFileDialog.getSaveFileName(
@@ -309,6 +316,7 @@ class MethodTab(QWidget):
         if err is None:
             self._method_path = path
             self._refresh_source_label()
+            self.methodSaved.emit(path)
         else:
             self._show_save_error(err)
 

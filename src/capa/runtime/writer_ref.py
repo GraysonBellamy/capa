@@ -127,9 +127,7 @@ class WriterThreadRef:
         attributes to the ref's source), camera events carry their own
         :attr:`CameraEvent.t_mono_ns` / :attr:`t_utc` (captured in the
         camera adapter at event time) and their own ``severity`` /
-        ``camera:<name>`` source string. This matches the legacy
-        ``camera_task`` semantics so bundle parity holds across the
-        migration cutover.
+        ``camera:<name>`` source string.
         """
         await self.writer_thread.write_event(
             kind=kind,

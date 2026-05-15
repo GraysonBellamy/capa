@@ -786,7 +786,7 @@ def _build_descriptor() -> AdapterDescriptor:
         id="capa.devices.sim.flir_ir_sim",
         label="FLIR IR camera (simulator)",
         family="camera_ir",
-        adapter_factory=None,
+        adapter_factory=FlirIrSim,
         params_model=FlirIrSimParams,
         supported_binding_sources=(),
         default_params={

@@ -3,8 +3,7 @@
 Covers:
 
 * Strict UPPER_SNAKE name validation (``"K"`` works, ``"k"`` doesn't).
-* Backwards compatibility with raw integer ``.value`` inputs.
-* The new nidaqlib v0.2.0 ADC-timing / auto-zero / terminal-config knobs.
+* The nidaqlib v0.2.0 ADC-timing / auto-zero / terminal-config knobs.
 * Discriminated-union dispatch — typed kinds resolve to typed models, unknown
   kinds fall back to the pass-through model.
 * End-to-end round trip through ``NIDAQAdapterParams.build_task_spec()`` so
@@ -91,20 +90,15 @@ class TestThermocoupleNames:
         assert d["cjc_source"] == CJCSource.BUILT_IN.value
         assert d["units"] == TemperatureUnits.DEG_C.value
 
-    def test_int_value_accepted_for_backwards_compat(self) -> None:
-        cfg = NIDAQThermocoupleConfig(
-            kind="thermocouple",
-            physical_channel="Dev1/ai0",
-            thermocouple_type=ThermocoupleType.K.value,  # 10073
-            min_val=0.0,
-            max_val=1000.0,
-            cjc_source=CJCSource.BUILT_IN.value,  # 10200
-            units=TemperatureUnits.DEG_C.value,  # 10143
-        )
-        # Validator canonicalises to the name regardless of input form.
-        assert cfg.thermocouple_type == "K"
-        assert cfg.cjc_source == "BUILT_IN"
-        assert cfg.units == "DEG_C"
+    def test_int_value_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            NIDAQThermocoupleConfig(
+                kind="thermocouple",
+                physical_channel="Dev1/ai0",
+                thermocouple_type=ThermocoupleType.K.value,  # 10073
+                min_val=0.0,
+                max_val=1000.0,
+            )
 
     def test_lowercase_name_rejected_strict(self) -> None:
         with pytest.raises(ValidationError) as excinfo:
@@ -128,16 +122,6 @@ class TestThermocoupleNames:
                 max_val=1000.0,
             )
         assert "ThermocoupleType" in str(excinfo.value)
-
-    def test_unknown_int_value_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            NIDAQThermocoupleConfig(
-                kind="thermocouple",
-                physical_channel="Dev1/ai0",
-                thermocouple_type=99999,
-                min_val=0.0,
-                max_val=1000.0,
-            )
 
     def test_bool_rejected(self) -> None:
         with pytest.raises(ValidationError):
@@ -287,13 +271,13 @@ class TestVoltage:
         )
         assert cfg.to_nidaqlib_dict()["terminal_config"] == TerminalConfiguration.DIFF.value
 
-    def test_terminal_config_int_backcompat(self) -> None:
-        cfg = NIDAQVoltageConfig(
-            kind="ai_voltage",
-            physical_channel="Dev1/ai0",
-            terminal_config=TerminalConfiguration.RSE.value,
-        )
-        assert cfg.terminal_config == "RSE"
+    def test_terminal_config_int_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            NIDAQVoltageConfig(
+                kind="ai_voltage",
+                physical_channel="Dev1/ai0",
+                terminal_config=TerminalConfiguration.RSE.value,
+            )
 
     def test_default_min_max(self) -> None:
         cfg = NIDAQVoltageConfig(kind="ai_voltage", physical_channel="Dev1/ai0")
@@ -369,35 +353,6 @@ class TestBuildTaskSpec:
         assert ch.units is TemperatureUnits.DEG_C  # type: ignore[attr-defined]
         assert ch.adc_timing_mode is ADCTimingMode.HIGH_RESOLUTION  # type: ignore[attr-defined]
         assert ch.auto_zero_mode is AutoZeroType.ONCE  # type: ignore[attr-defined]
-
-    def test_int_form_round_trips_identically(self) -> None:
-        named = NIDAQAdapterParams(
-            task_name="t",
-            channels=(
-                {
-                    "kind": "thermocouple",
-                    "physical_channel": "Dev1/ai0",
-                    "thermocouple_type": "K",
-                    "min_val": 0.0,
-                    "max_val": 1000.0,
-                    "cjc_source": "BUILT_IN",
-                },
-            ),
-        )
-        ints = NIDAQAdapterParams(
-            task_name="t",
-            channels=(
-                {
-                    "kind": "thermocouple",
-                    "physical_channel": "Dev1/ai0",
-                    "thermocouple_type": ThermocoupleType.K.value,
-                    "min_val": 0.0,
-                    "max_val": 1000.0,
-                    "cjc_source": CJCSource.BUILT_IN.value,
-                },
-            ),
-        )
-        assert named.build_task_spec().channels[0] == ints.build_task_spec().channels[0]
 
     def test_raw_channel_kind_passes_through(self) -> None:
         params = NIDAQAdapterParams(

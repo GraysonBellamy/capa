@@ -72,7 +72,7 @@ def _snapshot() -> DeviceSnapshot:
         device="dev",
         t_mono_ns=0,
         t_utc=datetime.now().astimezone(),
-        healthy=True,
+        health="ok",
     )
 
 

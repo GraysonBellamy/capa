@@ -5,9 +5,6 @@ sim adapters only declare a subset of capability flags (they only need to
 satisfy the producer surface, not the manual-control surface). This stub
 advertises a configurable capability set and records every command dispatch
 into a buffer that tests can inspect.
-
-Import path: ``tests.fixtures.stub_recording_adapter``. The
-``_import_adapter_class`` resolver looks for ``StubRecordingAdapter`` first.
 """
 
 from __future__ import annotations
@@ -25,6 +22,7 @@ from capa.devices.adapter import (
     DeviceCommand,
 )
 from capa.devices.records import DeviceEmission
+from capa.devices.registry import AdapterDescriptor, register
 
 
 class StubRecordingAdapter:
@@ -126,4 +124,13 @@ class _CalRecord:
     result = "OK"
 
 
-__all__ = ["StubRecordingAdapter"]
+DESCRIPTOR = AdapterDescriptor(
+    id="tests.fixtures.stub_recording_adapter",
+    label="Stub recording adapter (test fixture)",
+    family="sim",
+    adapter_factory=StubRecordingAdapter,
+)
+register(DESCRIPTOR)
+
+
+__all__ = ["DESCRIPTOR", "StubRecordingAdapter"]

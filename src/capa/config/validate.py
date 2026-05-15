@@ -213,9 +213,18 @@ def _layer2_referential(config: Any, document: ConfigDocument) -> list[ConfigPro
     for dev in hardware.devices:
         descriptor = get_descriptor(dev.adapter)
         if descriptor is None:
-            # No descriptor — can't check; fall through silently. The
-            # legacy snake-case probe still constructs the adapter at
-            # runtime, but Layer 2 only warns when we have ground truth.
+            problems.append(
+                ConfigProblem(
+                    severity="error",
+                    code="devices.unknown_adapter",
+                    message=(
+                        f"device {dev.name!r}: no AdapterDescriptor registered for {dev.adapter!r}"
+                    ),
+                    section="devices",
+                    path=("devices", dev.name, "adapter"),
+                    source_file=document.hardware_path,
+                )
+            )
             continue
         family_for_device[dev.name] = descriptor.supported_binding_sources
 

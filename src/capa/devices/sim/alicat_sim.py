@@ -139,7 +139,7 @@ class AlicatSim:
             device=self.name,
             t_mono_ns=clock.t_mono_ns(),
             t_utc=now_utc(),
-            healthy=self._lifecycle.state == "running",
+            health="ok" if self._lifecycle.state == "running" else "down",
             fields={
                 "unit_id": self.unit_id,
                 "channel_count": len(self._channels),

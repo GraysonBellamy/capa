@@ -220,6 +220,7 @@ def test_dialog_lists_non_scannable_adapters(qtbot: Any, monkeypatch: pytest.Mon
         id="capa.tests.plugin_stub",
         label="Stub plugin (not scannable)",
         family="plugin",
+        adapter_factory=lambda **_: None,
         discoverable=False,
         discoverable_reason="stub adapter — used by tests only",
         handshake_available=False,
@@ -247,6 +248,7 @@ def test_non_scannable_row_tooltip_carries_reason(
         id="capa.tests.plugin_stub_tip",
         label="Stub plugin (with tooltip)",
         family="plugin",
+        adapter_factory=lambda **_: None,
         discoverable=False,
         discoverable_reason="awaiting upstream find_devices() helper",
         handshake_available=False,
@@ -453,14 +455,16 @@ def test_dialog_add_emits_device_payload(qtbot: Any) -> None:
         "capa.devices.alicat",
         rows=[{"port": "COM7", "unit_id": "A"}],
     )
-    captured: list[dict[str, Any]] = []
-    dialog.deviceAdded.connect(captured.append)
+    captured: list[tuple[str, dict[str, Any]]] = []
+    dialog.entryAdded.connect(lambda section, payload: captured.append((section, payload)))
     desc = get_descriptor("capa.devices.alicat")
     assert desc is not None
     dialog._on_add(desc, {"port": "COM7", "unit_id": "A"})
     assert len(captured) == 1
+    section, payload = captured[0]
+    assert section == "devices"
     # ``alicat1`` is already taken; dialog picks ``alicat2``.
-    assert captured[0]["name"] == "alicat2"
+    assert payload["name"] == "alicat2"
 
 
 # ---------------------------------------------------------------------------

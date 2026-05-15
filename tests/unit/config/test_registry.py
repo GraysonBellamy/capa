@@ -107,8 +107,12 @@ def test_adapter_constructors_are_passive() -> None:
     from pydantic import ValidationError
 
     for adapter_id, d in ADAPTERS.items():
-        if d.adapter_factory is None:
-            continue  # plugin adapter without a factory; skipped
+        # Cameras' adapter_factory is the camera class; constructing one
+        # requires a CameraSpec/clock and is exercised separately. Skip
+        # them here — Layer-4 dry-run for cameras goes through
+        # capa.runtime.camera_adapter.make_camera_adapter.
+        if d.family.startswith("camera_"):
+            continue
         from_params = getattr(d.adapter_factory, "from_params", None)
         try:
             if callable(from_params):
@@ -125,14 +129,19 @@ def test_adapter_constructors_are_passive() -> None:
 
 def test_descriptor_round_trip_through_dataclass() -> None:
     """Building a descriptor instance with the dataclass shape works."""
+
+    def _factory(*, name: str) -> object:
+        return {"name": name}
+
     custom = AdapterDescriptor(
         id="capa.devices.plugin.test",
         label="Plugin Test Adapter",
         family="plugin",
+        adapter_factory=_factory,
         channel_templates=(),
     )
     assert custom.id == "capa.devices.plugin.test"
-    assert custom.adapter_factory is None
+    assert custom.adapter_factory is _factory
     assert custom.params_model is None
 
 

@@ -128,7 +128,7 @@ class NIDAQPolledSim:
             device=self.name,
             t_mono_ns=clock.t_mono_ns(),
             t_utc=now_utc(),
-            healthy=self._lifecycle.state == "running",
+            health="ok" if self._lifecycle.state == "running" else "down",
             fields={
                 "task": self.task,
                 "channel_count": len(self.signals),

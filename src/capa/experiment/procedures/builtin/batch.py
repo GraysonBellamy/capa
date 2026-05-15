@@ -235,8 +235,7 @@ class Batch(Procedure):
             # Each child gets its own bundle via a nested conductor stack.
             # ``run_headless`` opens a fresh :class:`WorkerPool` for the child
             # config and tears it down before returning — child resources
-            # are isolated from the parent's pool, matching legacy engine
-            # semantics.
+            # stay isolated from the parent's pool.
             result = await run_headless(
                 child_config,
                 runs_root=self._runs_root,

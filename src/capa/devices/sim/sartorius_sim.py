@@ -137,7 +137,7 @@ class SartoriusSim:
             device=self.name,
             t_mono_ns=clock.t_mono_ns(),
             t_utc=now_utc(),
-            healthy=self._lifecycle.state == "running",
+            health="ok" if self._lifecycle.state == "running" else "down",
             fields={
                 "protocol": self.protocol.value,
                 "unit": self.unit.value,

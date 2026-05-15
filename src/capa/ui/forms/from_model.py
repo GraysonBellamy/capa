@@ -298,10 +298,7 @@ class ModelForm(QWidget):
                 with contextlib.suppress(Exception):
                     defaults[name] = info.default_factory()  # type: ignore[call-arg]
                 continue
-            # `info.default` is `PydanticUndefined` for required fields,
-            # `Ellipsis` for legacy `Field(...)`, and the actual default
-            # otherwise. Treat all three "no default" sentinels the same.
-            if info.default is PydanticUndefined or info.default is ...:
+            if info.default is PydanticUndefined:
                 continue
             defaults[name] = info.default
         return defaults

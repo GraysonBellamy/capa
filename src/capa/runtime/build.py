@@ -8,8 +8,6 @@ a misconfigured config fails fast with no hardware side-effects. Any
 
 from __future__ import annotations
 
-import importlib
-import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
@@ -122,179 +120,80 @@ def _construct_camera_adapters_from_config(
 ) -> list[CameraDeviceAdapter]:
     """Build a :class:`CameraDeviceAdapter` for each ``hardware.cameras`` entry.
 
-    Mirrors :func:`capa.experiment.cameras.construct_cameras` import-class
-    resolution (snake-case → CamelCase, with ``Adapter`` / ``Sim``
-    suffix probing) so a TOML config that works today against the
-    engine works tomorrow against the worker pool.
-
-    The factory hands the wrapper a :class:`_ClockProxy` that the
-    wrapper rebinds at :meth:`start` time. Cameras themselves never
-    learn that the clock is late-bound.
+    The camera class is read from the adapter's :class:`AdapterDescriptor`
+    in the registry (each camera module registers a descriptor whose
+    ``adapter_factory`` is the camera class itself). The factory hands
+    the wrapper a :class:`_ClockProxy` that the wrapper rebinds at
+    :meth:`start` time; cameras themselves never learn that the clock
+    is late-bound.
     """
     out: list[CameraDeviceAdapter] = []
     for spec in config.hardware.cameras:
-        cls = _import_camera_class(spec.adapter)
+        cls = _resolve_camera_class(spec.adapter)
         out.append(make_camera_adapter(camera_cls=cls, spec=spec))
     return out
 
 
-def _import_camera_class(module_path: str) -> type[Camera]:
-    """Resolve a camera adapter module path to its camera class.
+def _resolve_camera_class(adapter_id: str) -> type[Camera]:
+    """Look up the camera class for ``adapter_id`` via the registry."""
+    from capa.devices.registry import require_descriptor  # noqa: PLC0415
 
-    Mirrors :func:`capa.experiment.cameras._import_camera_class` so the
-    same TOML names work uniformly. Probes ``<CamelCase>``,
-    ``<CamelCase>Adapter``, ``<CamelBaseNoSim>Sim``, etc. and returns
-    the first match that is a class.
-
-    The implementation lives here (and inside ``cameras.py``) rather
-    than being shared — ``capa.runtime`` cannot import from
-    ``capa.experiment`` without re-introducing an import cycle.
-    A few duplicated lines are cheaper than a structural workaround.
-    """
     try:
-        module = importlib.import_module(module_path)
-    except ImportError as exc:
+        descriptor = require_descriptor(adapter_id)
+    except KeyError as exc:
+        raise ResourceConflict(str(exc)) from exc
+    factory = descriptor.adapter_factory
+    if not isinstance(factory, type):
         raise ResourceConflict(
-            f"camera adapter module {module_path!r} not importable: {exc}"
-        ) from exc
-    leaf = module_path.rsplit(".", 1)[-1]
-    base = _snake_to_camel(leaf)
-    base_no_sim = _snake_to_camel(leaf.removesuffix("_sim"))
-    candidates = [
-        base,
-        base + "Adapter",
-        base_no_sim + "Sim",
-        base_no_sim + "Adapter",
-        base_no_sim,
-    ]
-    seen: list[str] = []
-    for name in candidates:
-        if name in seen:
-            continue
-        seen.append(name)
-        cls = getattr(module, name, None)
-        if isinstance(cls, type):
-            return cast(type[Camera], cls)
-    raise ResourceConflict(f"camera adapter module {module_path!r} does not expose any of {seen}")
-
-
-def _snake_to_camel(name: str) -> str:
-    return "".join(part.title() for part in re.split(r"[_\-]", name))
+            f"camera descriptor {adapter_id!r} adapter_factory must be a Camera "
+            f"class, got {type(factory).__name__}"
+        )
+    return cast(type[Camera], factory)
 
 
 def _construct_adapters_from_config(config: ExperimentConfig) -> list[DeviceAdapter]:
     """Walk ``config.hardware.devices`` and instantiate each declared adapter.
 
-    Mirrors the resolution rules from the legacy
-    :func:`capa.experiment.engine._construct_adapters` (now retired): if the
-    adapter class exposes a ``from_params(name=..., **params)`` classmethod
-    it is preferred (sim adapters use it to materialise signal dicts); else
-    ``cls(name=..., **params)`` is called directly.
+    Each :class:`DeviceConfig.adapter` resolves to an
+    :class:`AdapterDescriptor` in the registry; the descriptor's
+    ``adapter_factory`` is invoked as
+    ``factory(name=..., **params)`` (or its ``from_params`` classmethod
+    when present, which sim adapters use to materialise signal dicts).
 
-    A :class:`TypeError` from either path is re-raised as
-    :class:`ResourceConflict` so that pool-open surfaces config-shaped
-    failures alongside resource-ID collisions, rather than mixing two
-    error types at the same boundary.
+    A :class:`TypeError` from either call is re-raised as
+    :class:`ResourceConflict` so pool-open surfaces config-shaped
+    failures alongside resource-ID collisions.
     """
-    # Local import to defer registry import cost when the runtime is
-    # used directly (avoids the descriptor registry's eager-import of
-    # every adapter module when this function isn't called).
-    from capa.devices.registry import get_descriptor  # noqa: PLC0415
+    from capa.devices.registry import require_descriptor  # noqa: PLC0415
 
     out: list[DeviceAdapter] = []
     channels = list(config.hardware.channels)
     for dev in config.hardware.devices:
-        # Prefer the registry; fall back to the legacy snake-case probe
-        # for adapters that haven't migrated yet. Either path yields the
-        # same class.
-        descriptor = get_descriptor(dev.adapter)
-        if descriptor is not None and descriptor.adapter_factory is not None:
-            cls = descriptor.adapter_factory
-        else:
-            cls = _import_adapter_class(dev.adapter)
-        from_params = getattr(cls, "from_params", None)
+        try:
+            descriptor = require_descriptor(dev.adapter)
+        except KeyError as exc:
+            raise ResourceConflict(str(exc)) from exc
+        factory = descriptor.adapter_factory
+        from_params = getattr(factory, "from_params", None)
         try:
             if callable(from_params):
                 adapter = from_params(name=dev.name, **dev.params)
             else:
-                adapter = cls(name=dev.name, **dev.params)
+                adapter = factory(name=dev.name, **dev.params)
         except TypeError as exc:
             raise ResourceConflict(
                 f"failed to construct adapter {dev.name!r} ({dev.adapter}): {exc}"
             ) from exc
         # Bind the adapter to its channel specs so streams emit
         # :class:`ChannelSample`\\ s alongside the raw
-        # :class:`SourceRecord`\\ s. The legacy engine did this between
-        # adapter construction and producer-task spawn; the conductor
-        # does it here, before any worker is built, so the binding is
-        # immutable for the worker's lifetime.
+        # :class:`SourceRecord`\\ s. The conductor does it here, before
+        # any worker is built, so the binding is immutable for the
+        # worker's lifetime.
         configure = getattr(adapter, "configure_channels", None)
         if callable(configure):
             configure(channels)
         out.append(cast(DeviceAdapter, adapter))
     return out
-
-
-def _import_adapter_class(module_path: str) -> type:
-    """Resolve ``capa.devices.sim.alicat_sim`` → ``AlicatSim`` (and the real
-    counterpart ``capa.devices.watlow`` → ``WatlowAdapter``).
-
-    Convention: the module exports exactly one adapter class whose name is
-    one of:
-
-    * ``<Leaf>`` — direct CamelCase of the leaf module (``alicat`` → ``Alicat``).
-    * ``<Leaf>Sim`` — sim adapters with the ``_sim`` suffix stripped
-      (``alicat_sim`` → ``AlicatSim``).
-    * ``<Leaf>Adapter`` — the real-adapter naming
-      (``watlow`` → ``WatlowAdapter``, ``alicat`` → ``AlicatAdapter``).
-    * Bare-acronym variants where the first leaf segment is upper-cased
-      (``nidaq`` → ``NIDAQAdapter``, ``nidaq_polled_sim`` → ``NIDAQPolledSim``).
-      Without this every acronym adapter (NIDAQ, LCR, MFC, PWM, …) would
-      need to ship a CamelCase alias to satisfy the resolver.
-    """
-    try:
-        module = importlib.import_module(module_path)
-    except ImportError as exc:
-        raise ResourceConflict(f"adapter module {module_path!r} not importable: {exc}") from exc
-    leaf = module_path.rsplit(".", 1)[-1]
-    leaf_no_sim = leaf.removesuffix("_sim")
-    base = _snake_to_camel(leaf)
-    base_no_sim = _snake_to_camel(leaf_no_sim)
-    upper_first = _snake_to_camel_upper_first(leaf)
-    upper_first_no_sim = _snake_to_camel_upper_first(leaf_no_sim)
-    candidate_names = [
-        base,
-        base_no_sim + "Sim",
-        base + "Adapter",
-        base_no_sim + "Adapter",
-        upper_first,
-        upper_first_no_sim + "Sim",
-        upper_first + "Adapter",
-        upper_first_no_sim + "Adapter",
-    ]
-    seen: list[str] = []
-    for name in candidate_names:
-        if name in seen:
-            continue
-        seen.append(name)
-        cls = getattr(module, name, None)
-        if isinstance(cls, type):
-            return cls
-    raise ResourceConflict(f"adapter module {module_path!r} does not expose any of {seen}")
-
-
-def _snake_to_camel_upper_first(name: str) -> str:
-    """Like :func:`_snake_to_camel` but the leading segment stays uppercase.
-
-    ``nidaq`` → ``NIDAQ`` (single segment), ``nidaq_polled_sim`` →
-    ``NIDAQPolledSim``. The bare-acronym fallback for adapters whose
-    canonical class name begins with an all-caps acronym
-    (``NIDAQAdapter``, ``LCRAdapter``, ``MFCAdapter``, …).
-    """
-    parts = re.split(r"[_\-]", name)
-    if not parts:
-        return name
-    return parts[0].upper() + "".join(p.title() for p in parts[1:])
 
 
 # ---------------------------------------------------------------------------

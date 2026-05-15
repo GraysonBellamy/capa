@@ -3,17 +3,23 @@ so :func:`capa.ui.manual.cards.balance.is_balance_device` recognises it."""
 
 from __future__ import annotations
 
+from capa.devices.registry import AdapterDescriptor, register
 from tests.fixtures.stub_recording_adapter import StubRecordingAdapter as _Base
 
 
 class StubSartorius(_Base):
-    """Identical to :class:`StubRecordingAdapter`; the class name follows
-    the resolver convention (CamelCase of the module leaf) so
-    ``_import_adapter_class`` picks it up.
-
-    The module path also contains the substring ``sartorius`` so
-    :func:`capa.ui.manual.cards.balance.is_balance_device` recognises it.
-    """
+    """Identical to :class:`StubRecordingAdapter`; lives in this module so
+    the substring ``sartorius`` in the import path satisfies
+    :func:`capa.ui.manual.cards.balance.is_balance_device`."""
 
 
-__all__ = ["StubSartorius"]
+DESCRIPTOR = AdapterDescriptor(
+    id="tests.fixtures.stub_sartorius",
+    label="Stub Sartorius (test fixture)",
+    family="sim",
+    adapter_factory=StubSartorius,
+)
+register(DESCRIPTOR)
+
+
+__all__ = ["DESCRIPTOR", "StubSartorius"]

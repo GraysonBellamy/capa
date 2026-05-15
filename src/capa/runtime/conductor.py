@@ -1,12 +1,11 @@
 """:class:`Conductor` — per-run coordinator.
 
-Replaces :class:`~capa.experiment.engine.ExperimentEngine` for runs spawned
-through the runtime stack. The conductor lives in **its own thread on its
-own asyncio loop**, separate from the UI and from the pool's worker threads.
-This is what makes a hung adapter (or a stalled writer fsync) unable to
-freeze the UI: every cross-thread hand-off is bounded by a
-:class:`ThreadBridge` and every blocking deadline is observed by the
-:class:`SaturationMonitor`.
+Owns the lifecycle of one run spawned through the runtime stack. The
+conductor lives in **its own thread on its own asyncio loop**, separate
+from the UI and from the pool's worker threads. This is what makes a
+hung adapter (or a stalled writer fsync) unable to freeze the UI:
+every cross-thread hand-off is bounded by a :class:`ThreadBridge` and
+every blocking deadline is observed by the :class:`SaturationMonitor`.
 
 Lifetime:
 
@@ -867,10 +866,8 @@ class Conductor:
 
         Camera emissions (:class:`FrameReceipt`, :class:`CameraEvent`) get
         their own writer methods and skip the procedure-side databus —
-        nothing on the bus would subscribe to a frame receipt, and the
-        existing engine path doesn't publish them either. Bundle parity
-        with the legacy :func:`camera_task` is the load-bearing property
-        here.
+        nothing on the bus would subscribe to a frame receipt, so the
+        databus carries only :class:`SourceRecord` / :class:`ChannelSample`.
         """
         if isinstance(emission, FrameReceipt):
             await writer.record_frame(emission)

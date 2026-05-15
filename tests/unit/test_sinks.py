@@ -290,14 +290,14 @@ class TestStatusSink:
                 device="heater",
                 t_mono_ns=10,
                 t_utc=WALL,
-                healthy=True,
+                health="ok",
                 fields={"address": 1, "state": "running"},
             )
         )
         sink.close()
         conn = sqlite3.connect(tmp_path / "status.sqlite")
-        rows = list(conn.execute("SELECT adapter, device, healthy FROM status;"))
-        assert rows == [("watlow", "heater", 1)]
+        rows = list(conn.execute("SELECT adapter, device, health FROM status;"))
+        assert rows == [("watlow", "heater", "ok")]
         conn.close()
 
 

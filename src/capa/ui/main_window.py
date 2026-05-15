@@ -126,7 +126,7 @@ class MainWindow(QMainWindow):
         self._setup_tab = SetupTab(controller=self._controller, parent=self)
         self._method_tab = MethodTab(self)
         self._run_tab = RunTab(controller=self._controller, parent=self)
-        self._setup_tab.device_action_requested.connect(self._on_device_action)
+        self._setup_tab.deviceActionRequested.connect(self._on_device_action)
 
         # Setup ↔ Method coordinator. Keeps the experiment's
         # method ref in lock-step with whatever MethodTab is showing —

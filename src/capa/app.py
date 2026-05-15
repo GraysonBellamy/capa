@@ -29,10 +29,9 @@ from capa.core.errors import CapaError
 from capa.core.logging import configure_pre_run_logging
 from capa.core.plugins_lock import PluginsLock
 from capa.devices.discovery import discover_descriptor, discoverable_descriptors
-from capa.devices.registry import AdapterDescriptor
+from capa.devices.registry import AdapterDescriptor, require_descriptor
 from capa.experiment.config import ExperimentConfig
 from capa.runtime import RUNTIME_VERSION, install_sigint_handler
-from capa.runtime.build import _import_adapter_class
 from capa.runtime.headless import HeadlessResult, run_headless
 from capa.storage.catalog import CatalogError, RunCatalog
 from capa.storage.finalize import FinalizeError, finalize_in_place
@@ -198,27 +197,28 @@ def validate(
         typer.echo("  method:    present")
 
     if strict:
-        # Import each adapter module and, if it exposes a
-        # ``handshake(params)`` async function, run a non-disruptive
-        # read-only open + identify + close against the declared
-        # hardware — no setpoint writes. Modules that do not expose
-        # ``handshake`` (sim adapters, real adapters that haven't grown
-        # the hook yet) fall back to the import-only check.
+        # Look each adapter up in the registry and, if its module
+        # exposes a ``handshake(params)`` async function, run a
+        # non-disruptive read-only open + identify + close against the
+        # declared hardware — no setpoint writes. Modules without a
+        # ``handshake`` hook fall back to the descriptor-only check.
         import importlib  # noqa: PLC0415
 
         for dev in ec.hardware.devices:
             try:
-                cls = _import_adapter_class(dev.adapter)
-            except CapaError as exc:
+                descriptor = require_descriptor(dev.adapter)
+            except KeyError as exc:
                 typer.secho(f"  strict: {dev.name}: {exc}", err=True, fg=typer.colors.RED)
                 raise typer.Exit(code=2) from exc
 
+            factory = descriptor.adapter_factory
             module = importlib.import_module(dev.adapter)
             handshake_fn = getattr(module, "handshake", None)
             if handshake_fn is None:
+                factory_label = getattr(factory, "__name__", repr(factory))
                 typer.echo(
-                    f"  strict: {dev.name} -> {cls.__module__}.{cls.__name__} "
-                    f"(no handshake hook; import-only check)"
+                    f"  strict: {dev.name} -> {dev.adapter}.{factory_label} "
+                    f"(no handshake hook; descriptor-only check)"
                 )
                 continue
             try:

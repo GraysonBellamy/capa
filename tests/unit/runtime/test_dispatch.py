@@ -308,7 +308,6 @@ class TestManualClient:
             device="heater",
             t_mono_ns=0,
             t_utc=datetime.now(UTC),
-            healthy=True,
             health="ok",
             fields={},
         )

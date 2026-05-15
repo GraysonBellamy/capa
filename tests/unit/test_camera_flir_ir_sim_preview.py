@@ -9,8 +9,8 @@ This module asserts the new fixture:
 
 1. advertises :class:`CameraCapability.LIVE_PREVIEW`, and
 2. emits JPEG-decodable previews while recording, and
-3. emits NO previews between recordings (no run_preview_pump for the IR
-   shape — the drainer sits idle until the next record).
+3. emits NO previews between recordings (the IR shape has no
+   between-run pump; the drainer sits idle until the next record).
 """
 
 from __future__ import annotations
@@ -76,16 +76,14 @@ class TestPreviewEmission:
             await cam.close()
 
     async def test_emits_no_preview_between_recordings(self, tmp_path: Path) -> None:
-        """The IR sim has no ``run_preview_pump`` between runs (no input
-        container to drive). Calling ``pump_one_frame`` outside of recording
-        raises, so the preview channel stays empty — the drainer sits idle
-        but doesn't crash.
+        """The IR sim has no between-run pump (no input container to drive).
+        Calling ``pump_one_frame`` outside of recording raises, so the
+        preview channel stays empty — the drainer sits idle but doesn't
+        crash.
         """
         cam = FlirIrSim.from_params(spec=_spec(), clock=RunClock.now())
         await cam.open()
         try:
-            # No start_recording. The internal preview buffer is empty.
-            assert not hasattr(cam, "run_preview_pump")
             # An attempt to pump without recording raises — protecting the
             # preview stream from accidental between-runs frames.
             from capa.core.errors import AdapterError

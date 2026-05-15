@@ -4,14 +4,10 @@ The :class:`Conductor` exposes its current state so callers (UI status
 bar, CLI logs, tests) can observe the run's macro lifecycle stage
 without inspecting internal attributes.
 
-The shape intentionally mirrors today's
-:class:`~capa.experiment.engine.EngineState`. Two differences:
-
-* No ``IDLE`` value. A :class:`Conductor` is constructed per-run; "no
-  conductor" already means "no run". A pre-run state would be dead code.
-* :meth:`permits_dispatch` lives here, codifying the rule that commands
-  are accepted in PREPARING / RUNNING but refused in DRAINING /
-  FINALIZING (and later).
+There is no ``IDLE`` value: a :class:`Conductor` is constructed per-run,
+so "no conductor" already means "no run". :meth:`permits_dispatch`
+codifies the rule that commands are accepted in PREPARING / RUNNING
+but refused in DRAINING / FINALIZING (and later).
 """
 
 from __future__ import annotations

@@ -3,13 +3,11 @@
 The controller owns:
 
 * a long-lived :class:`WorkerPool` opened on config-load and reopened on
-  config-reload (replaces the legacy :class:`DeviceRegistry`);
-* a :class:`Conductor` constructed per-run (replaces
-  :class:`ExperimentEngine`);
+  config-reload;
+* a :class:`Conductor` constructed per-run;
 * a :class:`ThreadBridge` carrying :class:`WorkerEmission`\\ s from the
-  conductor's thread back to the UI's qasync loop, drained into the same
-  :class:`RingBufferRegistry` / Qt signals the legacy UI already
-  consumes;
+  conductor's thread back to the UI's qasync loop, drained into the
+  :class:`RingBufferRegistry` / Qt signals the docks consume;
 * the :class:`ManualClient` UI cards dispatch through — it routes to the
   conductor while a run is armed (records into the bundle, gates by
   state) or to the pool when no run exists.
@@ -102,10 +100,9 @@ class RunUiState(enum.StrEnum):
     """UI-facing state of the controller.
 
     Mirrors :class:`~capa.runtime.state.ConductorState` plus an ``IDLE``
-    sentinel for the between-runs / no-conductor case. The legacy
-    :class:`EngineState` had the same shape; consumers (status bar, run
-    tab badge, manual-card gate) read this enum rather than reaching into
-    the runtime's state directly.
+    sentinel for the between-runs / no-conductor case. Consumers (status
+    bar, run tab badge, manual-card gate) read this enum rather than
+    reaching into the runtime's state directly.
     """
 
     IDLE = "idle"
@@ -135,9 +132,7 @@ class RunUiState(enum.StrEnum):
     SAMPLING (preflight refusal, pool-open failure)."""
 
 
-# State sets used by the manual-card write gate. The legacy ``EngineState``
-# treated PREPARING / RUNNING / ABORTING / FINALIZING as write-blocked;
-# DRAINING is the ConductorState equivalent of the old ABORTING phase.
+# State sets used by the manual-card write gate.
 _WRITE_BLOCKED_STATES: Final[frozenset[RunUiState]] = frozenset(
     {
         RunUiState.PREPARING,
@@ -170,8 +165,8 @@ class RunUiResult:
 
     The conductor's :class:`RunResult` carries a runtime-typed enum
     (:class:`RunOutcome`) and the conductor's terminal state. The UI's
-    status bar and run-tab readouts want strings — matching the legacy
-    ``EngineResult`` shape — so we translate at the controller boundary.
+    status bar and run-tab readouts want strings, so we translate at
+    the controller boundary.
     """
 
     run_id: str

@@ -21,8 +21,8 @@ def install_sigint_handler(stop_event: anyio.Event) -> None:
     """Install a ``SIGINT`` handler that sets ``stop_event``.
 
     Idempotent against re-entry: a second Ctrl-C terminates the process via
-    the OS default handler. Wires the conductor stack to the same
-    operator-stop semantics the legacy engine had.
+    the OS default handler. The first Ctrl-C lets the conductor unwind
+    gracefully (drain the writer, finalize the bundle).
     """
     triggered = False
 

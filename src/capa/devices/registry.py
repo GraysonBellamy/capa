@@ -1,10 +1,9 @@
 """:class:`AdapterDescriptor` registry — one source of truth (plan §5.7).
 
-The descriptor registry replaces the snake-case-probing lookup used by
-:func:`capa.runtime.build._import_adapter_class` with a curated record per
-adapter. The Setup editor, the runtime, and the CLI all read from
-:data:`ADAPTERS` so that *adding an adapter* means defining one Pydantic
-params model + one descriptor — no duplicate lookup tables.
+Each adapter contributes one curated record. The Setup editor, the
+runtime, and the CLI all read from :data:`ADAPTERS` so that *adding an
+adapter* means defining one Pydantic params model + one descriptor —
+no duplicate lookup tables.
 
 Built-in descriptors live next to each adapter module (the module
 exports a module-level ``DESCRIPTOR``); the module's bottom-of-file
@@ -110,13 +109,19 @@ class AdapterDescriptor:
     family: AdapterFamily
     """Coarse family for UI grouping, colour cues, and discovery routing."""
 
-    adapter_factory: Callable[..., Any] | None = None
-    """Callable that returns a constructed adapter instance.
+    adapter_factory: Callable[..., Any]
+    """Callable that returns the underlying adapter or camera instance.
 
-    Signature mirrors what :func:`capa.runtime.build._construct_adapters_from_config`
-    expects: ``cls(name=..., **params)`` or ``cls.from_params(name=..., **params)``.
-    When ``None``, the runtime falls back to its legacy snake-case probe
-    (compatibility shim for adapters that haven't migrated yet)."""
+    For device adapters: the runtime calls
+    ``adapter_factory(name=..., **params)`` (or its ``from_params``
+    classmethod when present) and uses the result directly.
+
+    For cameras (``family`` in ``("camera_visible", "camera_ir")``): the
+    runtime passes the factory to
+    :func:`capa.runtime.camera_adapter.make_camera_adapter`, which
+    invokes ``adapter_factory(spec=..., clock=..., **params)`` (or
+    ``from_params``) and wraps the result in a
+    :class:`CameraDeviceAdapter`."""
 
     params_model: type[BaseModel] | None = None
     """The adapter's typed parameter model (e.g. ``WatlowAdapterParams``).
@@ -182,14 +187,40 @@ def register(descriptor: AdapterDescriptor) -> None:
 
 
 def get_descriptor(adapter_id: str) -> AdapterDescriptor | None:
-    """Look up a descriptor; ``None`` if none registered.
-
-    The runtime falls back to the legacy probe on ``None`` so adapters
-    that haven't migrated keep working through the transition. Setup
-    editor surfaces (channel templates, params form) gracefully degrade
-    to a generic JSON editor for missing descriptors.
-    """
+    """Look up a descriptor; ``None`` if none registered."""
     return ADAPTERS.get(adapter_id)
+
+
+def require_descriptor(adapter_id: str) -> AdapterDescriptor:
+    """Look up a descriptor or raise :class:`KeyError`.
+
+    Used by call sites that must have a descriptor (the runtime adapter
+    builder, the Setup editor's resolve step). Adapter modules register
+    at import time, so a missing descriptor here is an authoring bug.
+
+    When ``adapter_id`` is a dotted module path that hasn't been
+    imported yet (built-in adapters that ``ensure_adapters_loaded``
+    didn't cover; out-of-tree test fixtures whose path matches), the
+    module is imported first to give its ``register(DESCRIPTOR)`` call
+    a chance to populate the registry.
+    """
+    descriptor = ADAPTERS.get(adapter_id)
+    if descriptor is not None:
+        return descriptor
+    if "." in adapter_id:
+        try:
+            importlib.import_module(adapter_id)
+        except ImportError:
+            pass
+        else:
+            descriptor = ADAPTERS.get(adapter_id)
+            if descriptor is not None:
+                return descriptor
+    raise KeyError(
+        f"no AdapterDescriptor registered for {adapter_id!r}; "
+        "the adapter module must export a module-level DESCRIPTOR "
+        "and call register(DESCRIPTOR) at import time"
+    )
 
 
 def all_for_family(family: AdapterFamily) -> tuple[AdapterDescriptor, ...]:
@@ -264,10 +295,8 @@ _BUILTIN_ADAPTER_MODULES = (
 def _import_builtins() -> None:
     """Import each built-in adapter module so its ``DESCRIPTOR`` registers.
 
-    Modules that don't expose a ``DESCRIPTOR`` yet are imported but
-    contribute nothing — the registry simply lacks an entry for that
-    adapter and the runtime's fallback probe kicks in for it.
-    Failures are silent (e.g. nidaq library missing on a sim-only box).
+    Failures are silent (e.g. nidaq library missing on a sim-only box) —
+    only the adapters whose import succeeds contribute to the registry.
     """
     if "builtins" in _LOADED_DESCRIPTOR_SETS:
         return
@@ -304,4 +333,5 @@ __all__ = [
     "get_descriptor",
     "load_plugin_descriptors",
     "register",
+    "require_descriptor",
 ]

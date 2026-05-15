@@ -894,9 +894,13 @@ class ChannelsSection(SectionWidget):
             for template in descriptor.channel_templates:
                 templates_by_family.setdefault(descriptor.family, []).append(template)
 
-        family_order = sorted(templates_by_family.keys(), key=lambda f: (f != "sim", f))
+        # Real-hardware templates first; sim templates pushed to the bottom
+        # under their own labelled group — this is production tooling and
+        # sims are a testing affordance, not the primary path.
+        family_order = sorted(templates_by_family.keys(), key=lambda f: (f == "sim", f))
         for family in family_order:
-            header = self._add_menu.addAction(family.upper())
+            header_text = "SIMULATED (TESTING ONLY)" if family == "sim" else family.upper()
+            header = self._add_menu.addAction(header_text)
             header.setEnabled(False)
             for template in sorted(templates_by_family[family], key=lambda t: t.label):
                 action = self._add_menu.addAction(template.label)
