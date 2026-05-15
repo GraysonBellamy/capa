@@ -40,7 +40,7 @@ class SourceRecord(BaseModel):
     :func:`sartoriuslib.sinks.sample_to_row`, and
     :func:`nidaqlib.sinks.reading_to_row` produce. For ``shape="block"``,
     ``row`` is empty and ``block_ref`` points at the rectangular sidecar
-    (TDMS or in-bundle Parquet block file written in P0b).
+    (TDMS or in-bundle Parquet block file).
 
     Plan §5.6.
     """
@@ -153,7 +153,7 @@ class ChannelSample(BaseModel):
 
 # ---------------------------------------------------------------------------
 # Device-level events and snapshots — emitted alongside samples for diagnostics.
-# Stored in events.sqlite / status.sqlite respectively (P0b).
+# Stored in events.sqlite / status.sqlite respectively.
 # ---------------------------------------------------------------------------
 
 
@@ -199,8 +199,8 @@ class DeviceSnapshot(BaseModel):
     t_mono_ns: int
     t_utc: datetime
     healthy: bool
-    """Coarse-grained boolean kept for back-compat with P0d's snapshot shape.
-    Newer surfaces (P2 status bar) consume :attr:`health` instead."""
+    """Coarse-grained boolean kept for back-compat with older snapshot shapes.
+    Newer surfaces consume :attr:`health` instead."""
     health: DeviceHealth = "ok"
     """Tri-state health pill. Defaults to ``"ok"`` so existing snapshots
     constructed without the field round-trip cleanly through the schema."""

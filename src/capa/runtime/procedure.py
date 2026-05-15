@@ -1,7 +1,7 @@
 """:class:`ProcedureRunner` — adapter between the procedure plugin layer
 and the :class:`ConductorRunner` contract.
 
-Migration doc §4.5. The conductor doesn't know about
+The conductor doesn't know about
 :class:`~capa.experiment.procedures.base.Procedure` plugins; it only knows
 about the :class:`~capa.runtime.conductor.ConductorRunner` protocol (one
 ``preflight``, one ``run``). :class:`ProcedureRunner` is the thin adapter:
@@ -22,13 +22,9 @@ What it does **not** do:
   via :class:`~capa.experiment.procedures.registry.ProcedureRegistry` and
   passes the instance in.
 * Resolve channels, build adapters, open the bundle. All of that is the
-  session/factory's job (Phase 2.4).
+  session/factory's job.
 * Hard-stop a procedure. The conductor's normal cancel scope handles
   that — :meth:`run` propagates :class:`asyncio.CancelledError`.
-
-Phase 2.3 scope: the procedure runner is the bridge between today's
-plugin layer and the conductor's lifecycle. Phase 2.4 will wire it into
-a session that handles bundle/writer construction.
 """
 
 from __future__ import annotations
@@ -153,9 +149,8 @@ class ProcedureRunner:
         """
         self._proc_ctx = self._build_proc_ctx(ctx, bus)
         problems: list[Problem] = await self._procedure.preflight(self._proc_ctx)
-        # Migration doc §3.7 + procedures/base.py:76: ``blocking=True``
-        # refuses the run regardless of severity; non-blocking is a warning
-        # regardless of severity.
+        # ``blocking=True`` refuses the run regardless of severity;
+        # non-blocking is a warning regardless of severity.
         blocking = [p for p in problems if p.blocking]
         warnings = [p for p in problems if not p.blocking]
         for p in warnings:

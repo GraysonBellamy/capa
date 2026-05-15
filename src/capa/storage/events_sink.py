@@ -2,9 +2,8 @@
 device events.
 
 Plan §8 / §13.1. SQLite is transactional and crash-safe — events written are
-not lost even on abnormal exit. Used by the engine task group (P0c+) and the
-operator-events dock (P1+); P0b ships the persistence layer so any caller can
-write without dragging in the engine.
+not lost even on abnormal exit. Used by the engine task group and the
+operator-events dock; any caller can write without dragging in the engine.
 
 Two write paths:
 
@@ -74,8 +73,7 @@ class EventsSink:
         self._path = Path(bundle_root) / EVENTS_FILENAME
         self._closed = False
         # check_same_thread=False so a future engine that uses a writer task
-        # can hand the connection between coroutine threads. P0b's harness
-        # always writes from one thread; the flag is harmless either way.
+        # can hand the connection between coroutine threads. The flag is harmless.
         self._conn = sqlite3.connect(self._path, isolation_level=None, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode = WAL;")
         self._conn.execute("PRAGMA synchronous = NORMAL;")

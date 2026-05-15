@@ -1,7 +1,7 @@
 """:func:`run_headless` — the conductor-based headless entry point.
 
-Replaces :meth:`ExperimentEngine.run` for command-line runs (migration doc
-§8 Phase 2). The function assembles the full conductor stack:
+Replaces :meth:`ExperimentEngine.run` for command-line runs. The
+function assembles the full conductor stack:
 
 1. Resolve the procedure plugin.
 2. Build a :class:`WorkerPool` from config and open it (adapters open here).
@@ -15,10 +15,7 @@ Replaces :meth:`ExperimentEngine.run` for command-line runs (migration doc
 
 What this module does NOT do:
 
-* Construct cameras. The sim config used for headless smoke tests has no
-  cameras; full camera-bearing configs are Phase 3.
-* Drive the GUI. The GUI cutover is Phase 4; today it still goes through
-  :class:`ExperimentEngine`.
+* Drive the GUI. The GUI uses its own bootstrap path.
 * Re-open adapters between runs. The pool stays open for the whole
   process — though the headless entry point closes it on exit, the
   same design supports many runs against one pool.
@@ -51,17 +48,16 @@ from capa.runtime.conductor import (
     Conductor,
     ConductorConfig,
     ConductorRunner,
-    RunOutcome,
     RunResult,
     RunSession,
 )
 from capa.runtime.dispatch import PoolDispatcher
 from capa.runtime.errors import ResourceConflict
+from capa.runtime.outcomes import read_bundle_status, run_status_for_outcome
 from capa.runtime.pool import WorkerPool
 from capa.runtime.procedure import ProcedureRunner
 from capa.runtime.runcontext import RunContext
 from capa.runtime.session import RealRunSession
-from capa.storage.manifest import BundleManifest
 
 if TYPE_CHECKING:
     from capa.core.plugins_lock import PluginsLock
@@ -196,7 +192,7 @@ async def run_headless(
     try:
         # 3. Collect adapter maps for the bundle's equipment + camera
         #    identity blocks at finalize. Cameras are wrapped in
-        #    :class:`CameraDeviceAdapter` (migration doc §6); the
+        #    :class:`CameraDeviceAdapter`; the
         #    session's collector reads ``device_info`` off the
         #    underlying :class:`Camera`, so we expose ``.camera`` here
         #    rather than the wrapper itself.
@@ -424,9 +420,9 @@ def _result_to_headless(result: RunResult, session: RealRunSession) -> HeadlessR
     CLI-shaped :class:`HeadlessResult`. Mirrors the exit-status logic in
     :meth:`ExperimentEngine.run` so exit codes match across the cutover.
     """
-    run_status = _outcome_to_run_status(result.outcome)
+    run_status = run_status_for_outcome(result.outcome)
     # Bundle status is read off the session's manifest after finalize.
-    bundle_status, integrity_status = _read_bundle_status(session)
+    bundle_status, integrity_status = read_bundle_status(session.bundle_path)
     return HeadlessResult(
         run_id=result.run_id,
         bundle_path=result.bundle_path,
@@ -435,32 +431,6 @@ def _result_to_headless(result: RunResult, session: RealRunSession) -> HeadlessR
         integrity_status=integrity_status,
         exit_reason=result.exit_reason,
     )
-
-
-def _outcome_to_run_status(outcome: RunOutcome) -> str:
-    match outcome:
-        case RunOutcome.COMPLETED:
-            return "completed"
-        case RunOutcome.ABORTED:
-            return "aborted"
-        case RunOutcome.CRASHED | RunOutcome.CRASHED_BUT_SEALED:
-            return "crashed"
-
-
-def _read_bundle_status(session: RealRunSession) -> tuple[str, str]:
-    """Read ``bundle_status`` / ``integrity_status`` from the finalized
-    manifest. Returns sensible defaults if the manifest can't be read."""
-    bundle_path = session.bundle_path
-    if bundle_path is None:
-        return "open", "unknown"
-    try:
-        manifest = BundleManifest.read(bundle_path / "manifest.json")
-        return (
-            str(manifest.bundle_status),
-            str(manifest.integrity.status),
-        )
-    except Exception:
-        return "open", "unknown"
 
 
 __all__ = ["HeadlessResult", "run_headless"]

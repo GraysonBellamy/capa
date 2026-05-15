@@ -2,7 +2,7 @@
 
 Mirrors :class:`watlowlib.streaming.Sample`'s shape exactly via
 :func:`watlowlib.sinks.base.sample_to_row` so the resulting
-``device_records/watlow.parquet`` (P0b) is indistinguishable from what a real
+``device_records/watlow.parquet`` is indistinguishable from what a real
 Watlow recorder would emit.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Final, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import anyio
 from watlowlib.errors import WatlowValidationError
@@ -41,6 +41,9 @@ from capa.devices.sim._base import (
     synth_timing,
 )
 from capa.devices.sim._signals import SignalFn, watlow_signals_from_mapping
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 ADAPTER_ID: Final[str] = "watlow"
 
@@ -268,7 +271,7 @@ class WatlowSim:
                 t_mono_ns=(self._clock or RunClock.now()).t_mono_ns(),
                 t_utc=now_utc(),
             )
-        # Sim always accepts. Real adapter (P0d) writes to the device.
+        # Sim always accepts. Real adapter writes to the device.
         clock = self._clock or RunClock.now()
         return CommandResult(
             accepted=True,
@@ -333,4 +336,27 @@ def _coerce_sim_unit_value(value: Unit | str | None) -> Unit | str | None:
         return value
 
 
-__all__ = ["ADAPTER_ID", "WatlowSim"]
+__all__ = ["ADAPTER_ID", "DESCRIPTOR", "WatlowSim"]
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices._templates import WATLOW_HEATER_PV, WATLOW_HEATER_SETPOINT  # noqa: PLC0415
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.sim.watlow_sim",
+        label="Watlow PM-series (simulated)",
+        family="sim",
+        adapter_factory=WatlowSim,
+        params_model=None,
+        supported_binding_sources=("watlow_parameter",),
+        default_params={},
+        channel_templates=(WATLOW_HEATER_PV, WATLOW_HEATER_SETPOINT),
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

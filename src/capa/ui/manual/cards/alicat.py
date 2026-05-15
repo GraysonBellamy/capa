@@ -91,7 +91,7 @@ class AlicatCard(DeviceCard):
         self._spec: DeviceConfig = spec
         # Pool-hosted adapter feeds the real capability set; fall back
         # to the Alicat default flags when the pool hasn't finished
-        # opening (migration doc §3.6).
+        # opening.
         caps: frozenset[Capability] = frozenset()
         pool = controller.worker_pool
         if pool is not None:

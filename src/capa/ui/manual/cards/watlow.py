@@ -331,9 +331,10 @@ class HeaterCard(DeviceCard):
         """Return the worker-hosted adapter (read-only attribute access).
 
         Used to walk ``_channels`` for calibration lookup. Touching the
-        adapter's *async* methods from this loop is a §3.11 invariant
-        violation, but a pure attribute read of ``_channels`` is fine.
-        Returns ``None`` when the pool hasn't opened yet.
+        adapter's *async* methods from this loop violates worker-loop
+        ownership of the handle, but a pure attribute read of
+        ``_channels`` is fine. Returns ``None`` when the pool hasn't
+        opened yet.
         """
         pool = self._controller.worker_pool
         if pool is None:

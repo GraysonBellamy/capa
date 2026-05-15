@@ -1,6 +1,6 @@
-"""Real :class:`SartoriusAdapter` — wraps a :class:`sartoriuslib.Balance` (P2).
+"""Real :class:`SartoriusAdapter` — wraps a :class:`sartoriuslib.Balance`.
 
-Plan §16 P2 entry: "real ``SartoriusAdapter``. Capability flags. Device
+Plan §16: "real ``SartoriusAdapter``. Capability flags. Device
 watchdogs and health surfacing. Discovery (``capa devices discover``).
 ``capa validate --strict``."
 
@@ -30,7 +30,7 @@ import logging
 import math
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import UTC, datetime
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import anyio
 import sartoriuslib
@@ -71,6 +71,9 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 _log = logging.getLogger(__name__)
 
@@ -979,38 +982,46 @@ async def handshake(params: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def discover(*, ports: list[str] | None = None) -> list[dict[str, Any]]:
-    """Probe local serial ports for Sartorius balances.
+async def discover(
+    *,
+    ports: list[str] | None = None,
+    baudrates: tuple[int, ...] | None = None,
+    timeout_s: float = 0.5,
+) -> list[dict[str, Any]]:
+    """Probe local serial ports for Sartorius balances, sweeping baudrates.
 
-    Wraps :func:`sartoriuslib.discover_port` for each visible port. The
-    library's discover only resolves the wire protocol (xBPI vs SBI) — it
-    does not identify the balance. Use ``capa validate --strict`` after
-    wiring the device into a config to get model / serial / firmware.
+    Thin wrapper over :func:`sartoriuslib.find_devices` (shipped in
+    sartoriuslib 0.3.1). For each port the library sweeps the
+    requested baudrates (defaults to
+    :data:`sartoriuslib.DEFAULT_DISCOVERY_BAUDRATES` —
+    ``(9600, 19200, 38400, 57600, 115200)``) and returns the first
+    baud that resolves a wire protocol. The probe is read-only.
 
-    Returns one dict per port that responded with a recognised protocol.
+    Returns one dict per port that responded with a recognised
+    protocol. The library's discover only resolves the wire protocol
+    (xBPI vs SBI); use ``capa validate --strict`` after wiring the
+    device into a config to get model / serial / firmware.
     """
-    if ports is None:
-        # sartoriuslib does not (yet) ship a shared ``list_serial_ports``;
-        # alicatlib does. Fall back to anyserial directly to avoid a hard
-        # cross-library dep.
-        try:
-            import anyserial  # noqa: PLC0415
-        except ImportError:
-            return []
-        ports = [p.device for p in await anyserial.list_serial_ports()]
+    if ports is not None and not ports:
+        return []
+
+    try:
+        results = await sartoriuslib.find_devices(
+            ports=ports,
+            baudrates=baudrates,
+            per_probe_timeout_s=timeout_s,
+        )
+    except SartoriusError:
+        return []
 
     out: list[dict[str, Any]] = []
-    for port in ports:
-        try:
-            result = await sartoriuslib.discover_port(port)
-        except SartoriusError:
-            continue
+    for result in results:
         if not result.ok or result.protocol is None:
             continue
         out.append(
             {
                 "adapter": ADAPTER_ID,
-                "port": port,
+                "port": result.port,
                 "protocol": result.protocol.value,
                 "baudrate": result.baudrate,
                 "autoprint_active": result.autoprint_active,
@@ -1021,8 +1032,44 @@ async def discover(*, ports: list[str] | None = None) -> list[dict[str, Any]]:
 
 __all__ = [
     "ADAPTER_ID",
+    "DESCRIPTOR",
     "SartoriusAdapter",
     "SartoriusAdapterParams",
     "discover",
     "handshake",
 ]
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices._templates import SARTORIUS_MASS  # noqa: PLC0415
+    from capa.devices.adapter import Capability  # noqa: PLC0415
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.sartorius",
+        label="Sartorius balance",
+        family="sartorius",
+        adapter_factory=SartoriusAdapter,
+        params_model=SartoriusAdapterParams,
+        supported_binding_sources=("sartorius_reading",),
+        default_params={"rate_hz": 50.0},
+        channel_templates=(SARTORIUS_MASS,),
+        discoverable=True,
+        handshake_available=True,
+        capabilities=frozenset(
+            {
+                Capability.HAS_TARE,
+                Capability.HAS_ZERO,
+                Capability.EMITS_STABILITY_FLAG,
+                Capability.HAS_INTERNAL_CAL,
+                Capability.HAS_PARAMETER_CONFIG,
+            }
+        ),
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

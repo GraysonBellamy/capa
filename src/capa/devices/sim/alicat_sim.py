@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import anyio
 from alicatlib.devices.data_frame import (
@@ -44,6 +44,9 @@ from capa.devices.sim._base import (
     synth_timing,
 )
 from capa.devices.sim._signals import SignalFn, signals_from_mapping
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 ADAPTER_ID: Final[str] = "alicat"
 
@@ -253,4 +256,27 @@ class AlicatSim:
         )
 
 
-__all__ = ["ADAPTER_ID", "AlicatSim"]
+__all__ = ["ADAPTER_ID", "DESCRIPTOR", "AlicatSim"]
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices._templates import ALICAT_PURGE_FLOW  # noqa: PLC0415
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.sim.alicat_sim",
+        label="Alicat MFC / MFM (simulated)",
+        family="sim",
+        adapter_factory=AlicatSim,
+        params_model=None,
+        supported_binding_sources=("alicat_frame_field",),
+        default_params={},
+        channel_templates=(ALICAT_PURGE_FLOW,),
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

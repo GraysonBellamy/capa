@@ -1,21 +1,18 @@
 """:class:`WorkerRunner` — pluggable host for a worker's coroutine surface.
 
-Plan §3.1: every :class:`~capa.runtime.worker.Worker` is constructed with a
+Every :class:`~capa.runtime.worker.Worker` is constructed with a
 :class:`WorkerRunner`. The runner owns the *thread + loop* dimension; the
 worker owns the *state machine + adapter handle* dimension. Splitting them
 along that seam lets the same :class:`Worker` code run two ways:
 
 * :class:`ThreadedRunner` — production. Spawns one ``threading.Thread`` with
-  a dedicated ``asyncio.new_event_loop()``. This is the model the migration
-  doc specifies in §4.1 lines 651-677.
+  a dedicated ``asyncio.new_event_loop()``.
 * :class:`InlineRunner` — unit tests. Runs the worker's coroutines on the
-  test's own loop. Deterministic; ~10× faster; no thread to join. Migration
-  doc §10.4 lines 1907-1913 calls this out as "the single biggest determinism
-  win available."
+  test's own loop. Deterministic; ~10× faster; no thread to join.
 
 Both runners satisfy the same :class:`WorkerRunner` protocol; the worker
-itself doesn't know which it has. Cross-runner test parameterization (plan
-risk register §7) catches semantic drift between the two implementations.
+itself doesn't know which it has. Cross-runner test parameterization
+catches semantic drift between the two implementations.
 
 The runner is a deliberately small surface — submit a coroutine factory,
 get back a future. It is **not** a general-purpose loop wrapper; it doesn't
@@ -23,9 +20,9 @@ expose ``call_soon``, ``call_later``, or schedule helpers because the worker
 should never need them. If a worker needs them it has reached into the loop
 when it should be expressing intent through the runner.
 
-Phase 1 caveat: the :class:`Worker` uses the runner's :attr:`loop` directly
-when it builds loop-affine primitives (``asyncio.Event``, ``asyncio.Queue``,
-the outbound :class:`~capa.runtime.bridge.ThreadBridge`). That is by design:
+Note: the :class:`Worker` uses the runner's :attr:`loop` directly when it
+builds loop-affine primitives (``asyncio.Event``, ``asyncio.Queue``, the
+outbound :class:`~capa.runtime.bridge.ThreadBridge`). That is by design:
 the worker constructs those *inside* a coroutine it submitted via
 :meth:`submit`, so the loop is the running loop at construction time. The
 :attr:`loop` property exists for the bridge's ``attach_*`` calls, which must
@@ -81,9 +78,9 @@ class WorkerRunner(Protocol):
         """Thread ID hosting the loop, or ``None`` for :class:`InlineRunner`.
 
         Used by the worker for ``sys._current_frames()[thread_ident]`` when
-        capturing a stack on hard-stop (migration doc §3.8 Phase B line
-        442). Inline mode runs on the caller's thread, so the stack capture
-        would be self-referential and is skipped.
+        capturing a stack on hard-stop. Inline mode runs on the caller's
+        thread, so the stack capture would be self-referential and is
+        skipped.
         """
         ...
 
@@ -135,9 +132,8 @@ class ThreadedRunner:
     """Production runner: dedicated thread, dedicated asyncio loop.
 
     Constructed but not started. Call :meth:`start` to spawn the thread.
-    The thread is non-daemon (``daemon=False``) per migration doc §4.1
-    line 659 so a misbehaving worker is visible at process exit rather
-    than silently dropped.
+    The thread is non-daemon (``daemon=False``) so a misbehaving worker
+    is visible at process exit rather than silently dropped.
 
     Stop policy: the thread stays non-daemon for the worker's lifetime.
     ``stop()`` either joins within grace or returns
@@ -315,9 +311,9 @@ class ThreadedRunner:
 class InlineRunner:
     """Deterministic test runner: hosts the worker on the caller's loop.
 
-    Migration doc §10.4 lines 1907-1913. The runner doesn't own a thread; it
-    just records the loop that called :meth:`start` and routes
-    :meth:`submit` calls through that loop's ``create_task``.
+    The runner doesn't own a thread; it just records the loop that
+    called :meth:`start` and routes :meth:`submit` calls through that
+    loop's ``create_task``.
 
     Why ``loop`` is captured at :meth:`start` rather than at construction:
     pytest-anyio constructs the runner before the test's event loop is

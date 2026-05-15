@@ -88,14 +88,21 @@ class WorkerShutdownConfig:
 
     Two distinct stream-cancel deadlines:
 
-    * ``stream_stop_grace_s`` — Phase A. How long to wait for stream
-      tasks to exit cooperatively after ``adapter.stop()`` flipped their
-      lifecycle.
-    * ``stream_cancel_grace_s`` — Phase B. After cancelling the
+    * ``stream_stop_grace_s`` — cooperative stop. How long to wait for
+      stream tasks to exit cooperatively after ``adapter.stop()`` flipped
+      their lifecycle.
+    * ``stream_cancel_grace_s`` — forced cancel. After cancelling the
       stragglers, how long we'll wait for the cancellation to actually
       land. Anything past this is a stream task ignoring cancellation
       (vendor code wedged in a native blocking call); the worker can't
       help further and the application fuse takes over.
+
+    **Budget Composition:** These inner timeouts compose into the pool-level
+    deadline defined in :class:`~capa.ui.shutdown.ShutdownDeadlines`. The sum
+    of (adapter_stop_grace_s × num_adapters + stream_stop_grace_s +
+    stream_cancel_grace_s + adapter_close_grace_s × num_adapters +
+    runner_stop_grace_s) MUST be less than ``ShutdownDeadlines.pool_close_s``
+    to ensure worker close completes within the pool budget.
     """
 
     adapter_stop_grace_s: float = 2.0

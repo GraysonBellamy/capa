@@ -478,7 +478,7 @@ class CancelIgnoringStreamAdapter:
     Used by the secondary-bounded-gather test. The stream loops on a
     short sleep; when cancelled, the ``except`` clause re-enters a long
     sleep that itself ignores cancellation (the canonical "vendor
-    finally block taking forever" pattern). The Phase B
+    finally block taking forever" pattern). The forced-cancel grace
     ``stream_cancel_grace_s`` bound is what keeps disarm from wedging.
     """
 
@@ -512,8 +512,8 @@ class CancelIgnoringStreamAdapter:
 
     async def stop(self) -> None:
         # Don't actually flip lifecycle — we want the stream task to
-        # still be running when disarm's Phase A grace fires so Phase B
-        # cancellation is exercised.
+        # still be running when disarm's cooperative stop grace fires so
+        # forced-cancel cancellation is exercised.
         self.stop_calls += 1
 
     async def stream(self) -> AsyncIterator[DeviceEmission]:
@@ -531,7 +531,7 @@ class CancelIgnoringStreamAdapter:
         except asyncio.CancelledError:
             # The canonical "swallowed cancel" — vendor finally block
             # that takes much longer than expected. Sleep with shielding
-            # so a second cancel still doesn't unwedge it. The Phase B
+            # so a second cancel still doesn't unwedge it. The forced-cancel
             # secondary bound is what saves us.
             await asyncio.shield(asyncio.sleep(self.cancel_swallow_s))
             raise

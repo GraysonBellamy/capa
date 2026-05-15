@@ -1,6 +1,6 @@
 """Multi-pane PyQtGraph plot widget.
 
-Plan §10.3. One :class:`pg.PlotWidget` per ``plot_group`` declared in the
+One :class:`pg.PlotWidget` per ``plot_group`` declared in the
 channel registry, populated automatically from the active config. Repaint
 runs on a 200 ms ``QTimer`` (5 Hz) — fast enough for operator viewing of
 slow-trending temperatures and flows, slow enough to leave the UI thread

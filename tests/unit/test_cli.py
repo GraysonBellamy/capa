@@ -309,16 +309,40 @@ class TestVersion:
         assert "runtime" in result.stdout
 
 
+@pytest.fixture
+def _stub_discover(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force every non-camera adapter's discovery hook to return ``[]``.
+
+    Lets the CLI test exercise the "no devices found" code path
+    independently of whatever hardware happens to be attached to the
+    machine running the suite (a real Watlow at COM6 will otherwise
+    make the suite flaky on the lab bench).
+    """
+    import importlib
+
+    from capa.devices.discovery import discoverable_descriptors
+
+    async def empty_discover(**_kwargs: object) -> list[dict[str, object]]:
+        return []
+
+    for descriptor in discoverable_descriptors(include_cameras=False):
+        try:
+            module = importlib.import_module(descriptor.id)
+        except ImportError:
+            continue
+        if hasattr(module, "discover"):
+            monkeypatch.setattr(module, "discover", empty_discover)
+
+
 class TestDevicesDiscover:
-    def test_no_hardware_returns_zero(self, runner: CliRunner) -> None:
-        # On a workstation without lab hardware: every probe returns
-        # empty, the command still exits cleanly with a "no devices"
-        # message rather than a non-zero exit.
+    def test_no_hardware_returns_zero(self, runner: CliRunner, _stub_discover: None) -> None:
+        # Every probe stubbed to return empty; the command still exits
+        # cleanly with a "no devices" message rather than a non-zero exit.
         result = runner.invoke(app, ["devices", "discover"])
         assert result.exit_code == 0, result.stdout
         assert "no devices" in result.stdout.lower()
 
-    def test_json_output_is_valid(self, runner: CliRunner) -> None:
+    def test_json_output_is_valid(self, runner: CliRunner, _stub_discover: None) -> None:
         import json as _json
 
         result = runner.invoke(app, ["devices", "discover", "--json"])
@@ -335,7 +359,7 @@ class TestDevicesDiscover:
             "unknown adapter" in result.stderr.lower() or "unknown adapter" in result.stdout.lower()
         )
 
-    def test_specific_adapter_filters(self, runner: CliRunner) -> None:
+    def test_specific_adapter_filters(self, runner: CliRunner, _stub_discover: None) -> None:
         # Asking for "alicat" specifically should not surface notes for
         # nidaq / sartorius / watlow.
         result = runner.invoke(app, ["devices", "discover", "--adapter", "alicat"])

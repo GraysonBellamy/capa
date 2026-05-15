@@ -2,7 +2,7 @@
 
 Mirrors :class:`sartoriuslib.streaming.Sample` shape via
 :func:`sartoriuslib.sinks.base.sample_to_row`. Carries stability / overload /
-underload flags so a P3 procedure can verify "balance was stable for >= 5 s
+underload flags so a procedure can verify "balance was stable for >= 5 s
 prior to ignition" using the preserved native row.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import anyio
 from sartoriuslib.devices.models import Reading
@@ -42,6 +42,9 @@ from capa.devices.sim._base import (
     synth_timing,
 )
 from capa.devices.sim._signals import SignalFn, signal_from_dict
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 ADAPTER_ID: Final[str] = "sartorius"
 
@@ -261,4 +264,27 @@ class SartoriusSim:
         )
 
 
-__all__ = ["ADAPTER_ID", "SartoriusSim"]
+__all__ = ["ADAPTER_ID", "DESCRIPTOR", "SartoriusSim"]
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices._templates import SARTORIUS_MASS  # noqa: PLC0415
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.sim.sartorius_sim",
+        label="Sartorius balance (simulated)",
+        family="sim",
+        adapter_factory=SartoriusSim,
+        params_model=None,
+        supported_binding_sources=("sartorius_reading",),
+        default_params={},
+        channel_templates=(SARTORIUS_MASS,),
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

@@ -11,7 +11,6 @@ machinery end-to-end, not unit tests of the state table — that's
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 
 import pytest
@@ -41,10 +40,6 @@ def make_runner(request: pytest.FixtureRequest) -> Callable[[str], WorkerRunner]
     return _factory
 
 
-async def _wait(fut: object) -> object:
-    return await asyncio.wrap_future(fut)  # type: ignore[arg-type]
-
-
 # ---------------------------------------------------------------------------
 # CLOSED → IDLE → CLOSED
 # ---------------------------------------------------------------------------
@@ -64,13 +59,13 @@ class TestOpenClose:
             runner=make_runner("worker-open"),
         )
         assert worker.state is WorkerState.CLOSED
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             assert worker.state is WorkerState.IDLE
             assert adapter.open_calls == 1
             assert adapter.close_calls == 0
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_close_calls_adapter_close_and_reaches_closed(
@@ -82,8 +77,8 @@ class TestOpenClose:
             adapters=[adapter],
             runner=make_runner("worker-close"),
         )
-        await _wait(worker.start())
-        await _wait(worker.close(grace_s=1.0))
+        await worker.async_start()
+        await worker.async_close(grace_s=1.0)
         assert worker.state is WorkerState.CLOSED
         assert adapter.close_calls == 1
 
@@ -101,7 +96,7 @@ class TestOpenClose:
             runner=make_runner("worker-rollback"),
         )
         with pytest.raises(RuntimeError, match="cannot open"):
-            await _wait(worker.start())
+            await worker.async_start()
         # Good adapter was rolled back; bad never reached "open" lifecycle.
         assert good.open_calls == 1
         assert good.close_calls == 1
@@ -123,17 +118,17 @@ class TestOpenClose:
         )
         # CLOSED: close is refused
         with pytest.raises(WorkerStateError, match="requires IDLE"):
-            await _wait(worker.close())
+            await worker.async_close()
         # IDLE → ARMED: close is also refused
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             ctx = make_run_context()
-            await _wait(worker.arm(ctx))
+            await worker.async_arm(ctx)
             with pytest.raises(WorkerStateError, match="requires IDLE"):
-                await _wait(worker.close())
+                await worker.async_close()
         finally:
-            await _wait(worker.disarm(grace_s=1.0))
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_disarm(grace_s=1.0)
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_start_refused_when_already_running(
@@ -145,12 +140,12 @@ class TestOpenClose:
             adapters=[adapter],
             runner=make_runner("worker-restart"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             with pytest.raises(WorkerStateError, match="requires CLOSED"):
-                await _wait(worker.start())
+                await worker.async_start()
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -172,15 +167,15 @@ class TestArmDisarmWithoutSampling:
             adapters=[adapter],
             runner=make_runner("worker-arm"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             ctx = make_run_context(run_id="run-XYZ")
-            await _wait(worker.arm(ctx))
+            await worker.async_arm(ctx)
             assert worker.state is WorkerState.ARMED
             assert worker._run_context is ctx
         finally:
-            await _wait(worker.disarm(grace_s=1.0))
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_disarm(grace_s=1.0)
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_disarm_from_armed_returns_ok(
@@ -192,10 +187,10 @@ class TestArmDisarmWithoutSampling:
             adapters=[adapter],
             runner=make_runner("worker-disarm-armed"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
-            await _wait(worker.arm(make_run_context()))
-            result = await _wait(worker.disarm(grace_s=1.0))
+            await worker.async_arm(make_run_context())
+            result = await worker.async_disarm(grace_s=1.0)
             assert result is DisarmResult.OK
             assert worker.state is WorkerState.IDLE
             assert worker._run_context is None
@@ -205,7 +200,7 @@ class TestArmDisarmWithoutSampling:
             # adapter.start was NOT called (we never reached SAMPLING).
             assert adapter.start_calls == 0
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_arm_refused_outside_idle(
@@ -218,16 +213,16 @@ class TestArmDisarmWithoutSampling:
             runner=make_runner("worker-arm-bad"),
         )
         with pytest.raises(WorkerStateError, match="requires IDLE"):
-            await _wait(worker.arm(make_run_context()))
-        await _wait(worker.start())
+            await worker.async_arm(make_run_context())
+        await worker.async_start()
         try:
-            await _wait(worker.arm(make_run_context()))
+            await worker.async_arm(make_run_context())
             # ARMED: arm() again is refused
             with pytest.raises(WorkerStateError, match="requires IDLE"):
-                await _wait(worker.arm(make_run_context()))
+                await worker.async_arm(make_run_context())
         finally:
-            await _wait(worker.disarm(grace_s=1.0))
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_disarm(grace_s=1.0)
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_disarm_refused_in_idle(self, make_runner: Callable[[str], WorkerRunner]) -> None:
@@ -237,12 +232,12 @@ class TestArmDisarmWithoutSampling:
             adapters=[adapter],
             runner=make_runner("worker-disarm-idle"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             with pytest.raises(WorkerStateError, match="requires ARMED or SAMPLING"):
-                await _wait(worker.disarm(grace_s=1.0))
+                await worker.async_disarm(grace_s=1.0)
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -266,16 +261,16 @@ class TestMultipleRuns:
             adapters=[adapter],
             runner=make_runner("worker-cycles"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             for _i in range(3):
-                await _wait(worker.arm(make_run_context()))
+                await worker.async_arm(make_run_context())
                 assert worker.state is WorkerState.ARMED
-                result = await _wait(worker.disarm(grace_s=1.0))
+                result = await worker.async_disarm(grace_s=1.0)
                 assert result is DisarmResult.OK
                 assert worker.state is WorkerState.IDLE
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
         # adapter.open called exactly once — the entire point of pool-level
         # connection caching.
         assert adapter.open_calls == 1
@@ -297,15 +292,15 @@ class TestStateInvariant:
             runner=make_runner("worker-state-progression"),
         )
         observed: list[WorkerState] = [worker.state]
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             observed.append(worker.state)
-            await _wait(worker.arm(make_run_context()))
+            await worker.async_arm(make_run_context())
             observed.append(worker.state)
-            await _wait(worker.disarm(grace_s=1.0))
+            await worker.async_disarm(grace_s=1.0)
             observed.append(worker.state)
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
             observed.append(worker.state)
         assert observed == [
             WorkerState.CLOSED,

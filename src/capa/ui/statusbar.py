@@ -1,6 +1,6 @@
 """Persistent status bar — operational health at a glance.
 
-Plan §10.4. Always visible. Polls live data at 1 Hz from the controller's
+Always visible. Polls live data at 1 Hz from the controller's
 :class:`Conductor` (via :class:`RunController`'s readonly view) and the
 OS (``psutil`` for disk free). The same metrics are written into
 ``manifest.json``'s ``queue_health`` block at finalize.
@@ -57,13 +57,13 @@ class CapaStatusBar(QStatusBar):
       UI thread is falling behind (use ``sat`` / ``loop`` / ``q`` for
       that).
     * **Saturation** reads ``blocked_since_ms`` per bridge and colors against
-      the configured ``saturation_deadline_s`` (runtime-architecture.md §6.3).
+      the configured ``saturation_deadline_s``.
     * **Loop lag** is the conductor's loop-lag p99 (warn 50ms, fail 200ms).
     * **Queue depth** shows current ``depth`` and lifetime ``depth_max``
       so historical worst is visible without pinning the current reading.
 
-    The camera-health pill is a placeholder until P4. Safety queue is also
-    a placeholder until P3+ adds :class:`SafetyMonitor`.
+    The camera-health pill is a placeholder. Safety queue is also
+    a placeholder until :class:`SafetyMonitor` is added.
     """
 
     def __init__(
@@ -146,7 +146,7 @@ class CapaStatusBar(QStatusBar):
     # ------------------------------------------------------------------ refresh
 
     def _refresh(self) -> None:
-        # Operator id (free-text in P1; full registry in P3).
+        # Operator id.
         op = self._operator_id_provider.current_operator_id() or "—"
         self._operator_label.setText(f"op: {op}")
 
@@ -172,7 +172,7 @@ class CapaStatusBar(QStatusBar):
         # Saturation is the load-bearing signal: any bridge with a non-None
         # blocked_since_ms means a producer is currently waiting for space.
         # As that approaches saturation_deadline_s the run will seal as
-        # crashed_but_sealed (runtime-architecture.md §6.3).
+        # crashed_but_sealed.
         conductor = self._controller.conductor
         if conductor is None:
             self._saturation_label.setText("sat —")
@@ -184,11 +184,11 @@ class CapaStatusBar(QStatusBar):
         else:
             self._update_runtime_pills(conductor.runtime_diagnostics())
 
-        # Safety queue placeholder — P3+ when SafetyMonitor lands. Showing 0
-        # honestly here makes the field's eventual non-zero values stand out.
+        # Safety queue placeholder — showing 0 until SafetyMonitor is added.
+        # The honest zero makes the field's eventual non-zero values stand out.
         self._safety_label.setText("safety queue 0")
 
-        # Disk free + projected video fill (no cameras in P1 → projection 0).
+        # Disk free + projected video fill.
         try:
             usage = psutil.disk_usage(str(self._runs_root))
             free_gb = usage.free / (1024**3)
@@ -202,7 +202,7 @@ class CapaStatusBar(QStatusBar):
         except OSError:
             self._disk_label.setText("disk —")
 
-        # Camera health placeholder — P4 will plug into camera health probes.
+        # Camera health placeholder — not yet wired to camera health probes.
         self._camera_label.setText("cam n/a")
         self._camera_label.setStyleSheet(f"color: {COLOR_IDLE.name()};")
 
@@ -246,7 +246,7 @@ class CapaStatusBar(QStatusBar):
         so the pill turns yellow at 25% and red at 50% of the deadline.
 
         Loop lag: conductor loop p99 over its sliding window. Warn at
-        50 ms, fail at 200 ms (runtime-architecture.md §14).
+        50 ms, fail at 200 ms.
 
         Depth: worst current depth and lifetime max across bridges,
         rendered as ``cur/max`` for at-a-glance backlog. Current depth

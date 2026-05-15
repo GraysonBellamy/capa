@@ -1,7 +1,6 @@
 """Procedure plugin runtime — Protocol, context, builtin procedures.
 
-Plan §11. P0c ships the smallest viable surface (Protocol + ProcedureContext +
-``FreeRun``); MethodExecutor and richer builtins land in P3.
+Plan §11. Provides the Protocol + ProcedureContext + builtin procedures.
 """
 
 from capa.experiment.procedures.base import Procedure, ProcedureContext, ProcedureError

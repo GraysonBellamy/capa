@@ -1,7 +1,6 @@
 """:class:`CameraDeviceAdapter` — Camera → DeviceAdapter bridge.
 
-Migration doc §6 (camera unification). Cameras and device adapters have
-incompatible lifecycles by design:
+Cameras and device adapters have incompatible lifecycles by design:
 
 * Devices: ``open / close / start / stop / stream / command / snapshot``,
   emit :data:`~capa.devices.records.DeviceEmission` from ``stream()``.
@@ -19,8 +18,7 @@ takes the cheaper path: a thin wrapper that **implements**
 
 1. Multiplexes ``frame_stream`` + ``event_stream`` into the single
    ``stream()`` the worker iterates. Preview stays addressable on the
-   underlying Camera for UI cards (migration doc §6.2: preview path
-   unchanged).
+   underlying Camera for UI cards (preview path unchanged).
 2. Translates ``start(run_context)`` into the camera's
    ``start_recording(output_path)``, computing the path via
    :func:`~capa.experiment.cameras.camera_output_path`. The wrapper
@@ -51,12 +49,12 @@ What the wrapper deliberately does NOT do:
 * Periodically emit health snapshots. The Camera's
   :meth:`~capa.devices.camera.base.Camera.snapshot` is callable on
   demand (mapped onto :meth:`DeviceAdapter.snapshot`); periodic
-  scraping is a Phase 5 nicety.
+  scraping is a planned follow-up.
 * Enforce ``on_failure`` policy. Camera events with
   ``severity="error"`` flow through the standard drain into the bundle;
-  Phase 5 wires :class:`~capa.experiment.safety.SafetyMonitor` to act
-  on them. The Conductor's saturation deadline still catches a wedged
-  camera the same way it catches a wedged device.
+  :class:`~capa.experiment.safety.SafetyMonitor` integration is a
+  planned follow-up. The Conductor's saturation deadline still catches
+  a wedged camera the same way it catches a wedged device.
 """
 
 from __future__ import annotations
@@ -337,8 +335,8 @@ class CameraDeviceAdapter:
         """Close the camera handle. Idempotent.
 
         If recording is somehow still active when this lands (the
-        worker.close() path requires IDLE, but defensive code is cheap
-        here), the camera's own :meth:`close` flips ``stop_recording``
+        worker.async_close() path requires IDLE, but defensive code is
+        cheap here), the camera's own :meth:`close` flips ``stop_recording``
         before releasing the handle (see [flir_ir_sim.py:305-314]) and
         — for cameras with a long-lived input pump — also stops the
         pump.
@@ -545,7 +543,7 @@ class CameraDeviceAdapter:
 
         Used by the procedure's status checks; not the periodic
         bundle-status path (which still goes through the Camera's
-        own snapshot path in Phase 5).
+        own snapshot path).
         """
         health: CameraHealth = await self._camera.snapshot()
         return DeviceSnapshot(
@@ -589,9 +587,9 @@ class CameraDeviceAdapter:
 
         Runs on whichever loop calls it; the worker dispatcher submits
         this onto the worker loop via :meth:`Worker.camera_metadata` so
-        the read happens on the same loop that owns the camera handle
-        (migration doc §3.11 invariant 2). Synchronous because the
-        underlying probe is a pure attribute read — there is no I/O.
+        the read happens on the same loop that owns the camera handle.
+        Synchronous because the underlying probe is a pure attribute
+        read — there is no I/O.
         """
         snapshot = getattr(self._camera, "snapshot_metadata", None)
         if not callable(snapshot):

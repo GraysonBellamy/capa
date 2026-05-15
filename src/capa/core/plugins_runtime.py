@@ -1,7 +1,7 @@
 """Plugin discovery + runtime trust enforcement.
 
 Plan §11. The lock parser + drift detector live in
-:mod:`capa.core.plugins_lock` (P0a). This module is the runtime side:
+:mod:`capa.core.plugins_lock`. This module is the runtime side:
 
 1. **Discovery.** Walk ``importlib.metadata.entry_points(group="capa.procedures")``
    and (when dev mode is enabled) any ``Procedure`` subclasses under a local

@@ -25,7 +25,7 @@ What this module owns (per run):
 What it does **not** own:
 
 * The :class:`WorkerPool` — that's the caller's responsibility (one
-  pool can host many runs, doc §3.2 / §4.3).
+  pool can host many runs).
 * The procedure / :class:`MethodExecutor` / :class:`ChannelRegistry` —
   the caller assembles those into a :class:`ProcedureRunner`, threading
   the session's open resources through.
@@ -54,6 +54,7 @@ from capa.core.logging import (
 from capa.experiment.authorization import Authorization
 from capa.runtime.bundle_ref import BundleWriterRef
 from capa.runtime.conductor import RunOutcome
+from capa.runtime.outcomes import run_status_for_outcome
 from capa.runtime.progress import identity_from_device_info as _identity_from_device_info
 from capa.runtime.recovery import (
     ActiveCheckpoint,
@@ -78,14 +79,14 @@ _logger = structlog.get_logger("capa.runtime.session")
 
 
 # Run-id minting — kept here so RealRunSession is self-contained and
-# doesn't pull from ``capa.experiment.engine`` (which Phase 4 deletes).
-# Format is byte-identical to ``engine.make_run_id`` to keep bundle paths
-# diff-friendly across the cutover (migration doc §11 acceptance #3).
+# doesn't pull from the legacy ``capa.experiment.engine``. Format is
+# byte-identical to ``engine.make_run_id`` to keep bundle paths
+# diff-friendly across the cutover.
 _INVALID_RUN_ID_CHARS: Final = re.compile(r"[^A-Za-z0-9._-]")
 
 
 def make_run_id(*, sample_id: str, started_utc: datetime | None = None) -> str:
-    """Plan §8 directory shape: ``YYYY-MM-DD_HHMMSS_<sample-slug>``.
+    """Directory shape: ``YYYY-MM-DD_HHMMSS_<sample-slug>``.
 
     Identical output to :func:`capa.experiment.engine.make_run_id` so
     headless cutover bundles drop into the same catalog rows.
@@ -102,8 +103,7 @@ def _stamp_clock_anchor(writer: RunBundleWriter, clock: RunClock) -> None:
     The writer's :meth:`open` writes an initial manifest with
     ``started_mono_ns_anchor=0``; once :class:`RunClock.now` is captured we
     update the manifest so downstream readers can correlate ``t_mono_ns``
-    columns with wall time. Lifted from :mod:`capa.experiment.engine`
-    (which Phase 4 deletes).
+    columns with wall time. Lifted from :mod:`capa.experiment.engine`.
     """
     manifest_path = writer.bundle_path / "manifest.json"
     manifest = BundleManifest.read(manifest_path)
@@ -115,6 +115,7 @@ def _stamp_clock_anchor(writer: RunBundleWriter, clock: RunClock) -> None:
     )
     manifest.write(manifest_path)
 
+
 # ---------------------------------------------------------------------------
 # RealRunSession
 # ---------------------------------------------------------------------------
@@ -123,8 +124,8 @@ def _stamp_clock_anchor(writer: RunBundleWriter, clock: RunClock) -> None:
 class RealRunSession:
     """Production :class:`RunSession` for the Conductor.
 
-    Built by the headless entry point (and by the GUI in Phase 4). The
-    session is per-run; reuse across runs is not supported.
+    Built by the headless entry point (and by the GUI). The session is
+    per-run; reuse across runs is not supported.
 
     The :meth:`writer_thread` / :meth:`bundle_writer` / :meth:`clock` /
     :meth:`authorization` properties become valid only after :meth:`open`
@@ -210,9 +211,8 @@ class RealRunSession:
         self._outcome: RunOutcome = RunOutcome.COMPLETED
         self._exit_reason: str | None = None
         # Per-loop / per-bridge / per-worker diagnostics handed in by the
-        # Conductor before close (migration doc §5.5 + §11 acceptance #12).
-        # Merged into the manifest's queue_health dict at finalize so the
-        # bundle's on-disk schema stays put.
+        # Conductor before close. Merged into the manifest's queue_health
+        # dict at finalize so the bundle's on-disk schema stays put.
         self._extra_queue_health: dict[str, dict[str, float]] = {}
 
     # ------------------------------------------------------------------ RunSession protocol
@@ -402,9 +402,8 @@ class RealRunSession:
                 engine_version=self._engine_version,
                 operator_id=self._config.operator.id,
             )
-            # Compatibility breadcrumb for existing bundle/log consumers and
-            # P0c: the conductor replaces the single-loop engine, but run.log
-            # still carries the historical audit event names.
+            # Compatibility breadcrumb for existing bundle/log consumers:
+            # run.log carries the historical audit event names.
             self._logger.info(
                 "engine.run.start",
                 run_id=self._run_id,
@@ -450,7 +449,7 @@ class RealRunSession:
 
         Idempotent — last write wins. The conductor calls this once just
         before :meth:`close`; tests / subclassed sessions may also call
-        it directly. Migration doc §11 acceptance #12.
+        it directly.
         """
         self._extra_queue_health = dict(diagnostics)
 
@@ -469,7 +468,7 @@ class RealRunSession:
 
         ended_utc = datetime.now(UTC)
         writer_snapshot: dict[str, float] | None = None
-        run_status = self._outcome_to_run_status(self._outcome)
+        run_status = run_status_for_outcome(self._outcome)
 
         # Log before stopping the writer / finalizing sinks so run.log keeps
         # the same start/end audit envelope as the legacy engine path.
@@ -497,11 +496,11 @@ class RealRunSession:
                     queue_health = self._metrics.snapshot_for_manifest()
                 if writer_snapshot is not None:
                     queue_health["queue.writer-inbox"] = writer_snapshot
-                # Conductor-side runtime diagnostics (migration doc §5.5).
+                # Conductor-side runtime diagnostics.
                 queue_health.update(self._extra_queue_health)
                 if not self._bundle_writer.is_finalized:
                     self._bundle_writer.finalize(
-                        run_status=run_status,  # type: ignore[arg-type]
+                        run_status=run_status,
                         exit_reason=self._exit_reason,
                         ended_utc=ended_utc,
                         queue_health=queue_health,
@@ -554,22 +553,6 @@ class RealRunSession:
             writer=writer_ref,
             bundle=bundle_ref,
         )
-
-    @staticmethod
-    def _outcome_to_run_status(outcome: RunOutcome) -> str:
-        """Map :class:`RunOutcome` → the manifest's ``run_status`` string.
-
-        Migration doc §11 acceptance #3: byte-identical bundles for
-        ``COMPLETED`` / ``ABORTED`` / ``CRASHED``. ``CRASHED_BUT_SEALED``
-        records as ``crashed`` for catalog parity with today's engine.
-        """
-        match outcome:
-            case RunOutcome.COMPLETED:
-                return "completed"
-            case RunOutcome.ABORTED:
-                return "aborted"
-            case RunOutcome.CRASHED | RunOutcome.CRASHED_BUT_SEALED:
-                return "crashed"
 
     def _collect_equipment_blocks(self) -> list[dict[str, Any]]:
         """Walk ``config.hardware.devices`` (canonical order) and pair each

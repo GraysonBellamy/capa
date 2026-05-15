@@ -26,7 +26,7 @@ from capa.core.errors import CapaError
 
 HASH_BUFFER = 65_536
 """Streaming chunk size. 64 KiB amortizes syscall overhead without hogging
-RAM on the IR ``.csq`` (10–20 GiB) files we'll see in P4."""
+RAM on large IR ``.csq`` (10–20 GiB) files."""
 
 MANIFEST_FILENAME = "manifest.sha256"
 

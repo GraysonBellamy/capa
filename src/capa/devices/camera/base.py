@@ -56,7 +56,7 @@ class CameraCapability(Flag):
     LIVE_PREVIEW = auto()
     """Adapter pumps preview frames onto :meth:`Camera.preview_stream`."""
 
-    # ---- Control-surface flags (capa-flir Phase 4) ----
+    # ---- Control-surface flags ----
     NUC_TRIGGER = auto()
     """Adapter exposes a one-shot NUC / flat-field correction trigger
     (``ACS_Remote_Calibration_nuc_executeSync`` in the FLIR Atlas SDK)."""

@@ -11,9 +11,8 @@ Covers:
 * The outbound bridge closes after disarm — consumer iteration sees EOF.
 * ``begin_sampling`` rolls back cleanly if ``adapter.start()`` raises.
 
-Migration doc references: §3.4 (data flow), §3.7 (drain-before-preflight
-— here just the local equivalent: bridge attached before sampling), §3.8
-(disarm Phase A / Phase B), §4.1 (Worker state machine).
+Covers data flow (bridge attached before sampling), cooperative and forced
+disarm (``DisarmResult.OK`` / ``FORCED``), and the Worker state machine.
 """
 
 from __future__ import annotations
@@ -32,16 +31,12 @@ from tests.integration.runtime.fakes import (
 )
 
 
-async def _wait(fut: object) -> object:
-    return await asyncio.wrap_future(fut)  # type: ignore[arg-type]
-
-
 async def _start_sampling(worker: Worker) -> object:
     """Helper: drive a worker to SAMPLING and return its bridge with the
     consumer attached on the test's loop."""
-    await _wait(worker.start())
-    await _wait(worker.arm(make_run_context()))
-    bridge = await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+    await worker.async_start()
+    await worker.async_arm(make_run_context())
+    bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
     return bridge
 
 
@@ -54,19 +49,19 @@ class TestBeginSampling:
             adapters=[adapter],
             runner=ThreadedRunner(name="stream-state"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
-            await _wait(worker.arm(make_run_context()))
+            await worker.async_arm(make_run_context())
             assert worker.state is WorkerState.ARMED
-            bridge = await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+            bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             try:
                 assert worker.state is WorkerState.SAMPLING
                 assert adapter.start_calls == 1
                 assert bridge.name.startswith("worker-")  # type: ignore[union-attr]
             finally:
-                await _wait(worker.disarm(grace_s=1.0))
+                await worker.async_disarm(grace_s=1.0)
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_begin_sampling_refused_in_idle(self) -> None:
@@ -76,14 +71,14 @@ class TestBeginSampling:
             adapters=[adapter],
             runner=ThreadedRunner(name="stream-refused"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             from capa.runtime.errors import WorkerStateError
 
             with pytest.raises(WorkerStateError, match="requires ARMED"):
-                await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+                await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_begin_sampling_rolls_back_on_start_failure(self) -> None:
@@ -98,19 +93,19 @@ class TestBeginSampling:
             adapters=[good, bad],
             runner=ThreadedRunner(name="stream-rollback"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
-            await _wait(worker.arm(make_run_context()))
+            await worker.async_arm(make_run_context())
             with pytest.raises(RuntimeError, match="bad cannot start"):
-                await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+                await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             # Worker stayed in ARMED; rollback returned us there.
             assert worker.state is WorkerState.ARMED
             # Good was started and then stopped during rollback.
             assert good.start_calls == 1
             assert good.stop_calls == 1
         finally:
-            await _wait(worker.disarm(grace_s=1.0))
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_disarm(grace_s=1.0)
+            await worker.async_close(grace_s=1.0)
 
 
 class TestEmissionFlow:
@@ -142,8 +137,8 @@ class TestEmissionFlow:
             # Bridge latency metric incremented.
             assert bridge.metrics.dequeued_total == 5  # type: ignore[union-attr]
         finally:
-            await _wait(worker.disarm(grace_s=2.0))
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_disarm(grace_s=2.0)
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_worker_metrics_count_emissions(self) -> None:
@@ -158,8 +153,8 @@ class TestEmissionFlow:
             for _ in range(10):
                 await bridge.get()  # type: ignore[union-attr]
         finally:
-            await _wait(worker.disarm(grace_s=2.0))
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_disarm(grace_s=2.0)
+            await worker.async_close(grace_s=1.0)
         assert worker.metrics.samples_emitted == 10
 
 
@@ -178,7 +173,7 @@ class TestDisarm:
             await bridge.get()  # type: ignore[union-attr]
             await bridge.get()  # type: ignore[union-attr]
 
-            result = await _wait(worker.disarm(grace_s=2.0))
+            result = await worker.async_disarm(grace_s=2.0)
             assert result is DisarmResult.OK
             assert worker.state is WorkerState.IDLE
             assert adapter.stop_calls == 1
@@ -186,7 +181,7 @@ class TestDisarm:
             # Bridge closed: get() yields None (sentinel EOF).
             assert await bridge.get() is None  # type: ignore[union-attr]
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_disarm_returns_forced_on_grace_expiry(self) -> None:
@@ -209,11 +204,11 @@ class TestDisarm:
             # parked in anyio.sleep(5.0). Even after adapter.stop() flips
             # the lifecycle, the stream loop won't re-check until the sleep
             # returns. The worker must cancel the task on grace expiry.
-            result = await _wait(worker.disarm(grace_s=0.3))
+            result = await worker.async_disarm(grace_s=0.3)
             assert result is DisarmResult.FORCED
             assert worker.state is WorkerState.IDLE
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_bridge_closes_after_disarm(self) -> None:
@@ -227,10 +222,10 @@ class TestDisarm:
             bridge = await _start_sampling(worker)
             # Don't drain — let the producer fill some, then disarm.
             await asyncio.sleep(0.05)
-            await _wait(worker.disarm(grace_s=2.0))
+            await worker.async_disarm(grace_s=2.0)
             assert bridge.closed is True  # type: ignore[union-attr]
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
 
 class TestMultipleSamplingCycles:
@@ -244,22 +239,20 @@ class TestMultipleSamplingCycles:
             adapters=[adapter],
             runner=ThreadedRunner(name="cycles"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             for _ in range(2):
-                await _wait(worker.arm(make_run_context()))
-                bridge = await _wait(
-                    worker.begin_sampling(consumer_loop=asyncio.get_running_loop())
-                )
+                await worker.async_arm(make_run_context())
+                bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
                 # Drain 3 emissions then disarm
                 for _i in range(3):
                     em = await bridge.get()
                     assert em is not None
-                result = await _wait(worker.disarm(grace_s=2.0))
+                result = await worker.async_disarm(grace_s=2.0)
                 assert result is DisarmResult.OK
                 assert worker.state is WorkerState.IDLE
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
         # Adapter was opened once, started twice, stopped twice.
         assert adapter.open_calls == 1
         assert adapter.close_calls == 1

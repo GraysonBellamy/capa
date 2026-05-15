@@ -369,9 +369,9 @@ class FlirCard(DeviceCard):
     async def _ensure_adapter(self) -> CommandTarget | None:
         """Return the :class:`WorkerPool`-owned camera handle.
 
-        Phase 4 / migration doc §6: cameras are constructed inside the
-        pool's :class:`Worker` at :meth:`WorkerPool.open` time and
-        wrapped in :class:`CameraDeviceAdapter`. Cards reach the
+        Cameras are constructed inside the pool's :class:`Worker` at
+        :meth:`WorkerPool.open` time and wrapped in
+        :class:`CameraDeviceAdapter`. Cards reach the
         underlying :class:`Camera` (for preview-stream subscription)
         through :meth:`ManualClient.camera`. The card never owns the
         camera's lifecycle — the pool does.
@@ -390,8 +390,8 @@ class FlirCard(DeviceCard):
         return camera
 
     def _on_engine_state(self, state: object) -> None:
-        """Phase 4: the worker owns the camera handle for the duration of
-        the pool, so there is no per-run hand-off. The base class still
+        """The worker owns the camera handle for the duration of the
+        pool, so there is no per-run hand-off. The base class still
         handles the manual-write gate (cards refuse dispatch during a
         run); no camera-specific behavior is required here."""
         super()._on_engine_state(state)

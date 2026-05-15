@@ -1,4 +1,4 @@
-"""In-process IR-camera sim fixture (plan §12.1, P4 entry).
+"""In-process IR-camera sim fixture (plan §12.1).
 
 Writes a small, deterministic "fake-csq" file at the path the engine asks for.
 The format is **not** a real FLIR FFF/`.csq` — it is a capa-private layout
@@ -40,7 +40,7 @@ import struct
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
@@ -63,6 +63,9 @@ from capa.devices.camera.base import (
     FrameReceipt,
     make_stream_pair,
 )
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 SIM_MAGIC = b"CAPA-IR-SIM\n"
 """Distinct from real FFF (``b"FFF\\0..."``)."""
@@ -142,7 +145,7 @@ class FlirIrSim:
             # Sim emits JPEG-encoded preview frames during recording so the
             # preview integration tests can decode pixels via QImage. The
             # real FlirIrAdapter declares this when capa-flir wires the
-            # live preview pump (see Phase 4 follow-up).
+            # live preview pump.
             CameraCapability.LIVE_PREVIEW,
             # Control-surface flags — sim mirrors the real FlirIrAdapter so
             # recipes / UI panels can be developed against the sim without an
@@ -266,7 +269,7 @@ class FlirIrSim:
         frame_payload_bytes: int = 1024,
         serial: str = "SIM-IR-0001",
     ) -> FlirIrSim:
-        """TOML-friendly constructor (plan §16 P3 ``from_params`` convention)."""
+        """TOML-friendly constructor (plan §16 ``from_params`` convention)."""
         return cls(
             spec=spec,
             clock=clock,
@@ -704,8 +707,103 @@ async def _drain_stream[T](recv: MemoryObjectReceiveStream[T]) -> AsyncIterator[
 
 
 __all__ = [
+    "DESCRIPTOR",
     "HEADER_SIZE",
     "SIM_MAGIC",
     "FlirIrSim",
+    "FlirIrSimParams",
+    "discover_cameras",
     "extract_frame_index",
+    "handshake",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Module-level discovery + handshake (plan §7.2 item 1).
+# ---------------------------------------------------------------------------
+
+
+_SIM_DEFAULT_SERIAL = "SIM-IR-0001"
+"""Stable serial advertised by the sim regardless of params. Operators
+can override via ``cameras[*].serial`` in the config; the matcher below
+treats the spec serial as authoritative when set."""
+
+
+async def discover_cameras() -> list[dict[str, Any]]:
+    """Return the single sim IR camera as a discover row.
+
+    The simulator has no real device behind it, so "discovery" is a
+    fixed advertisement — useful for the CLI's ``capa hardware
+    discover`` and for the wizard's "CAPA pyrolysis simulated"
+    starting point.
+    """
+    return [
+        {
+            "adapter": "capa.devices.sim.flir_ir_sim",
+            "selector": _SIM_DEFAULT_SERIAL,
+            "model": "FLIR IR sim",
+            "serial": _SIM_DEFAULT_SERIAL,
+            "transport": "sim",
+        }
+    ]
+
+
+async def handshake(cam_spec: dict[str, Any]) -> str:
+    """Layer-5 read-only verification for the IR sim camera.
+
+    The sim always succeeds: there's nothing to wire up. We surface the
+    selector / serial in the summary so the Problems panel reads
+    consistently with the real camera adapter.
+    """
+    serial = cam_spec.get("serial") or _SIM_DEFAULT_SERIAL
+    return f"flir_ir_sim model={'FLIR IR sim'!r} serial={serial!r}"
+
+
+# ---------------------------------------------------------------------------
+# Setup-editor descriptor (plan §5.7).
+# ---------------------------------------------------------------------------
+
+
+from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
+
+
+class FlirIrSimParams(BaseModel):
+    """View model for :class:`FlirIrSim` params (plan §4.9.3)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    fps: float = Field(default=30.0, gt=0)
+    width: int = Field(default=384, gt=0)
+    height: int = Field(default=288, gt=0)
+    frame_payload_bytes: int = Field(default=1024, gt=0)
+    serial: str = "SIM-IR-0001"
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.sim.flir_ir_sim",
+        label="FLIR IR camera (simulator)",
+        family="camera_ir",
+        adapter_factory=None,
+        params_model=FlirIrSimParams,
+        supported_binding_sources=(),
+        default_params={
+            "fps": 30.0,
+            "width": 384,
+            "height": 288,
+            "frame_payload_bytes": 1024,
+            "serial": "SIM-IR-0001",
+        },
+        channel_templates=(),
+        discoverable=True,
+        handshake_available=True,
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

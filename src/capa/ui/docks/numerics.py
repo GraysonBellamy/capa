@@ -1,6 +1,6 @@
 """Numerics dock — large readouts of starred channels.
 
-Plan §10.2. Reads :meth:`ChannelRingBuffer.latest` for each registered
+Reads :meth:`ChannelRingBuffer.latest` for each registered
 channel at 1 Hz (the 10 Hz plot cadence is overkill for digit displays;
 operators prefer stable readouts to flickering decimals).
 """

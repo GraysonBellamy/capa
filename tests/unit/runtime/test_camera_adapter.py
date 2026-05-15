@@ -6,9 +6,8 @@ streams (frames + events), and has a ``run_pump`` so the multiplexer's
 pump path is covered. Hardware tests against the webcam adapter live
 under ``tests/hardware/``.
 
-Migration doc references: §6 (camera unification), §6.1 (wrapper produces
-DeviceEmissions over a Camera), §6.4 (Phase 3 deliverable: wrapper +
-emission-type dispatch).
+Covers camera unification: the wrapper produces DeviceEmissions over a
+Camera and the emission-type dispatch routes frames and events correctly.
 """
 
 from __future__ import annotations

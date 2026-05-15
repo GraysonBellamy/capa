@@ -1,6 +1,6 @@
 """Shared adapter helpers used by both sim and real adapters.
 
-Both sim and real adapters (P0d onward) need:
+Both sim and real adapters need:
 
 * the same channel-routing and calibration-application logic when turning a
   library record into one or more
@@ -12,8 +12,7 @@ Both sim and real adapters (P0d onward) need:
 * a uniform "last-sample-emitted" timestamp so the engine's safety
   watchdog (plan §13.2 / §9 day-1 rules) can detect a silent producer.
 
-Lifting these here keeps the four real adapters (Watlow + the three new
-P2 adapters) from re-implementing the exact same logic.
+Lifting these here keeps the four real adapters from re-implementing the exact same logic.
 """
 
 from __future__ import annotations
@@ -76,12 +75,11 @@ def build_channel_sample(
     consumers see calibrated ``ChannelSample``\\ s."
     """
     cal = spec.calibration
-    # CustomCallable's evaluate() requires the plugin runtime; the plugin trust
-    # check / production trust workflow lands in P3. Until then, surface the
+    # CustomCallable's evaluate() requires the plugin runtime; surface the
     # gap loudly rather than silently fall back.
     if cal.kind == "custom_callable":
         raise AdapterError(
-            f"adapter cannot evaluate custom_callable calibration on channel {spec.name!r} (P3)",
+            f"adapter cannot evaluate custom_callable calibration on channel {spec.name!r}",
             device=spec.source.device if hasattr(spec.source, "device") else None,
         )
     value, uncertainty = cal.evaluate_with_uncertainty(raw_value)

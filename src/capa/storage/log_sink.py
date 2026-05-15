@@ -1,9 +1,9 @@
 """``run.log`` — JSON-lines append handle for run-correlated structured logs.
 
 Plan §13.1. The structlog config (root logger, processors, run_id binder)
-lands in P0c; P0b just owns the bundle-side file. A line-buffered text handle
-is enough — structlog's JSONRenderer produces one self-contained line per
-event, and the engine task group will plumb the run-id context binder around
+is in the logging module; this module owns the bundle-side file. A line-buffered
+text handle is enough — structlog's JSONRenderer produces one self-contained line
+per event, and the engine task group plumbs the run-id context binder around
 the writes.
 
 This sink intentionally accepts pre-rendered JSON strings rather than dicts:

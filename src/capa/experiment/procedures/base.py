@@ -13,7 +13,6 @@ authorization handle (so every device write carries the run's audit stamps),
 the per-adapter command surface, and the :class:`MethodExecutor` for
 method-bearing procedures.
 
-P0c shipped a tiny prefix; P3 promotes this to the full §11 contract.
 """
 
 from __future__ import annotations
@@ -157,7 +156,7 @@ class ProcedureContext:
     :attr:`SourceBinding.device`). Provided for **introspection only** —
     procedures that need adapter metadata (capabilities, resource_id) can
     read here. Sending commands directly through ``adapter.command`` is
-    deprecated as of Phase 2; use :attr:`dispatcher` instead so the
+    deprecated; use :attr:`dispatcher` instead so the
     concurrency layer (single-loop Engine vs per-resource-worker
     Conductor) is transparent to procedures."""
 

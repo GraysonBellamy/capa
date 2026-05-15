@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
 import av
@@ -77,6 +77,9 @@ from capa.devices.camera.base import (
 from capa.devices.camera.metadata import UvcRangeMetadata, WebcamMetadata
 
 _logger = structlog.get_logger("capa.devices.camera.webcam")
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 
 _BASE_CAPABILITIES: frozenset[CameraCapability] = frozenset(
@@ -269,7 +272,7 @@ class WebcamAdapter:
         input_url: str | None = None,
         input_format: str | None = None,
     ) -> WebcamAdapter:
-        """TOML-friendly constructor (plan §16 P3 ``from_params`` convention)."""
+        """TOML-friendly constructor (plan §16 ``from_params`` convention)."""
         return cls(
             spec=spec,
             clock=clock,
@@ -313,7 +316,7 @@ class WebcamAdapter:
         back to the configured camera ``name`` when no serial is declared
         (CI / dshow-by-name use). Two ``WebcamAdapter`` instances pointing
         at the same physical camera share this string and therefore would
-        share a worker in Phase 1.
+        share a worker.
         """
         if self._spec.serial:
             return f"webcam:{self._spec.serial}"
@@ -1221,10 +1224,248 @@ __all__ = [
     "DEFAULT_CODEC",
     "DEFAULT_FPS",
     "DEFAULT_PIX_FMT",
+    "DESCRIPTOR",
     "OPEN_RETRY_DEADLINE_S",
     "OPEN_RETRY_DELAYS_S",
     "PREVIEW_INTERVAL_NS",
     "PREVIEW_JPEG_QUALITY",
     "PREVIEW_MAX_WIDTH",
     "WebcamAdapter",
+    "WebcamParams",
+    "discover_cameras",
+    "handshake",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Module-level discovery + handshake (plan §7.2 item 1).
+#
+# Both the Setup editor's DiscoveryDialog and Layer 5 of the validation
+# pipeline reach for these without ever constructing an adapter. They
+# must be passive (no recording, no RunClock) and platform-tolerant —
+# a missing OS API returns an empty list, not an exception.
+# ---------------------------------------------------------------------------
+
+
+async def discover_cameras() -> list[dict[str, Any]]:
+    """Walk the local OS camera enumeration APIs and return a row per
+    visible visible-light camera.
+
+    Returns dicts shaped like the other adapters' ``discover()`` output
+    so the CLI can render them uniformly::
+
+        {
+            "adapter": "capa.devices.camera.webcam",
+            "selector": "/dev/video0" | "video=Logitech C920" | "0",
+            "model":    "Logitech C920",
+            "serial":   "ABC123" | None,
+            "transport": "usb",
+        }
+
+    Platform paths:
+
+    * **Linux** — walks ``/sys/class/video4linux/video*`` and reuses the
+      existing :func:`_probe_v4l2_info` helper so card-name / USB serial
+      come from sysfs without opening the device.
+    * **Windows** — uses ``duvc_ctl.list_devices()`` when the wheel is
+      installed. Returns one row per visible DirectShow camera.
+    * **macOS / unsupported** — returns ``[]``. AVFoundation
+      enumeration is a follow-up; for now operators add macOS cameras
+      by hand.
+    """
+    platform = sys.platform
+    if platform.startswith("linux"):
+        return await anyio.to_thread.run_sync(_enumerate_v4l2_sync)
+    if platform == "win32":
+        return await _enumerate_directshow()
+    return []
+
+
+def _enumerate_v4l2_sync() -> list[dict[str, Any]]:
+    """List visible-light V4L2 capture nodes via sysfs (Linux only)."""
+    root = Path("/sys/class/video4linux")
+    if not root.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    seen_devices: set[str] = set()
+    for node_dir in sorted(root.iterdir()):
+        node = node_dir.name
+        if not re.fullmatch(r"video\d+", node):
+            continue
+        device_path = f"/dev/{node}"
+        probed = _probe_v4l2_info(device_path)
+        # bus_info is the USB device id; collapse the multiple
+        # /dev/videoN nodes one webcam exposes (capture + metadata) to
+        # a single row keyed on the bus.
+        bus = probed.bus_info or device_path
+        if bus in seen_devices:
+            continue
+        seen_devices.add(bus)
+        rows.append(
+            {
+                "adapter": "capa.devices.camera.webcam",
+                "selector": device_path,
+                "model": probed.card_name,
+                "serial": probed.serial,
+                "transport": "usb",
+            }
+        )
+    return rows
+
+
+async def _enumerate_directshow() -> list[dict[str, Any]]:
+    """List DirectShow cameras via duvc-ctl (Windows only).
+
+    Falls back to an empty list when the duvc-ctl wheel is missing —
+    operators on a stripped-down Windows install simply see no camera
+    rows rather than a crash.
+    """
+    try:
+        from capa.devices.camera._uvc import _duvc  # noqa: PLC0415
+    except ImportError:
+        return []
+    if _duvc is None:
+        return []
+    try:
+        devices = await anyio.to_thread.run_sync(_duvc.list_devices)
+    except Exception:
+        return []
+    rows: list[dict[str, Any]] = []
+    for dev in devices or ():
+        name = getattr(dev, "name", None)
+        path = getattr(dev, "path", None)
+        rows.append(
+            {
+                "adapter": "capa.devices.camera.webcam",
+                "selector": f"video={name}" if name else (path or ""),
+                "model": name,
+                "serial": path,  # duvc path is the DirectShow moniker
+                "transport": "directshow",
+            }
+        )
+    return rows
+
+
+def _match_camera_row(
+    rows: list[dict[str, Any]],
+    *,
+    model_hint: str | None,
+    serial: str | None,
+) -> dict[str, Any] | None:
+    """Apply the plan §12.1 selector rules to a discover result list.
+
+    Returns the chosen row or ``None`` when no unique match exists.
+    """
+    if serial is not None:
+        for row in rows:
+            row_serial = row.get("serial")
+            if isinstance(row_serial, str) and serial.lower() in row_serial.lower():
+                return row
+        return None
+    if model_hint is not None:
+        matches = [
+            row
+            for row in rows
+            if isinstance(row.get("model"), str) and model_hint.lower() in row["model"].lower()
+        ]
+        if not matches:
+            return None
+        return matches[0]
+    if len(rows) == 1:
+        return rows[0]
+    return None
+
+
+async def handshake(cam_spec: dict[str, Any]) -> str:
+    """Layer-5 read-only verification for a configured visible camera.
+
+    Unlike device handshakes (which open + identify + close a serial
+    port), a real DirectShow / V4L2 open holds the capture pin for
+    100s of ms and competes with whatever else might be watching the
+    camera. We use the cheaper "the camera shows up in discovery"
+    check instead — sufficient to catch the common wiring failure
+    (cable yanked, device path renumbered) without paying the
+    capture-pin cost. Plan §7.2 item 1.
+    """
+    rows = await discover_cameras()
+    if not rows:
+        raise AdapterError(
+            "no visible cameras enumerated on this host (sysfs/duvc-ctl returned no devices)"
+        )
+    model_hint = cam_spec.get("model_hint")
+    serial = cam_spec.get("serial")
+    chosen = _match_camera_row(
+        rows,
+        model_hint=model_hint if isinstance(model_hint, str) else None,
+        serial=serial if isinstance(serial, str) else None,
+    )
+    if chosen is None:
+        wanted = (
+            f"serial={serial!r}"
+            if serial is not None
+            else f"model_hint={model_hint!r}"
+            if model_hint is not None
+            else "no selector (and >1 camera present)"
+        )
+        raise AdapterError(f"no unique camera match for {wanted}; saw {len(rows)} devices")
+    model = chosen.get("model") or "?"
+    serial_seen = chosen.get("serial") or "?"
+    selector = chosen.get("selector") or "?"
+    return f"webcam model={model!r} serial={serial_seen!r} selector={selector!r}"
+
+
+# ---------------------------------------------------------------------------
+# Setup-editor descriptor (plan §5.7).
+# ---------------------------------------------------------------------------
+
+
+from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
+
+
+class WebcamParams(BaseModel):
+    """View model for :class:`WebcamAdapter`'s ``params`` dict (plan §4.9.3).
+
+    Mirrors :meth:`WebcamAdapter.__init__`'s keyword arguments. Used by
+    the Setup editor's Cameras section to produce a curated auto-form
+    over otherwise free-form scalar params; not consulted at runtime
+    (the adapter validates kwargs the existing way)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    fps: float = Field(default=DEFAULT_FPS, gt=0)
+    width: int = Field(default=1280, gt=0)
+    height: int = Field(default=720, gt=0)
+    codec: str = DEFAULT_CODEC
+    pix_fmt: str = DEFAULT_PIX_FMT
+    input_url: str | None = None
+    input_format: str | None = None
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.camera.webcam",
+        label="USB webcam (visible)",
+        family="camera_visible",
+        adapter_factory=None,  # Cameras are constructed via make_camera_adapter
+        params_model=WebcamParams,
+        supported_binding_sources=(),  # Cameras don't bind via SourceBinding
+        default_params={
+            "fps": DEFAULT_FPS,
+            "width": 1280,
+            "height": 720,
+            "codec": DEFAULT_CODEC,
+            "pix_fmt": DEFAULT_PIX_FMT,
+        },
+        channel_templates=(),
+        discoverable=True,
+        handshake_available=True,
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

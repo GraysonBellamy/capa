@@ -1,4 +1,4 @@
-"""Manual device-control panel UI (plan §10, handoff §1).
+"""Manual device-control panel UI.
 
 Per-device cards rendered into a single :class:`~capa.ui.docks.manual_control.ManualControlDock`,
 gated reflectively on adapter / camera capability flags. Adapters are

@@ -21,7 +21,7 @@ The profile contributes:
   required channel mappings
 
 The profile snapshot lands in ``profiles/cone_calorimeter.toml`` and is
-referenced from ``manifest.json.domain_profile`` (P0b).
+referenced from ``manifest.json.domain_profile``.
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ class GasAnalysis(BaseModel):
 
     Plan §5.4.1 / §6: analyzer delay/response is *not* clock sync; it is a
     measurement-model field that belongs in the bundle even though capa
-    doesn't perform full analysis in P0–P6.
+    doesn't perform full analysis.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -142,7 +142,7 @@ class ConeCalorimeterMetadata(BaseModel):
     """Cone-profile metadata block.
 
     Mirrored verbatim into ``profiles/cone_calorimeter.toml`` at run-arm
-    (P0b's bundle writer); the same model validates the inbound config.
+    The bundle writer mirrors it verbatim; the same model validates the inbound config.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -241,7 +241,7 @@ PREFLIGHT_CHECKS: tuple[PreflightCheck, ...] = (
 
 # ---------------------------------------------------------------------------
 # Validation helpers — used by ExperimentConfig._validate_method-equivalent
-# logic in P0c, but exposed here so P0a tests can exercise them directly.
+# logic; exposed here so tests can exercise them directly.
 # ---------------------------------------------------------------------------
 
 

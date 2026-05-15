@@ -1,7 +1,7 @@
 """In-process pub/sub for :class:`DeviceEmission`.
 
 Plan §3, §7. The engine fan-out reads from per-adapter producer tasks and
-publishes onto the :class:`DataBus`; the safety monitor, the (P1) UI ring
+publishes onto the :class:`DataBus`; the safety monitor, the UI ring
 buffers, and procedure subscribers all consume from it. The durable sinks do
 *not* go through here — the engine fan-out forwards to the bundle writer
 directly so a slow disk never starves a UI plot.
@@ -47,7 +47,7 @@ _PredicateFn = Callable[[DeviceEmission], bool]
 
 DEFAULT_SUBSCRIBER_CAPACITY: Final[int] = 256
 """Per-subscription buffer. Sized for capa's 3–60 Hz envelope; UI ring buffers
-override this in P1 with their own decimation cadence."""
+override this with their own decimation cadence."""
 
 
 # Bucket discriminators. Stored on each :class:`Subscription` so
@@ -66,8 +66,8 @@ class DataBusLoopError(CapaError):
     Migration doc §3.10 / §3.11 invariant 7. Each :class:`DataBus` instance
     is **loop-affine**: its subscription queues are :class:`BoundedQueue`s
     bound to one loop, and mutating them from a different loop's task is
-    undefined behaviour for asyncio. Phase 2's :class:`Conductor` builds one
-    bus on the conductor loop; UIBridge (Phase 4) builds a separate mirror
+    undefined behaviour for asyncio. The :class:`Conductor` builds one
+    bus on the conductor loop; UIBridge builds a separate mirror
     bus on the UI loop.
     """
 
@@ -550,7 +550,7 @@ def _adapter_predicate(adapter: str) -> _PredicateFn:
 
 
 # Exposed so the engine can pass ``Awaitable[None]`` typed-callbacks if it ever
-# wants a non-iterator subscriber API. P0c subscribers use ``async for``.
+# wants a non-iterator subscriber API. Subscribers use ``async for``.
 PublishFn = Callable[[DeviceEmission], Awaitable[None]]
 
 

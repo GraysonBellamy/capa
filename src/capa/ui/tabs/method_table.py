@@ -1,6 +1,6 @@
 """``MethodTableModel`` — :class:`QAbstractTableModel` over ``list[Step]``.
 
-Plan §10.1. The Method tab's left pane is a QTableView bound to this
+The Method tab's left pane is a QTableView bound to this
 model; selection drives which step is shown in the detail pane on the
 right. Columns are intentionally narrow:
 

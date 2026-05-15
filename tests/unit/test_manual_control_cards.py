@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox, QPushButton
 
 from capa.channels.calibration import Identity
@@ -101,7 +100,7 @@ def _open_pool_sync(controller: RunController, cfg: ExperimentConfig) -> None:
     """Apply ``cfg`` to ``controller`` and drive the async pool open to
     completion synchronously.
 
-    Phase 4 split :meth:`RunController.set_active_config` into a sync
+    :meth:`RunController.set_active_config` is split into a sync
     "build a fresh :class:`WorkerPool`" step plus a scheduled async
     :meth:`WorkerPool.open`. Tests construct adapters in-process (no
     real hardware), so we run the open on a fresh loop and then drop
@@ -474,42 +473,23 @@ class TestManualControlDock:
 
 
 class TestSetupTabContextMenu:
-    def test_right_click_on_device_emits_signal(self, qtbot: Any) -> None:
+    def test_device_action_signal_routes_to_listener(self, qtbot: Any) -> None:
+        """``device_action_requested`` is preserved across the SetupTab rewrite.
+
+        The legacy read-only inspector emitted this signal from a right-
+        click on a device row in its tree. The new editor shell preserves
+        the signal on SetupTab so MainWindow's ``_on_device_action`` wiring
+        keeps working; it is re-emitted from the Devices table once that
+        section lands.
+        """
         from capa.ui.tabs.setup import SetupTab
 
-        cfg = _make_config((DeviceConfig(name="balance.main", adapter="x.y.z", params={}),))
         tab = SetupTab()
         qtbot.addWidget(tab)
-        tab.load_config(cfg)
 
         captured: list[str] = []
         tab.device_action_requested.connect(captured.append)
-
-        # Find the device item and emit the request directly through the
-        # signal — exercising the menu .exec() requires popping a real
-        # popup which pytest-qt can't easily synchronously close.
-        items: list[Any] = []
-
-        def _walk(item: Any) -> None:
-            items.append(item)
-            for i in range(item.childCount()):
-                _walk(item.child(i))
-
-        root = tab._tree.topLevelItem(0)
-        assert root is not None
-        _walk(root)
-
-        device_items = [
-            it
-            for it in items
-            if (
-                isinstance(it.data(0, Qt.ItemDataRole.UserRole), tuple)
-                and it.data(0, Qt.ItemDataRole.UserRole)[0] == "device"
-            )
-        ]
-        assert device_items, "expected at least one device row in the tree"
-        # Simulate the signal emit that the menu callback would issue.
-        tab.device_action_requested.emit(device_items[0].data(0, Qt.ItemDataRole.UserRole)[1])
+        tab.device_action_requested.emit("balance.main")
         assert captured == ["balance.main"]
 
 

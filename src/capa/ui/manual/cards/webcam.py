@@ -419,9 +419,9 @@ class WebcamCard(DeviceCard):
     async def _ensure_adapter(self) -> CommandTarget | None:
         """Return the :class:`WorkerPool`-owned webcam handle.
 
-        Phase 4 / migration doc §6: webcams are constructed inside the
-        pool's :class:`Worker` at :meth:`WorkerPool.open` time and
-        wrapped in :class:`CameraDeviceAdapter`. The card consumes
+        Webcams are constructed inside the pool's :class:`Worker` at
+        :meth:`WorkerPool.open` time and wrapped in
+        :class:`CameraDeviceAdapter`. The card consumes
         preview JPEGs via :attr:`RunController.preview_received` and
         probe metadata via :meth:`ManualClient.camera_metadata`; this
         helper is only used so the base-class
@@ -441,7 +441,7 @@ class WebcamCard(DeviceCard):
         return camera
 
     def _on_engine_state(self, state: object) -> None:
-        """Phase 4: the pool owns the webcam handle across runs, so there
+        """The pool owns the webcam handle across runs, so there
         is no per-run hand-off and no preview to tear down on PREPARING.
         :class:`WebcamAdapter` supports preview running concurrently with
         recording — the pre-run release dance the legacy card needed is

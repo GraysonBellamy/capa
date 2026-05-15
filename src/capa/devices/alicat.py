@@ -1,6 +1,6 @@
-"""Real :class:`AlicatAdapter` — wraps an :class:`alicatlib.devices.base.Device` (P2).
+"""Real :class:`AlicatAdapter` — wraps an :class:`alicatlib.devices.base.Device`.
 
-Plan §16 P2 entry: "real ``AlicatAdapter``. Capability flags. Device watchdogs
+Plan §16: "real ``AlicatAdapter``. Capability flags. Device watchdogs
 and health surfacing. Discovery (``capa devices discover``).
 ``capa validate --strict``."
 
@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import UTC, datetime
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import alicatlib
 from alicatlib.devices.base import Device as AlicatDevice
@@ -73,6 +73,9 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 ADAPTER_ID: Final[str] = "alicat"
 
@@ -1091,8 +1094,47 @@ async def discover(
 
 __all__ = [
     "ADAPTER_ID",
+    "DESCRIPTOR",
     "AlicatAdapter",
     "AlicatAdapterParams",
     "discover",
     "handshake",
 ]
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices._templates import ALICAT_PURGE_FLOW  # noqa: PLC0415
+    from capa.devices.adapter import Capability  # noqa: PLC0415
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.alicat",
+        label="Alicat MFC / MFM",
+        family="alicat",
+        adapter_factory=AlicatAdapter,
+        params_model=AlicatAdapterParams,
+        supported_binding_sources=("alicat_frame_field",),
+        default_params={"rate_hz": 2.0},
+        channel_templates=(ALICAT_PURGE_FLOW,),
+        discoverable=True,
+        handshake_available=True,
+        capabilities=frozenset(
+            {
+                Capability.HAS_TARE,
+                Capability.HAS_GAS_SELECT,
+                Capability.READS_PROCESS_VAR,
+                Capability.HAS_PARAMETER_CONFIG,
+                Capability.HAS_DISPLAY_CONTROL,
+                Capability.HAS_TOTALIZER,
+                Capability.HAS_SETPOINT,
+                Capability.HAS_VALVE_HOLD,
+            }
+        ),
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

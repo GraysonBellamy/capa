@@ -5,8 +5,8 @@ sinks that violate their policy are a bug, not a configuration choice. Plan
 §13 gives the same rule a procedural framing — durable storage never silently
 loses data; UI never blocks acquisition; safety has its own queue.
 
-P0a only ships the policy enum + a small queue helper; the engine task group
-that wires producers to fan-outs lands in P0c.
+Ships the policy enum + a small queue helper; the engine task group
+wires producers to fan-outs.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class BackpressurePolicy(Enum):
 @dataclass(slots=True)
 class QueueStats:
     """Live statistics for a :class:`BoundedQueue`. Mirrored into
-    ``manifest.json``\\ ``.queue_health`` at finalize (P0b).
+    ``manifest.json``\\ ``.queue_health`` at finalize.
     """
 
     depth_high_water: int = 0

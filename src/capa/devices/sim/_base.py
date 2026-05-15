@@ -15,7 +15,7 @@ slightly different per-tick payload (one wide row vs. many long rows vs. a
 balance row vs. a block).
 
 Calibration / channel-routing helpers live in
-:mod:`capa.devices._helpers` so the real adapters (P0d+) can reuse them
+:mod:`capa.devices._helpers` so the real adapters can reuse them
 without importing out of :mod:`capa.devices.sim`.
 """
 

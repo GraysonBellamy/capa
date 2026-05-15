@@ -12,7 +12,7 @@ Plus the bundle writes ``env/uv.lock`` and ``env/packages.json`` next to it
 so re-deriving values five years later does not depend on what tooling
 happens to be installed today.
 
-This module is pure data gathering. The bundle writer (P0b) calls
+This module is pure data gathering. The bundle writer calls
 :func:`gather_provenance` at open and uses the result to populate
 ``manifest.json`` plus copy the ``env/`` directory contents into place.
 
@@ -171,9 +171,8 @@ def gather_plugins(
 ) -> tuple[PluginEntryBlock, ...]:
     """Mirror ``plugins.lock`` entries into manifest blocks.
 
-    P0b records what the lock claims; P3 layers in actual install discovery
-    and drift detection (already implemented in :mod:`capa.core.plugins_lock`).
-    For now the bundle records the trust assertion verbatim.
+    Records what the lock claims; the bundle records the trust assertion verbatim.
+    Drift detection is already implemented in :mod:`capa.core.plugins_lock`.
     """
     if lock is None:
         return ()

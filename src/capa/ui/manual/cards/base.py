@@ -50,8 +50,8 @@ CommandTarget = DeviceAdapter | Camera
 _logger = structlog.get_logger("capa.ui.manual")
 
 # UI states during which writes are NEVER routed through the manual
-# panel. The plan's principle (handoff §1.3): manual commands during a run
-# go through procedure steps, not the panel.
+# panel. Manual commands during a run go through procedure steps, not
+# the panel.
 _WRITE_BLOCKED_STATES: Final[frozenset[RunUiState]] = frozenset(
     {
         RunUiState.PREPARING,
@@ -161,7 +161,7 @@ class DeviceCard(QGroupBox):
     async def _ensure_adapter(self) -> CommandTarget | None:
         """Probe for liveness; pure no-op for device cards.
 
-        Phase 4: cards no longer hold adapter references. Dispatch goes
+        Cards no longer hold adapter references. Dispatch goes
         through :class:`ManualClient` which routes to the
         :class:`WorkerPool`'s worker for the device. The wrapper / adapter
         instance lives in the worker thread; cards never see it directly.
@@ -249,8 +249,7 @@ class DeviceCard(QGroupBox):
             return None
 
         # Build the command via the run-arm-free manual-issue path. The
-        # Authorization helper enforces the issued_by + confirmed_by
-        # invariant for us — both stamps are the same operator in P1.
+        # Authorization helper enforces the issued_by + confirmed_by invariant.
         auth = Authorization(operator_id=operator, run_id="manual")
         try:
             cmd = auth.issue_manual(

@@ -4,11 +4,10 @@ Each :class:`DataBus` is pinned to exactly one asyncio loop. Its subscription
 queues are :class:`BoundedQueue`s that bind to whatever loop creates them;
 publishing from a different loop's task corrupts those queues silently.
 
-Phase 2 introduces a runtime assertion: every :meth:`publish` /
-:meth:`publish_nowait` call asserts the running loop matches the bus's
-owning loop. The first call captures the owning loop; :meth:`bind_loop`
-lets the conductor pin eagerly so a misconfigured subscriber fails at bind
-time rather than first publish.
+A runtime assertion fires on every :meth:`publish` / :meth:`publish_nowait`
+call to ensure the running loop matches the bus's owning loop. The first call
+captures the owning loop; :meth:`bind_loop` lets the conductor pin eagerly so
+a misconfigured subscriber fails at bind time rather than first publish.
 """
 
 from __future__ import annotations

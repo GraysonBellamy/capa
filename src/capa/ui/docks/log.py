@@ -16,10 +16,11 @@ from worker / conductor threads land safely.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Final
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot
-from PySide6.QtGui import QColor, QFont, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QCloseEvent, QColor, QFont, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
     QDockWidget,
@@ -106,8 +107,6 @@ class _PlainFormatter(logging.Formatter):
     _ANSI_RE = None  # lazy
 
     def format(self, record: logging.LogRecord) -> str:
-        import re
-
         if _PlainFormatter._ANSI_RE is None:
             _PlainFormatter._ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
         ts = self.formatTime(record, datefmt="%H:%M:%S")
@@ -165,7 +164,7 @@ class LogDock(QDockWidget):
         # threads marshal onto the main thread.
         self._bridge = _QtLogBridge(self)
         self._bridge.line.connect(self._append, Qt.ConnectionType.QueuedConnection)
-        self._handler = _QtLogHandler(self._bridge, level=logging.INFO)
+        self._handler: _QtLogHandler | None = _QtLogHandler(self._bridge, level=logging.INFO)
         self._handler.setFormatter(_PlainFormatter())
         self._handler._capa_owned = True  # type: ignore[attr-defined]
         logging.getLogger().addHandler(self._handler)
@@ -193,6 +192,8 @@ class LogDock(QDockWidget):
 
     def _on_level_changed(self, label: str) -> None:
         level = dict(_LEVEL_CHOICES).get(label, logging.INFO)
+        if self._handler is None:
+            return
         self._handler.setLevel(level)
         # Root level must be permissive enough to deliver the chosen
         # level to our handler — other capa handlers manage their own
@@ -207,11 +208,11 @@ class LogDock(QDockWidget):
 
     # ------------------------------------------------------------------ teardown
 
-    def closeEvent(self, event: object) -> None:  # type: ignore[override]
+    def closeEvent(self, event: QCloseEvent) -> None:
         self._detach_handler()
-        super().closeEvent(event)  # type: ignore[arg-type]
+        super().closeEvent(event)
 
-    def deleteLater(self) -> None:  # type: ignore[override]
+    def deleteLater(self) -> None:
         self._detach_handler()
         super().deleteLater()
 
@@ -224,7 +225,7 @@ class LogDock(QDockWidget):
             handler.close()
         except Exception:
             pass
-        self._handler = None  # type: ignore[assignment]
+        self._handler = None
 
 
 __all__ = ["LogDock"]

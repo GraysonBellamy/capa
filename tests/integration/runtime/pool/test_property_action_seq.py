@@ -10,7 +10,7 @@ Plan §5 calls for a Hypothesis state-machine test that randomly mixes
 
 This file delivers that property check using stdlib ``random`` with
 seeded fuzzing (the rest of the project doesn't depend on Hypothesis;
-adding a dev-only dep mid-phase is out of scope here). A future
+adding a dev-only dep mid-project is out of scope here). A future
 contributor can migrate this to ``hypothesis.stateful.RuleBasedStateMachine``
 without changing the assertions — the action grammar below is
 intentionally Hypothesis-shaped.

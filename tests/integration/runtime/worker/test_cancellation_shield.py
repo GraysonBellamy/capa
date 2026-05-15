@@ -16,9 +16,8 @@ These tests cover:
    integrates the shield correctly against each real sim adapter type
    (the migration doc §10.2 list: Watlow, Alicat, Sartorius, NI-DAQ).
 
-The doc's intent is one test per *real* adapter (§10.2 names them by
-production name). Phase 1 stages the equivalent against the sim adapters;
-Phase 5 re-runs the same tests against real hardware (plan §1 boundary).
+These tests stage the equivalent against the sim adapters; corresponding
+hardware tests run the same assertions against real hardware.
 """
 
 from __future__ import annotations
@@ -71,7 +70,7 @@ class TestShieldMechanism:
             adapters=[adapter],
             runner=ThreadedRunner(name="shield-cancel"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             cmd = fake_command(kind="slow_set")
             dispatch_fut = worker.dispatch("a", cmd)
@@ -93,7 +92,7 @@ class TestShieldMechanism:
             assert worker.metrics.commands_total == 1
             assert worker.metrics.commands_failed == 0
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_subsequent_dispatch_reads_clean_state(self) -> None:
@@ -106,7 +105,7 @@ class TestShieldMechanism:
             adapters=[adapter],
             runner=ThreadedRunner(name="shield-clean"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             # First command: caller cancels.
             cmd1 = fake_command(kind="first")
@@ -128,7 +127,7 @@ class TestShieldMechanism:
                 "second",
             ]
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_metrics_record_completion_not_cancellation(self) -> None:
@@ -141,7 +140,7 @@ class TestShieldMechanism:
             adapters=[adapter],
             runner=ThreadedRunner(name="shield-metrics"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             fut = worker.dispatch("a", fake_command())
             await asyncio.sleep(0.02)
@@ -151,7 +150,7 @@ class TestShieldMechanism:
             assert worker.metrics.commands_failed == 0
             assert worker.metrics.commands_inflight == 0
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +229,7 @@ async def _run_shield_against_sim(
         adapters=[proxy],  # type: ignore[list-item]
         runner=ThreadedRunner(name=f"shield-{sim_name}"),
     )
-    await _wait(worker.start())
+    await worker.async_start()
     try:
         # First: caller cancels mid-flight.
         fut1 = worker.dispatch(sim_name, auth_cmd)
@@ -247,7 +246,7 @@ async def _run_shield_against_sim(
         assert result.accepted is True
         assert worker.metrics.commands_total == 2
     finally:
-        await _wait(worker.close(grace_s=1.0))
+        await worker.async_close(grace_s=1.0)
 
 
 class TestPerSimShield:

@@ -3,9 +3,9 @@
 Plan §5.4.1: domain profiles are optional schema/preflight bundles layered on
 top of the generic engine. Each profile declares the metadata it requires,
 the channel groups that must be present, and a list of preflight checks to
-run before arming a run. P0a ships the Protocol + the cone-calorimeter
-implementation; the executor that *runs* the preflight checks lands in P3
-alongside ``Procedure.preflight``.
+run before arming a run. Ships the Protocol + the cone-calorimeter
+implementation; the executor runs the preflight checks alongside
+``Procedure.preflight``.
 """
 
 from __future__ import annotations
@@ -36,9 +36,8 @@ class ChannelRequirement(BaseModel):
 class PreflightCheck(BaseModel):
     """Declarative preflight check.
 
-    The check ``id`` is resolved by the profile's runtime (P3) to a concrete
-    callable. P0a stores the schema only; the registry of checks lands with
-    the executor.
+    The check ``id`` is resolved by the profile's runtime to a concrete
+    callable. The registry of checks is managed by the executor.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

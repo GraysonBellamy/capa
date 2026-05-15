@@ -1,20 +1,14 @@
 """State enums and legal-edge tables for :class:`Worker` and :class:`WorkerPool`.
 
-The per-resource-worker migration (``docs/per-resource-worker-migration.md``)
-specifies three nested lifetimes (§3.2) and exact state machines for each
-component. This module centralizes the enums and the *only* legal-edge tables
-so every state-mutating call site checks against the same source of truth.
+Three nested lifetimes share precise state machines. This module
+centralizes the enums and the *only* legal-edge tables so every
+state-mutating call site checks against the same source of truth.
 
 Why a single edge table instead of pairwise ``if state == X`` branches in
-:class:`Worker`: the migration doc explicitly lists "topology invariant #9 —
-worker state transitions are atomic per worker and verified" (§3.11 line 524).
-A single table makes the test that enumerates every legal/illegal edge a
-one-liner; without it, the same correctness has to be reasserted at every
-caller of :meth:`Worker._transition`.
-
-Phase 1 scope: enums + edge tables only. :class:`Worker` (this same phase)
-performs the transitions; :class:`Conductor` (Phase 2) walks the pool through
-its own enum.
+:class:`Worker`: worker state transitions are atomic per worker and
+verified. A single table makes the test that enumerates every
+legal/illegal edge a one-liner; without it, the same correctness has to
+be reasserted at every caller of :meth:`Worker._transition`.
 """
 
 from __future__ import annotations
@@ -26,8 +20,7 @@ from typing import Final
 class WorkerState(Enum):
     """State of one :class:`~capa.runtime.worker.Worker`.
 
-    Migration doc §3.3 lines 218-258. Edges live in
-    :data:`LEGAL_WORKER_EDGES`.
+    Edges live in :data:`LEGAL_WORKER_EDGES`.
     """
 
     CLOSED = "closed"
@@ -55,15 +48,15 @@ class WorkerState(Enum):
     """``adapter.stop()`` in flight; outbound bridge drains and closes.
     :meth:`Worker.dispatch` is REFUSED. Drain is bounded by the disarm
     ``grace_s``; on grace expiry the worker is hard-stopped and the run is
-    marked degraded (migration doc §3.8 Phase B)."""
+    marked degraded."""
 
 
 class PoolState(Enum):
     """State of one :class:`~capa.runtime.pool.WorkerPool`.
 
-    Migration doc §4.3 line 821. The pool's state is independent of any
-    individual worker's state — pool transitions cover only construction and
-    teardown of the worker set as a whole.
+    The pool's state is independent of any individual worker's state —
+    pool transitions cover only construction and teardown of the worker
+    set as a whole.
     """
 
     CLOSED = "closed"
@@ -99,7 +92,7 @@ LEGAL_WORKER_EDGES: Final[frozenset[tuple[WorkerState, WorkerState]]] = frozense
 )
 """The seven edges the worker state machine permits.
 
-Edge intent (one per row, in migration doc §3.3 order):
+Edge intent (one per row):
 
 * ``CLOSED → IDLE`` — :meth:`Worker.start`. Thread spawned, adapters opened.
 * ``IDLE → ARMED`` — :meth:`Worker.arm`. Per-run context installed.

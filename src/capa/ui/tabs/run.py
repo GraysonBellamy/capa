@@ -1,12 +1,12 @@
 """Run tab — the instrument-console view.
 
-Plan §10.1. Header with state badge + Start / Abort controls; live
-PyQtGraph plot panes filling the body. Numerics live in a dock managed by
+Header with state badge + Start / Abort controls; live PyQtGraph plot
+panes filling the body. Numerics live in a dock managed by
 :class:`MainWindow`, not here.
 
-P1 collapses Arm/Start into a single Start button — preflight runs inside
-:meth:`Conductor.start` (PREPARING state) and any failure is surfaced
-as the run's :class:`RunUiResult`.
+Arm/Start is collapsed into a single Start button — preflight runs
+inside :meth:`Conductor.start` (PREPARING state) and any failure is
+surfaced as the run's :class:`RunUiResult`.
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ class RunTab(QWidget):
         h.addWidget(self._start_btn)
 
         # Abort = QToolButton with a popup so Safe-Shutdown vs Emergency are
-        # one click apart, matching plan §9 / §13.2.
+        # one click apart.
         self._abort_btn = QToolButton(header)
         self._abort_btn.setText("Abort ▾")
         self._abort_btn.setMinimumSize(QSize(110, 36))
@@ -157,7 +157,7 @@ class RunTab(QWidget):
         abort_menu.addAction(emergency_action)
         self._abort_btn.setMenu(abort_menu)
         # Default action (clicking the body of the button) = Safe Shutdown,
-        # the lower-blast-radius option per plan §9.
+        # the lower-blast-radius option.
         self._abort_btn.setDefaultAction(safe_action)
         self._abort_btn.setEnabled(False)
         h.addWidget(self._abort_btn)

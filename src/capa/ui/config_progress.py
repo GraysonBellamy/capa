@@ -149,8 +149,7 @@ class HardwareInitDialog(QDialog):
 
         config_name = progress.path.name if progress.path is not None else "config"
         self._message.setText(
-            f"Loading {config_name} and connecting devices. "
-            "Controls unlock when hardware is ready."
+            f"Loading {config_name} and connecting devices. Controls unlock when hardware is ready."
         )
 
         phase_text = _PHASE_TEXT.get(progress.phase, progress.phase.value)

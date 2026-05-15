@@ -1,6 +1,6 @@
 """:class:`SaturationMonitor` — end-to-end durable-output deadline.
 
-Migration doc §4.5. Per-channel backpressure policies catch individual
+Per-channel backpressure policies catch individual
 queues filling up, but they don't catch the macro condition that matters
 most for hardware safety: *the durable side has stopped accepting work*.
 A wedged writer thread or a writer-side `fsync` stall makes every worker

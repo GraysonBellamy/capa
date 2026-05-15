@@ -1,6 +1,6 @@
 """Per-camera frame-index sink.
 
-Plan §12.3 / §12.5 / P4 Stage C. One sink instance per camera; writes
+Plan §12.3 / §12.5. One sink instance per camera; writes
 ``video/<camera_name>.frames.in-flight.arrows`` (Arrow IPC stream — see
 ``arrow-ipc-streaming-plan.md``) while the run is active. The finalize stage
 rewrites it to ``video/<camera_name>.frames.parquet`` with the same

@@ -1,9 +1,9 @@
 """:class:`WorkerPool` — config-lifetime container for :class:`Worker`\\ s.
 
-Migration doc §4.3 lines 721-820 and the topology diagram in §3.1. The pool
-owns every worker the loaded config produces, opens hardware once per
-config, lives across runs, and exposes manual dispatch when no run is
-armed (subsuming today's :class:`~capa.devices.registry.DeviceRegistry`).
+The pool owns every worker the loaded config produces, opens hardware
+once per config, lives across runs, and exposes manual dispatch when no
+run is armed (subsuming today's
+:class:`~capa.devices.registry.DeviceRegistry`).
 
 State machine: ``CLOSED → OPENING → OPEN → CLOSING → CLOSED``
 (edges enumerated in :data:`~capa.runtime.lifecycle.LEGAL_POOL_EDGES`).
@@ -11,31 +11,21 @@ Runs may arm/sample/disarm any number of times while the pool stays in
 :attr:`PoolState.OPEN`; the pool's state itself does not change during a
 run.
 
-Phase 1 scope:
+Surface:
 
 * ``open`` / ``close`` lifecycle with reverse-order rollback on partial
   open failure.
 * ``arm_all`` / ``begin_sampling_all`` / ``disarm_all`` — parallel
-  per-worker driving; the conductor (Phase 2) calls these.
+  per-worker driving; the conductor calls these.
 * ``dispatch`` / ``snapshot`` — synchronous facade for the manual-control
-  surface (PoolClient lands in Phase 2 as the async wrapper).
+  surface.
 * ``worker_for`` — device-name → worker lookup.
-
-What's deliberately deferred:
-
-* :class:`~capa.runtime.dispatch.PoolClient` (Phase 2). The pool exposes
-  sync ``dispatch`` for the conductor; the PoolClient is the same call
-  wrapped for the UI/CLI async surface.
-* Saturation monitor wiring (Phase 2). The pool reports per-worker
-  metrics; the conductor reads them.
-* Per-worker watchdog (Phase 2). The pool surfaces ``fatal_error``
-  per worker; the conductor decides what to do per ``on_failure``.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import Future
 from types import MappingProxyType
 from typing import Any
@@ -77,9 +67,9 @@ class WorkerPool:
     Lifetime: pool lives as long as the loaded config. Reloading the
     config tears down the old pool (every worker closes) and a new pool
     is constructed for the new config. Manual-control-between-runs is
-    the load-bearing property (migration doc §2.1 goal #3): one
-    :meth:`open` pays the adapter cold-open cost once; every subsequent
-    arm/disarm reuses the same opened hardware.
+    the load-bearing property: one :meth:`open` pays the adapter
+    cold-open cost once; every subsequent arm/disarm reuses the same
+    opened hardware.
     """
 
     def __init__(
@@ -273,13 +263,59 @@ class WorkerPool:
     # Config-lifetime methods
     # ------------------------------------------------------------------
 
+    async def _close_workers_parallel(
+        self, workers: Iterable[Worker], *, grace_s: float = 5.0
+    ) -> tuple[list[WorkerCloseResult], list[str]]:
+        """Close workers in parallel and collect results.
+
+        Returns (worker_results, pool_errors). Errors are captured as
+        strings rather than raised so all workers are given the chance
+        to release hardware. Caller is responsible for logging details.
+        """
+        close_tasks: list[tuple[Worker, asyncio.Task[WorkerCloseResult]]] = [
+            (worker, asyncio.create_task(worker.async_close(grace_s=grace_s))) for worker in workers
+        ]
+        pool_errors: list[str] = []
+        if not close_tasks:
+            return [], []
+
+        await asyncio.gather(*(t for _, t in close_tasks), return_exceptions=True)
+
+        worker_results: list[WorkerCloseResult] = []
+        for worker, task in close_tasks:
+            exc = task.exception()
+            if exc is not None:
+                pool_errors.append(f"worker {worker.resource_id!r} close crashed: {exc!r}")
+                _logger.warning(
+                    "pool.close_worker_failed",
+                    resource_id=worker.resource_id,
+                    error=str(exc),
+                )
+                continue
+            result = task.result()
+            worker_results.append(result)
+            if result.adapter_close_errors or result.adapter_stop_errors:
+                _logger.warning(
+                    "pool.close_worker_degraded",
+                    resource_id=worker.resource_id,
+                    adapter_stop_errors=result.adapter_stop_errors,
+                    adapter_close_errors=result.adapter_close_errors,
+                )
+            if not result.runner_stop.joined:
+                _logger.warning(
+                    "pool.close_worker_runner_not_joined",
+                    resource_id=worker.resource_id,
+                    thread_ident=result.runner_stop.thread_ident,
+                )
+        return worker_results, pool_errors
+
     async def open(self, progress_callback: OpenProgressCallback | None = None) -> None:
         """Start every worker; on first failure, roll back in reverse order.
 
         Workers start in parallel — bus-collision avoidance is the
         ``resource_id`` grouping job, not a sequential warm-up
-        responsibility (migration doc §3.7 line 412). At 6 workers this
-        cuts pool-open from a ~2 s sequential warm-up to ~500 ms.
+        responsibility. At 6 workers this cuts pool-open from a ~2 s
+        sequential warm-up to ~500 ms.
 
         On any worker's start failure: every already-opened worker is
         closed in reverse order (LIFO of completion), then the original
@@ -288,14 +324,12 @@ class WorkerPool:
         async with self._state_lock:
             self._transition(PoolState.OPENING)
 
-            # Kick off every worker's start in parallel. We can't use
-            # asyncio.gather directly because the futures are
-            # concurrent.futures.Futures from the runner — wrap each.
-            start_tasks: list[tuple[Worker, asyncio.Future[None]]] = []
+            # Kick off every worker's start in parallel. Use async_start() so
+            # we don't need to wrap futures — we get native coroutines that
+            # can be gathered directly.
+            start_tasks: list[tuple[Worker, asyncio.Task[None]]] = []
             for worker in self._workers.values():
-                task = asyncio.ensure_future(
-                    asyncio.wrap_future(worker.start(progress_callback=progress_callback))
-                )
+                task = asyncio.create_task(worker.async_start(progress_callback=progress_callback))
                 start_tasks.append((worker, task))
 
             # Wait for ALL to complete (success or failure). We don't want
@@ -335,13 +369,13 @@ class WorkerPool:
             )
             self._transition(PoolState.CLOSING)
             for worker in reversed(opened):
-                # close() now returns a structured result rather than
+                # async_close() now returns a structured result rather than
                 # raising on adapter-level errors. Any unexpected
                 # exception (impl crash) gets swallowed here so the
                 # original open failure can propagate; degraded close
                 # outcomes are logged but never mask the open cause.
                 try:
-                    rollback_result = await asyncio.wrap_future(worker.close(grace_s=5.0))
+                    rollback_result = await worker.async_close(grace_s=5.0)
                 except Exception as rollback_exc:
                     _logger.warning(
                         "pool.open_rollback_close_crashed",
@@ -387,10 +421,9 @@ class WorkerPool:
     async def close(self) -> PoolCloseResult:
         """Close every worker. Refuses if any worker is not IDLE.
 
-        Migration doc §4.3 lines 759-775: pool close is the
-        config-boundary teardown. Any active run must be disarmed first
-        (the conductor's :meth:`Conductor.stop` is what does this in
-        Phase 2; in Phase 1 the test driver does it).
+        Pool close is the config-boundary teardown. Any active run must
+        be disarmed first — the conductor's :meth:`Conductor.stop` is
+        what does this in production; tests drive it directly.
 
         Close is idempotent — calling on an already-CLOSED pool returns
         a clean empty result rather than erroring.
@@ -421,44 +454,9 @@ class WorkerPool:
                 )
 
             self._transition(PoolState.CLOSING)
-            # Close in parallel; each worker is independent. Adapter-level
-            # failures are now captured by the worker itself and surfaced
-            # in the WorkerCloseResult — close no longer raises on adapter
-            # errors. A bare exception out of the close task is unexpected
-            # and is captured as a pool-level error.
-            close_tasks: list[tuple[Worker, asyncio.Future[WorkerCloseResult]]] = [
-                (worker, asyncio.ensure_future(asyncio.wrap_future(worker.close(grace_s=5.0))))
-                for worker in self._workers.values()
-            ]
-            await asyncio.gather(*(t for _, t in close_tasks), return_exceptions=True)
-
-            worker_results: list[WorkerCloseResult] = []
-            pool_errors: list[str] = []
-            for worker, task in close_tasks:
-                exc = task.exception()
-                if exc is not None:
-                    pool_errors.append(f"worker {worker.resource_id!r} close crashed: {exc!r}")
-                    _logger.warning(
-                        "pool.close_worker_failed",
-                        resource_id=worker.resource_id,
-                        error=str(exc),
-                    )
-                    continue
-                result = task.result()
-                worker_results.append(result)
-                if result.adapter_close_errors or result.adapter_stop_errors:
-                    _logger.warning(
-                        "pool.close_worker_degraded",
-                        resource_id=worker.resource_id,
-                        adapter_stop_errors=result.adapter_stop_errors,
-                        adapter_close_errors=result.adapter_close_errors,
-                    )
-                if not result.runner_stop.joined:
-                    _logger.warning(
-                        "pool.close_worker_runner_not_joined",
-                        resource_id=worker.resource_id,
-                        thread_ident=result.runner_stop.thread_ident,
-                    )
+            worker_results, pool_errors = await self._close_workers_parallel(
+                self._workers.values(), grace_s=5.0
+            )
 
             # Close preview bridges after every worker has closed so no
             # producer attempts to write to a closed bridge. The
@@ -510,16 +508,13 @@ class WorkerPool:
             pool_errors: list[str] = []
 
             # Step 1: disarm any non-IDLE workers, in parallel. Workers
-            # that are already IDLE skip this step (worker.disarm() would
-            # WorkerStateError them). Failures are recorded as pool
-            # errors but never short-circuit — we still want to close
-            # every adapter we can.
+            # that are already IDLE skip this step (worker.async_disarm() would
+            # raise). Failures are recorded as pool errors but never
+            # short-circuit — we still want to close every adapter we can.
             disarm_tasks: dict[str, asyncio.Task[DisarmResult]] = {}
             for rid, worker in self._workers.items():
                 if worker.state in (WorkerState.ARMED, WorkerState.SAMPLING):
-                    disarm_tasks[rid] = asyncio.ensure_future(
-                        asyncio.wrap_future(worker.disarm(grace_s=grace_s))
-                    )
+                    disarm_tasks[rid] = asyncio.create_task(worker.async_disarm(grace_s=grace_s))
             if disarm_tasks:
                 await asyncio.gather(*disarm_tasks.values(), return_exceptions=True)
                 for rid, task in disarm_tasks.items():
@@ -550,58 +545,17 @@ class WorkerPool:
 
             self._transition(PoolState.CLOSING)
 
-            # Step 2: close every worker. Worker.close() will WorkerStateError
-            # synchronously inside its returned future if the worker is not
-            # IDLE — we capture that as a per-worker error and synthesize a
-            # degraded WorkerCloseResult so the aggregate still names every
-            # worker.
-            close_results: list[WorkerCloseResult] = []
-            close_tasks: list[tuple[Worker, asyncio.Future[WorkerCloseResult]]] = []
+            # Step 2: close every worker. Only close IDLE workers; non-IDLE
+            # workers are recorded as errors.
+            idle_workers = [w for w in self._workers.values() if w.state is WorkerState.IDLE]
             for worker in self._workers.values():
-                if worker.state is WorkerState.IDLE:
-                    close_tasks.append(
-                        (
-                            worker,
-                            asyncio.ensure_future(
-                                asyncio.wrap_future(worker.close(grace_s=grace_s))
-                            ),
-                        )
-                    )
-                else:
-                    # Worker is still non-IDLE — close() refuses. Record a
-                    # synthetic degraded result so the coordinator's payload
-                    # names every resource.
+                if worker.state is not WorkerState.IDLE:
                     pool_errors.append(f"worker {worker.resource_id!r} non-IDLE; close skipped")
 
-            if close_tasks:
-                await asyncio.gather(*(t for _, t in close_tasks), return_exceptions=True)
-                for close_worker, close_task in close_tasks:
-                    close_exc = close_task.exception()
-                    if close_exc is not None:
-                        pool_errors.append(
-                            f"worker {close_worker.resource_id!r} close crashed: {close_exc!r}"
-                        )
-                        _logger.warning(
-                            "pool.shutdown_close_worker_failed",
-                            resource_id=close_worker.resource_id,
-                            error=str(close_exc),
-                        )
-                        continue
-                    close_result = close_task.result()
-                    close_results.append(close_result)
-                    if close_result.adapter_close_errors or close_result.adapter_stop_errors:
-                        _logger.warning(
-                            "pool.shutdown_close_worker_degraded",
-                            resource_id=close_worker.resource_id,
-                            adapter_stop_errors=close_result.adapter_stop_errors,
-                            adapter_close_errors=close_result.adapter_close_errors,
-                        )
-                    if not close_result.runner_stop.joined:
-                        _logger.warning(
-                            "shutdown.worker_not_joined",
-                            resource_id=close_worker.resource_id,
-                            thread_ident=close_result.runner_stop.thread_ident,
-                        )
+            close_results, close_errors = await self._close_workers_parallel(
+                idle_workers, grace_s=grace_s
+            )
+            pool_errors.extend(close_errors)
 
             self.close_preview_bridges()
             self._transition(PoolState.CLOSED)
@@ -622,7 +576,7 @@ class WorkerPool:
             )
 
     # ------------------------------------------------------------------
-    # Run-lifecycle methods (called by the Conductor in Phase 2)
+    # Run-lifecycle methods (called by the Conductor)
     # ------------------------------------------------------------------
 
     async def arm_all(self, run_context: RunContext) -> None:
@@ -630,12 +584,11 @@ class WorkerPool:
 
         Parallel. On any failure, in-flight arms are awaited but the
         pool does not undo successful arms — that's the conductor's job
-        via :meth:`disarm_all`. Migration doc §3.7 lines 393-407.
+        via :meth:`disarm_all`.
         """
         self._require_open()
         tasks = [
-            asyncio.ensure_future(asyncio.wrap_future(worker.arm(run_context)))
-            for worker in self._workers.values()
+            asyncio.create_task(worker.async_arm(run_context)) for worker in self._workers.values()
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         first_exc: BaseException | None = None
@@ -657,19 +610,17 @@ class WorkerPool:
 
         Returns a dict keyed by ``resource_id``; the conductor's drain
         tasks iterate ``bridges.items()`` and spawn one drain coroutine
-        per bridge (migration doc §4.5 line 1054).
+        per bridge.
 
         ``consumer_loop`` is the loop that will drain the bridges — the
-        conductor's loop in Phase 2 production wiring; the test's loop
-        in Phase 1 integration tests.
+        conductor's loop in production; the test's loop in integration
+        tests.
         """
         self._require_open()
         tasks = [
             (
                 rid,
-                asyncio.ensure_future(
-                    asyncio.wrap_future(worker.begin_sampling(consumer_loop=consumer_loop))
-                ),
+                asyncio.create_task(worker.async_begin_sampling(consumer_loop=consumer_loop)),
             )
             for rid, worker in self._workers.items()
         ]
@@ -709,9 +660,7 @@ class WorkerPool:
         tasks: dict[str, asyncio.Task[DisarmResult]] = {}
         for rid, worker in self._workers.items():
             if worker.state in (WorkerState.ARMED, WorkerState.SAMPLING):
-                tasks[rid] = asyncio.ensure_future(
-                    asyncio.wrap_future(worker.disarm(grace_s=grace_s))
-                )
+                tasks[rid] = asyncio.create_task(worker.async_disarm(grace_s=grace_s))
         if not tasks:
             return {}
         await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -733,15 +682,14 @@ class WorkerPool:
         return results
 
     # ------------------------------------------------------------------
-    # Command-lifetime methods (PoolClient routes here in Phase 2)
+    # Command-lifetime methods (PoolClient routes here)
     # ------------------------------------------------------------------
 
     def dispatch(self, device: str, cmd: DeviceCommand) -> Future[CommandResult]:
         """Route a command to the worker hosting ``device``.
 
         Synchronous facade (returns a :class:`concurrent.futures.Future`)
-        — the PoolClient (Phase 2) async-wraps this. Used directly by
-        tests in Phase 1.
+        — the PoolClient async-wraps this. Used directly by tests.
 
         State-gating happens inside the worker (per worker's own state).
         Pool-level state is not checked here on purpose: a CLOSED pool

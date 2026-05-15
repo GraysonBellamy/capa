@@ -1,4 +1,4 @@
-"""Dockable panels — Numerics, Events, Diagnostics. Notes/Camera previews land in P3/P4."""
+"""Dockable panels — Numerics, Events, Diagnostics."""
 
 from __future__ import annotations
 

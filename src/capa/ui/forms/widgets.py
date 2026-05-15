@@ -22,8 +22,9 @@ import types
 import typing
 from collections.abc import Callable
 from datetime import datetime
+from enum import StrEnum as _StrEnum
 from pathlib import Path
-from typing import Any, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Any, cast, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -34,16 +35,23 @@ from PySide6.QtWidgets import (
     QDateTimeEdit,
     QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
+
+if TYPE_CHECKING:
+    from capa.ui.forms.from_model import ModelForm
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -79,6 +87,17 @@ def _is_optional(annotation: Any) -> tuple[bool, Any]:
     return False, annotation
 
 
+def _path_mode_from_field(field: FieldInfo) -> typing.Literal["file", "dir"]:
+    """Read ``Field(json_schema_extra={"capa_path_mode": "dir"})``.
+
+    The default is ``"file"``; only callers that explicitly opt into a
+    directory picker get one. Used by ``StoragePolicy.bundle_root``."""
+    extra = getattr(field, "json_schema_extra", None)
+    if isinstance(extra, dict) and extra.get("capa_path_mode") == "dir":
+        return "dir"
+    return "file"
+
+
 def _numeric_constraints(field: FieldInfo) -> dict[str, float]:
     """Pull ``Field(gt=, ge=, lt=, le=)`` numeric constraints into a
     dict the spinbox factories can apply directly. Strict ``gt`` / ``lt``
@@ -91,6 +110,263 @@ def _numeric_constraints(field: FieldInfo) -> dict[str, float]:
             if v is not None:
                 out[attr] = float(v)
     return out
+
+
+# Unit-suffix → decimal-place table for float spinboxes. Order matters:
+# longer suffixes must come first so ``_mm`` doesn't lose to ``_m``.
+# Reasoning per group: a heat flux of 12.3 kW/m² doesn't need .000123; a
+# sample mass of 1.2345 g does (sub-mg matters). When in doubt the
+# default below is 3 — fine for most operator-facing values, easy to
+# override per-field via ``Field(json_schema_extra={"capa_decimals": N})``.
+_DECIMALS_BY_SUFFIX: tuple[tuple[str, int], ...] = (
+    # Time
+    ("_ns", 0),
+    ("_us", 0),
+    ("_ms", 1),
+    ("_seconds", 2),
+    ("_minutes", 2),
+    ("_hours", 2),
+    ("_s", 2),
+    # Frequency
+    ("_khz", 2),
+    ("_hz", 1),
+    # Length
+    ("_nm", 1),
+    ("_um", 1),
+    ("_mm", 2),
+    ("_cm", 2),
+    ("_inches", 3),
+    ("_in", 3),
+    ("_meters", 4),
+    # Area
+    ("_mm2", 2),
+    ("_cm2", 2),
+    ("_m2", 3),
+    # Mass
+    ("_mg", 3),
+    ("_kg", 4),
+    ("_g", 4),
+    # Flow
+    ("_sccm", 2),
+    ("_slpm", 2),
+    ("_slm", 2),
+    ("_lpm", 2),
+    ("_mlpm", 2),
+    # Temperature
+    ("_celsius", 1),
+    ("_kelvin", 1),
+    ("_fahrenheit", 1),
+    ("_degc", 1),
+    ("_degf", 1),
+    ("_c", 1),
+    ("_f", 1),
+    ("_k", 1),
+    # Pressure
+    ("_pascal", 1),
+    ("_pascals", 1),
+    ("_kpa", 2),
+    ("_mpa", 3),
+    ("_bar", 3),
+    ("_psi", 2),
+    ("_torr", 2),
+    ("_mbar", 2),
+    ("_atm", 3),
+    ("_pa", 1),
+    # Heat flux / power
+    ("_kw_m2", 1),
+    ("_kw_per_m2", 1),
+    ("_w_m2", 1),
+    ("_w_per_m2", 1),
+    ("_kw", 2),
+    ("_mw", 1),
+    ("_w", 1),
+    # Energy
+    ("_kj", 2),
+    ("_mj", 3),
+    ("_j", 2),
+    # Electrical
+    ("_mv", 2),
+    ("_volts", 4),
+    ("_v", 4),
+    ("_ma", 2),
+    ("_amperes", 4),
+    ("_amps", 4),
+    ("_a", 4),
+    ("_ohms", 2),
+    ("_ohm", 2),
+    # Ratios / dimensionless
+    ("_percent", 1),
+    ("_pct", 1),
+    ("_fraction", 4),
+    ("_frac", 4),
+    ("_ratio", 4),
+)
+
+
+def _decimals_for_field(field_name: str | None, field: FieldInfo) -> int:
+    """Pick a decimal count for a ``QDoubleSpinBox``.
+
+    Priority:
+
+    1. Explicit ``Field(json_schema_extra={"capa_decimals": N})``.
+    2. Suffix lookup against :data:`_DECIMALS_BY_SUFFIX`. A trailing
+       ``_per_min`` / ``_per_s`` is treated as a rate and stripped before
+       the suffix match so ``ramp_rate_c_per_min`` reads as a per-minute
+       temperature rate (2 decimals on the °C side).
+    3. Default ``3`` — tighter than the operator-frustrating ``6`` and
+       loose enough that nobody-cares fields read cleanly.
+
+    A non-recognised field can opt back into more precision via the
+    explicit override.
+    """
+    extra = getattr(field, "json_schema_extra", None)
+    if isinstance(extra, dict):
+        override = extra.get("capa_decimals")
+        if isinstance(override, int) and 0 <= override <= 12:
+            return override
+    if field_name:
+        lowered = field_name.lower()
+        # Rate-per-time fields like ``ramp_rate_c_per_min`` —— strip
+        # the ``_per_<unit>`` tail before suffix matching so the base
+        # unit (``_c``) drives precision rather than ``_min``.
+        for tail in ("_per_min", "_per_minute", "_per_s", "_per_sec", "_per_second", "_per_hour"):
+            if lowered.endswith(tail):
+                lowered = lowered[: -len(tail)]
+                break
+        for suffix, decimals in _DECIMALS_BY_SUFFIX:
+            if lowered.endswith(suffix):
+                return decimals
+    return 3
+
+
+# ---------------------------------------------------------------------------
+# CollapsibleGroup — disclosure widget for grouping rare fields under a
+# header that defaults to closed. Used by ``ModelForm`` to render every
+# field group declared via ``Field(json_schema_extra={"capa_group": ...})``;
+# also usable directly by section widgets that need ad-hoc disclosure
+# outside the auto-form path.
+# ---------------------------------------------------------------------------
+
+
+class CollapsibleGroup(QWidget):
+    """A header-button + content-area pair with toggleable visibility.
+
+    The header is a :class:`QToolButton` styled flat with a chevron that
+    flips between right (closed) and down (open). An optional subtitle
+    renders to the right of the title in muted text, useful for hinting
+    at what lives inside without forcing the operator to expand. The
+    content area is a plain :class:`QWidget`; callers add to it via
+    :meth:`add_row` (label + widget, ``QFormLayout`` semantics) or
+    :meth:`add_widget` (full-width widget).
+
+    Open/closed state is held on the instance; :meth:`set_open` is
+    idempotent and emits :attr:`toggled` only on transitions. Visibility
+    is toggled with ``setVisible`` — no animation, deliberate. Animation
+    flickers with QSS, slows reveal of validation errors, and adds no
+    information.
+    """
+
+    toggled = Signal(bool)
+    """Emitted with the new open state on every transition."""
+
+    def __init__(
+        self,
+        title: str,
+        *,
+        subtitle: str | None = None,
+        default_open: bool = False,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._title = title
+        self._is_open = bool(default_open)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 4, 0, 4)
+        outer.setSpacing(4)
+
+        # Header row: chevron + title (+ optional muted subtitle).
+        header_row = QWidget(self)
+        header_layout = QHBoxLayout(header_row)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(4)
+
+        self._button = QToolButton(header_row)
+        self._button.setText(title)
+        self._button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._button.setArrowType(
+            Qt.ArrowType.DownArrow if self._is_open else Qt.ArrowType.RightArrow
+        )
+        self._button.setAutoRaise(True)
+        self._button.setCheckable(True)
+        self._button.setChecked(self._is_open)
+        self._button.setStyleSheet("QToolButton { font-weight: 600; }")
+        self._button.clicked.connect(self._on_button_clicked)
+        header_layout.addWidget(self._button)
+
+        if subtitle:
+            self._subtitle_label: QLabel | None = QLabel(subtitle, header_row)
+            self._subtitle_label.setStyleSheet("color: #777;")
+            header_layout.addWidget(self._subtitle_label, 1)
+        else:
+            self._subtitle_label = None
+            header_layout.addStretch(1)
+
+        outer.addWidget(header_row)
+
+        # Content area: hosts a QFormLayout so ``add_row`` mirrors the
+        # parent form's row shape. Callers that need a free-form layout
+        # use :meth:`add_widget`, which appends below the form rows.
+        self._content = QFrame(self)
+        self._content.setFrameShape(QFrame.Shape.NoFrame)
+        # Indent the content slightly so the disclosure hierarchy reads.
+        content_layout = QVBoxLayout(self._content)
+        content_layout.setContentsMargins(16, 0, 0, 0)
+        content_layout.setSpacing(4)
+
+        self._form_layout = QFormLayout()
+        self._form_layout.setContentsMargins(0, 0, 0, 0)
+        self._form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        content_layout.addLayout(self._form_layout)
+
+        outer.addWidget(self._content)
+        self._content.setVisible(self._is_open)
+
+    # ------------------------------------------------------------------ API
+
+    def is_open(self) -> bool:
+        return self._is_open
+
+    def set_open(self, open_: bool) -> None:
+        open_ = bool(open_)
+        if open_ == self._is_open:
+            return
+        self._is_open = open_
+        self._button.setChecked(open_)
+        self._button.setArrowType(Qt.ArrowType.DownArrow if open_ else Qt.ArrowType.RightArrow)
+        self._content.setVisible(open_)
+        self.toggled.emit(open_)
+
+    def add_row(self, label: str | QWidget, widget: QWidget) -> None:
+        """Mirror ``QFormLayout.addRow`` for the group's content area."""
+        if isinstance(label, str):
+            self._form_layout.addRow(QLabel(label, self._content), widget)
+        else:
+            self._form_layout.addRow(label, widget)
+
+    def add_widget(self, widget: QWidget) -> None:
+        """Append a full-width widget below the group's form rows."""
+        layout = self._content.layout()
+        if layout is not None:
+            layout.addWidget(widget)
+
+    # ---------------------------------------------------------------- slots
+
+    def _on_button_clicked(self) -> None:
+        # ``QToolButton.toggled`` would race with our own state; drive
+        # everything through ``set_open`` so the chevron, content
+        # visibility, and the toggled signal stay in lockstep.
+        self.set_open(not self._is_open)
 
 
 # ---------------------------------------------------------------------------
@@ -182,16 +458,16 @@ class _DoubleSpinBoxField(FieldWidget):
         self,
         *,
         constraints: dict[str, float],
+        decimals: int = 3,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._spin = QDoubleSpinBox(self)
-        # Default to 6 decimals — finer than any production value we'll
-        # see (heat flux kW/m², flow sccm, temperature °C). The strict-
-        # inequality nudge below uses 10**-decimals so it round-trips at
-        # the configured precision; smaller eps would silently round to
-        # the bound.
-        decimals = 6
+        # ``decimals`` is picked per-field by :func:`_decimals_for_field`
+        # so an acquisition rate doesn't masquerade as 2.000000 Hz. The
+        # strict-inequality eps tracks the configured precision so a
+        # ``gt=0`` field clamps to the smallest representable positive
+        # number rather than silently rounding to the bound.
         eps = 10.0**-decimals
         self._spin.setDecimals(decimals)
         self._spin.setRange(-1e12, 1e12)
@@ -289,8 +565,22 @@ class _DateTimeField(FieldWidget):
 
 
 class _PathField(FieldWidget):
-    def __init__(self, *, parent: QWidget | None = None) -> None:
+    """File or directory picker.
+
+    ``mode`` defaults to ``"file"``; set via
+    ``Field(json_schema_extra={"capa_path_mode": "dir"})`` to switch the
+    browse button to a directory picker. ``StoragePolicy.bundle_root`` is
+    the canonical caller of the directory mode.
+    """
+
+    def __init__(
+        self,
+        *,
+        mode: typing.Literal["file", "dir"] = "file",
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._mode = mode
         self._edit = QLineEdit(self)
         self._browse = QPushButton("Browse…", self)
         layout = QHBoxLayout(self)
@@ -308,9 +598,14 @@ class _PathField(FieldWidget):
             self._edit.setText(str(v) if v is not None else "")
 
     def _on_browse(self) -> None:
-        chosen, _ = QFileDialog.getOpenFileName(self, "Choose file", self._edit.text())
-        if chosen:
-            self._edit.setText(chosen)
+        if self._mode == "dir":
+            chosen = QFileDialog.getExistingDirectory(self, "Choose directory", self._edit.text())
+            if chosen:
+                self._edit.setText(chosen)
+        else:
+            chosen, _ = QFileDialog.getOpenFileName(self, "Choose file", self._edit.text())
+            if chosen:
+                self._edit.setText(chosen)
 
 
 class _OptionalField(FieldWidget):
@@ -430,7 +725,9 @@ class _DictStrFloatField(FieldWidget):
         row_layout.setContentsMargins(0, 0, 0, 0)
         key_edit = QLineEdit(key, row_widget)
         val_spin = QDoubleSpinBox(row_widget)
-        val_spin.setDecimals(6)
+        # Free-form dict — we don't know the unit, so 3 decimals is a
+        # cleaner compromise than the previous noisy 6.
+        val_spin.setDecimals(3)
         val_spin.setRange(-1e12, 1e12)
         val_spin.setValue(float(val))
         row_layout.addWidget(key_edit)
@@ -536,6 +833,213 @@ class _NestedModelField(FieldWidget):
         self._inner.set_values(v if v is not None else {})
 
 
+# ---------------------------------------------------------------------------
+# Discriminated union widget.
+# ---------------------------------------------------------------------------
+
+
+def _is_discriminated_union(annotation: Any, field: FieldInfo | None = None) -> bool:
+    """Detect a Pydantic discriminated tagged union.
+
+    Pydantic v2 strips the ``Annotated[..., Field(discriminator=...)]``
+    wrapper when it builds :class:`FieldInfo`: the annotation becomes a
+    plain ``X | Y | …`` union and the discriminator name lands on
+    ``FieldInfo.discriminator``. We accept either shape so the helper
+    can be called both from the dispatcher (with the field handy) and
+    from tests on a bare ``Annotated[…]`` symbol.
+    """
+    # Path 1: FieldInfo has the discriminator (Pydantic-stripped form).
+    if field is not None and getattr(field, "discriminator", None):
+        ann = annotation
+        if get_origin(ann) is typing.Annotated:
+            ann = get_args(ann)[0]
+        if get_origin(ann) in (typing.Union, types.UnionType):
+            return True
+    # Path 2: raw Annotated[…, FieldInfo(discriminator=…)] (test idiom).
+    if get_origin(annotation) is typing.Annotated:
+        for meta in getattr(annotation, "__metadata__", ()):
+            if getattr(meta, "discriminator", None) is not None:
+                return True
+    return False
+
+
+def _extract_union_variants(annotation: Any) -> tuple[type[BaseModel], ...]:
+    """Pull the union members from either ``Annotated[X | Y, …]`` or ``X | Y``."""
+    if get_origin(annotation) is typing.Annotated:
+        annotation = get_args(annotation)[0]
+    args = get_args(annotation)
+    return tuple(a for a in args if isinstance(a, type) and issubclass(a, BaseModel))
+
+
+def _get_discriminator_name(annotation: Any, field: FieldInfo | None = None) -> str:
+    """Return the field name the union dispatches on (``"kind"``, ``"source"``)."""
+    if field is not None:
+        disc = getattr(field, "discriminator", None)
+        if disc:
+            return str(disc)
+    if get_origin(annotation) is typing.Annotated:
+        for meta in getattr(annotation, "__metadata__", ()):
+            disc = getattr(meta, "discriminator", None)
+            if disc is not None:
+                return str(disc)
+    return "type"  # pragma: no cover - defensive
+
+
+def _variant_discriminator_value(variant: type[BaseModel], discriminator: str) -> str:
+    """Read the Literal default for a variant's discriminator field.
+
+    Each tagged-union variant declares
+    ``discriminator: Literal["foo"] = "foo"`` — we read that default so
+    the combobox can label and route by the canonical string value.
+    """
+    field_info = variant.model_fields.get(discriminator)
+    if field_info is None:
+        return variant.__name__
+    default = field_info.default
+    if default is None or default is ...:
+        # Fall back to the Literal annotation if no default was provided.
+        ann = field_info.annotation
+        ann_args = get_args(ann)
+        if ann_args:
+            return str(ann_args[0])
+        return variant.__name__
+    return str(default)
+
+
+class _DiscriminatedUnionField(FieldWidget):
+    """Combobox-driven editor for ``Annotated[A | B | ..., discriminator=…]``.
+
+    Replaces the JSON-fallback widget for tagged unions like
+    :data:`capa.channels.spec.SourceBinding` and
+    :data:`capa.channels.calibration.Calibration`. Switching the combobox
+    rebuilds the variant subform, preserving values for field names that
+    exist in both variants (the operator's ``input_unit`` survives a
+    flip from Identity to LinearTwoPoint).
+    """
+
+    def __init__(
+        self,
+        *,
+        union: Any,
+        field: FieldInfo,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._union = union
+        self._field = field
+        self._variants = _extract_union_variants(union)
+        self._discriminator = _get_discriminator_name(union, field)
+        # discriminator value -> variant class, e.g. "identity" -> Identity.
+        self._variant_by_value: dict[str, type[BaseModel]] = {
+            _variant_discriminator_value(v, self._discriminator): v for v in self._variants
+        }
+        # Cross-variant buffer: field-name -> last-seen value across
+        # variant switches. Lets operators flip variant without losing
+        # the ``input_unit`` / ``output_unit`` / ``uncertainty`` they
+        # already typed.
+        self._buffer: dict[str, Any] = {}
+        self._current_form: ModelForm | None = None
+        self._current_variant: type[BaseModel] | None = None
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self._combo = QComboBox(self)
+        for value in self._variant_by_value:
+            self._combo.addItem(_humanize(value), userData=value)
+        outer.addWidget(self._combo)
+        self._subform_holder = QWidget(self)
+        self._subform_layout = QVBoxLayout(self._subform_holder)
+        self._subform_layout.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(self._subform_holder)
+
+        self._combo.currentIndexChanged.connect(self._on_variant_changed)
+        # Build the first subform.
+        self._rebuild_subform()
+
+    # -- internals ----------------------------------------------------------
+
+    def _selected_variant_value(self) -> str:
+        data = self._combo.currentData()
+        if isinstance(data, str):
+            return data
+        # Fallback for old-style addItem without userData.
+        return self._combo.currentText().lower().replace(" ", "_")
+
+    def _on_variant_changed(self) -> None:
+        # Capture current subform values into the cross-variant buffer
+        # before tearing it down.
+        if self._current_form is not None:
+            with contextlib.suppress(Exception):
+                current_values = self._current_form.values()
+                self._buffer.update(current_values)
+        self._rebuild_subform()
+        self.valueChanged.emit()
+
+    def _rebuild_subform(self) -> None:
+        """Tear down the existing subform; build a new one for the picked variant."""
+        # Late import — same cycle-break trick _NestedModelField uses.
+        from capa.ui.forms.from_model import build_form  # noqa: PLC0415
+
+        value = self._selected_variant_value()
+        variant = self._variant_by_value.get(value)
+        if variant is None:
+            return
+        # Clear existing subform.
+        if self._current_form is not None:
+            self._current_form.deleteLater()
+            self._current_form = None
+        self._current_variant = variant
+        # Build the new subform; hide the discriminator field within it
+        # so the operator only sees the combobox above.
+        new_form = build_form(variant, hidden_fields=frozenset({self._discriminator}))
+        # Replay buffered values for overlapping field names.
+        replay: dict[str, Any] = {}
+        for name in variant.model_fields:
+            if name == self._discriminator:
+                continue
+            if name in self._buffer:
+                replay[name] = self._buffer[name]
+        if replay:
+            with contextlib.suppress(Exception):
+                new_form.set_values(replay)
+        new_form.valuesChanged.connect(self.valueChanged)
+        self._subform_layout.addWidget(new_form)
+        self._current_form = new_form
+
+    # -- FieldWidget API ---------------------------------------------------
+
+    def value(self) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if self._current_form is not None:
+            out.update(self._current_form.values())
+        # Always emit the canonical discriminator value, even when the
+        # form chooses to hide it.
+        out[self._discriminator] = self._selected_variant_value()
+        return out
+
+    def set_value(self, v: Any) -> None:
+        if isinstance(v, BaseModel):
+            v = v.model_dump()
+        if not isinstance(v, dict):
+            return
+        target = v.get(self._discriminator)
+        if target is not None and target in self._variant_by_value:
+            with QSignalBlocker(self._combo):
+                # Find the index of the target variant value.
+                for i in range(self._combo.count()):
+                    if self._combo.itemData(i) == target:
+                        self._combo.setCurrentIndex(i)
+                        break
+            self._rebuild_subform()
+        # Populate the subform with the remaining fields.
+        if self._current_form is not None:
+            payload = {k: val for k, val in v.items() if k != self._discriminator}
+            with contextlib.suppress(Exception):
+                self._current_form.set_values(payload)
+            # Refresh the buffer so future variant flips see these values.
+            self._buffer.update(payload)
+
+
 class _ModelTupleField(FieldWidget):
     """``tuple[Model, ...]`` editor — fixed-shape rows of nested model forms.
 
@@ -550,7 +1054,7 @@ class _ModelTupleField(FieldWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        from capa.ui.forms.from_model import ModelForm, build_form  # noqa: PLC0415
+        from capa.ui.forms.from_model import build_form  # noqa: PLC0415
 
         self._model_cls = model_cls
         self._build_form: Callable[[], ModelForm] = lambda: build_form(model_cls)
@@ -606,15 +1110,18 @@ def build_field_widget(
     field: FieldInfo,
     *,
     parent: QWidget | None = None,
+    field_name: str | None = None,
 ) -> FieldWidget:
     """Pick a :class:`FieldWidget` subclass based on the annotation.
 
     Optional / union-with-None annotations are unwrapped first and
-    wrapped in :class:`_OptionalField`. The dispatcher is intentionally
-    flat — extending it means adding one more branch, not subclassing a
-    visitor."""
+    wrapped in :class:`_OptionalField`. ``field_name`` (passed by
+    :class:`ModelForm`) is used to infer per-field spinbox decimal
+    precision via :func:`_decimals_for_field`; callers that don't have
+    a name (e.g. ad-hoc widgets) may omit it.
+    """
     is_optional, inner_annotation = _is_optional(annotation)
-    widget = _build_inner(inner_annotation, field, parent=parent)
+    widget = _build_inner(inner_annotation, field, parent=parent, field_name=field_name)
     if is_optional:
         widget = _OptionalField(inner=widget, parent=parent)
     widget._description = field.description or ""
@@ -623,7 +1130,19 @@ def build_field_widget(
     return widget
 
 
-def _build_inner(annotation: Any, field: FieldInfo, *, parent: QWidget | None) -> FieldWidget:
+def _build_inner(
+    annotation: Any,
+    field: FieldInfo,
+    *,
+    parent: QWidget | None,
+    field_name: str | None = None,
+) -> FieldWidget:
+    # Discriminated unions take priority over generic origin/args probes:
+    # ``Annotated[A | B, Field(discriminator=...)]`` would otherwise fall
+    # through to the JSON fallback.
+    if _is_discriminated_union(annotation, field):
+        return _DiscriminatedUnionField(union=annotation, field=field, parent=parent)
+
     origin = get_origin(annotation)
     args = get_args(annotation)
 
@@ -639,11 +1158,27 @@ def _build_inner(annotation: Any, field: FieldInfo, *, parent: QWidget | None) -
     if annotation is int:
         return _SpinBoxField(constraints=_numeric_constraints(field), parent=parent)
     if annotation is float:
-        return _DoubleSpinBoxField(constraints=_numeric_constraints(field), parent=parent)
+        return _DoubleSpinBoxField(
+            constraints=_numeric_constraints(field),
+            decimals=_decimals_for_field(field_name, field),
+            parent=parent,
+        )
     if annotation is datetime:
         return _DateTimeField(parent=parent)
     if annotation is Path:
-        return _PathField(parent=parent)
+        mode = _path_mode_from_field(field)
+        return _PathField(mode=mode, parent=parent)
+
+    # StrEnum subclass → combobox over members. ``Literal`` already
+    # covers explicit choice tuples; this branch handles the cleaner
+    # ``class Mode(StrEnum): ...`` declaration the operator-facing
+    # config models prefer.
+    if (
+        isinstance(annotation, type)
+        and issubclass(annotation, str)
+        and issubclass(annotation, _StrEnum)
+    ):
+        return _ComboBoxField(choices=tuple(annotation), parent=parent)
 
     # Nested BaseModel.
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
@@ -674,6 +1209,12 @@ def _build_inner(annotation: Any, field: FieldInfo, *, parent: QWidget | None) -
 
 
 __all__ = [
+    "CollapsibleGroup",
     "FieldWidget",
     "build_field_widget",
 ]
+
+
+# Re-export the discriminated-union detector so tests and the form
+# generator can introspect it without importing the private helpers.
+_DiscriminatedUnion_detect = _is_discriminated_union

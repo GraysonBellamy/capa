@@ -107,12 +107,12 @@ class TestWorkerCameraMetadata:
             adapters=[adapter],  # type: ignore[list-item]
             runner=make_runner("md-cam"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             out = await _wait(worker.camera_metadata("cam0"))
             assert out is meta
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_returns_none_for_non_camera_adapter(
@@ -127,12 +127,12 @@ class TestWorkerCameraMetadata:
             adapters=[adapter],
             runner=make_runner("md-noncam"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             out = await _wait(worker.camera_metadata("heater"))
             assert out is None
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_returns_none_for_camera_without_snapshot(
@@ -147,12 +147,12 @@ class TestWorkerCameraMetadata:
             adapters=[adapter],  # type: ignore[list-item]
             runner=make_runner("md-ir"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             out = await _wait(worker.camera_metadata("ir_cam0"))
             assert out is None
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_unknown_adapter_raises(self, make_runner: Callable[[str], WorkerRunner]) -> None:
@@ -162,9 +162,9 @@ class TestWorkerCameraMetadata:
             adapters=[adapter],
             runner=make_runner("md-unknown"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             with pytest.raises(UnknownDeviceError):
                 await _wait(worker.camera_metadata("missing"))
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)

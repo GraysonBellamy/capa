@@ -1,28 +1,24 @@
 """:class:`RunContext` — the per-run state installed into every worker on arm.
 
-Migration doc §3.2 line 195 and §3.7 line 393. Each :class:`Conductor` builds
-one :class:`RunContext` at run start and passes the same instance to every
-worker via :meth:`Worker.arm`. The context is **immutable** after
-construction — workers read fields off it but never mutate.
+Each :class:`Conductor` builds one :class:`RunContext` at run start and
+passes the same instance to every worker via :meth:`Worker.arm`. The
+context is **immutable** after construction — workers read fields off it
+but never mutate.
 
 Why a frozen dataclass over passing four arguments to ``arm()``:
 
-1. The migration doc consistently refers to "the run context" as one object
-   (§3.7 line 395, §3.8 line 451). Code that mirrors the doc reads more
+1. "The run context" is a single conceptual object — bundling reads
    naturally.
-2. Phase 2's :class:`Conductor` will pass the same context to several
-   subsystems (workers, drain tasks, procedure runner, watchdog). Bundling
-   it now means no plumbing churn later.
-3. Tests construct a context once and re-use it across multiple arm/disarm
-   cycles in the same run, which mirrors how real runs work.
+2. The :class:`Conductor` passes the same context to several subsystems
+   (workers, drain tasks, procedure runner, watchdog). Bundling means
+   no plumbing churn when adding a new consumer.
+3. Tests construct a context once and re-use it across multiple
+   arm/disarm cycles in the same run, which mirrors how real runs work.
 
-Phase 1 scope:
-
-* The struct and the writer / bundle :class:`Protocol` types ship now.
-* Real :class:`WriterRef` / :class:`BundleRef` implementations land with
-  :class:`Conductor` in Phase 2.
-* Phase 1 tests use the in-package fakes from
-  ``tests/integration/runtime/fakes.py``.
+Tests use the in-package fakes from
+``tests/integration/runtime/fakes.py``; production wires real
+:class:`WriterRef` / :class:`BundleRef` implementations via
+:class:`Conductor`.
 """
 
 from __future__ import annotations
@@ -42,13 +38,13 @@ if TYPE_CHECKING:
 class WriterRef(Protocol):
     """Sync facade over the per-run writer thread.
 
-    The real :class:`Conductor` (Phase 2) supplies a wrapper that hands
-    emissions to :class:`~capa.storage.writer_thread.WriterThread`'s inbox.
-    Phase 1 tests supply a fake that records calls into a list.
+    The real :class:`Conductor` supplies a wrapper that hands emissions
+    to :class:`~capa.storage.writer_thread.WriterThread`'s inbox; tests
+    supply a fake that records calls into a list.
 
     Methods are async because the writer-thread inbox is bounded — the caller
     awaits when the inbox is full. That backpressure is the canonical
-    saturation trigger (migration doc §4.5).
+    saturation trigger.
     """
 
     async def submit(self, emission: DeviceEmission) -> None:
@@ -58,10 +54,9 @@ class WriterRef(Protocol):
     async def write_event(self, *, kind: str, message: str, metadata: dict[str, Any]) -> None:
         """Record a structured event into ``events.sqlite``.
 
-        Used by the worker to record adapter errors and hard-stop attempts
-        (migration doc §3.8 Phase B line 442). Severity defaults to the
-        ref's configured value (``"info"`` for workers); source attribution
-        is the ref's configured source.
+        Used by the worker to record adapter errors and hard-stop attempts.
+        Severity defaults to the ref's configured value (``"info"`` for
+        workers); source attribution is the ref's configured source.
         """
         ...
 
@@ -69,9 +64,8 @@ class WriterRef(Protocol):
         """Hand one :class:`FrameReceipt` to the frame-index sink.
 
         Used by the conductor's drain task when an emission is a frame
-        receipt (migration doc §6.1 / §6.3, camera unification). The
-        writer thread wraps it in a :class:`FrameItem` internally;
-        callers pass the receipt unwrapped.
+        receipt. The writer thread wraps it in a :class:`FrameItem`
+        internally; callers pass the receipt unwrapped.
         """
         ...
 
@@ -104,7 +98,7 @@ class BundleRef(Protocol):
 
     The worker doesn't directly write files — that's the writer thread's job
     — but it sometimes needs to know the bundle root (e.g. to emit a path
-    into an event). Phase 1 only carries this around; Phase 2 wires the real
+    into an event). Tests carry a stub; production wires the real
     :class:`~capa.storage.bundle.RunBundleWriter`'s root path through here.
     """
 
@@ -122,17 +116,15 @@ class BundleRef(Protocol):
 class RunContext:
     """The per-run state installed into workers via :meth:`Worker.arm`.
 
-    Migration doc §3.2 line 195 and the ARMED-state definition in §3.3.
-
     Frozen because every field is logically a constant for the run's
     duration; making mutation impossible at the type level removes a class
     of bug ("which thread last wrote the writer ref?").
 
-    The :class:`RunClock` is the single timestamp authority for the run
-    (migration doc §5.1 line 1361). Workers stamp ``t_bridge_put_ns`` against
-    this clock immediately before crossing the outbound bridge; the consumer
-    side reads ``time.monotonic_ns()`` and the difference is observed as
-    bridge latency (§14.6).
+    The :class:`RunClock` is the single timestamp authority for the run.
+    Workers stamp ``t_bridge_put_ns`` against this clock immediately
+    before crossing the outbound bridge; the consumer side reads
+    ``time.monotonic_ns()`` and the difference is observed as bridge
+    latency.
     """
 
     run_id: str
@@ -146,8 +138,8 @@ class RunContext:
 
     writer: WriterRef
     """Sync facade over the writer thread. Workers submit emissions and
-    record adapter-side events here. In Phase 1 this is a test fake; Phase 2
-    wires the real :class:`~capa.storage.writer_thread.WriterThread`."""
+    record adapter-side events here. Tests pass a fake; production wires
+    the real :class:`~capa.storage.writer_thread.WriterThread`."""
 
     bundle: BundleRef
     """Opaque handle to the run bundle. Carried for symmetry with how the

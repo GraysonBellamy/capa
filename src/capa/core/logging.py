@@ -7,7 +7,7 @@ run, logs are tee'd to:
 * **stdout** — human-friendly console renderer for headless / dev,
 * **``run.log``** — JSON lines, captured for archival debugging via
   :class:`~capa.storage.log_sink.LogSink`,
-* **the status bar / events dock** — WARNING and above only (P1 wires this up).
+* **the status bar / events dock** — WARNING and above only.
 
 Pre-run logs (config errors, plugin load failures) go to
 ``~/.capa/logs/capa-YYYYMMDD.log`` since there is no bundle yet to write into.

@@ -451,7 +451,7 @@ class TestCommandsP2:
             await adapter.close()
 
     async def test_authorized_command_rejected_in_p2(self) -> None:
-        """Authorized commands still raise: AO/DO writes land in P3."""
+        """Authorized commands still raise: AO/DO writes are not supported."""
         adapter, _ = _make_adapter()
         await adapter.open()
         try:
@@ -464,7 +464,7 @@ class TestCommandsP2:
                 issued_by="alice",
                 authorization_id="run-x",
             )
-            with pytest.raises(AdapterError, match="P2"):
+            with pytest.raises(AdapterError, match="not supported"):
                 await adapter.command(cmd)
         finally:
             await adapter.close()

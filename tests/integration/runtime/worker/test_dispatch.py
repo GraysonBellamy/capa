@@ -52,14 +52,14 @@ class TestDispatchAllowedStates:
             adapters=[adapter],
             runner=make_runner("disp-idle"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             result = await _wait(worker.dispatch("a", fake_command()))
             assert isinstance(result, CommandResult)
             assert result.accepted is True
             assert len(adapter.commands_completed) == 1
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_dispatch_in_armed(self, make_runner: Callable[[str], WorkerRunner]) -> None:
@@ -69,14 +69,14 @@ class TestDispatchAllowedStates:
             adapters=[adapter],
             runner=make_runner("disp-armed"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
-            await _wait(worker.arm(make_run_context()))
+            await worker.async_arm(make_run_context())
             result = await _wait(worker.dispatch("a", fake_command()))
             assert result.accepted is True
         finally:
-            await _wait(worker.disarm(grace_s=1.0))
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_disarm(grace_s=1.0)
+            await worker.async_close(grace_s=1.0)
 
 
 class TestDispatchRefusedStates:
@@ -111,12 +111,12 @@ class TestDispatchRefusedStates:
             adapters=[adapter],
             runner=make_runner("disp-unknown"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             with pytest.raises(UnknownDeviceError):
                 await _wait(worker.dispatch("nonexistent", fake_command()))
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_dispatch_refused_in_draining(
@@ -143,11 +143,11 @@ class TestDispatchRefusedStates:
             adapters=[adapter],
             runner=make_runner("disp-drain"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
-            await _wait(worker.arm(make_run_context()))
+            await worker.async_arm(make_run_context())
             # Kick off disarm; it will hold the worker in DRAINING for ~500ms.
-            disarm_fut = worker.disarm(grace_s=2.0)
+            disarm_task = asyncio.create_task(worker.async_disarm(grace_s=2.0))
             # Wait briefly for the disarm to actually enter DRAINING.
             await asyncio.sleep(0.1)
             from capa.runtime.lifecycle import WorkerState
@@ -157,9 +157,9 @@ class TestDispatchRefusedStates:
             with pytest.raises(WorkerStateError, match="dispatch refused"):
                 await _wait(worker.dispatch("a", fake_command()))
             # Wait for disarm to finish so close() doesn't see DRAINING.
-            await _wait(disarm_fut)
+            await disarm_task
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
 
 class TestDispatchExceptionPropagation:
@@ -179,7 +179,7 @@ class TestDispatchExceptionPropagation:
             adapters=[adapter],
             runner=make_runner("disp-exc"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             with pytest.raises(CmdBoomError, match="device refused"):
                 await _wait(worker.dispatch("a", fake_command()))
@@ -188,7 +188,7 @@ class TestDispatchExceptionPropagation:
             assert worker.metrics.commands_total == 1
             assert worker.metrics.commands_inflight == 0
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
 
 class TestMultiAdapterWorker:
@@ -206,7 +206,7 @@ class TestMultiAdapterWorker:
             adapters=[a, b],
             runner=make_runner("multi"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             await _wait(worker.dispatch("heater_1", fake_command()))
             await _wait(worker.dispatch("heater_2", fake_command()))
@@ -214,7 +214,7 @@ class TestMultiAdapterWorker:
             assert len(a.commands_completed) == 2
             assert len(b.commands_completed) == 1
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
 
 class TestSnapshot:
@@ -228,14 +228,14 @@ class TestSnapshot:
             adapters=[adapter],
             runner=make_runner("snapshot"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             from capa.devices.records import DeviceSnapshot
 
             snap = await _wait(worker.snapshot("a"))
             assert isinstance(snap, DeviceSnapshot)
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_snapshot_unknown_raises(
@@ -247,9 +247,9 @@ class TestSnapshot:
             adapters=[adapter],
             runner=make_runner("snapshot-unknown"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             with pytest.raises(UnknownDeviceError):
                 await _wait(worker.snapshot("not-there"))
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)

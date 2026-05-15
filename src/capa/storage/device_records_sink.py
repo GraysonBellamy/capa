@@ -11,7 +11,7 @@ Adapter id           Native shape                  Plan §8.1 path
 ``watlow``           long_row                      ``device_records/watlow.parquet``
 ``sartorius``        single_value_row              ``device_records/sartorius.parquet``
 ``nidaq_polled``     wide_row                      ``device_records/nidaq_polled.parquet``
-``nidaq_block``      block (TDMS / sidecar later)  *not in P0b*
+``nidaq_block``      block (TDMS / sidecar later)  deferred
 ==================== ============================ ====================================
 
 This sink is a multiplexer: it owns one ``_PerFamilyWriter`` per ``adapter``
@@ -373,7 +373,7 @@ class DeviceRecordsSink:
     Routes each record by ``adapter`` to a per-family Parquet writer under
     ``<bundle_root>/device_records/<adapter>.in-flight.parquet``.
     ``shape="block"`` records are skipped (block sidecar landing is deferred
-    to TDMS in P0d/P2; see plan §8.7) but counted via :attr:`skipped_blocks`.
+    to TDMS; see plan §8.7) but counted via :attr:`skipped_blocks`.
     """
 
     __slots__ = ("_closed", "_dirpath", "_flush_rows", "_skipped_blocks", "_writers")

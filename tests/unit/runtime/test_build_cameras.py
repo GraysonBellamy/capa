@@ -1,6 +1,6 @@
 """:func:`build_workers` integration tests for camera support.
 
-Migration doc §6 Phase 3: cameras must build into workers the same way
+Cameras must build into workers the same way
 device adapters do. These tests construct minimal :class:`ExperimentConfig`
 objects that include camera entries and assert:
 

@@ -3,7 +3,7 @@
 Plan §11. The smallest viable procedure that exercises the full engine
 pipeline. Used for:
 
-* ``capa run --headless freerun.yaml`` — the P0c outcome gate.
+* ``capa run --headless freerun.yaml`` — the headless outcome gate.
 * Operator "just record what's happening" runs without a structured method.
 * The simulator harness in tests.
 

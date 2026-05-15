@@ -1,6 +1,6 @@
-"""Real :class:`WatlowAdapter` — wraps a :class:`watlowlib.Controller` (P0d).
+"""Real :class:`WatlowAdapter` — wraps a :class:`watlowlib.Controller`.
 
-Plan §16 P0d entry: "real :class:`WatlowAdapter` (smallest viable real device);
+Plan §16: "real :class:`WatlowAdapter` (smallest viable real device);
 Watlow ``SourceRecord`` preservation; Watlow parameter-to-channel mapping;
 hardware smoke-test gate."
 
@@ -31,7 +31,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import structlog
 import watlowlib
@@ -70,6 +70,9 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 ADAPTER_ID: Final[str] = "watlow"
 
@@ -630,8 +633,8 @@ class WatlowAdapter:
             )
             self._display_unit = echoed
             self._drift_skipped_channels.clear()
-            echoed_str = echoed.value if echoed is not None else None
-            return f"set_display_units echoed={echoed_str!r}"
+            echoed_display = echoed.value if echoed is not None else None
+            return f"set_display_units echoed={echoed_display!r}"
         raise AdapterError(
             f"watlow {self.name!r}: unknown command kind {kind!r}",
             device=self.name,
@@ -709,7 +712,6 @@ class WatlowAdapter:
         """
         if self._controller is None:
             return None
-        snapshot = WatlowStateSnapshot()
         timeout = self.params.io_timeout_s
         sp_value: float | None = None
         sp_unit: str | None = None
@@ -1065,8 +1067,130 @@ async def handshake(params: dict[str, Any]) -> str:
 
 __all__ = [
     "ADAPTER_ID",
+    "DESCRIPTOR",
     "WatlowAdapter",
     "WatlowAdapterParams",
     "WatlowStateSnapshot",
+    "discover",
     "handshake",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Discovery hook (``capa devices discover`` / Setup editor scan)
+# ---------------------------------------------------------------------------
+
+
+async def discover(
+    *,
+    ports: list[str] | None = None,
+    addresses: tuple[int, ...] | None = None,
+    baudrates: tuple[int, ...] | None = None,
+    timeout_s: float = 0.5,
+) -> list[dict[str, Any]]:
+    """Probe local serial buses for Watlow PM-series controllers.
+
+    Thin wrapper over :func:`watlowlib.find_devices` (shipped in
+    watlowlib 0.5.0). The library iterates the cartesian product of
+    ``ports × baudrates × protocols × addresses``, runs
+    :meth:`Controller.identify` per probe, and short-circuits a port
+    if it can't be opened.
+
+    ``addresses`` and ``baudrates`` default to
+    :data:`watlowlib.DEFAULT_DISCOVERY_ADDRESSES` (``(1,)``) and
+    :data:`watlowlib.DEFAULT_DISCOVERY_BAUDRATES` (``(38400, 19200,
+    9600)``). CAPA rigs near-universally leave the Watlow at address
+    1, so the default address sweep is single-shot; operators on a
+    non-default address can pass ``addresses=range(1, 248)`` and
+    accept the longer scan.
+
+    Only ``ok=True`` rows (the controller identified successfully)
+    surface in the result. Silent or errored probes are dropped — the
+    Setup Discover dialog only needs hits.
+    """
+    if ports is not None and not ports:
+        return []
+
+    try:
+        results = await watlowlib.find_devices(
+            ports=ports,
+            addresses=addresses,
+            baudrates=baudrates,
+            per_probe_timeout_s=timeout_s,
+        )
+    except WatlowError:
+        return []
+
+    # One physical controller lives at exactly one (port, address). Dedup
+    # on that pair, first-hit-wins: find_devices iterates outermost-port,
+    # then baudrate (38400 / 19200 / 9600), then protocol (STDBUS /
+    # MODBUS_RTU), then address. The first hit is therefore the most
+    # likely production config. Collapsing here keeps the Discover dialog
+    # readable when a bus answers at multiple bauds or protocols.
+    rows: list[dict[str, Any]] = []
+    seen_devices: set[tuple[str, int]] = set()
+    for result in results:
+        if not result.ok or result.info is None:
+            continue
+        device_key = (result.port, result.address)
+        if device_key in seen_devices:
+            continue
+        seen_devices.add(device_key)
+        info = result.info
+        rows.append(
+            {
+                "adapter": ADAPTER_ID,
+                "port": result.port,
+                "address": result.address,
+                "baudrate": result.baudrate,
+                "protocol": result.protocol.value,
+                "model": info.part_number.raw or None,
+                "firmware": str(info.firmware_id),
+                "hardware": str(info.hardware_id),
+                "family": info.family.value,
+            }
+        )
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Setup-editor descriptor (plan §5.7). Lives next to the adapter so the
+# descriptor and adapter cannot drift; the bottom-of-file register() call
+# adds this to capa.devices.registry.ADAPTERS at import time.
+# ---------------------------------------------------------------------------
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    # Local imports keep registry.py / _templates.py off the hot import
+    # path during runtime adapter use — only Setup / CLI surfaces hit this.
+    from capa.devices._templates import WATLOW_HEATER_PV, WATLOW_HEATER_SETPOINT  # noqa: PLC0415
+    from capa.devices.adapter import Capability  # noqa: PLC0415
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.watlow",
+        label="Watlow PM-series controller",
+        family="watlow",
+        adapter_factory=WatlowAdapter,
+        params_model=WatlowAdapterParams,
+        supported_binding_sources=("watlow_parameter",),
+        default_params={"protocol": "stdbus", "rate_hz": 1.0},
+        channel_templates=(WATLOW_HEATER_PV, WATLOW_HEATER_SETPOINT),
+        discoverable=True,
+        handshake_available=True,
+        capabilities=frozenset(
+            {
+                Capability.HAS_SETPOINT,
+                Capability.HAS_RAMP,
+                Capability.READS_PROCESS_VAR,
+                Capability.HAS_PARAMETER_CONFIG,
+            }
+        ),
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

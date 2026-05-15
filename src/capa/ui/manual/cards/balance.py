@@ -1,7 +1,6 @@
 """:class:`BalanceCard` — manual control card for Sartorius balances.
 
-Gated entirely on the adapter's :class:`Capability` flagset, mirroring the
-handoff §1 sketch:
+Gated entirely on the adapter's :class:`Capability` flagset:
 
 * tare / zero            — ``HAS_TARE`` / ``HAS_ZERO``
 * internal cal           — ``HAS_INTERNAL_CAL`` (destructive)
@@ -93,10 +92,10 @@ class BalanceCard(DeviceCard):
         self._spec: DeviceConfig = spec
         # Capabilities are read off the pool-hosted adapter when one
         # exists; otherwise fall back to the Sartorius default set.
-        # Phase 4 / migration doc §3.6: the pool is opened
-        # asynchronously after :meth:`set_active_config` returns, so the
-        # card may build before the worker is up — the fallback is what
-        # keeps the UI consistent in that window.
+        # The pool is opened asynchronously after
+        # :meth:`set_active_config` returns, so the card may build before
+        # the worker is up — the fallback is what keeps the UI consistent
+        # in that window.
         caps: frozenset[Capability] = frozenset()
         pool = controller.worker_pool
         if pool is not None:

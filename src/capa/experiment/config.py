@@ -7,12 +7,10 @@ validated, YAML/TOML on disk, snapshotted into the run bundle.
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from ruamel.yaml import YAML
 
 from capa.channels.spec import ChannelSpec
 from capa.core.errors import ConfigError
@@ -123,7 +121,7 @@ class ProcedureRef(BaseModel):
     version"; production runs typically pin."""
     config: dict[str, Any] = Field(default_factory=dict)
     """Plugin-specific config blob. Validated by the plugin's
-    :attr:`Procedure.config_model` at load time (P3)."""
+    :attr:`Procedure.config_model` at load time."""
 
 
 class DomainProfileRef(BaseModel):
@@ -163,8 +161,8 @@ class StoragePolicy(BaseModel):
     """Storage knobs.
 
     Plan §8.5–§8.7: in-flight flush cadence, final Parquet codec, optional
-    TDMS pass-through, optional RO-Crate generation. P0a only stores the
-    schema; P0b's bundle writer reads it.
+    TDMS pass-through, optional RO-Crate generation. Stores the
+    schema; the bundle writer reads it.
 
     In-flight artifacts are Arrow IPC streams (``*.in-flight.arrows``); see
     ``arrow-ipc-streaming-plan.md``. IPC has no compression-level knob, so
@@ -174,13 +172,43 @@ class StoragePolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     bundle_root: str = "runs"
-    inflight_flush_seconds: float = Field(default=1.0, gt=0)
-    parquet_final_row_group_rows: int = Field(default=262_144, gt=0)
-    inflight_compression: str = "zstd"
-    parquet_final_compression: str = "zstd:6"
-    enable_tdms_passthrough: bool = False
-    enable_rocrate: bool = False
-    producer_queue_abort_after_s: float = Field(default=5.0, gt=0)
+    # Everything below this line is tuning the operator rarely touches —
+    # collapsed into the section's "Advanced" disclosure so the Storage
+    # editor opens with just the bundle-root field visible.
+    inflight_flush_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        json_schema_extra={
+            "capa_group": "advanced",
+            "capa_group_subtitle": "IPC / Parquet / TDMS tuning",
+        },
+    )
+    parquet_final_row_group_rows: int = Field(
+        default=262_144,
+        gt=0,
+        json_schema_extra={"capa_group": "advanced"},
+    )
+    inflight_compression: str = Field(
+        default="zstd",
+        json_schema_extra={"capa_group": "advanced"},
+    )
+    parquet_final_compression: str = Field(
+        default="zstd:6",
+        json_schema_extra={"capa_group": "advanced"},
+    )
+    enable_tdms_passthrough: bool = Field(
+        default=False,
+        json_schema_extra={"capa_group": "advanced"},
+    )
+    enable_rocrate: bool = Field(
+        default=False,
+        json_schema_extra={"capa_group": "advanced"},
+    )
+    producer_queue_abort_after_s: float = Field(
+        default=5.0,
+        gt=0,
+        json_schema_extra={"capa_group": "advanced"},
+    )
     """How long the producer→fan-out queue may stay at capacity before the
     run aborts. The producer queue's policy is :class:`ABORT_RUN`, so a
     sustained writer-thread or fan-out stall surfaces as a crashed run
@@ -192,7 +220,7 @@ class StoragePolicy(BaseModel):
 class SafetyRuleConfig(BaseModel):
     """Declarative safety-rule entry inside :class:`SafetyPolicy`.
 
-    Plan §9: rule evaluator lands in P0c+; P0a stores the schema only.
+    Plan §9: declarative safety rule entry.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -222,7 +250,7 @@ class SafetyPolicy(BaseModel):
 class SampleInfo(BaseModel):
     """Specimen metadata captured at run-start.
 
-    Plan §5.4. The cone-calorimeter profile (P0a's domain profile) layers
+    Plan §5.4. The cone-calorimeter domain profile layers
     additional required fields on top of these via its own metadata model.
     """
 
@@ -233,7 +261,13 @@ class SampleInfo(BaseModel):
     thickness_mm: float | None = Field(default=None, gt=0)
     mass_g: float | None = Field(default=None, gt=0)
     notes: str | None = None
-    extra: dict[str, Any] = Field(default_factory=dict)
+    extra: dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra={
+            "capa_group": "metadata",
+            "capa_group_subtitle": "Free-form extras",
+        },
+    )
 
 
 class OperatorRef(BaseModel):
@@ -264,10 +298,19 @@ class ExperimentConfig(BaseModel):
     """Optional :class:`~capa.experiment.method.Method`. Free runs have no
     method. Typed as ``Any`` here to keep the import surface small; validated
     in :meth:`load`."""
-    method_source_path: Path | None = None
+    method_source_path: Path | None = Field(default=None, exclude=True)
     """Original method file path when ``method:`` was a string ref in the
     experiment YAML. ``None`` when the method was inlined or absent. The UI
-    uses this so editing an auto-loaded method writes back to its source file."""
+    uses this so editing an auto-loaded method writes back to its source file.
+
+    Excluded from serialisation: this is in-memory IO bookkeeping, not a
+    config field. :class:`~capa.config.document.ConfigDocument` is the
+    authoritative source-tracking layer; this attribute survives as a
+    convenience for callers that still go through :meth:`load`."""
+    hardware_source_path: Path | None = Field(default=None, exclude=True)
+    """Original hardware file path when ``hardware:`` was a string ref in
+    the experiment YAML. ``None`` when the hardware block was inlined.
+    Mirrors :attr:`method_source_path`. Excluded from serialisation."""
     procedure: ProcedureRef
     domain_profile: DomainProfileRef | None = None
     calibration_set: CalibrationSetRef
@@ -313,60 +356,22 @@ class ExperimentConfig(BaseModel):
     def load(cls, path: str | Path) -> ExperimentConfig:
         """Load and validate an experiment file (YAML or TOML).
 
+        Delegates to :class:`~capa.config.document.ConfigDocument`, which
+        owns the source-tracking layer (paths, formats, inline/external
+        modes). This classmethod stays as the headless / CLI entry point;
+        anything that needs the raw payloads or save-back ability should
+        use :class:`ConfigDocument` directly.
+
         File-ref resolution: when ``hardware:`` is a string, treat it as a
         path to a hardware-profile TOML and load it. Relative paths resolve
         against the experiment file's directory. ``method:`` follows the
         same rule.
         """
-        source = Path(path).resolve()
-        data = _load_structured_file(source)
-        if not isinstance(data, dict):
-            raise ConfigError(f"{source}: top-level must be a mapping")
-        data = _resolve_external_refs(data, source.parent)
-        try:
-            return cls.model_validate(data)
-        except Exception as exc:
-            raise ConfigError(f"{source}: {exc}") from exc
+        # Local import: capa.config.document imports from this module, so
+        # the dep flows one direction at runtime.
+        from capa.config.document import ConfigDocument  # noqa: PLC0415
 
-
-def _load_structured_file(path: Path) -> Any:
-    """Load YAML or TOML from ``path`` based on the suffix.
-
-    Suffix dispatch keeps the loader simple — capa stores experiments as
-    either ``.yaml``/``.yml`` (operator-friendly) or ``.toml`` (programmatic).
-    """
-    if not path.is_file():
-        raise ConfigError(f"file not found: {path}")
-    suffix = path.suffix.lower()
-    if suffix in (".yaml", ".yml"):
-        yaml = YAML(typ="safe")
-        with open(path, encoding="utf-8") as fp:
-            return yaml.load(fp)
-    if suffix == ".toml":
-        with open(path, "rb") as fp:
-            return tomllib.load(fp)
-    raise ConfigError(f"unsupported config suffix {suffix!r}: {path}")
-
-
-def _resolve_external_refs(data: dict[str, Any], base_dir: Path) -> dict[str, Any]:
-    """Replace string values for ``hardware:`` / ``method:`` / etc. with the
-    contents of the referenced file.
-
-    Relative paths resolve against ``base_dir`` (the experiment file's
-    directory). Absolute paths are loaded as-is.
-    """
-    out = dict(data)
-    for key in ("hardware", "method"):
-        ref = out.get(key)
-        if isinstance(ref, str):
-            ref_path = Path(ref)
-            if not ref_path.is_absolute():
-                ref_path = base_dir / ref_path
-            ref_path = ref_path.resolve()
-            out[key] = _load_structured_file(ref_path)
-            if key == "method":
-                out["method_source_path"] = ref_path
-    return out
+        return cast(ExperimentConfig, ConfigDocument.load(path).build_config())
 
 
 __all__ = [

@@ -1,6 +1,6 @@
 """``MethodTab`` — author and edit segmented method profiles.
 
-Plan §10.1. Three regions:
+Three regions:
 
 * **Toolbar** — Open / Save / Save As / Validate / Add Step menu /
   Delete. Save validates before writing; an invalid method shows the

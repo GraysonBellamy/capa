@@ -111,9 +111,8 @@ async def test_run_controller_run_completes_and_populates_buffers(
     controller.run_finished.connect(finished.append)
     controller.event_received.connect(events.append)
 
-    # Phase 4 split set_active_config from start: open the pool first so
-    # the conductor has workers to arm. Tests run on a single asyncio
-    # loop (pytest-anyio's), so we await the open inline.
+    # Open the pool first so the conductor has workers to arm. Tests run
+    # on a single asyncio loop (pytest-anyio's), so we await the open inline.
     from capa.runtime.dispatch import ManualClient
     from capa.runtime.pool import WorkerPool
 
@@ -161,7 +160,7 @@ async def test_run_controller_abort_sets_aborted_status(
 ) -> None:
     """request_abort() flows through to the conductor and produces an
     aborted bundle. The conductor's stop reason is recorded for
-    downstream phases (operator audit, P3 cooldown)."""
+    downstream processing (operator audit, cooldown)."""
     config = _make_config(sample_id="CTRL-ABORT", duration_s=10.0, channels=1)
     controller = RunController(runs_root=tmp_path, configure_logging_for_bundle=False)
 

@@ -100,7 +100,7 @@ class TestHappyPath:
 
     async def test_drain_publishes_to_databus(self) -> None:
         """The drain task must publish to ``conductor.databus`` so
-        procedure subscribers (Phase 2.3) can wait on samples."""
+        procedure subscribers can wait on samples."""
         adapter = make_fake_adapter("d0", resource_id="sim:d0", tick_period_s=0.002)
         pool = _build_pool([adapter])
         await pool.open()

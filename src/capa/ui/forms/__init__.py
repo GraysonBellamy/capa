@@ -1,6 +1,6 @@
 """Pydantic-driven Qt form generator.
 
-Plan §10.5. Walks a :class:`pydantic.BaseModel` subclass and produces a
+Walks a :class:`pydantic.BaseModel` subclass and produces a
 :class:`QWidget` with one field per model attribute, choosing the widget
 from the field annotation. Validation errors paint inline on the
 offending widget. Used by the Method editor's per-step detail panel and

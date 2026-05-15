@@ -10,7 +10,7 @@ land on the right writer paths.
   in ``camera_events`` with full attribution: ``camera.<kind>`` /
   ``camera:<name>``).
 * Non-camera :data:`DeviceEmission` → :meth:`WriterRef.submit` +
-  :meth:`DataBus.publish` (unchanged from Phase 2.2).
+  :meth:`DataBus.publish` (unchanged from the pre-camera-unification path).
 
 Cameras do NOT participate in the procedure-side databus — this matches
 today's engine behavior where ``FrameReceipt`` never reached the bus.

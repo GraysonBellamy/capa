@@ -46,6 +46,7 @@ class LifecycleKind(StrEnum):
     """
 
     MANUAL_COMMAND = "manual_command"
+    DISCOVERY = "discovery"
     PREVIEW_DRAIN = "preview_drain"
     STATE_POLL = "state_poll"
     POOL_OPEN = "pool_open"
@@ -79,8 +80,8 @@ class LifecycleRegistry:
 
     The registry is intentionally minimal: it stores entries, fires
     callbacks on done so entries auto-unregister, and exposes a
-    snapshot for the coordinator. Plan §4.7 is explicit that this is
-    not a general-purpose task supervisor.
+    snapshot for the coordinator. By design, this is not a
+    general-purpose task supervisor.
     """
 
     def __init__(self) -> None:

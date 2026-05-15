@@ -40,8 +40,8 @@ dependencies = [
     "pyarrow>=18",
     "typer>=0.12",
     "alicatlib>=0.2.0,<0.3",
-    "watlowlib>=0.4.0,<0.5",
-    "sartoriuslib>=0.2.0,<0.3",
+    "watlowlib>=0.5.0,<0.6",
+    "sartoriuslib>=0.3.1,<0.4",
     "nidaqlib>=0.2.0,<0.3",
     "pyside6>=6.7",
     "qasync>=0.27",
@@ -130,6 +130,14 @@ ignore = [
 # (target_external_flux_kW_m2, etc.). These mixed-case suffixes match the
 # wider scientific convention; we don't want to rename them to snake_case.
 "src/capa/experiment/profiles/cone_calorimeter.py" = ["N815"]
+# PySide overrides must keep Qt's camelCase virtual method names in table
+# models and wizard pages. Several table models also use Qt's canonical
+# ``QModelIndex()`` default signature.
+"scripts/*.py" = ["PLC0415"]
+"src/capa/ui/docks/log.py" = ["N802"]
+"src/capa/ui/tabs/setup_problems.py" = ["N802", "B008"]
+"src/capa/ui/tabs/setup_sections/*.py" = ["N802", "B008"]
+"src/capa/ui/tabs/setup_wizard.py" = ["N802"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -3,9 +3,7 @@
 finalize.
 
 Plan §8 / §13.3. The writer is the only object that knows the bundle exists
-as a single coordinated unit; sinks know about themselves. P0b's writer is
-synchronous (the synthetic harness drives it from one thread); the engine
-task group in P0c will own a real producer/consumer split, but the surface
+as a single coordinated unit; sinks know about themselves. The surface
 exposed here is what the engine bolts onto.
 
 Lifecycle:
@@ -236,7 +234,7 @@ class RunBundleWriter:
                 tomli_w.dumps(_toml_safe(snapshot)), encoding="utf-8"
             )
 
-        # equipment.toml stub — populated by P0c+ once adapters report firmware.
+        # equipment.toml stub — populated once adapters report firmware.
         equipment_stub: dict[str, Any] = {"devices": []}
         for dev in self._config.hardware.devices:
             equipment_stub["devices"].append({"name": dev.name, "adapter": dev.adapter})
@@ -244,9 +242,9 @@ class RunBundleWriter:
             tomli_w.dumps(equipment_stub), encoding="utf-8"
         )
 
-        # calibration.json — verbatim CalibrationSet snapshot (P0a model).
-        # P0b records the *reference* (name + revision); the resolved curves
-        # snapshot lands when the calibration runtime is wired in P5.
+        # calibration.json — verbatim CalibrationSet snapshot.
+        # Records the *reference* (name + revision); the resolved curves
+        # snapshot lands when the calibration runtime is wired in.
         calibration_block = {
             "name": self._config.calibration_set.name,
             "revision": self._config.calibration_set.revision,
@@ -312,9 +310,8 @@ class RunBundleWriter:
     ) -> None:
         """Polymorphic dispatch over a ``DeviceEmission`` union.
 
-        Mirrors what the engine fan-out will do once it lands in P0c. The
-        synthetic harness uses this to drive the writer end-to-end with a
-        single call.
+        Mirrors what the engine fan-out does. The synthetic harness uses
+        this to drive the writer end-to-end with a single call.
         """
         if isinstance(emission, ChannelSample):
             self.record_sample(emission)

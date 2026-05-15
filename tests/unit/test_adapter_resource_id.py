@@ -1,10 +1,8 @@
 """Adapter ``resource_id`` conformance tests.
 
-Phase 0 of the per-resource worker migration adds a ``resource_id``
-property to every adapter (``docs/per-resource-worker-migration.md``
-§4.10). The string identifies the underlying hardware contention domain;
-``build_workers`` (Phase 1) will group adapters with the same
-``resource_id`` into a single worker.
+Every adapter exposes a ``resource_id`` property that identifies the
+underlying hardware contention domain; ``build_workers`` groups adapters
+with the same ``resource_id`` into a single worker.
 
 These tests enforce the contract documented on
 :class:`capa.devices.adapter.DeviceAdapter` ``.resource_id``:
@@ -16,9 +14,9 @@ These tests enforce the contract documented on
 * two adapters that do not share a physical resource produce different
   strings.
 
-The factories below are intentionally inline and minimal — Phase 1's
-``build_workers`` will need richer shared fixtures, but Phase 0 only
-needs to read a property off a constructed adapter.
+The factories below are intentionally inline and minimal — ``build_workers``
+will need richer shared fixtures, but these conformance tests only need to
+read a property off a constructed adapter.
 """
 
 from __future__ import annotations
@@ -172,15 +170,14 @@ def test_adapter_satisfies_device_adapter_protocol_resource_id_attr(
 ) -> None:
     """Camera adapters (Webcam, FlirIrSim) implement the Camera Protocol,
     not the DeviceAdapter Protocol, but every adapter must expose the
-    ``resource_id`` attribute either way. Phase 3 unifies cameras into
-    the device adapter shape; for Phase 0 we just assert presence.
+    ``resource_id`` attribute either way. This test asserts presence only.
     """
     adapter = factory()
     assert hasattr(adapter, "resource_id")
 
 
 # ---------------------------------------------------------------------------
-# Serial-port sharing (the load-bearing bus-grouping case for Phase 1)
+# Serial-port sharing (the load-bearing bus-grouping case)
 # ---------------------------------------------------------------------------
 
 
@@ -307,6 +304,6 @@ def test_two_sim_adapters_with_same_name_share_resource_id() -> None:
 
 
 def test_device_adapter_protocol_declares_resource_id() -> None:
-    """Phase 0 adds ``resource_id`` to the Protocol so ``build_workers``
+    """The ``DeviceAdapter`` Protocol declares ``resource_id`` so ``build_workers``
     can ``getattr`` it without per-adapter dispatch."""
     assert "resource_id" in DeviceAdapter.__annotations__

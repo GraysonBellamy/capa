@@ -3,7 +3,7 @@
 
 The :class:`FakeRunSession` lets integration tests drive the conductor
 through its full lifecycle without opening a real bundle on disk. The
-production :class:`RealRunSession` (Phase 2.4) plugs in the real
+production :class:`RealRunSession` plugs in the real
 :class:`RunBundleWriter` + :class:`WriterThread`.
 """
 

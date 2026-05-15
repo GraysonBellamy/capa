@@ -4,9 +4,9 @@ Plan §5.1. Channel names are the stable contract; the registry resolves a name
 to the concrete handles needed to emit/route a sample. The registry is
 *frozen* at run-arm time — later config edits do not change historical meaning.
 
-P0a ships the schema and the in-memory resolver. The actual wiring of an
+The registry ships the schema and the in-memory resolver. The actual wiring of an
 adapter handle into :class:`ResolvedChannel` lands when the engine task group
-constructs adapters at run-arm (P0c).
+constructs adapters at run-arm.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ class ChannelRegistry:
     * :meth:`resolve` returns the snapshotted :class:`ResolvedChannel`.
 
     Held by :class:`~capa.experiment.config.ExperimentConfig`; the engine
-    (P0c) calls ``freeze()`` once it has opened all adapters and verified
+    calls ``freeze()`` once it has opened all adapters and verified
     the channel set.
     """
 

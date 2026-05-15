@@ -52,7 +52,7 @@ class ChannelKind(StrEnum):
     VIDEO_IR = "video_ir"
     """IR-camera frame stream."""
     DERIVED = "derived"
-    """Computed from other channels (declared in :mod:`capa.channels.derived`)."""
+    """Computed from other channels by a future derivation registry."""
 
 
 # ---------------------------------------------------------------------------
@@ -138,9 +138,9 @@ class NIDAQBlockChannel(_BindingBase):
 class DerivedBinding(BaseModel):
     """Channel that is computed from other channels rather than read.
 
-    Concrete derivations live in :mod:`capa.channels.derived` (P0a stub). The
-    binding records the dependency list so the registry can topologically sort
-    derived channels and surface circular-dep errors at config-load.
+    The binding records the dependency list so a derivation registry can
+    topologically sort derived channels and surface circular-dep errors at
+    config-load once derived channels are implemented.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -166,8 +166,8 @@ the right model on deserialization.
 
 
 # ---------------------------------------------------------------------------
-# AlarmBand — declarative alarm rule attached to a ChannelSpec. P0a ships
-# the schema; the evaluator lands with SafetyMonitor in P0c+.
+# AlarmBand — declarative alarm rule attached to a ChannelSpec. Ships
+# the schema; the evaluator lands with SafetyMonitor.
 # ---------------------------------------------------------------------------
 
 
@@ -268,7 +268,7 @@ class ChannelSpec(BaseModel):
 
     sinks: tuple[str, ...] = ("scalars",)
     """Which named sinks receive this channel. Matches keys in the storage
-    layer wired up in P0b."""
+    layer."""
 
     decimate_to_hz: float = Field(default=60.0, gt=0)
     """Plot-only decimation. Underlying disk capture is at native rate.

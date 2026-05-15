@@ -1,9 +1,9 @@
 """Runtime-layer exception hierarchy.
 
 Every runtime exception inherits from :class:`~capa.core.errors.CapaError`
-so the existing UI / events.sqlite plumbing can render them with no special
-case. The runtime types here cover only the new per-resource-worker machinery
-(``docs/per-resource-worker-migration.md``); adapter-layer errors keep using
+so the existing UI / events.sqlite plumbing can render them with no
+special case. The runtime types here cover only the per-resource-worker
+machinery; adapter-layer errors keep using
 :class:`~capa.core.errors.AdapterError` unchanged.
 
 Hierarchy:
@@ -19,17 +19,10 @@ Hierarchy:
         ├── RunnerStateError       — WorkerRunner used in a state it doesn't permit
         └── UnknownDeviceError     — dispatch to a device not in the pool
 
-The migration doc references each of these by name:
-
-* ``WorkerStateError`` — §3.3 line 263, §4.1 line 591.
-* ``PoolStateError`` — §4.3 lines 737-767.
-* ``ResourceConflict`` — §4.12 lines 1311-1336, §7.4 line 1622.
-* ``UnknownDeviceError`` — §4.3 line 781.
-
-``RunnerStateError`` is new in this implementation; the
-:class:`~capa.runtime.runner.WorkerRunner` abstraction lifted out for testability
-(plan §3.1) needs its own state-misuse error so a confused test fixture doesn't
-masquerade as a worker bug.
+``RunnerStateError`` exists because the
+:class:`~capa.runtime.runner.WorkerRunner` abstraction (lifted out for
+testability) needs its own state-misuse error so a confused test fixture
+doesn't masquerade as a worker bug.
 """
 
 from __future__ import annotations
@@ -73,9 +66,9 @@ class WorkerStateError(CapaError):
 class PoolStateError(CapaError):
     """Pool is in a state that does not permit the attempted operation.
 
-    Migration doc §4.3 lines 737-767: ``open()`` may not be called twice;
-    ``close()`` may not be called while any worker is non-IDLE; ``arm_all()``
-    requires :attr:`~capa.runtime.lifecycle.PoolState.OPEN`.
+    ``open()`` may not be called twice; ``close()`` may not be called
+    while any worker is non-IDLE; ``arm_all()`` requires
+    :attr:`~capa.runtime.lifecycle.PoolState.OPEN`.
     """
 
     def __init__(
@@ -93,7 +86,7 @@ class PoolStateError(CapaError):
 class ResourceConflict(CapaError):  # noqa: N818 - documented public API name
     """Two adapters claim the same hardware contention domain.
 
-    Migration doc §4.12 / §7.4. Raised synchronously from
+    Raised synchronously from
     :func:`~capa.runtime.build.build_workers` *before* any worker thread is
     spawned, so a misconfigured config fails fast with no hardware side
     effects.
@@ -139,8 +132,8 @@ class UnknownDeviceError(CapaError):
 class RunnerStateError(CapaError):
     """:class:`~capa.runtime.runner.WorkerRunner` used in a state it doesn't permit.
 
-    The runner abstraction (plan §3.1) supports both real-thread and inline
-    test backends; both have lifecycles (``start`` → ``submit`` ... → ``stop``)
+    The runner abstraction supports both real-thread and inline test
+    backends; both have lifecycles (``start`` → ``submit`` ... → ``stop``)
     and both raise this when called out of order. Kept separate from
     :class:`WorkerStateError` so test failures point at the harness rather
     than the production state machine.

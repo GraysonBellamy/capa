@@ -1,6 +1,6 @@
-"""Real :class:`NIDAQAdapter` — wraps a :class:`nidaqlib.tasks.session.DaqSession` (P2).
+"""Real :class:`NIDAQAdapter` — wraps a :class:`nidaqlib.tasks.session.DaqSession`.
 
-Plan §16 P2 entry: "real ``NIDAQAdapter``. Capability flags. Device watchdogs
+Plan §16: "real ``NIDAQAdapter``. Capability flags. Device watchdogs
 and health surfacing. Discovery (``capa devices discover``).
 ``capa validate --strict``."
 
@@ -27,7 +27,7 @@ Two emission shapes (plan §5.6):
   ``task_started_at + (first_sample_index + k) / sample_rate_hz``. The
   unroll is gated by :attr:`NIDAQAdapterParams.max_samples_per_block_unroll`
   so kHz acquisition cannot accidentally land on this path; the
-  rectangular-block sidecar / TDMS escape (plan §8.7) is P3 territory.
+  rectangular-block sidecar / TDMS escape (plan §8.7) is future work.
 
 For tests, an opt-in ``backend`` kwarg is forwarded to
 :func:`nidaqlib.tasks.open_device` so a
@@ -42,7 +42,7 @@ import re
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Final, Literal, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from nidaqlib.channels.base import ChannelSpec as NidaqChannelSpec
 from nidaqlib.errors import NIDaqError
@@ -80,6 +80,9 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 ADAPTER_ID_POLLED: Final[str] = "nidaq_polled"
 ADAPTER_ID_BLOCK: Final[str] = "nidaq_block"
@@ -198,7 +201,7 @@ class NIDAQAdapterParams(BaseModel):
     (≤ a few hundred Hz × a few channels) but explodes at kHz. The
     guardrail trips at :meth:`NIDAQAdapter.open` if the resolved chunk
     size exceeds it — pointing the operator at the rectangular-block
-    sidecar / TDMS path (P3) instead. Default ``10 000`` covers
+    sidecar / TDMS path instead. Default ``10 000`` covers
     500 Hz × 20 ch × 1-second blocks; aggressive enough to stop a typo."""
 
     @field_validator("channels")
@@ -393,7 +396,7 @@ class NIDAQAdapter:
                         f"nidaq {self.name!r}: block chunk size {chunk} exceeds "
                         f"max_samples_per_block_unroll="
                         f"{self.params.max_samples_per_block_unroll}; reduce "
-                        f"timing.samples_per_channel or use the kHz block sidecar (P3)",
+                        f"timing.samples_per_channel or use the kHz block sidecar",
                         device=self.name,
                     )
             self._session = await self._build_session(self._task_spec)
@@ -650,11 +653,9 @@ class NIDAQAdapter:
     # ------------------------------------------------------------------ commands
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
-        """NI tasks have no scalar setpoint commands in P2.
+        """NI tasks have no scalar setpoint commands.
 
-        Analog-output / digital-output writes will land in P3 alongside the
-        method editor. For now the command surface enforces the auth gate
-        and rejects unknown verbs.
+        The command surface enforces the auth gate and rejects unknown verbs.
         """
         clock = self._clock or RunClock.now()
         rejection = reject_unless_authorized(
@@ -667,8 +668,7 @@ class NIDAQAdapter:
                 adapter_id=self.params.adapter_id(), device_name=self.name, clock=clock
             )
         raise AdapterError(
-            f"nidaq {self.name!r}: command kind {cmd.kind!r} not supported in P2 "
-            f"(AO/DO writes land in P3)",
+            f"nidaq {self.name!r}: command kind {cmd.kind!r} not supported",
             device=self.name,
         )
 
@@ -1065,6 +1065,7 @@ async def discover() -> list[dict[str, Any]]:
 __all__ = [
     "ADAPTER_ID_BLOCK",
     "ADAPTER_ID_POLLED",
+    "DESCRIPTOR",
     "NIDAQAdapter",
     "NIDAQAdapterParams",
     "NIDAQDeviceInfo",
@@ -1072,3 +1073,37 @@ __all__ = [
     "discover",
     "handshake",
 ]
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices._templates import NIDAQ_THERMOCOUPLE  # noqa: PLC0415
+    from capa.devices.adapter import Capability  # noqa: PLC0415
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.nidaq",
+        label="NI-DAQmx chassis",
+        family="nidaq",
+        adapter_factory=NIDAQAdapter,
+        params_model=NIDAQAdapterParams,
+        supported_binding_sources=("nidaq_reading_field", "nidaq_block_channel"),
+        default_params={"rate_hz": 10.0},
+        channel_templates=(NIDAQ_THERMOCOUPLE,),
+        discoverable=True,
+        handshake_available=True,
+        capabilities=frozenset(
+            {
+                Capability.READS_PROCESS_VAR,
+                Capability.SUPPORTS_DISCOVERY,
+                Capability.HARDWARE_CLOCKED,
+                Capability.EMITS_BLOCKS,
+            }
+        ),
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

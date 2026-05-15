@@ -288,8 +288,8 @@ class CustomCallable(_CalibrationBase):
     a config error. The active callable metadata is snapshotted into
     ``calibration.json``.
 
-    P0a only validates the *schema* of the reference; resolving and invoking
-    the callable lands in P3 (procedure plugin runtime).
+    Only validates the *schema* of the reference; resolving and invoking
+    the callable requires the procedure plugin runtime.
     """
 
     kind: Literal["custom_callable"] = "custom_callable"
@@ -327,7 +327,7 @@ class CustomCallable(_CalibrationBase):
         return value
 
     def evaluate(self, raw: float) -> float:
-        raise CalibrationError("CustomCallable.evaluate() requires the plugin runtime (P3+).")
+        raise CalibrationError("CustomCallable.evaluate() requires the plugin runtime.")
 
 
 Calibration = Annotated[

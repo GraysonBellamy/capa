@@ -36,7 +36,7 @@ registry can compose without instantiating Pydantic models mid-chain."""
 MIGRATIONS: dict[int, Migration] = {}
 """Maps ``from_version`` to the migration that produces ``from_version + 1``.
 
-Empty in P0b. To add a v1 → v2 migration, register
+Empty by default. To add a v1 → v2 migration, register
 ``MIGRATIONS[1] = _migrate_1_to_2``.
 """
 

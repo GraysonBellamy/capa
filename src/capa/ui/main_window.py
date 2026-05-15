@@ -1,8 +1,8 @@
 """:class:`MainWindow` — the top-level capa GUI shell.
 
-Plan §10. ``QMainWindow`` with central ``QTabWidget`` (Setup, Run) and
-dockable Numerics + Events panels. Window state (geometry + dock layout)
-persists to ``~/.capa/window_state.json``.
+``QMainWindow`` with central ``QTabWidget`` (Setup, Run) and dockable
+Numerics + Events panels. Window state (geometry + dock layout) persists
+to ``~/.capa/window_state.json``.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import structlog
 from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QMainWindow,
     QMenu,
@@ -35,6 +36,7 @@ from capa.ui.docks.events import EventsDock
 from capa.ui.docks.log import LogDock
 from capa.ui.docks.manual_control import ManualControlDock
 from capa.ui.docks.numerics import NumericsDock
+from capa.ui.document_coordinator import DocumentCoordinator
 from capa.ui.shutdown import (
     ShutdownCoordinator,
     ShutdownPhase,
@@ -121,10 +123,28 @@ class MainWindow(QMainWindow):
         self._shutdown_coordinator.phase_changed.connect(self._on_shutdown_phase)
         self._shutdown_coordinator.completed.connect(self._on_shutdown_completed)
 
-        self._setup_tab = SetupTab(self)
+        self._setup_tab = SetupTab(controller=self._controller, parent=self)
         self._method_tab = MethodTab(self)
         self._run_tab = RunTab(controller=self._controller, parent=self)
         self._setup_tab.device_action_requested.connect(self._on_device_action)
+
+        # Setup ↔ Method coordinator. Keeps the experiment's
+        # method ref in lock-step with whatever MethodTab is showing —
+        # without it, editing the method in Setup's Files view or saving
+        # a method through MethodTab leaves the other side stale.
+        self._document_coordinator = DocumentCoordinator(
+            setup_tab=self._setup_tab,
+            method_tab=self._method_tab,
+            parent=self,
+        )
+        # Inject the coordinator into SetupTab so Apply-to-Rig can
+        # compose the draft + Method-tab buffer.
+        self._setup_tab.set_document_coordinator(self._document_coordinator)
+        # Apply-to-Rig: SetupTab emits the composed config + path; we
+        # route it through the same loader that File→Open already uses
+        # so the Numerics / CameraPreview / Diagnostics / Manual docks
+        # rebuild exactly once.
+        self._setup_tab.applyRequested.connect(self._on_setup_apply_requested)
 
         self._tabs = QTabWidget(self)
         self._tabs.addTab(self._setup_tab, "Setup")
@@ -260,6 +280,22 @@ class MainWindow(QMainWindow):
             return
         self._apply_loaded_config(cfg, path)
 
+    def _on_setup_apply_requested(self, cfg: object, path: object) -> None:
+        """Apply-to-Rig from the Setup tab.
+
+        ``SetupTab`` has already validated the draft and composed the
+        config; we just need to drive the same loader that File→Open
+        uses so the Numerics / CameraPreview / Diagnostics / Manual
+        docks rebuild around the new config. ``SetupTab`` keys off
+        ``RunController.config_load_finished`` for completion state, so
+        we don't need to surface success/failure ourselves — the
+        existing modal progress dialog covers the in-flight phase.
+        """
+        if not isinstance(cfg, ExperimentConfig):
+            return
+        resolved_path = path if isinstance(path, Path) else None
+        self._apply_loaded_config(cfg, resolved_path)
+
     def _apply_loaded_config(self, cfg: ExperimentConfig, path: Path | None) -> None:
         # Bind the controller's DeviceRegistry to the new config FIRST so
         # any consumer (manual control dock) that reacts to load_config
@@ -276,7 +312,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self._setup_tab.load_config(cfg)
+        self._setup_tab.load_config(cfg, path=path)
         self._run_tab.load_config(cfg)
         self._manual_dock.load_config(cfg)
         self._operator_provider.set_operator_id(cfg.operator.id)
@@ -366,7 +402,9 @@ class MainWindow(QMainWindow):
     def _on_device_action(self, name: str) -> None:
         """Handle "Open Manual Control" from the Setup tab right-click menu."""
         if not self._controller.hardware_ready:
-            self._status.showMessage("Hardware is still initializing; manual controls are disabled.")
+            self._status.showMessage(
+                "Hardware is still initializing; manual controls are disabled."
+            )
             return
         self._manual_dock.reveal(name)
 
@@ -518,6 +556,17 @@ class MainWindow(QMainWindow):
         Connected to :attr:`ShutdownCoordinator.completed`. Logging the
         outcome here gives ops one structured event per shutdown attempt
         without needing to grep the coordinator's per-phase logs.
+
+        After hiding the window we explicitly poke ``QApplication.quit``
+        instead of relying on Qt's ``quitOnLastWindowClosed`` heuristic.
+        That heuristic depends on every top-level dialog having no
+        parent (a non-modal DiscoveryDialog with a Setup-tab parent is
+        the typical counterexample), and on the event loop ticking
+        once more after the slot returns. In practice, with the qasync
+        loop wrapping ``app.exec()``, we've seen the loop sit idle past
+        the last log line until SIGINT — explicit ``quit()`` makes the
+        exit deterministic and is idempotent if Qt was already going to
+        quit anyway.
         """
         if isinstance(result, ShutdownResult):
             _logger.info(
@@ -529,6 +578,9 @@ class MainWindow(QMainWindow):
             )
         self._shutdown_complete = True
         self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _save_window_state(self) -> None:
         try:

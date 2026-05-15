@@ -1,8 +1,8 @@
 # CAPA-shaped sim hardware profile (controlled atmosphere pyrolysis).
 #
 # Provides every channel group required by capa.profiles.capa_pyrolysis:
-# heater_setpoint, heater_pv, sample_temperature, purge_gas_flow.
-# Optional: mass (load-cell), reactive_gas_flow (partial-oxidation runs).
+# heater_setpoint, heater_pv, sample_temperature, purge_gas_flow, mass.
+# Optional: reactive_gas_flow (partial-oxidation runs).
 #
 # Each device's `params` declare TOML-friendly signal specs that the sim
 # adapters' from_params() classmethods convert into SignalFn callables at
@@ -154,7 +154,7 @@ kind = "identity"
 input_unit = "K"
 output_unit = "K"
 
-# --- Mass (load-cell; optional under the CAPA profile) ---
+# --- Mass (load-cell; required under the CAPA profile) ---
 
 [[channels]]
 name = "balance.mass"

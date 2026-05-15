@@ -1,0 +1,34 @@
+# Default identity-only calibration set for the simulator rigs.
+#
+# Phase G item 3: ships so the New Setup Wizard's "CAPA pyrolysis
+# simulated" starting point can point at a real file, and so the
+# apply-set diff dialog has a working fixture for tests + manual
+# exploration.
+#
+# Every channel that the sim_capa fixture defines maps to an Identity
+# calibration in its declared input/output unit. Real-hardware
+# calibration sets land in this directory under names like
+# "thermocouples_2026Q2.toml".
+
+name = "sim_default"
+revision = "1"
+
+[curves.heater_pv]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[curves.heater_sp]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[curves."purge_mfc.flow"]
+kind = "identity"
+input_unit = "sccm"
+output_unit = "sccm"
+
+[curves."balance.value"]
+kind = "identity"
+input_unit = "g"
+output_unit = "g"

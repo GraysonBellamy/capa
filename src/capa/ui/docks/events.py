@@ -1,9 +1,9 @@
 """Events dock — append-only log of :class:`DeviceEvent` lines.
 
-Plan §10.2. Subscribes (via :class:`RunController.event_received`) to
-adapter events, segment transitions, and operator notes (P3). For P1 we
-display only the ``DeviceEvent`` stream — Notes / segment markers come
-later. Auto-scrolls to the bottom unless the operator has scrolled away.
+Subscribes (via :class:`RunController.event_received`) to adapter
+events, segment transitions, and operator notes. Currently displays
+only the ``DeviceEvent`` stream — Notes / segment markers come later.
+Auto-scrolls to the bottom unless the operator has scrolled away.
 """
 
 from __future__ import annotations
@@ -58,9 +58,8 @@ class EventsDock(QDockWidget):
 
     def append_event(self, event: DeviceEvent) -> None:
         """Append one row. Connected to ``RunController.event_received``."""
-        # ``t_mono_ns`` could be derived from the run clock for a wall-time
-        # display; for P1 we show the engine-relative seconds since run
-        # start, matching the plot axis.
+        # Shows engine-relative seconds since run start, matching the plot axis.
+        # Could be derived from the run clock for a wall-time display instead.
         text = (
             f"{event.t_mono_ns / 1e9:8.3f}s  "
             f"[{event.severity:7}] "

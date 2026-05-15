@@ -1,8 +1,8 @@
 """Control-surface flags on :class:`CameraCapability`.
 
-capa-flir Phase 4 references these by name on the FLIR adapter; missing
-names break the adapter at import time. The check here is intentionally
-narrow — pure-Python enum semantics, no adapter wiring.
+The capa-flir FLIR adapter references these flags by name; missing names
+break the adapter at import time. The check here is intentionally narrow —
+pure-Python enum semantics, no adapter wiring.
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ from capa.devices.camera.base import CameraCapability
 
 
 def test_control_surface_flags_present() -> None:
-    """capa-flir Phase 4 references these by name; missing names break the
-    adapter at import time."""
+    """The capa-flir FLIR adapter references these by name; missing names
+    break the adapter at import time."""
     for name in (
         "NUC_TRIGGER",
         "RADIOMETRIC_PARAMS",

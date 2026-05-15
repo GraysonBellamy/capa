@@ -1,3 +1,3 @@
-"""PyQtGraph plot panes. Plan §10.3."""
+"""PyQtGraph plot panes."""
 
 from __future__ import annotations

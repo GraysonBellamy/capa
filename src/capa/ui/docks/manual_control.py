@@ -1,6 +1,6 @@
 """:class:`ManualControlDock` — single dock hosting per-device manual-control cards.
 
-Plan §10 / handoff §1. The dock is rebuilt on every config-load (same
+The dock is rebuilt on every config-load (same
 pattern as :class:`NumericsDock` and :class:`CameraPreviewDock`): the old
 cards are torn down, fresh ones are built for the new config's
 ``hardware.devices`` and ``hardware.cameras``. Cards are gated reflectively

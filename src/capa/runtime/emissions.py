@@ -1,6 +1,6 @@
 """:data:`WorkerEmission` — the wire type for the per-worker outbound bridge.
 
-Migration doc §6 (camera unification). Device adapters yield
+Device adapters yield
 :data:`~capa.devices.records.DeviceEmission`; the new
 :class:`~capa.runtime.camera_adapter.CameraDeviceAdapter` wrapper yields
 :class:`~capa.devices.camera.base.FrameReceipt` and

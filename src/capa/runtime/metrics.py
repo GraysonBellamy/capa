@@ -1,8 +1,8 @@
 """:class:`WorkerMetrics`, :class:`DisarmResult` — per-worker telemetry surface.
 
-Migration doc §5.5 lines 1438-1453 defines the per-worker metrics block that
-the bundle's ``diagnostics.runtime`` manifest entry consumes (and that the UI
-status bar reads for the per-loop lag badge).
+The per-worker metrics block is consumed by the bundle's
+``diagnostics.runtime`` manifest entry and by the UI status bar's
+per-loop lag badge.
 
 Why a dataclass on top of free-standing fields:
 
@@ -15,10 +15,6 @@ Why a dataclass on top of free-standing fields:
    adding bespoke struct fields.
 3. Tests assert against a typed surface — ``metrics.commands_total == 1``
    is more legible than ``metrics["commands_total"] == 1``.
-
-Phase 1 scope: struct definitions plus a minimal :meth:`observe_*` API.
-The Conductor consumes these in Phase 2 to assemble the runtime diagnostics
-block; the UI status-bar binding lands in Phase 4.
 """
 
 from __future__ import annotations
@@ -34,8 +30,6 @@ from capa.runtime.lifecycle import WorkerState
 
 class DisarmResult(Enum):
     """Outcome of one :meth:`Worker.disarm` call.
-
-    Migration doc §4.1 line 581 and §3.8 Phase A/B.
 
     The distinction matters at the run level: a single ``FORCED`` from any
     worker marks the run as degraded in the bundle manifest. Multiple
@@ -58,8 +52,8 @@ class DisarmResult(Enum):
     """Grace expired AND the hard-stop's ``thread.join(timeout)`` also
     expired. The thread persists as a daemon for the process lifetime; the
     bundle records ``worker_thread_leaked`` with a stack from
-    ``sys._current_frames()`` (migration doc §3.8 Phase B line 442). Pool
-    drops the worker from its map; the resource is unusable for the rest of
+    ``sys._current_frames()``. Pool drops the worker from its map; the
+    resource is unusable for the rest of
     the process's life — operator must restart capa to recover."""
 
 
@@ -67,11 +61,11 @@ class DisarmResult(Enum):
 class WorkerMetrics:
     """Live observability for one :class:`~capa.runtime.worker.Worker`.
 
-    Migration doc §5.5 lines 1438-1453. Fields are read by:
+    Fields are read by:
 
     * Conductor's manifest-writer at run finalize.
-    * UI status bar (Phase 4) for the per-loop lag badge.
-    * Saturation monitor (Phase 2) which reads :attr:`bridge_out` and
+    * UI status bar for the per-loop lag badge.
+    * Saturation monitor which reads :attr:`bridge_out` and
       :attr:`commands_inflight`.
 
     Mutators are intentionally narrow — each observation routes through a
@@ -88,8 +82,7 @@ class WorkerMetrics:
 
     adapter_names: tuple[str, ...]
     """Names of every adapter hosted by this worker, in construction order.
-    A worker with one adapter has a singleton tuple here. Migration doc
-    §4.12 line 1294."""
+    A worker with one adapter has a singleton tuple here."""
 
     state: WorkerState = WorkerState.CLOSED
     """Current worker state; updated by :class:`Worker` at every transition.
@@ -111,17 +104,17 @@ class WorkerMetrics:
     commands_failed: int = 0
     """Subset of :attr:`commands_total`: the dispatch's ``adapter.command``
     raised. Caller cancellations are NOT counted here — under the
-    cancellation shield (migration doc §4.2), the worker-side coroutine
-    runs to completion; only its caller-facing future is cancelled. A
+    cancellation shield, the worker-side coroutine runs to completion;
+    only its caller-facing future is cancelled. A
     cancelled-caller-but-successful-adapter command is counted as a normal
     success in :attr:`commands_total`."""
 
     samples_emitted: int = 0
     """Number of ``adapter.stream()`` items the worker put on its outbound
     bridge — every emission, including the channel-sample fanout. Read by
-    the per-worker watchdog (Phase 2) to detect stream silence —
+    the per-worker watchdog to detect stream silence —
     ``samples_emitted`` failing to advance for ``2 / rate_hz`` is the silence
-    trigger (§5.3). For "polls per second" use :attr:`polls_emitted`."""
+    trigger. For "polls per second" use :attr:`polls_emitted`."""
 
     samples_late: int = 0
     """Subset of :attr:`samples_emitted`: producer side observed > 1 tick
@@ -157,8 +150,8 @@ class WorkerMetrics:
 
     tick_duration_ms: _PercentileRing = field(default_factory=_PercentileRing)
     """One observation per ``adapter.stream()`` yield: time spent in the
-    worker between consecutive emissions. p50/p99 of this is what §10 line
-    1962 budgets to < 18 ms for the Sartorius @ 50 Hz. Includes the
+    worker between consecutive emissions. The bridge-latency budget is
+    < 18 ms for the Sartorius @ 50 Hz. Includes the
     microsecond gaps inside a single poll's emission burst — this is the
     bridge-latency budget metric, NOT the operator-facing poll period.
     Use :attr:`poll_period_ms` for the latter."""

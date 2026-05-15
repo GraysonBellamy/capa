@@ -1,4 +1,4 @@
-""":class:`Conductor` — per-run coordinator (migration doc §3.2 / §4.5).
+""":class:`Conductor` — per-run coordinator.
 
 Replaces :class:`~capa.experiment.engine.ExperimentEngine` for runs spawned
 through the runtime stack. The conductor lives in **its own thread on its
@@ -8,14 +8,14 @@ freeze the UI: every cross-thread hand-off is bounded by a
 :class:`ThreadBridge` and every blocking deadline is observed by the
 :class:`SaturationMonitor`.
 
-Lifetime (migration doc §3.2 line 195):
+Lifetime:
 
 * Constructed per-run from a long-lived :class:`WorkerPool`. Does not own
   the pool — closing the conductor leaves the pool open for the next run.
 * :meth:`start` spawns the conductor thread, builds the per-run resources
   via a caller-supplied :class:`RunSession`, arms the pool, opens drains
-  (BEFORE preflight — see migration doc §3.7), runs the procedure, and
-  returns a :class:`RunHandle` once everything is up.
+  before preflight, runs the procedure, and returns a :class:`RunHandle`
+  once everything is up.
 * :meth:`stop` initiates a cooperative drain. The procedure exits, workers
   disarm in parallel, the writer thread closes, and the bundle is finalized.
 * The thread exits when :meth:`_run` returns; the run's result is published
@@ -27,15 +27,13 @@ Why a dedicated thread for the conductor:
 * The UI loop must never block on serial I/O. The conductor's drain tasks
   call ``await writer.submit(...)`` and ``await databus.publish(...)``,
   both of which can park; doing that from the UI loop would defeat the
-  whole migration.
+  whole runtime model.
 * Headless and GUI flows share one code path: the conductor doesn't know
   whether a UI exists, so its design is invariant to that.
 
-Phase 2 scope: this module is the orchestration shell. The actual
-**procedure runner** — preflight + method execution + watchdog — lands in
-Phase 2.3 (:class:`~capa.runtime.procedure.ProcedureRunner`). For Phase 2.2
-the conductor accepts a pluggable :class:`ConductorRunner`; tests inject a
-no-op runner; production wires the real one in PR 2.3.
+The conductor accepts a pluggable :class:`ConductorRunner`; the production
+runner is :class:`~capa.runtime.procedure.ProcedureRunner` and tests inject
+a no-op runner to exercise the conductor's lifecycle in isolation.
 """
 
 from __future__ import annotations
@@ -105,7 +103,7 @@ class RunOutcome(StrEnum):
 
     CRASHED_BUT_SEALED = "crashed_but_sealed"
     """Saturation deadline tripped. The conductor sealed the bundle anyway
-    after disarming workers (migration doc §4.5)."""
+    after disarming workers."""
 
 
 # ---------------------------------------------------------------------------
@@ -121,11 +119,9 @@ class RunSession(Protocol):
     materializes the bundle / writer / clock and returns a
     :class:`RunContext`; :meth:`close` finalizes the bundle. The caller
     builds the session (and owns its lifecycle decisions like where the
-    bundle lives) so the conductor stays focused on orchestration.
-
-    PR 2.4 will ship the production session
-    :class:`RealRunSession` that wraps :class:`RunBundleWriter` +
-    :class:`WriterThread`. Tests use a fake.
+    bundle lives) so the conductor stays focused on orchestration. The
+    production session is :class:`RealRunSession` which wraps
+    :class:`RunBundleWriter` + :class:`WriterThread`; tests use a fake.
     """
 
     @property
@@ -170,7 +166,7 @@ class RunSession(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Runner protocol — implemented by ProcedureRunner in PR 2.3.
+# Runner protocol — implemented by ProcedureRunner.
 # ---------------------------------------------------------------------------
 
 
@@ -179,19 +175,17 @@ class ConductorRunner(Protocol):
     """The "procedure body" surface — what the conductor calls between
     workers-armed and workers-disarmed.
 
-    Phase 2.2: in-tree tests use :class:`NoOpRunner`; the conductor exercises
-    arm / drain / disarm in isolation. Phase 2.3 plugs in the real
-    procedure-method runtime.
+    Tests inject :class:`NoOpRunner` to exercise arm / drain / disarm in
+    isolation; production wires :class:`~capa.runtime.procedure.ProcedureRunner`.
 
     All methods receive the per-run :class:`RunContext` and the conductor's
     authoritative :class:`DataBus` so procedure subscribers can wait for
-    samples (migration doc §3.10).
+    samples.
     """
 
     async def preflight(self, ctx: RunContext, bus: DataBus) -> None:
         """Dynamic preflight — run AFTER drains are pumping samples into
-        the bus (migration doc §3.7 step h). Blocking failures here mean
-        the run never enters RUNNING.
+        the bus. Blocking failures here mean the run never enters RUNNING.
         """
         ...
 
@@ -209,10 +203,10 @@ class ConductorRunner(Protocol):
 class NoOpRunner:
     """Smallest viable :class:`ConductorRunner`.
 
-    Used by Phase 2.2 tests to exercise the conductor's lifecycle without
-    pulling :class:`MethodExecutor` into scope. :meth:`run` parks until
-    cancelled (i.e. until :meth:`Conductor.stop` is called) or until the
-    test's stop hook fires.
+    Used by tests to exercise the conductor's lifecycle without pulling
+    :class:`MethodExecutor` into scope. :meth:`run` parks until cancelled
+    (i.e. until :meth:`Conductor.stop` is called) or until the test's stop
+    hook fires.
     """
 
     def __init__(self, *, run_for_s: float | None = None) -> None:
@@ -242,8 +236,8 @@ class NoOpRunner:
 
 DEFAULT_SHUTDOWN_GRACE_S: Final[float] = 5.0
 """How long the conductor waits for each worker to drain before forcing
-the shutdown protocol (migration doc §3.8 Phase B). Per-worker; the
-slowest worker bounds the overall disarm time."""
+the shutdown protocol. Per-worker; the slowest worker bounds the overall
+disarm time."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,7 +353,7 @@ class Conductor:
         # `session.open()` returns the RunContext, so the factory can wire
         # the runner against per-run resources (e.g. an open bundle writer).
         # Tests usually pass `runner` directly; production headless wiring
-        # uses `runner_factory` (Phase 2.4).
+        # uses `runner_factory`.
         self._runner = runner
         self._runner_factory = runner_factory
         self._config = config or ConductorConfig()
@@ -382,14 +376,14 @@ class Conductor:
         self._run_context: RunContext | None = None
         self._bridges: dict[str, ThreadBridge[WorkerEmission]] = {}
         self._drain_count_observed = 0
-        # UI bridge — optional Conductor → UI thread channel (doc §3.10 +
-        # §4.9). Attached by the UI before :meth:`start`; the drain task
-        # ``put_nowait``s every emission after the writer/databus hop.
-        # Headless paths leave this ``None`` and pay nothing for it.
+        # UI bridge — optional Conductor → UI thread channel. Attached by
+        # the UI before :meth:`start`; the drain task ``put_nowait``s every
+        # emission after the writer/databus hop. Headless paths leave this
+        # ``None`` and pay nothing for it.
         self._ui_bridge: ThreadBridge[WorkerEmission] | None = None
-        # Loop-lag observability (migration doc §5.5). A heartbeat task
-        # measures wake-up lag against a 50 ms cadence; the percentile
-        # ring lands in the runtime diagnostics emitted at finalize.
+        # Loop-lag observability. A heartbeat task measures wake-up lag
+        # against a 50 ms cadence; the percentile ring lands in the runtime
+        # diagnostics emitted at finalize.
         self._loop_lag = LoopLagMetric(name="conductor")
         self._heartbeat_stop: anyio.Event | None = None
         # Idempotency flags for the unconditional cleanup callbacks. The
@@ -440,15 +434,14 @@ class Conductor:
     def runtime_diagnostics(self) -> dict[str, Any]:
         """Snapshot the per-loop / per-bridge / per-worker metrics.
 
-        Migration doc §5.5 + §11 acceptance #12. The dict shape is
-        intended for ``manifest.queue_health`` consumption (one entry per
-        queue/bridge/worker keyed by tag), so the existing manifest
-        schema works without extension:
+        The dict shape is intended for ``manifest.queue_health`` consumption
+        (one entry per queue/bridge/worker keyed by tag), so the existing
+        manifest schema works without extension:
 
         * ``loop.conductor`` — conductor-loop lag percentiles.
         * ``loop.worker:<resource_id>`` — per-worker loop lag (zeros for
-          now; Phase 1 workers expose their own LoopLagMetric and a
-          future step plumbs it through here).
+          now; workers expose their own LoopLagMetric and a future step
+          plumbs it through here).
         * ``bridge.outbound:<resource_id>`` — per-worker outbound bridge
           latency + blocked time.
         * ``worker:<resource_id>`` — tick durations, samples_late, command
@@ -563,7 +556,7 @@ class Conductor:
         return self._result_future
 
     def dispatch(self, device: str, cmd: DeviceCommand) -> Future[CommandResult]:
-        """Run-time command dispatch (migration doc §3.5 Path A).
+        """Run-time command dispatch.
 
         Refused outside PREPARING / RUNNING. Routes through the pool to
         the worker hosting ``device``.
@@ -586,7 +579,7 @@ class Conductor:
         return self._pool.snapshot(device)
 
     def attach_ui_bridge(self, bridge: ThreadBridge[WorkerEmission]) -> None:
-        """Wire a Conductor → UI :class:`ThreadBridge` (migration doc §4.9).
+        """Wire a Conductor → UI :class:`ThreadBridge`.
 
         Must be called BEFORE :meth:`start` so the drain task picks the
         reference up on first dispatch. Headless callers omit this; the
@@ -643,10 +636,9 @@ class Conductor:
     async def _run(self) -> None:
         """The full per-run lifecycle on the conductor loop.
 
-        Migration doc §3.7. Drain-before-preflight ordering is enforced
-        explicitly: drain tasks start spinning **before** the runner's
-        preflight runs, so any dynamic preflight subscriber sees live
-        samples.
+        Drain-before-preflight ordering is enforced explicitly: drain
+        tasks start spinning **before** the runner's preflight runs, so
+        any dynamic preflight subscriber sees live samples.
         """
         self._completion_event = asyncio.Event()
         if self._stop_requested:
@@ -702,14 +694,14 @@ class Conductor:
                 self._transition(ConductorState.FAILED)
                 return
 
-            # 4. Spawn drain tasks BEFORE preflight (migration doc §3.7).
+            # 4. Spawn drain tasks BEFORE preflight.
             #    Use anyio task group — uniform with the rest of the
             #    codebase and propagates exceptions cleanly.
             try:
                 async with anyio.create_task_group() as tg:
-                    # Heartbeat task (migration doc §5.5) — observes loop
-                    # lag on the conductor's loop. The stop event is
-                    # cancelled by the task-group teardown on shutdown.
+                    # Heartbeat task — observes loop lag on the conductor's
+                    # loop. The stop event is cancelled by the task-group
+                    # teardown on shutdown.
                     self._heartbeat_stop = anyio.Event()
                     tg.start_soon(heartbeat_task, self._loop_lag, self._heartbeat_stop)
 
@@ -777,7 +769,7 @@ class Conductor:
                 if self._exit_reason is None:
                     self._exit_reason = f"task_group_crashed: {exc!r}"
 
-            # 9. Drain phase — disarm workers in parallel.
+            # 9. Drain — disarm workers in parallel.
             self._transition(ConductorState.DRAINING)
             disarm_results = await self._pool.disarm_all(grace_s=self._config.shutdown_grace_s)
             self._pool_armed = False
@@ -788,7 +780,7 @@ class Conductor:
                     result=str(dr),
                 )
 
-            # 10. Finalize phase — close the session (writer + bundle).
+            # 10. Finalize — close the session (writer + bundle).
             self._transition(ConductorState.FINALIZING)
             self._session.set_outcome(self._outcome, self._exit_reason)
             # Hand the runtime diagnostics to the session so finalize can
@@ -817,8 +809,7 @@ class Conductor:
     async def _drain_worker(self, resource_id: str, bridge: ThreadBridge[WorkerEmission]) -> None:
         """One drain coroutine per worker bridge.
 
-        Routes each emission by runtime type (migration doc §6.1 camera
-        unification):
+        Routes each emission by runtime type:
 
         * :class:`FrameReceipt` → :meth:`WriterThread.record_frame` (wraps
           in :class:`FrameItem`); skips databus — cameras do not
@@ -828,11 +819,11 @@ class Conductor:
           ``kind=f"camera.{event.kind}"`` and ``source=f"camera:{event.name}"``;
           mirrors the camera_task drain ([cameras.py:519](src/capa/experiment/cameras.py#L519)).
         * Everything else (the :data:`DeviceEmission` union) → durable
-          submit + databus publish, same as the device-only Phase 2 path.
+          submit + databus publish, same as the device-only path.
 
         The await on `bus.publish` honors per-subscription backpressure
         (BLOCK / ABORT_RUN); a sustained block surfaces as drain blocking
-        and the saturation deadline (§4.5) catches it.
+        and the saturation deadline catches it.
 
         Cancellation is honoured by the underlying ``bridge.get`` — when
         the bridge closes (worker disarmed) or the task group cancels,
@@ -903,9 +894,9 @@ class Conductor:
         # losing it off the bus.
         await writer.submit(emission)
         await bus.publish(emission)
-        # UI mirror last — DROP_OLDEST under load. Migration doc §3.4:
-        # `publish_nowait` on the UI side because the UI loop cannot honor
-        # blocking subscriber backpressure.
+        # UI mirror last — DROP_OLDEST under load. `publish_nowait` on the
+        # UI side because the UI loop cannot honor blocking subscriber
+        # backpressure.
         self._publish_ui(emission)
 
     def _publish_ui(self, emission: WorkerEmission) -> None:

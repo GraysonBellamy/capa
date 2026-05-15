@@ -7,7 +7,6 @@ adapter-level errors. Per-adapter ``close()`` is bounded by
 
 from __future__ import annotations
 
-import asyncio
 import time
 
 import pytest
@@ -21,10 +20,6 @@ from tests.integration.runtime.fakes import (
 )
 
 
-async def _wait(fut: object) -> object:
-    return await asyncio.wrap_future(fut)  # type: ignore[arg-type]
-
-
 @pytest.mark.anyio
 async def test_close_returns_clean_result_on_happy_path() -> None:
     adapter = make_fake_adapter("a")
@@ -33,8 +28,8 @@ async def test_close_returns_clean_result_on_happy_path() -> None:
         adapters=[adapter],
         runner=ThreadedRunner(name="close-clean"),
     )
-    await _wait(worker.start())
-    result = await _wait(worker.close(grace_s=1.0))
+    await worker.async_start()
+    result = await worker.async_close(grace_s=1.0)
     assert isinstance(result, WorkerCloseResult)
     assert result.resource_id == adapter.resource_id
     assert result.adapter_stop_errors == ()
@@ -59,10 +54,10 @@ async def test_close_bounds_hanging_adapter_and_captures_timeout() -> None:
         runner=ThreadedRunner(name="close-bounded"),
         shutdown_config=cfg,
     )
-    await _wait(worker.start())
+    await worker.async_start()
 
     t0 = time.monotonic()
-    result = await _wait(worker.close(grace_s=1.0))
+    result = await worker.async_close(grace_s=1.0)
     elapsed = time.monotonic() - t0
 
     assert isinstance(result, WorkerCloseResult)
@@ -96,8 +91,8 @@ async def test_close_attempts_every_adapter_even_when_first_times_out() -> None:
         runner=ThreadedRunner(name="close-mixed"),
         shutdown_config=cfg,
     )
-    await _wait(worker.start())
-    result = await _wait(worker.close(grace_s=1.0))
+    await worker.async_start()
+    result = await worker.async_close(grace_s=1.0)
 
     assert isinstance(result, WorkerCloseResult)
     # The good adapter still got its close called (close iterates in

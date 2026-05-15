@@ -6,15 +6,13 @@ installed plugin whose hash/version differs from the lock unless the operator
 explicitly runs ``capa plugins trust ...``. The lock snapshot is copied into
 every bundle and mirrored into ``manifest.json.plugins``.
 
-P0a ships:
+Ships:
 
 * the lock file format (TOML),
 * parse + validate via Pydantic,
 * :func:`detect_drift` against an "installed" set (pure-data — no
-  ``importlib.metadata`` discovery yet; the discovery step lands with the
-  procedure runtime in P3).
-
-The runtime trust enforcement (refusing to load on drift) lands in P3.
+  ``importlib.metadata`` discovery; the discovery step is in the
+  procedure runtime).
 """
 
 from __future__ import annotations
@@ -150,8 +148,8 @@ class Drift:
 class InstalledPlugin:
     """Pure-data view of an installed plugin.
 
-    Production code (P3+) builds these from ``importlib.metadata``; tests build
-    them directly. P0a deliberately keeps the discovery step out of the parser
+    Production code builds these from ``importlib.metadata``; tests build
+    them directly. The discovery step is deliberately kept out of the parser
     so the schema and drift logic can be exercised without a real install.
     """
 

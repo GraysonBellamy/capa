@@ -1,19 +1,17 @@
 """Bounded-disarm tests covering the secondary cancellation deadline.
 
-Shutdown coordinator plan §4.4 / §6.3. The worker's :meth:`_disarm_impl`
-must:
+The worker's :meth:`_disarm_impl` must:
 
 1. Wrap each ``adapter.stop()`` in ``asyncio.wait_for`` with
    ``adapter_stop_grace_s``. A stop that ignores its deadline is
    recorded as an error and the disarm event still fires.
 2. Wait for stream tasks to exit cooperatively with the caller-supplied
-   ``grace_s`` (Phase A).
-3. After cancelling stragglers (Phase B), bound the
+   ``grace_s`` (cooperative stop grace).
+3. After cancelling stragglers (forced-cancel grace), bound the
    ``gather(*pending, return_exceptions=True)`` itself with
    ``stream_cancel_grace_s``. A stream task that swallows
    :class:`asyncio.CancelledError` and keeps running can not be killed
-   from inside the worker; the application-level fuse (PR 2) is the
-   hard backstop.
+   from inside the worker; the application-level fuse is the hard backstop.
 """
 
 from __future__ import annotations
@@ -32,10 +30,6 @@ from tests.integration.runtime.fakes import (
     make_hanging_stop_adapter,
     make_run_context,
 )
-
-
-async def _wait(fut: object) -> object:
-    return await asyncio.wrap_future(fut)  # type: ignore[arg-type]
 
 
 @pytest.mark.anyio
@@ -57,13 +51,13 @@ async def test_adapter_stop_is_bounded() -> None:
         runner=ThreadedRunner(name="bounded-stop"),
         shutdown_config=cfg,
     )
-    await _wait(worker.start())
+    await worker.async_start()
     try:
-        await _wait(worker.arm(make_run_context()))
-        await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+        await worker.async_arm(make_run_context())
+        await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
 
         t0 = time.monotonic()
-        result = await _wait(worker.disarm(grace_s=cfg.stream_stop_grace_s))
+        result = await worker.async_disarm(grace_s=cfg.stream_stop_grace_s)
         elapsed = time.monotonic() - t0
 
         # adapter.stop hung — disarm reports FORCED and bounded near the
@@ -72,15 +66,15 @@ async def test_adapter_stop_is_bounded() -> None:
         assert result is DisarmResult.FORCED
         assert elapsed < 3.0, f"disarm took {elapsed:.2f}s, expected bounded"
     finally:
-        await _wait(worker.close(grace_s=1.0))
+        await worker.async_close(grace_s=1.0)
 
 
 @pytest.mark.anyio
 async def test_secondary_gather_bound_unblocks_cancel_ignoring_stream() -> None:
     """A stream task that swallows ``CancelledError`` would otherwise
-    wedge ``asyncio.gather(*pending)`` in disarm Phase B. The secondary
-    ``stream_cancel_grace_s`` bound is what keeps disarm bounded — the
-    test confirms it returns ``FORCED`` and within a tight envelope."""
+    wedge ``asyncio.gather(*pending)`` in disarm's forced-cancel step. The
+    secondary ``stream_cancel_grace_s`` bound is what keeps disarm bounded —
+    the test confirms it returns ``FORCED`` and within a tight envelope."""
     adapter = make_cancel_ignoring_adapter(
         "ignores-cancel",
         cancel_swallow_s=5.0,  # well beyond stream_cancel_grace_s below
@@ -98,26 +92,26 @@ async def test_secondary_gather_bound_unblocks_cancel_ignoring_stream() -> None:
         runner=ThreadedRunner(name="bounded-cancel"),
         shutdown_config=cfg,
     )
-    await _wait(worker.start())
+    await worker.async_start()
     try:
-        await _wait(worker.arm(make_run_context()))
-        await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+        await worker.async_arm(make_run_context())
+        await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
         # Let the stream task actually emit so it's in its sleep.
         await asyncio.sleep(0.05)
 
         t0 = time.monotonic()
-        result = await _wait(worker.disarm(grace_s=cfg.stream_stop_grace_s))
+        result = await worker.async_disarm(grace_s=cfg.stream_stop_grace_s)
         elapsed = time.monotonic() - t0
 
         assert result is DisarmResult.FORCED
-        # Phase A grace (0.2) + Phase B secondary grace (0.25) plus a
-        # bit of overhead. The cancel-swallow is 5s — without the
+        # Cooperative stop grace (0.2) + forced-cancel secondary grace (0.25)
+        # plus a bit of overhead. The cancel-swallow is 5s — without the
         # secondary bound this would block ~5s.
         assert elapsed < 2.0, f"secondary bound failed; disarm took {elapsed:.2f}s"
     finally:
         # close: the worker is now IDLE, runner stop will join the
         # thread cleanly since the swallow-cancel task is detached.
-        result_close = await _wait(worker.close(grace_s=1.5))
+        result_close = await worker.async_close(grace_s=1.5)
         # The cancel-swallow may still hold the loop alive past the
         # close — we just don't want it to wedge the test forever.
         assert result_close is not None  # WorkerCloseResult

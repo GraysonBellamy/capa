@@ -113,7 +113,7 @@ class DeviceAdapter(Protocol):
     """Uniform device surface.
 
     Plan §5.2. Concrete adapters live under :mod:`capa.devices` (real) and
-    :mod:`capa.devices.sim` (simulated, P0a). All four production adapters
+    :mod:`capa.devices.sim` (simulated). All four production adapters
     wrap their respective library Manager.
     """
 

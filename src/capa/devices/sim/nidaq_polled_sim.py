@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import anyio
 from nidaqlib.sinks.base import reading_to_row
@@ -37,6 +37,9 @@ from capa.devices.sim._base import (
     synth_timing,
 )
 from capa.devices.sim._signals import SignalFn, signals_from_mapping
+
+if TYPE_CHECKING:
+    from capa.devices.registry import AdapterDescriptor
 
 ADAPTER_ID: Final[str] = "nidaq_polled"
 
@@ -213,4 +216,27 @@ class NIDAQPolledSim:
         )
 
 
-__all__ = ["ADAPTER_ID", "NIDAQPolledSim"]
+__all__ = ["ADAPTER_ID", "DESCRIPTOR", "NIDAQPolledSim"]
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices._templates import NIDAQ_THERMOCOUPLE  # noqa: PLC0415
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.sim.nidaq_polled_sim",
+        label="NI-DAQ polled task (simulated)",
+        family="sim",
+        adapter_factory=NIDAQPolledSim,
+        params_model=None,
+        supported_binding_sources=("nidaq_reading_field",),
+        default_params={},
+        channel_templates=(NIDAQ_THERMOCOUPLE,),
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

@@ -23,7 +23,7 @@ Notes on lifecycle:
   want shared sensor data correlated against children.
 
 This implementation is conservative — synchronous iteration, no parallelism,
-fail-fast on the first crashed child. P5+ may add concurrent-batch support
+fail-fast on the first crashed child. Concurrent-batch support may be added
 when the parameter sweeps grow.
 """
 

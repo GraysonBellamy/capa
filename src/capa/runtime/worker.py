@@ -1,29 +1,28 @@
 """:class:`Worker` — one thread + one asyncio loop owning one hardware resource.
 
-Migration doc §4.1 lines 530-647. The worker hosts one or more adapters that
-share a hardware contention domain (identified by ``resource_id``) and
-exposes a thread-safe sync facade for the :class:`Conductor` (Phase 2) and
-the manual-control surface (Phase 4).
+The worker hosts one or more adapters that share a hardware contention
+domain (identified by ``resource_id``) and exposes async lifecycle methods
+for the :class:`Conductor` and the manual-control surface.
 
 The state machine (CLOSED → IDLE → ARMED → SAMPLING → DRAINING → IDLE,
 edges enumerated in :data:`~capa.runtime.lifecycle.LEGAL_WORKER_EDGES`) is
 the contract. Every public method either drives a specific edge or is gated
 by a specific state set.
 
-Phase 1 boundary (plan §1): the worker is fully implemented here, including
-the cancellation shield from §4.2. It is **not** wired into :class:`Engine`
-or the UI — only the new test suite under ``tests/integration/runtime/``
-exercises it. The :class:`Conductor` (Phase 2) is the first production caller.
+Construction does no I/O. :meth:`async_start` brings the runner up, opens
+every adapter inside the worker loop, and resolves when the worker reaches
+IDLE. :meth:`async_close` reverses this, after asserting IDLE.
 
-Construction does no I/O. :meth:`start` brings the runner up, opens every
-adapter inside the worker loop, and resolves the future when the worker
-reaches IDLE. :meth:`close` reverses this, after asserting IDLE.
+Lifecycle methods (``async_start``, ``async_close``, ``async_arm``,
+``async_begin_sampling``, ``async_disarm``) are coroutines — every caller
+(Conductor, PoolClient, UI cards) is on a *different* loop than the worker,
+and these methods bridge to the worker loop via ``asyncio.wrap_future`` of
+the runner's submit futures.
 
-Why a sync-facade-over-runner instead of an async surface: every caller
-(Conductor, PoolClient, UI cards) is on a *different* loop than the worker.
-A sync facade returning :class:`concurrent.futures.Future` is the standard
-``loop.call_soon_threadsafe`` bridge; async callers ``asyncio.wrap_future``
-it, sync CLI callers ``.result()`` it. See migration doc §4.1 line 534.
+Per-command methods (``dispatch``, ``snapshot``, ``camera_metadata``,
+``device_readback``) remain sync and return :class:`concurrent.futures.Future`
+— they're called by sync UI paths on different loops where awaiting isn't
+an option; async callers wrap them with :func:`asyncio.wrap_future`.
 """
 
 from __future__ import annotations
@@ -63,7 +62,6 @@ from capa.runtime.progress import (
 from capa.runtime.runcontext import RunContext
 from capa.runtime.runner import ThreadedRunner, WorkerRunner
 from capa.runtime.shutdown import (
-    RunnerStopResult,
     WorkerCloseResult,
     WorkerShutdownConfig,
 )
@@ -75,8 +73,8 @@ class Worker:
     """One thread + loop hosting one resource's adapters.
 
     The constructor is sync and does no I/O — it just records the
-    configuration. Bring the worker up with :meth:`start`; tear it down
-    with :meth:`close`.
+    configuration. Bring the worker up with :meth:`async_start`; tear it down
+    with :meth:`async_close`.
 
     Adapters passed to the constructor MUST share the same
     :attr:`DeviceAdapter.resource_id`. Validating this is the
@@ -161,7 +159,7 @@ class Worker:
         """Read-only view of this worker's adapters keyed by device name.
 
         Exposed so the conductor / session can introspect adapter metadata
-        for equipment-block construction (migration doc §11 acceptance #3).
+        for equipment-block construction.
         The mapping is a live view: keys never change after construction,
         but adapter state (open/closed) reflects the worker's lifecycle.
         Commands MUST still flow through :meth:`dispatch` — direct
@@ -191,199 +189,6 @@ class Worker:
         whether the run is degraded."""
         return self._fatal_error
 
-    # ---- config-lifetime sync facade ------------------------------------
-
-    def start(self, progress_callback: OpenProgressCallback | None = None) -> Future[None]:
-        """Bring the runner up; open every adapter inside the worker loop.
-
-        Resolves when the worker reaches :attr:`WorkerState.IDLE`. On any
-        :meth:`adapter.open` failure the future rejects with the first
-        exception; adapters opened prior are closed in reverse order
-        before the failure surfaces, so no half-opened adapter leaks.
-
-        Raises :class:`WorkerStateError` synchronously (no future) if the
-        worker is not in CLOSED — re-starting a closed worker is not
-        supported; construct a new one.
-        """
-        if self._state is not WorkerState.CLOSED:
-            return _failed_future(
-                WorkerStateError(
-                    f"Worker {self._resource_id!r}: start() requires CLOSED, got {self._state}",
-                    from_state=self._state,
-                    resource_id=self._resource_id,
-                )
-            )
-
-        # Spin the runner up. This is fast (~1ms for ThreadedRunner; instant
-        # for InlineRunner). We synchronously wait for the loop to bind so
-        # the subsequent submit() lands; the wait is bounded by the runner's
-        # own start protocol.
-        try:
-            self._runner.start().result(timeout=5.0)
-        except BaseException as exc:
-            return _failed_future(exc)
-
-        # Submit _open_all_impl. On failure we MUST stop the runner before
-        # surfacing the exception, otherwise the worker thread leaks (Phase 1
-        # done-criterion: no thread leaks on rollback). The bridge below
-        # serializes the two futures.
-        impl_fut = self._runner.submit(lambda: self._open_all_impl(progress_callback))
-        out: Future[None] = Future()
-
-        def _on_open_done(f: Future[None]) -> None:
-            exc = f.exception()
-            if exc is None:
-                out.set_result(None)
-                return
-            # Adapters already rolled back inside _open_all_impl (its own
-            # try/except); the runner is still up. Stop it then propagate.
-            stop_fut = self._runner.stop(grace_s=2.0)
-
-            def _on_stop_done(_sf: Future[RunnerStopResult]) -> None:
-                # Even if stop itself errored we still propagate the
-                # original open exception — it's the more informative one.
-                out.set_exception(exc)
-
-            stop_fut.add_done_callback(_on_stop_done)
-
-        impl_fut.add_done_callback(_on_open_done)
-        return out
-
-    def close(self, *, grace_s: float = 5.0) -> Future[WorkerCloseResult]:
-        """Close every adapter and stop the runner.
-
-        Requires :attr:`WorkerState.IDLE`. Raises
-        :class:`WorkerStateError` (synchronously, in the returned future)
-        otherwise. The :class:`WorkerPool` is responsible for disarming
-        any active run before closing the worker.
-
-        Returns a :class:`WorkerCloseResult` describing the outcome.
-        Adapter-level errors are captured in the result's error tuples
-        rather than raised — every adapter is given the chance to
-        release its bus, and the caller (pool, shutdown coordinator)
-        aggregates per-worker outcomes.
-
-        ``grace_s`` bounds the runner-stop deadline; the per-phase
-        :class:`WorkerShutdownConfig` is what bounds the adapter-close
-        calls.
-        """
-        if self._state is not WorkerState.IDLE:
-            return _failed_future(
-                WorkerStateError(
-                    f"Worker {self._resource_id!r}: close() requires IDLE, got {self._state}",
-                    from_state=self._state,
-                    resource_id=self._resource_id,
-                )
-            )
-
-        state_before = self._state.value
-        # Snapshot the disarm-side bookkeeping that the impl will reset
-        # so they end up in the result even if a fresh disarm runs
-        # concurrently (the shutdown_close path drives disarm then close
-        # back-to-back).
-        adapter_stop_errors = tuple(self._last_adapter_stop_errors)
-        disarm_result_str = (
-            self._last_disarm_result.value if self._last_disarm_result is not None else None
-        )
-
-        out: Future[WorkerCloseResult] = Future()
-
-        def _on_close_done(impl_fut: Future[tuple[str, ...]]) -> None:
-            impl_exc = impl_fut.exception()
-            # An unexpected exception out of _close_all_impl itself (not
-            # an adapter-level error, which is now captured as a string)
-            # gets recorded as a synthetic error and the result still
-            # composes — close should never raise for adapter problems.
-            if impl_exc is not None:
-                close_errors: tuple[str, ...] = (f"close impl crashed: {impl_exc!r}",)
-            else:
-                close_errors = impl_fut.result()
-            # Always stop the runner — even on partial close failure we
-            # don't want a leaked loop+thread.
-            stop_fut = self._runner.stop(grace_s=grace_s)
-
-            def _on_stop_done(sf: Future[RunnerStopResult]) -> None:
-                runner_stop = sf.result()
-                out.set_result(
-                    WorkerCloseResult(
-                        resource_id=self._resource_id,
-                        state_before=state_before,
-                        adapter_stop_errors=adapter_stop_errors,
-                        adapter_close_errors=close_errors,
-                        disarm_result=disarm_result_str,
-                        runner_stop=runner_stop,
-                    )
-                )
-
-            stop_fut.add_done_callback(_on_stop_done)
-
-        self._runner.submit(self._close_all_impl).add_done_callback(_on_close_done)
-        return out
-
-    # ---- run-lifetime sync facade ---------------------------------------
-
-    def arm(self, run_context: RunContext) -> Future[None]:
-        """Transition IDLE → ARMED with ``run_context`` installed.
-
-        Streams are not yet running; dispatch is permitted; commands route
-        through the worker loop with the run context's writer for event
-        recording. See migration doc §3.3 ARMED block.
-        """
-        if self._state is not WorkerState.IDLE:
-            return _failed_future(
-                WorkerStateError(
-                    f"Worker {self._resource_id!r}: arm() requires IDLE, got {self._state}",
-                    from_state=self._state,
-                    resource_id=self._resource_id,
-                )
-            )
-        return self._runner.submit(lambda: self._arm_impl(run_context))
-
-    def begin_sampling(
-        self, *, consumer_loop: asyncio.AbstractEventLoop
-    ) -> Future[ThreadBridge[WorkerEmission]]:
-        """Transition ARMED → SAMPLING; return the outbound emission bridge.
-
-        ``consumer_loop`` is the loop that will drain the bridge — for
-        :class:`Conductor` (Phase 2), the conductor's own loop. The bridge
-        constructor records this; :meth:`ThreadBridge.attach_consumer`
-        will assert the running loop matches.
-
-        Migration doc §4.1 line 574 abbreviates this signature to
-        ``begin_sampling()``; the doc omits the consumer-loop parameter
-        because it inlines the loop reference everywhere. Making it
-        explicit here keeps the worker decoupled from Conductor wiring.
-        """
-        if self._state is not WorkerState.ARMED:
-            return _failed_future(
-                WorkerStateError(
-                    f"Worker {self._resource_id!r}: begin_sampling() requires "
-                    f"ARMED, got {self._state}",
-                    from_state=self._state,
-                    resource_id=self._resource_id,
-                )
-            )
-        return self._runner.submit(lambda: self._begin_sampling_impl(consumer_loop=consumer_loop))
-
-    def disarm(self, *, grace_s: float = 5.0) -> Future[DisarmResult]:
-        """Transition SAMPLING/ARMED → DRAINING → IDLE.
-
-        Resolves with :attr:`DisarmResult.OK` if all streams exit and all
-        adapter stops complete within ``grace_s``. Resolves with
-        :attr:`DisarmResult.FORCED` if any stream task had to be cancelled
-        on grace expiry. See migration doc §3.8 Phase A/B.
-        """
-        if self._state not in (WorkerState.ARMED, WorkerState.SAMPLING):
-            return _failed_future(
-                WorkerStateError(
-                    f"Worker {self._resource_id!r}: disarm() requires ARMED or "
-                    f"SAMPLING, got {self._state}",
-                    from_state=self._state,
-                    resource_id=self._resource_id,
-                )
-            )
-        return self._runner.submit(lambda: self._disarm_impl(grace_s=grace_s))
-
     # ---- command-lifetime sync facade -----------------------------------
 
     def dispatch(self, adapter_name: str, cmd: DeviceCommand) -> Future[CommandResult]:
@@ -395,7 +200,7 @@ class Worker:
         transitioned to DRAINING" race; the worker is the single authority.
 
         The shielded ``adapter.command`` call is the load-bearing
-        cancellation-shield rule from §4.2 — see :meth:`_dispatch_impl`.
+        cancellation-shield rule — see :meth:`_dispatch_impl`.
         """
         if adapter_name not in self._adapters:
             return _failed_future(
@@ -448,6 +253,128 @@ class Worker:
                 UnknownDeviceError(adapter_name, configured_names=tuple(self._adapters))
             )
         return self._runner.submit(lambda: self._device_readback_impl(adapter_name))
+
+    # ---- async lifecycle facade (for async callers on any loop) ---------------
+
+    async def async_start(self, progress_callback: OpenProgressCallback | None = None) -> None:
+        """Bring the runner up; open every adapter inside the worker loop.
+
+        Resolves when the worker reaches :attr:`WorkerState.IDLE`. On any
+        :meth:`adapter.open` failure, the runner is cleanly stopped before
+        the exception propagates — no half-opened adapter or leaked
+        worker thread.
+
+        Raises :class:`WorkerStateError` if the worker is not in CLOSED —
+        re-starting a closed worker is not supported; construct a new one.
+        """
+        if self._state is not WorkerState.CLOSED:
+            raise WorkerStateError(
+                f"Worker {self._resource_id!r}: start() requires CLOSED, got {self._state}",
+                from_state=self._state,
+                resource_id=self._resource_id,
+            )
+        await asyncio.wrap_future(self._runner.start())
+        try:
+            await asyncio.wrap_future(
+                self._runner.submit(lambda: self._open_all_impl(progress_callback))
+            )
+        except BaseException:
+            await asyncio.wrap_future(self._runner.stop(grace_s=2.0))
+            raise
+
+    async def async_close(self, *, grace_s: float = 5.0) -> WorkerCloseResult:
+        """Close every adapter and stop the runner.
+
+        Requires :attr:`WorkerState.IDLE`. Raises :class:`WorkerStateError`
+        if the worker is not IDLE. The :class:`WorkerPool` is responsible
+        for disarming any active run before closing the worker.
+
+        Returns a :class:`WorkerCloseResult` describing the outcome.
+        Adapter-level errors are captured in the result's error tuples
+        rather than raised — every adapter is given the chance to release
+        its bus, and the caller (pool, shutdown coordinator) aggregates
+        per-worker outcomes.
+
+        ``grace_s`` bounds the runner-stop deadline; the per-adapter
+        :class:`WorkerShutdownConfig` is what bounds the adapter-close
+        calls.
+        """
+        if self._state is not WorkerState.IDLE:
+            raise WorkerStateError(
+                f"Worker {self._resource_id!r}: close() requires IDLE, got {self._state}",
+                from_state=self._state,
+                resource_id=self._resource_id,
+            )
+        state_before = self._state.value
+        adapter_stop_errors = tuple(self._last_adapter_stop_errors)
+        disarm_result_str = (
+            self._last_disarm_result.value if self._last_disarm_result is not None else None
+        )
+        close_errors = await asyncio.wrap_future(self._runner.submit(self._close_all_impl))
+        runner_stop = await asyncio.wrap_future(self._runner.stop(grace_s=grace_s))
+        return WorkerCloseResult(
+            resource_id=self._resource_id,
+            state_before=state_before,
+            adapter_stop_errors=adapter_stop_errors,
+            adapter_close_errors=close_errors,
+            disarm_result=disarm_result_str,
+            runner_stop=runner_stop,
+        )
+
+    async def async_arm(self, run_context: RunContext) -> None:
+        """Transition IDLE → ARMED with ``run_context`` installed.
+
+        Streams are not yet running; dispatch is permitted; commands route
+        through the worker loop with the run context's writer for event
+        recording.
+        """
+        if self._state is not WorkerState.IDLE:
+            raise WorkerStateError(
+                f"Worker {self._resource_id!r}: arm() requires IDLE, got {self._state}",
+                from_state=self._state,
+                resource_id=self._resource_id,
+            )
+        await asyncio.wrap_future(self._runner.submit(lambda: self._arm_impl(run_context)))
+
+    async def async_begin_sampling(
+        self, *, consumer_loop: asyncio.AbstractEventLoop
+    ) -> ThreadBridge[WorkerEmission]:
+        """Transition ARMED → SAMPLING; return the outbound emission bridge.
+
+        ``consumer_loop`` is the loop that will drain the bridge — for
+        :class:`Conductor`, the conductor's own loop. The bridge
+        constructor records this; :meth:`ThreadBridge.attach_consumer`
+        will assert the running loop matches. Making the loop reference
+        explicit keeps the worker decoupled from Conductor wiring.
+        """
+        if self._state is not WorkerState.ARMED:
+            raise WorkerStateError(
+                f"Worker {self._resource_id!r}: begin_sampling() requires ARMED, got {self._state}",
+                from_state=self._state,
+                resource_id=self._resource_id,
+            )
+        return await asyncio.wrap_future(
+            self._runner.submit(lambda: self._begin_sampling_impl(consumer_loop=consumer_loop))
+        )
+
+    async def async_disarm(self, *, grace_s: float = 5.0) -> DisarmResult:
+        """Transition SAMPLING/ARMED → DRAINING → IDLE.
+
+        Resolves with :attr:`DisarmResult.OK` if all streams exit and all
+        adapter stops complete within ``grace_s``. Resolves with
+        :attr:`DisarmResult.FORCED` if any stream task had to be cancelled
+        on grace expiry.
+        """
+        if self._state not in (WorkerState.ARMED, WorkerState.SAMPLING):
+            raise WorkerStateError(
+                f"Worker {self._resource_id!r}: disarm() requires ARMED or "
+                f"SAMPLING, got {self._state}",
+                from_state=self._state,
+                resource_id=self._resource_id,
+            )
+        return await asyncio.wrap_future(
+            self._runner.submit(lambda: self._disarm_impl(grace_s=grace_s))
+        )
 
     # =========================================================================
     # Worker-loop implementations. Every method here runs on the worker loop.
@@ -813,7 +740,7 @@ class Worker:
         * :class:`~capa.runtime.camera_adapter.CameraDeviceAdapter`'s
           ``start(run_context: RunContext)`` — needs the full context so
           it can compute the camera output_path from
-          ``bundle.root + run_id`` (migration doc §6).
+          ``bundle.root + run_id``.
         * Device adapters (Watlow, Alicat, Sartorius, NI-DAQ) declare
           ``start(self, clock: RunClock | None = None)`` — need the
           clock for emission timestamps.
@@ -854,15 +781,14 @@ class Worker:
     async def _disarm_impl(self, *, grace_s: float) -> DisarmResult:
         """SAMPLING/ARMED → DRAINING → IDLE.
 
-        Phase A: signal stream tasks to stop (``adapter.stop()`` wrapped in
+        First, signal stream tasks to stop (``adapter.stop()`` wrapped in
         ``asyncio.wait_for`` with ``adapter_stop_grace_s``), then await
-        each stream task with ``grace_s``. Phase B (forced): cancel any
-        task still running, then await the cancellations with a
-        secondary ``stream_cancel_grace_s`` bound — a stream task that
-        ignores its cancellation past this bound is wedged in a non-
-        cancellable native call, and the
-        :class:`~capa.ui.shutdown.ShutdownCoordinator`'s hard wall-clock
-        fuse takes over.
+        each stream task with ``grace_s``. If any task is still running,
+        cancel it and await cancellation with a secondary
+        ``stream_cancel_grace_s`` bound — a stream task that ignores its
+        cancellation past this bound is wedged in a non-cancellable native
+        call, and the :class:`~capa.ui.shutdown.ShutdownCoordinator`'s
+        hard wall-clock fuse takes over.
         """
         from_state = self._state
         self._transition(WorkerState.DRAINING)
@@ -870,7 +796,7 @@ class Worker:
 
         cfg = self._shutdown_config
         result = DisarmResult.OK
-        # Phase A: cooperative stop. adapter.stop() flips the adapter's
+        # Cooperative stop: adapter.stop() flips the adapter's
         # lifecycle so stream() exits naturally on its next yield. Each
         # call is bounded — a stop that ignores its deadline is recorded
         # and disarm continues; the disarm event still fires below so
@@ -986,8 +912,8 @@ class Worker:
         via ``adapter.stop()``.
 
         The bridge ``put`` is BLOCK by policy. Sustained block surfaces at
-        the Conductor's saturation deadline (§4.5, Phase 2) — the worker
-        itself doesn't escalate; it just stays parked at the put.
+        the Conductor's saturation deadline — the worker itself doesn't
+        escalate; it just stays parked at the put.
         """
         outbound = self._outbound
         run_context = self._run_context
@@ -1015,10 +941,10 @@ class Worker:
             # Forced disarm. Re-raise so the task's outcome is "cancelled."
             raise
         except BaseException as exc:
-            # Migration doc §5.4: record event into bundle, mark fatal,
-            # signal disarm by exiting the stream loop. The conductor's
-            # per-worker watchdog (Phase 2) is what escalates to run abort
-            # for adapters with ``on_failure = abort``.
+            # Record event into bundle, mark fatal, signal disarm by
+            # exiting the stream loop. The conductor's per-worker watchdog
+            # is what escalates to run abort for adapters with
+            # ``on_failure = abort``.
             self._fatal_error = exc
             try:
                 await run_context.writer.write_event(
@@ -1044,16 +970,16 @@ class Worker:
         """Worker-side dispatch. Enforces the dispatch state-gate and the
         cancellation shield.
 
-        Migration doc §4.2 (the load-bearing rule): ``adapter.command`` is
-        called inside :func:`asyncio.shield`. The caller's future may be
-        cancelled at any time without interrupting the in-flight hardware
-        transaction; the worker-side coroutine runs to completion. If the
-        caller cancelled, the result is dropped on the floor — but the
-        hardware is in a known state and the next dispatch reads clean.
+        The load-bearing rule: ``adapter.command`` is called inside
+        :func:`asyncio.shield`. The caller's future may be cancelled at
+        any time without interrupting the in-flight hardware transaction;
+        the worker-side coroutine runs to completion. If the caller
+        cancelled, the result is dropped on the floor — but the hardware
+        is in a known state and the next dispatch reads clean.
 
         The state check runs *here*, not at the caller side, so a
         DRAINING-vs-SAMPLING race resolves authoritatively on the worker
-        loop. See migration doc §3.5 lines 326-340 and plan §3.3.
+        loop.
         """
         if self._state in (WorkerState.DRAINING, WorkerState.CLOSED):
             raise WorkerStateError(

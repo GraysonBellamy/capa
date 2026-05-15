@@ -71,10 +71,6 @@ def _ctx(bundle_root: Path, *, run_id: str = "test-run") -> RunContext:
     )
 
 
-async def _wait(fut: object) -> object:
-    return await asyncio.wrap_future(fut)  # type: ignore[arg-type]
-
-
 def _make_preview_bridge(name: str) -> ThreadBridge[PreviewFrame]:
     loop = asyncio.get_running_loop()
     bridge: ThreadBridge[PreviewFrame] = ThreadBridge(
@@ -105,11 +101,11 @@ class TestWorkerPreviewLifecycle:
             runner=ThreadedRunner(name="cam-preview-lifecycle"),
             preview_bridges={wrapper.name: bridge},
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             # Sampling: drain a few preview frames mid-recording.
-            await _wait(worker.arm(_ctx(tmp_path)))
-            outbound = await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+            await worker.async_arm(_ctx(tmp_path))
+            outbound = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             try:
                 # Drain frames off the outbound bridge to keep the
                 # camera mux moving — pump_one_frame in the sim is what
@@ -124,7 +120,7 @@ class TestWorkerPreviewLifecycle:
                 # All preview JPEGs are real JPEGs — magic SOI bytes.
                 assert all(pf.jpeg[:3] == b"\xff\xd8\xff" for pf in sampling_frames)
             finally:
-                await _wait(worker.disarm(grace_s=3.0))
+                await worker.async_disarm(grace_s=3.0)
                 # The outbound bridge closed naturally on disarm; the
                 # drain task exits via the closed-empty `None` sentinel.
                 # Cancel as a belt-and-braces guard.
@@ -132,7 +128,7 @@ class TestWorkerPreviewLifecycle:
                     frame_drain_task.cancel()
                 await asyncio.gather(frame_drain_task, return_exceptions=True)
         finally:
-            await _wait(worker.close(grace_s=2.0))
+            await worker.async_close(grace_s=2.0)
             bridge.close()
 
     async def test_preview_channel_stops_on_pool_close(self, tmp_path: Path) -> None:
@@ -149,8 +145,8 @@ class TestWorkerPreviewLifecycle:
             runner=ThreadedRunner(name="cam-preview-close"),
             preview_bridges={wrapper.name: bridge},
         )
-        await _wait(worker.start())
-        await _wait(worker.close(grace_s=2.0))
+        await worker.async_start()
+        await worker.async_close(grace_s=2.0)
         # IR sim does not pump previews between recordings — channel is
         # alive but empty. After worker.close, the camera's preview
         # stream terminates and the drainer exits.
@@ -177,8 +173,8 @@ class TestWorkerPreviewLifecycle:
         # Just verify start/close round-trip without errors — the worker
         # iterates preview_bridges (empty) and skips all the camera-only
         # branches.
-        await _wait(worker.start())
-        await _wait(worker.close(grace_s=2.0))
+        await worker.async_start()
+        await worker.async_close(grace_s=2.0)
 
 
 async def _drain_outbound(bridge: object) -> None:

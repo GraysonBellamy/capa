@@ -1,7 +1,7 @@
 """Built-in procedure plugins shipped with capa.
 
-P0c ships :class:`~capa.experiment.procedures.builtin.free_run.FreeRun`. P3
-adds ``RecipeRunner``, ``Batch``, ``HFCalibration``, ``EmissivityRamp``.
+Includes :class:`~capa.experiment.procedures.builtin.free_run.FreeRun` and other
+built-in procedures shipped with capa.
 """
 
 from capa.experiment.procedures.builtin.free_run import FreeRun

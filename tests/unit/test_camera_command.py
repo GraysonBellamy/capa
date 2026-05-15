@@ -1,10 +1,9 @@
 """``Camera.command`` Protocol surface — webcam rejection + FLIR sim verbs.
 
-Phase 2 of the deferred-control-surface handoff: the :class:`Camera`
-Protocol now carries a generic ``command(cmd) -> CommandResult`` method.
-Webcam declares no control verbs and gate-rejects everything; FlirIrSim
-mirrors :class:`capa_flir.flir_ir.FlirIrAdapter`'s dispatch table so
-recipes targeting the real camera validate identically against sim.
+The :class:`Camera` Protocol carries a generic ``command(cmd) -> CommandResult``
+method. Webcam declares no control verbs and gate-rejects everything; FlirIrSim
+mirrors :class:`capa_flir.flir_ir.FlirIrAdapter`'s dispatch table so recipes
+targeting the real camera validate identically against sim.
 """
 
 from __future__ import annotations

@@ -385,8 +385,8 @@ class TestMetrics:
     def test_last_accept_monotonic_advances_on_each_dispatch(self) -> None:
         """The saturation signal must advance for every accepted item.
 
-        Phase 2 Conductor reads this to distinguish "writer healthy but
-        empty" from "writer stuck mid-flush" (migration doc §4.5).
+        The Conductor reads this to distinguish "writer healthy but
+        empty" from "writer stuck mid-flush".
         """
         wt = WriterThread(FakeWriter())
         before_start = wt.last_accept_monotonic_ns

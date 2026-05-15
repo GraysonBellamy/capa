@@ -1,6 +1,6 @@
 """:class:`RunController` — adapter between :class:`Conductor` and Qt.
 
-Migration doc §3 / §3.7 / §4.9. The controller owns:
+The controller owns:
 
 * a long-lived :class:`WorkerPool` opened on config-load and reopened on
   config-reload (replaces the legacy :class:`DeviceRegistry`);
@@ -45,12 +45,12 @@ from capa.runtime.camera_adapter import CameraDeviceAdapter
 from capa.runtime.conductor import (
     Conductor,
     ConductorConfig,
-    RunOutcome,
     RunResult,
 )
 from capa.runtime.dispatch import ManualClient, PoolDispatcher
 from capa.runtime.emissions import WorkerEmission
 from capa.runtime.lifecycle import PoolState
+from capa.runtime.outcomes import read_bundle_status, run_status_for_outcome
 from capa.runtime.pool import WorkerPool
 from capa.runtime.preview import PreviewFrame
 from capa.runtime.progress import DeviceInitProgress, DeviceInitStatus
@@ -58,7 +58,6 @@ from capa.runtime.session import RealRunSession
 from capa.runtime.shutdown import PoolCloseResult
 from capa.runtime.state import ConductorState
 from capa.storage.catalog import RunCatalog
-from capa.storage.manifest import BundleManifest
 from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress
 from capa.ui.lifecycle import LifecycleKind, LifecycleRegistry
 
@@ -67,9 +66,8 @@ if TYPE_CHECKING:
     from capa.runtime.runcontext import RunContext
 
 UI_BRIDGE_CAPACITY: Final[int] = 4096
-"""Capacity of the Conductor → UI :class:`ThreadBridge`. Migration doc
-§7.2 ``ui_bridge_capacity``. DROP_OLDEST policy so the conductor loop
-never blocks on a slow UI subscriber."""
+"""Capacity of the Conductor → UI :class:`ThreadBridge`. DROP_OLDEST
+policy so the conductor loop never blocks on a slow UI subscriber."""
 
 ABORT_GRACE_S: Final[float] = 5.0
 """Maximum time the conductor's disarm phase will wait for workers to
@@ -170,11 +168,10 @@ def _conductor_state_to_ui(state: ConductorState) -> RunUiState:
 class RunUiResult:
     """Outcome of one run as the UI consumes it.
 
-    Migration doc §3.5: the conductor's :class:`RunResult` carries a
-    runtime-typed enum (:class:`RunOutcome`) and the conductor's terminal
-    state. The UI's status bar and run-tab readouts want strings —
-    matching the legacy ``EngineResult`` shape — so we translate at the
-    controller boundary.
+    The conductor's :class:`RunResult` carries a runtime-typed enum
+    (:class:`RunOutcome`) and the conductor's terminal state. The UI's
+    status bar and run-tab readouts want strings — matching the legacy
+    ``EngineResult`` shape — so we translate at the controller boundary.
     """
 
     run_id: str
@@ -188,26 +185,6 @@ class RunUiResult:
     """``"ok"`` / ``"verification_failed"`` / ``"unknown"`` — mirrors the
     manifest's ``integrity.status`` field."""
     exit_reason: str | None = None
-
-
-def _outcome_to_run_status(outcome: RunOutcome) -> str:
-    match outcome:
-        case RunOutcome.COMPLETED:
-            return "completed"
-        case RunOutcome.ABORTED:
-            return "aborted"
-        case RunOutcome.CRASHED | RunOutcome.CRASHED_BUT_SEALED:
-            return "crashed"
-
-
-def _read_bundle_status(bundle_path: Path | None) -> tuple[str, str]:
-    if bundle_path is None:
-        return "open", "unknown"
-    try:
-        manifest = BundleManifest.read(bundle_path / "manifest.json")
-        return str(manifest.bundle_status), str(manifest.integrity.status)
-    except Exception:
-        return "open", "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -479,8 +456,7 @@ class RunController(QObject):
         :meth:`WorkerPool.open` on the qasync loop as a registered
         lifecycle task. The old pool (if any) is closed via a separate
         registered :attr:`LifecycleKind.OLD_POOL_CLOSE` task so the
-        shutdown coordinator can see both lifecycle phases independently
-        (plan §4.7).
+        shutdown coordinator can see both lifecycle phases independently.
 
         The new pool is published via :attr:`pool_changed` once
         :meth:`WorkerPool.open` resolves, so manual cards know not to
@@ -509,7 +485,7 @@ class RunController(QObject):
         # preview bridges. Pass it so from_config wires the bridges
         # against the right loop.
         try:
-            ui_loop = asyncio.get_event_loop()
+            ui_loop = asyncio.get_running_loop()
         except RuntimeError:
             ui_loop = None
         try:
@@ -784,7 +760,7 @@ class RunController(QObject):
                 f"worker pool is {pool.state.value!r}; wait for the config "
                 "to finish loading before starting a run"
             )
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self._task = loop.create_task(self._run(config), name="ui-run")
         self._lifecycle.register(
             LifecycleKind.RUN,
@@ -1052,9 +1028,9 @@ class RunController(QObject):
         if isinstance(emission, FrameReceipt):
             # Frame receipts are durable-only at the UI boundary —
             # preview JPEGs are delivered via :attr:`preview_received`
-            # from the per-camera preview bridges (migration doc §6.2:
-            # the camera-side ``preview_stream()`` surface is unchanged;
-            # only the cross-thread plumbing is new).
+            # from the per-camera preview bridges. The camera-side
+            # ``preview_stream()`` surface is unchanged; only the
+            # cross-thread plumbing is new.
             return
 
     async def _poll_conductor_state(self, conductor: Conductor) -> None:
@@ -1120,11 +1096,11 @@ def _resolve_procedure(
 
 
 def _translate_result(result: RunResult) -> RunUiResult:
-    bundle_status, integrity_status = _read_bundle_status(result.bundle_path)
+    bundle_status, integrity_status = read_bundle_status(result.bundle_path)
     return RunUiResult(
         run_id=result.run_id,
         bundle_path=result.bundle_path,
-        run_status=_outcome_to_run_status(result.outcome),
+        run_status=run_status_for_outcome(result.outcome),
         bundle_status=bundle_status,
         integrity_status=integrity_status,
         exit_reason=result.exit_reason,

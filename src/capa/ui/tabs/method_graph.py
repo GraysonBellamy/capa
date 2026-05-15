@@ -1,6 +1,6 @@
 """Method profile graph — PyQtGraph helper.
 
-Plan §10.1. Renders a single :class:`pyqtgraph.PlotWidget` showing the
+Renders a single :class:`pyqtgraph.PlotWidget` showing the
 operator-declared setpoint vs. elapsed time across the method.
 
 Scope: kept deliberately small. ~90% of CAPA runs are a single

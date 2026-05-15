@@ -3,15 +3,14 @@
 Plan §5.6 / §8.7: rectangular ``DaqBlock`` records stay block-shaped — capa
 deliberately does not scalarize kHz data through Python. The ``SourceRecord``
 emitted here therefore carries ``shape="block"`` with a ``block_ref`` and an
-empty ``row``; the block payload itself is held in adapter state for P0b's
-block sidecar / TDMS-passthrough plumbing to consume. P0a tests verify the
-shape and the metadata.
+empty ``row``; the block payload itself is held in adapter state for the
+block sidecar / TDMS-passthrough plumbing to consume.
 
-Per-channel ``ChannelSample`` derivation at low rate is **out of scope for
-P0a**: the block adapter is for kHz data, and emitting per-sample
-``ChannelSample``\\ s defeats the whole reason it stays block-shaped. P3
-introduces a configurable downsampler that emits one ``ChannelSample`` per
-second (mean / min / max) per channel; the binding for those derived rows is
+Per-channel ``ChannelSample`` derivation at low rate is out of scope for
+the block adapter: the block adapter is for kHz data, and emitting per-sample
+``ChannelSample``\\ s defeats the whole reason it stays block-shaped. A configurable
+downsampler can emit one ``ChannelSample`` per second (mean / min / max) per
+channel; the binding for those derived rows is
 :class:`~capa.channels.spec.NIDAQBlockChannel`.
 """
 
@@ -20,7 +19,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import anyio
 import numpy as np
@@ -47,6 +46,11 @@ from capa.devices.sim._base import (
     synth_timing,
 )
 from capa.devices.sim._signals import SignalFn
+
+if TYPE_CHECKING:
+    from capa.devices.registry import (
+        AdapterDescriptor,
+    )
 
 ADAPTER_ID: Final[str] = "nidaq_block"
 
@@ -82,8 +86,8 @@ class NIDAQBlockSim:
     _first_sample_index: int = 0
     _task_started_at_utc: object | None = None
     _blocks: list[DaqBlock] = field(default_factory=list)
-    """In-memory log of emitted blocks. P0b's block sidecar reads from this
-    when finalizing the bundle; P0a tests inspect it directly."""
+    """In-memory log of emitted blocks. The block sidecar reads from this
+    when finalizing the bundle; tests inspect it directly."""
 
     @property
     def block_period_s(self) -> float:
@@ -195,8 +199,8 @@ class NIDAQBlockSim:
 
         self._seq += 1
         record_id = make_record_id(ADAPTER_ID, self.name, self._seq)
-        # block_ref points at the in-memory log entry by index. P0b will
-        # rewrite this to a file path when block sidecars land.
+        # block_ref points at the in-memory log entry by index; rewritten to
+        # a file path when block sidecars land.
         block_ref = f"memory:{self.name}:{self._block_index}"
         record = SourceRecord(
             record_id=record_id,
@@ -244,4 +248,26 @@ class NIDAQBlockSim:
         )
 
 
-__all__ = ["ADAPTER_ID", "NIDAQBlockSim"]
+__all__ = ["ADAPTER_ID", "DESCRIPTOR", "NIDAQBlockSim"]
+
+
+def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
+
+    return AdapterDescriptor(
+        id="capa.devices.sim.nidaq_block_sim",
+        label="NI-DAQ hardware-clocked block (simulated)",
+        family="sim",
+        adapter_factory=NIDAQBlockSim,
+        params_model=None,
+        supported_binding_sources=("nidaq_block_channel",),
+        default_params={},
+        channel_templates=(),
+    )
+
+
+DESCRIPTOR = _build_descriptor()
+
+from capa.devices.registry import register as _register  # noqa: E402
+
+_register(DESCRIPTOR)

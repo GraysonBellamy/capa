@@ -1,34 +1,23 @@
 """Per-resource worker runtime.
 
-This package implements the per-resource-worker concurrency model described
-in ``docs/per-resource-worker-migration.md``. Each hardware resource (one
-serial port, one DAQmx chassis, one camera handle) gets its own thread
-hosting its own ``asyncio`` event loop; cross-thread emission and command
-traffic flows over :class:`ThreadBridge` instances; a per-run
-:class:`Conductor` coordinates workers via a config-lifetime
+This package implements the per-resource-worker concurrency model. Each
+hardware resource (one serial port, one DAQmx chassis, one camera handle)
+gets its own thread hosting its own ``asyncio`` event loop; cross-thread
+emission and command traffic flows over :class:`ThreadBridge` instances;
+a per-run :class:`Conductor` coordinates workers via a config-lifetime
 :class:`WorkerPool`.
 
-Phase 0 shipped:
+Foundation types:
 
 * :class:`~capa.runtime.bridge.ThreadBridge` — thread-safe bounded channel
-  between two asyncio loops (§4.4).
-* :func:`~capa.runtime.heartbeat.heartbeat_task` — per-loop lag observer
-  (§5.5).
-
-Phase 1 (this commit's first chunk) adds the foundation types
-:class:`Worker` builds on:
-
+  between two asyncio loops.
+* :func:`~capa.runtime.heartbeat.heartbeat_task` — per-loop lag observer.
 * :class:`WorkerState` / :class:`PoolState` and their legal-edge tables.
 * :class:`RunContext` — per-run state installed into workers at arm.
 * :class:`WorkerMetrics` / :class:`DisarmResult` — per-worker telemetry.
 * :class:`ThreadedRunner` / :class:`InlineRunner` — the thread + loop
   pluggable host that lets the same :class:`Worker` code be exercised
   inline in unit tests and in a real thread in production.
-
-The higher-level types (:class:`Worker`, :class:`WorkerPool`,
-``build_workers``) land in subsequent Phase 1 PRs. The :class:`Conductor`
-and dispatch facades land in Phase 2. Nothing in this package is wired into
-the engine yet.
 """
 
 from __future__ import annotations

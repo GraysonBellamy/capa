@@ -1,4 +1,4 @@
-"""Camera preview dock — thumbnails for each active camera (plan §10.2, §16 P4).
+"""Camera preview dock — thumbnails for each active camera.
 
 One :class:`_PreviewTile` per camera in :attr:`HardwareProfile.cameras`,
 laid out in a flow grid. Tiles update at the adapter's throttled cadence

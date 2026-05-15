@@ -88,6 +88,15 @@ class ShutdownDeadlines:
     The hard wall is the absolute upper bound; it must be larger than
     the sum of the phase deadlines so the timer fires only when a phase
     itself wedges past its bound.
+
+    **Budget Composition:** ``pool_close_s`` must exceed the sum of all
+    per-worker shutdown deadlines (see
+    :class:`~capa.runtime.shutdown.WorkerShutdownConfig`). For a system
+    with N adapters per worker, that sum is roughly:
+    (adapter_stop_grace × N + stream_stop_grace + stream_cancel_grace +
+    adapter_close_grace × N + runner_stop_grace). The default
+    ``pool_close_s=8.0`` is safe for systems with 1-2 adapters per resource.
+    Increase it when adding more adapters or reducing individual grace periods.
     """
 
     cancel_tasks_s: float = 1.0

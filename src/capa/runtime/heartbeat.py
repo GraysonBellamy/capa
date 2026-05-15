@@ -1,21 +1,17 @@
 """Per-loop heartbeat for observability.
 
-Implements the loop-lag observer from
-``docs/per-resource-worker-migration.md`` §5.5. Every per-resource worker
-loop, the conductor loop, and the UI loop run one :func:`heartbeat_task`
-in the background. The task re-targets every ``period_s`` seconds and
-observes the actual wake-up time vs the target; the difference is loop lag.
+Every per-resource worker loop, the conductor loop, and the UI loop run
+one :func:`heartbeat_task` in the background. The task re-targets every
+``period_s`` seconds and observes the actual wake-up time vs the target;
+the difference is loop lag.
 
-``loop_lag.p99 > 50 ms`` is the smoke alarm referenced in §5.5. The
-manifest's ``diagnostics.runtime`` block records the p99 per thread; the
-UI status bar flashes when any loop exceeds threshold.
+``loop_lag.p99 > 50 ms`` is the smoke alarm. The manifest's
+``diagnostics.runtime`` block records the p99 per thread; the UI status
+bar flashes when any loop exceeds threshold.
 
 The :class:`LoopLagMetric` shares the same percentile-ring implementation
 as :class:`~capa.runtime.bridge.ThreadBridgeMetrics` (lifted from there)
 so quantile semantics stay consistent across the runtime.
-
-Phase 0 scope: ships standalone. Workers and Conductor (Phase 1+) will
-each start one of these inside their own task group.
 """
 
 from __future__ import annotations
@@ -34,8 +30,8 @@ class LoopLagMetric:
 
     A loop running cooperatively should wake from a 50 ms sleep within
     a few ms; sustained lag above ~50 ms means the loop has a CPU-bound
-    or I/O-blocking task starving it. The migration doc's bounded-latency
-    goal (§2.1) translates directly to ``p99_ms < 50`` for every loop.
+    or I/O-blocking task starving it. The bounded-latency goal translates
+    directly to ``p99_ms < 50`` for every loop.
 
     All readers should treat fields as read-only and use the percentile
     properties — direct ``_ring`` access is private.
@@ -80,7 +76,7 @@ async def heartbeat_task(
 
     Sleeps from a moving target rather than from the current time, so a
     one-off stall shows up as lag on the *next* wake-up, not as drift in
-    subsequent samples. Migration doc §5.5 lines 1421-1431.
+    subsequent samples.
 
     Exits when ``stop_event`` is set. The task does not handle
     :class:`asyncio.CancelledError` specially — cancellation through the

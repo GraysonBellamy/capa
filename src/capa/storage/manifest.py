@@ -4,9 +4,8 @@ Plan §8.1. The manifest is the bundle's index card: every read tool starts
 here, and every field is required (or explicitly ``None`` with a comment).
 The structure mirrors the example block in the plan exactly.
 
-P0b populates everything that does not depend on the engine task group; the
-``queue_health`` and ``dropped_samples`` blocks are stubs that P0c fills in
-once the metrics module exists.
+Populates everything that does not depend on the engine task group; the
+``queue_health`` and ``dropped_samples`` blocks are populated by the metrics module.
 """
 
 from __future__ import annotations
@@ -160,7 +159,7 @@ class QueueHealthEntry(BaseModel):
 
     Queue collectors populate ``depth_*`` / ``lag_s_max``; writer collectors
     populate ``write_*`` extras (allowed via ``extra="allow"`` so adding a
-    new collector in P1+ doesn't require a schema bump).
+    new collector doesn't require a schema bump).
     """
 
     model_config = ConfigDict(extra="allow")
@@ -264,10 +263,10 @@ class BundleManifest(BaseModel):
     data_shape: DataShape = Field(default_factory=DataShape)
 
     queue_health: dict[str, QueueHealthEntry] = Field(default_factory=dict)
-    """Empty in P0b — populated by the metrics module in P0c+."""
+    """Populated by the metrics module."""
 
     dropped_samples: dict[str, int] = Field(default_factory=dict)
-    """Empty in P0b — populated by ringbuffer/metrics in P0c+."""
+    """Populated by the ringbuffer/metrics module."""
 
     integrity: IntegrityBlock = Field(default_factory=IntegrityBlock)
 

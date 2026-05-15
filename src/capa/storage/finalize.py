@@ -16,8 +16,8 @@ Idempotent: running on an already-sealed bundle is a no-op (same digest;
 manifest unchanged). Running on a bundle whose in-flight files are missing
 but final files exist behaves as "verify and seal."
 
-This module is library-only — the ``capa finalize`` CLI lands in P0c. The
-function is exposed here so the bundle writer's normal-exit path and the
+This module is library-only — the ``capa finalize`` CLI calls into it.
+The function is exposed here so the bundle writer's normal-exit path and the
 crash-recovery path can both call it.
 """
 
@@ -109,9 +109,9 @@ def _rewrite_inflight_to_parquet(in_flight: Path, final: Path) -> bool:
     """Read ``in_flight`` (Arrow IPC stream) and rewrite it to ``final`` parquet.
 
     Sorts by ``t_mono_ns`` if that column is present (it always is for the
-    sinks P0b ships). The rewrite is whole-file in memory — fine for the
+    Sorts by ``t_mono_ns`` when present. The rewrite is whole-file in memory — fine for the
     sample sizes capa produces (an hour of 60 Hz × 30 channels = ~6.5M rows
-    of 13 thin columns, easily under 1 GiB). A future P6 task can stream it.
+    of 13 thin columns, easily under 1 GiB).
 
     Returns ``True`` if the final parquet was written, ``False`` if the
     in-flight file is unrecoverable (torn before its first flush boundary)

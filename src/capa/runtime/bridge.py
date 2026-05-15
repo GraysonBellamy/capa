@@ -1,11 +1,9 @@
 """Thread-safe bounded channel between two ``asyncio`` loops.
 
-Implements :class:`ThreadBridge` from
-``docs/per-resource-worker-migration.md`` §4.4. Each bridge connects one
-producer loop (worker thread) to one consumer loop (conductor thread, or
-qasync UI loop). Backpressure is per-policy; latency is observed at every
-hop; ``blocked_since_ms`` is the saturation-deadline signal the Conductor
-polls in §4.5.
+Each bridge connects one producer loop (worker thread) to one consumer
+loop (conductor thread, or qasync UI loop). Backpressure is per-policy;
+latency is observed at every hop; ``blocked_since_ms`` is the
+saturation-deadline signal the Conductor polls.
 
 Why this is not :class:`~capa.core.backpressure.BoundedQueue`:
 ``BoundedQueue`` is loop-local and explicitly documented "not intended for
@@ -13,12 +11,7 @@ inter-thread use" — its ``anyio.Event`` and deque are owned by the loop that
 constructed them. :class:`ThreadBridge` instead pairs a consumer-loop
 :class:`asyncio.Queue` with a producer-loop :class:`asyncio.Semaphore` and
 crosses the thread seam exclusively via
-:meth:`asyncio.AbstractEventLoop.call_soon_threadsafe`. See §4.4.1 of the
-migration doc for the comparison against ``janus`` / ``culsans`` /
-``anyio.memory_object_stream``.
-
-Phase 0 scope: this module ships standalone and is not yet wired into any
-runtime path. :class:`Worker` (Phase 1) will be the first caller.
+:meth:`asyncio.AbstractEventLoop.call_soon_threadsafe`.
 """
 
 from __future__ import annotations
@@ -39,11 +32,11 @@ to signal end-of-stream. Identity-checked on the consumer side."""
 class BridgePolicy(Enum):
     """Backpressure policy for a :class:`ThreadBridge`.
 
-    Migration doc §4.4 — these are the bridge's three policies. ``ABORT_RUN``
-    is explicitly absent: aborts are a run-level concern owned by the
-    Conductor's saturation monitor (§4.5), not a per-bridge knob. The shape
-    parallels :class:`~capa.core.backpressure.BackpressurePolicy` but the two
-    enums are kept separate so the two systems can evolve independently.
+    ``ABORT_RUN`` is explicitly absent: aborts are a run-level concern
+    owned by the Conductor's saturation monitor, not a per-bridge knob.
+    The shape parallels :class:`~capa.core.backpressure.BackpressurePolicy`
+    but the two enums are kept separate so the two systems can evolve
+    independently.
     """
 
     BLOCK = "block"
@@ -116,9 +109,8 @@ class _PercentileRing:
 class ThreadBridgeMetrics:
     """Live statistics for one :class:`ThreadBridge`.
 
-    Field layout mirrors migration doc §4.4 lines 877-889. The
-    :attr:`blocked_since_ms` field is the saturation-deadline signal that
-    the Conductor's monitor polls (§4.5): when not ``None``, the producer
+    The :attr:`blocked_since_ms` field is the saturation-deadline signal
+    that the Conductor's monitor polls: when not ``None``, the producer
     is currently waiting for space, and the value is the wall-time elapsed
     since the wait began.
 
@@ -143,7 +135,7 @@ class ThreadBridgeMetrics:
     def blocked_since_ms(self) -> float | None:
         """How long the producer has been blocked NOW, in ms, or ``None``
         if not currently blocked. Polled by the Conductor's saturation
-        monitor (migration doc §4.5)."""
+        monitor."""
         start = self._block_start_mono
         if start is None:
             return None
@@ -161,8 +153,8 @@ class ThreadBridgeMetrics:
 class ThreadBridge[T]:
     """Thread-safe bounded channel between two ``asyncio`` loops.
 
-    Per migration doc §4.4. One consumer loop owns the receive side; one
-    producer loop owns the send side. Cross-thread signalling uses
+    One consumer loop owns the receive side; one producer loop owns the
+    send side. Cross-thread signalling uses
     :meth:`asyncio.AbstractEventLoop.call_soon_threadsafe` exclusively;
     no synchronization primitive is shared mutably across loops.
 

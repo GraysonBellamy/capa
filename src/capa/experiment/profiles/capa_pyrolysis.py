@@ -22,10 +22,8 @@ This profile contributes:
 
   * ``heater_setpoint`` / ``heater_pv`` — the controller pair
   * ``sample_temperature`` — at least one TC inside or close to the sample
-  * ``mass`` — when a load cell is present; optional otherwise
+  * ``mass`` — load cell reading the specimen mass
   * ``purge_gas_flow`` — the inert/sweep gas MFC
-  * ``reactor_pressure`` — optional; required if the rig has a pressure
-    transducer
 - **gas-analysis metadata** — purge-gas spec (purity grade, supplier,
   cylinder lot), sweep flow target, optional downstream analyzer (FTIR / GC
   / MS) entry-point + serial + sampling-line delay. CAPA does *not* do
@@ -267,6 +265,11 @@ REQUIRED_CHANNEL_GROUPS: tuple[ChannelRequirement, ...] = (
         kinds=(ChannelKind.MFC_FLOW.value, ChannelKind.ANALOG_IN.value),
         min_count=1,
     ),
+    ChannelRequirement(
+        group="mass",
+        kinds=(ChannelKind.MASS.value,),
+        min_count=1,
+    ),
 )
 """Channel groups required by the CAPA profile. Matched against
 :attr:`ChannelSpec.metadata['capa_group']` (the operator declares which
@@ -275,18 +278,8 @@ channel plays which role when building the hardware profile)."""
 
 OPTIONAL_CHANNEL_GROUPS: tuple[ChannelRequirement, ...] = (
     ChannelRequirement(
-        group="mass",
-        kinds=(ChannelKind.MASS.value,),
-        min_count=1,
-    ),
-    ChannelRequirement(
         group="reactive_gas_flow",
         kinds=(ChannelKind.MFC_FLOW.value, ChannelKind.ANALOG_IN.value),
-        min_count=1,
-    ),
-    ChannelRequirement(
-        group="reactor_pressure",
-        kinds=(ChannelKind.ANALOG_IN.value,),
         min_count=1,
     ),
 )
@@ -352,7 +345,7 @@ def validate_metadata(raw: dict[str, object]) -> CapaPyrolysisMetadata:
     return CapaPyrolysisMetadata.model_validate(raw)
 
 
-# Profile object exposed via the DomainProfile Protocol (P3 plugin runtime
+# Profile object exposed via the DomainProfile Protocol (the plugin runtime
 # discovers profiles by importing the module and reading these attributes).
 id: str = PROFILE_ID
 standard_refs: tuple[str, ...] = DEFAULT_STANDARD_REFS

@@ -185,11 +185,11 @@ requires-dist = [
     { name = "qasync", specifier = ">=0.27" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
-    { name = "sartoriuslib", specifier = ">=0.2.0,<0.3" },
+    { name = "sartoriuslib", specifier = ">=0.3.1,<0.4" },
     { name = "structlog", specifier = ">=24.4" },
     { name = "tomli-w", specifier = ">=1.0" },
     { name = "typer", specifier = ">=0.12" },
-    { name = "watlowlib", specifier = ">=0.4.0,<0.5" },
+    { name = "watlowlib", specifier = ">=0.5.0,<0.6" },
 ]
 provides-extras = ["dev", "flir"]
 
@@ -911,15 +911,15 @@ wheels = [
 
 [[package]]
 name = "sartoriuslib"
-version = "0.2.0"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fd/9d/37fa4306f70043cf5b32dbb535e81572e73ced99284f06f76031421ae076/sartoriuslib-0.2.0.tar.gz", hash = "sha256:6b37e3faa99745648db3de1b490941eb35133f19c70504cc8fca9b88b4fdf4b8", size = 390759, upload-time = "2026-05-10T16:53:51.093Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6d/c0/356cd378894021c4e17d491b5876dbca75eb93f4fc4d96cf8df816a04762/sartoriuslib-0.3.1.tar.gz", hash = "sha256:2da8b02c85b1584efb631ec31e0591bc61685aac58f6cd4e682f3110ffee3900", size = 402072, upload-time = "2026-05-14T22:59:52.852Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/cc/011a678f0f7d90b4cd14a000a00a04b38476079b8515026b6384a030c002/sartoriuslib-0.2.0-py3-none-any.whl", hash = "sha256:0e764a1e634d37fbbc7d36b5e78469f41479fbc2c849712d8b675e33c2feff2b", size = 215365, upload-time = "2026-05-10T16:53:49.08Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/21/772fb78b16bb7ad3b2614a6153059960b5d1aa56343948420d5daf480554/sartoriuslib-0.3.1-py3-none-any.whl", hash = "sha256:4a69e4679a2f166346007c9f04801f6b4d8d5346937cb40b0e1c61937d741da0", size = 224359, upload-time = "2026-05-14T22:59:51.094Z" },
 ]
 
 [[package]]
@@ -1064,14 +1064,14 @@ wheels = [
 
 [[package]]
 name = "watlowlib"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anymodbus" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/68/20/cfd32f4be7be626beee6dc3d869020030146a627e9e68d2aa13d7fd41fdc/watlowlib-0.4.0.tar.gz", hash = "sha256:24b863dcac48054b67423affdf84305be88032ba26455043f3c4b45097a34415", size = 364149, upload-time = "2026-05-13T20:56:01.603Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/8d/788f9552a86c794a7bfe845b0a5f0ffd2e6e1ea327d15b54b9329bb385c9/watlowlib-0.5.0.tar.gz", hash = "sha256:2d3b68c68b8569b9007f16bc0352d1c7355557fe4bc23b19f96a6dddb715fbb5", size = 369626, upload-time = "2026-05-14T22:46:13.71Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/26/091c70056b3d4a810bde8a171caa121197419725b9687f35a58a693b0fb3/watlowlib-0.4.0-py3-none-any.whl", hash = "sha256:451ec5c613d8442219698b051e4a2910d94c12188b0d3db00beca42249446a95", size = 321996, upload-time = "2026-05-13T20:55:59.786Z" },
+    { url = "https://files.pythonhosted.org/packages/82/77/0bc60b5ffdff1b0434e3b1b01b24c75cd1ef0b43a9ee617192ba5bb9275f/watlowlib-0.5.0-py3-none-any.whl", hash = "sha256:e70f1ffd0714c8bd4ae396a595a816a73e4242106c82683886c09b9e038538f9", size = 324261, upload-time = "2026-05-14T22:46:11.822Z" },
 ]

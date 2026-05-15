@@ -1,8 +1,7 @@
 """:class:`BundleRef` over a real :class:`RunBundleWriter`.
 
-Migration doc §3.7 step (c) and the :class:`~capa.runtime.runcontext.BundleRef`
-protocol. The bundle ref is an opaque read-only handle that workers and
-analyzers thread through diagnostic events so a reader can locate the bundle
+The bundle ref is an opaque read-only handle that workers and analyzers
+thread through diagnostic events so a reader can locate the bundle
 without parsing surrounding context.
 
 Workers never write to the bundle directly — that's the writer thread's job.

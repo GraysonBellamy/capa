@@ -1,31 +1,30 @@
 """:class:`CommandDispatcher` — the executor's outbound command surface.
 
-Migration doc §3.5. Today's :class:`~capa.experiment.executor.MethodExecutor`
-holds a ``dict[str, DeviceAdapter]`` and calls ``await adapter.command(cmd)``
+Today's :class:`~capa.experiment.executor.MethodExecutor` holds a
+``dict[str, DeviceAdapter]`` and calls ``await adapter.command(cmd)``
 directly. That direct call is the single most contended thing in the
 single-loop model — it serializes on whichever event loop the adapter was
 constructed in, regardless of which thread the caller is on.
 
-Phase 2 introduces the :class:`CommandDispatcher` indirection so the
-executor (and any other procedure-side dispatcher) can route a command
-through whichever concurrency layer is appropriate:
+The :class:`CommandDispatcher` indirection lets the executor (and any
+other procedure-side dispatcher) route a command through whichever
+concurrency layer is appropriate:
 
 * :class:`AdapterDispatcher` — direct, in-loop. Surviving as a thin
   helper for tests that don't want to spin up a full pool; production
   paths no longer use it.
 * :class:`PoolDispatcher` — routes through a :class:`WorkerPool` (and
   therefore through a :class:`ThreadBridge` to the resource's worker).
-  Used for manual control between runs (Phase 4 :class:`ManualClient`
-  routes here when no run is armed) and by tests that want to exercise
-  the pool directly.
+  Used for manual control between runs and by tests that want to
+  exercise the pool directly.
 * :class:`ConductorDispatcher` — adds run-time state gating on top of
   :class:`PoolDispatcher`: commands are refused outside PREPARING /
   RUNNING. Used by the :class:`ProcedureRunner` so a procedure-issued
   command landing during DRAINING fails fast instead of silently racing
   with shutdown.
-* :class:`ManualClient` (Phase 4, doc §4.8) — single sync facade for UI
-  manual cards. Routes to :class:`Conductor.dispatch` when a run is
-  armed (records into the bundle, gates by conductor state), else to
+* :class:`ManualClient` — single sync facade for UI manual cards.
+  Routes to :class:`Conductor.dispatch` when a run is armed (records
+  into the bundle, gates by conductor state), else to
   :class:`WorkerPool.dispatch` (no gating, no bundle event). Cards take
   a :class:`ManualClient` reference and remain unaware of which side is
   in use.
@@ -90,8 +89,8 @@ class CommandDispatcher(Protocol):
     The single method is loop-agnostic at the contract level: an
     implementation may run the command in the caller's loop (direct adapter
     call), on a worker thread loop (pool / conductor), or in a future
-    subprocess (Phase 2.x SubprocessWorker). The caller only sees an
-    awaitable that resolves to a :class:`CommandResult` or raises.
+    subprocess. The caller only sees an awaitable that resolves to a
+    :class:`CommandResult` or raises.
     """
 
     async def dispatch(self, device: str, cmd: DeviceCommand) -> CommandResult:
@@ -112,10 +111,10 @@ class CommandDispatcher(Protocol):
 class AdapterDispatcher:
     """Direct ``adapter.command(cmd)`` dispatch.
 
-    Used by today's :class:`ExperimentEngine` (Phase 2/3 coexistence) so
-    the executor cutover doesn't change Engine behaviour. The adapter map
-    is built at engine ``run()`` time and stays alive for the run; the
-    dispatcher holds it by reference and does **not** mutate.
+    Used by today's :class:`ExperimentEngine` so the executor cutover
+    doesn't change Engine behaviour. The adapter map is built at engine
+    ``run()`` time and stays alive for the run; the dispatcher holds it
+    by reference and does **not** mutate.
     """
 
     __slots__ = ("_adapters",)
@@ -146,7 +145,7 @@ class PoolDispatcher:
     cleanly — this is the cross-thread bridge.
 
     No engine-state gating. Suitable for manual-control-between-runs
-    (Phase 4) and for tests; production run-time dispatch should use
+    and for tests; production run-time dispatch should use
     :class:`ConductorDispatcher` so state-after-stop commands are
     refused promptly.
     """
@@ -177,9 +176,9 @@ class ConductorDispatcher:
     """Dispatch through a :class:`Conductor` (which routes through the pool).
 
     Adds the run-time state gate: commands are refused outside PREPARING /
-    RUNNING (migration doc §3.5). This is what protects a procedure from
-    issuing a command into a worker that's already disarming, which would
-    race with ``adapter.stop()``.
+    RUNNING. This is what protects a procedure from issuing a command into
+    a worker that's already disarming, which would race with
+    ``adapter.stop()``.
 
     The conductor's own :meth:`Conductor.dispatch` already enforces the
     gate; we layer the state check on the dispatcher side too so the
@@ -214,7 +213,7 @@ class ConductorDispatcher:
 
 
 class ManualClient:
-    """Single async facade for UI manual cards (migration doc §4.8).
+    """Single async facade for UI manual cards.
 
     Routes :meth:`dispatch` and :meth:`snapshot` to a live :class:`Conductor`
     when a run is armed (records into the bundle, gates by conductor state),
@@ -251,10 +250,10 @@ class ManualClient:
     async def dispatch(self, device: str, cmd: DeviceCommand) -> CommandResult:
         """Issue ``cmd`` against ``device``.
 
-        Routes through the conductor (Path A in doc §3.5) when a run is
-        armed and the conductor is dispatchable, else through the pool
-        (Path B). The future returned by either side is bridged into the
-        caller's loop via :func:`asyncio.wrap_future`.
+        Routes through the conductor when a run is armed and the
+        conductor is dispatchable, else through the pool. The future
+        returned by either side is bridged into the caller's loop via
+        :func:`asyncio.wrap_future`.
         """
         conductor = self._active_conductor()
         try:
@@ -294,7 +293,7 @@ class ManualClient:
         Retained for tests that want to assert the wrapper hosts the
         expected handle; UI code should not introduce new callers. The
         returned handle lives on the worker loop, so touching its methods
-        from the qasync loop is a §3.11 invariant 2 violation.
+        from the qasync loop violates the worker-owns-the-handle invariant.
 
         Returns ``None`` if the device name is unknown or refers to a
         non-camera adapter.

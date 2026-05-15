@@ -1,14 +1,9 @@
 """:func:`build_workers` — group adapters by resource and validate the grouping.
 
-Migration doc §4.12 lines 1273-1343. Phase 1 landed the resource validation
-and grouping; Phase 4 inlines adapter construction here so the legacy
-``capa.experiment.engine`` module can be deleted.
-
-The validation runs **synchronously, before any worker thread spawns**.
-The migration doc is explicit (§4.12 line 1282): a misconfigured config
-fails fast with no hardware side-effects. Any :class:`ResourceConflict`
-raised here propagates out of :meth:`WorkerPool.open` before the pool's
-state moves out of CLOSED.
+The validation runs **synchronously, before any worker thread spawns**:
+a misconfigured config fails fast with no hardware side-effects. Any
+:class:`ResourceConflict` raised here propagates out of
+:meth:`WorkerPool.open` before the pool's state moves out of CLOSED.
 """
 
 from __future__ import annotations
@@ -20,6 +15,7 @@ from typing import Any, cast
 
 import structlog
 
+from capa.config.problems import ConfigProblem
 from capa.devices.adapter import DeviceAdapter
 from capa.devices.camera.base import Camera
 from capa.experiment.config import ExperimentConfig
@@ -55,8 +51,8 @@ def build_workers(
     :meth:`WorkerPool.open` and surfaces with the offending adapter
     names, so the operator's TOML fix is unambiguous.
 
-    Cameras (migration doc §6) are constructed alongside devices,
-    wrapped in :class:`CameraDeviceAdapter` (which implements the
+    Cameras are constructed alongside devices, wrapped in
+    :class:`CameraDeviceAdapter` (which implements the
     :class:`DeviceAdapter` Protocol over a
     :class:`~capa.devices.camera.base.Camera`), and grouped into
     workers by their ``resource_id`` the same way device adapters are.
@@ -69,9 +65,9 @@ def build_workers(
     runner protocol) to get deterministic, single-loop behaviour.
 
     ``outbound_capacity`` is the worker outbound :class:`ThreadBridge`
-    capacity. Phase 1 uses a fixed value; Phase 2 will derive per-worker
-    capacities from ``config.runtime.bridge_capacity_factor * rate_hz``
-    (migration doc §7.2).
+    capacity. Currently a fixed value; a future change will derive
+    per-worker capacities from ``config.runtime.bridge_capacity_factor
+    * rate_hz``.
     """
     device_adapters = _construct_adapters_from_config(config)
     camera_adapters = _construct_camera_adapters_from_config(config)
@@ -152,9 +148,8 @@ def _import_camera_class(module_path: str) -> type[Camera]:
 
     The implementation lives here (and inside ``cameras.py``) rather
     than being shared — ``capa.runtime`` cannot import from
-    ``capa.experiment`` without re-introducing the cycle that the
-    Phase 1 build.py worked around. A few duplicated lines are
-    cheaper than a structural workaround.
+    ``capa.experiment`` without re-introducing an import cycle.
+    A few duplicated lines are cheaper than a structural workaround.
     """
     try:
         module = importlib.import_module(module_path)
@@ -201,10 +196,22 @@ def _construct_adapters_from_config(config: ExperimentConfig) -> list[DeviceAdap
     failures alongside resource-ID collisions, rather than mixing two
     error types at the same boundary.
     """
+    # Local import to defer registry import cost when the runtime is
+    # used directly (avoids the descriptor registry's eager-import of
+    # every adapter module when this function isn't called).
+    from capa.devices.registry import get_descriptor  # noqa: PLC0415
+
     out: list[DeviceAdapter] = []
     channels = list(config.hardware.channels)
     for dev in config.hardware.devices:
-        cls = _import_adapter_class(dev.adapter)
+        # Prefer the registry; fall back to the legacy snake-case probe
+        # for adapters that haven't migrated yet. Either path yields the
+        # same class.
+        descriptor = get_descriptor(dev.adapter)
+        if descriptor is not None and descriptor.adapter_factory is not None:
+            cls = descriptor.adapter_factory
+        else:
+            cls = _import_adapter_class(dev.adapter)
         from_params = getattr(cls, "from_params", None)
         try:
             if callable(from_params):
@@ -238,7 +245,7 @@ def _import_adapter_class(module_path: str) -> type:
     * ``<Leaf>`` — direct CamelCase of the leaf module (``alicat`` → ``Alicat``).
     * ``<Leaf>Sim`` — sim adapters with the ``_sim`` suffix stripped
       (``alicat_sim`` → ``AlicatSim``).
-    * ``<Leaf>Adapter`` — the real-adapter naming used in plan §5.2
+    * ``<Leaf>Adapter`` — the real-adapter naming
       (``watlow`` → ``WatlowAdapter``, ``alicat`` → ``AlicatAdapter``).
     * Bare-acronym variants where the first leaf segment is upper-cased
       (``nidaq`` → ``NIDAQAdapter``, ``nidaq_polled_sim`` → ``NIDAQPolledSim``).
@@ -291,80 +298,88 @@ def _snake_to_camel_upper_first(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Resource validation. Migration doc §4.12 lines 1301-1343.
+# Resource validation.
 # ---------------------------------------------------------------------------
 
 
 def _validate_resources(adapters: Sequence[DeviceAdapter], config: ExperimentConfig) -> None:
-    """Run all four resource-conflict checks synchronously.
+    """Run resource-conflict checks; raise on first conflict.
 
-    Raises :class:`ResourceConflict` on the first conflict. The exception
-    carries the offending adapter names so error toasts read
-    ``"port COM6 claimed by heater_a and heater_b"`` rather than
-    ``"some adapter conflict somewhere."``
+    Boundary wrapper: collects :class:`ConfigProblem`s via
+    :func:`collect_resource_problems`, then raises
+    :class:`ResourceConflict` for the first error so existing call sites
+    keep their exception contract. Setup-editor Layer-4 calls
+    :func:`collect_resource_problems` directly.
 
-    The four checks (migration doc §4.12 lines 1301-1339):
+    The active checks:
 
-    1. **Serial port uniqueness across resource IDs.** Two adapters with
-       ``resource_id`` starting ``serial:`` must agree on the port. The
-       resource_id is the contract: if both adapters use ``serial:COM6``
-       they're sharing the same worker, which is fine. If one uses
-       ``serial:COM6`` and another uses ``serial:COM6-alt`` for the same
-       physical port, they would otherwise spawn separate workers competing
-       for the bus.
-    2. **DAQmx physical-channel uniqueness.** Two adapters cannot claim the
+    1. **DAQmx physical-channel uniqueness.** Two adapters cannot claim the
        same physical channel (e.g. ``cDAQ1Mod1/ai0``) — DAQmx will throw
-       ``-50103 resource reserved`` if attempted. The default
-       ``resource_id`` for DAQmx is keyed on the chassis, so two tasks on
-       the same chassis already share a worker; this check catches the
-       case where one channel appears in two adapters' channel lists.
-    3. **Webcam handle uniqueness.** Same ``webcam:N`` may not appear in
+       ``-50103 resource reserved`` if attempted.
+    2. **Webcam handle uniqueness.** Same ``webcam:N`` may not appear in
        two adapters.
-    4. **Global SDK singletons** are recorded into a side log for the
-       conductor to include in the bundle manifest. They are NOT raised
-       as conflicts here — they can't be resolved by ``resource_id``
-       (NI-DAQmx system handle, PyAV format registration, FLIR Spinnaker
-       process-singleton). The :class:`SubprocessWorker` escape hatch
-       (§4.11) is the only architectural fix for these.
+    3. **Global SDK singletons** are recorded into a side log for the
+       conductor to include in the bundle manifest.
     """
-    _check_serial_uniqueness(adapters)
-    _check_daqmx_channel_uniqueness(adapters)
-    _check_webcam_uniqueness(adapters)
+    problems = collect_resource_problems(adapters, config)
+    errors = [p for p in problems if p.severity == "error"]
+    if errors:
+        first = errors[0]
+        raise _resource_conflict_from_problem(first)
+
+
+def collect_resource_problems(
+    adapters: Sequence[DeviceAdapter], config: ExperimentConfig
+) -> list[ConfigProblem]:
+    """Layer-4 entry point: collect all resource problems without raising.
+
+    Same checks as :func:`_validate_resources`, but each yields a
+    :class:`ConfigProblem` instead of raising. The Setup editor's
+    validation pipeline calls this; ``build_workers`` calls the raising
+    boundary above.
+    """
+    problems: list[ConfigProblem] = []
+    problems.extend(_check_daqmx_channel_uniqueness(adapters))
+    problems.extend(_check_webcam_uniqueness(adapters))
+    # Global SDK constraints are still logged for the bundle manifest,
+    # not reported as problems.
     _record_global_sdk_constraints(adapters, config)
+    return problems
 
 
-def _check_serial_uniqueness(adapters: Sequence[DeviceAdapter]) -> None:
-    """For each ``serial:<port>`` scheme, the body must be unique."""
-    port_to_resource: dict[str, str] = {}
-    port_to_name: dict[str, str] = {}
-    for adapter in adapters:
-        rid = adapter.resource_id
-        if not rid.startswith("serial:"):
-            continue
-        port = rid.removeprefix("serial:")
-        prev_rid = port_to_resource.get(port)
-        if prev_rid is None:
-            port_to_resource[port] = rid
-            port_to_name[port] = adapter.name
-            continue
-        if prev_rid != rid:
-            raise ResourceConflict(
-                f"serial port {port!r} claimed by conflicting resource_ids: "
-                f"{prev_rid!r} (from adapter {port_to_name[port]!r}) and "
-                f"{rid!r} (from adapter {adapter.name!r})",
-                conflicting_names=(port_to_name[port], adapter.name),
-                resource_key=port,
-            )
+def _resource_conflict_from_problem(problem: ConfigProblem) -> ResourceConflict:
+    """Promote a resource :class:`ConfigProblem` back to ``ResourceConflict``.
 
-
-def _check_daqmx_channel_uniqueness(adapters: Sequence[DeviceAdapter]) -> None:
-    """No two adapters may claim the same DAQmx physical channel.
-
-    The migration doc references ``getattr(a, "physical_channels", ())``
-    (§4.12 line 1321) — the production NI-DAQ adapter exposes this; sim
-    adapters that don't drive real DAQmx hardware naturally return empty
-    and pass through.
+    Preserves ``conflicting_names`` and ``resource_key`` payload so the
+    runtime exception payload is unchanged from the pre-refactor shape.
+    Auxiliary fields live under ``ConfigProblem.path`` and the message.
     """
+    # The collecting checks below stash the conflict metadata into a
+    # private extra-field on the dataclass-like model via the message
+    # and the path; here we reconstruct ResourceConflict from the
+    # problem's well-known fields. ``path`` is
+    # ("conflicting_names", a, b) for the two-name pair check.
+    names: tuple[str, ...] = ()
+    resource_key: str | None = None
+    # Convention: collecting helpers below put the names tuple at path[0:2]
+    # and the resource key in path[-1].
+    if len(problem.path) >= 3 and problem.path[0] == "conflict":
+        # path = ("conflict", name_a, name_b, resource_key)
+        names = (str(problem.path[1]), str(problem.path[2]))
+        if len(problem.path) >= 4:
+            resource_key = str(problem.path[3])
+    return ResourceConflict(
+        problem.message,
+        conflicting_names=names,
+        resource_key=resource_key,
+    )
+
+
+def _check_daqmx_channel_uniqueness(
+    adapters: Sequence[DeviceAdapter],
+) -> list[ConfigProblem]:
+    """No two adapters may claim the same DAQmx physical channel."""
+    problems: list[ConfigProblem] = []
     channel_to_adapter: dict[str, str] = {}
     for adapter in adapters:
         if not adapter.resource_id.startswith("daqmx:"):
@@ -373,16 +388,25 @@ def _check_daqmx_channel_uniqueness(adapters: Sequence[DeviceAdapter]) -> None:
         for ch in channels:
             prev = channel_to_adapter.get(ch)
             if prev is not None and prev != adapter.name:
-                raise ResourceConflict(
-                    f"DAQmx physical channel {ch!r} claimed by both {prev!r} and {adapter.name!r}",
-                    conflicting_names=(prev, adapter.name),
-                    resource_key=ch,
+                problems.append(
+                    ConfigProblem(
+                        severity="error",
+                        code="devices.daqmx_channel_conflict",
+                        message=(
+                            f"DAQmx physical channel {ch!r} claimed by both "
+                            f"{prev!r} and {adapter.name!r}"
+                        ),
+                        section="devices",
+                        path=("conflict", prev, adapter.name, ch),
+                    )
                 )
             channel_to_adapter[ch] = adapter.name
+    return problems
 
 
-def _check_webcam_uniqueness(adapters: Sequence[DeviceAdapter]) -> None:
+def _check_webcam_uniqueness(adapters: Sequence[DeviceAdapter]) -> list[ConfigProblem]:
     """Same ``webcam:<id>`` may not be claimed by two adapters."""
+    problems: list[ConfigProblem] = []
     webcam_to_adapter: dict[str, str] = {}
     for adapter in adapters:
         rid = adapter.resource_id
@@ -390,12 +414,19 @@ def _check_webcam_uniqueness(adapters: Sequence[DeviceAdapter]) -> None:
             continue
         prev = webcam_to_adapter.get(rid)
         if prev is not None and prev != adapter.name:
-            raise ResourceConflict(
-                f"webcam handle {rid!r} claimed by both {prev!r} and {adapter.name!r}",
-                conflicting_names=(prev, adapter.name),
-                resource_key=rid,
+            problems.append(
+                ConfigProblem(
+                    severity="error",
+                    code="cameras.webcam_handle_conflict",
+                    message=(
+                        f"webcam handle {rid!r} claimed by both {prev!r} and {adapter.name!r}"
+                    ),
+                    section="cameras",
+                    path=("conflict", prev, adapter.name, rid),
+                )
             )
         webcam_to_adapter[rid] = adapter.name
+    return problems
 
 
 def _record_global_sdk_constraints(
@@ -403,11 +434,11 @@ def _record_global_sdk_constraints(
 ) -> None:
     """Note global-SDK singletons in the structlog stream.
 
-    Migration doc §4.12 line 1341: NI-DAQmx, PyAV, FLIR Spinnaker have
-    process-singleton state that ``resource_id`` cannot isolate. We don't
-    raise here — the bundle's ``diagnostics.runtime.global_sdk_constraints``
-    map (Phase 2) records these so an operator triaging a crash can see at
-    a glance whether process-singleton state was involved.
+    NI-DAQmx, PyAV, FLIR Spinnaker have process-singleton state that
+    ``resource_id`` cannot isolate. We don't raise here — the bundle's
+    ``diagnostics.runtime.global_sdk_constraints`` map records these so
+    an operator triaging a crash can see at a glance whether
+    process-singleton state was involved.
     """
     constraints: list[dict[str, Any]] = []
     has_daqmx = any(a.resource_id.startswith("daqmx:") for a in adapters)
@@ -434,4 +465,4 @@ def _record_global_sdk_constraints(
         )
 
 
-__all__ = ["build_workers"]
+__all__ = ["build_workers", "collect_resource_problems"]

@@ -1,15 +1,14 @@
 """:class:`PreviewFrame` wire type and :func:`run_preview_drain` worker task.
 
-Phase 4 follow-up — fills in the cross-thread plumbing the migration left
-deferred. Cameras live on the worker loop after Phase 4; the UI loop cannot
-iterate :meth:`Camera.preview_stream` directly (migration doc §3.11
-invariant 2). This module gives the worker side a tiny coroutine that drains
-the camera's preview iterator onto a :class:`ThreadBridge` whose consumer is
-the qasync loop.
+Cameras live on the worker loop; the UI loop cannot iterate
+:meth:`Camera.preview_stream` directly (the camera handle is owned by
+the worker loop). This module gives the worker side a tiny coroutine
+that drains the camera's preview iterator onto a :class:`ThreadBridge`
+whose consumer is the qasync loop.
 
-The bridge is **per-camera** and **pool-resident**: cameras stay open across
-runs (migration doc §3.2), so preview must too — operators get a live tile
-between runs as well as during one. The bridge therefore cannot live on the
+The bridge is **per-camera** and **pool-resident**: cameras stay open
+across runs, so preview must too — operators get a live tile between
+runs as well as during one. The bridge therefore cannot live on the
 Conductor (per-run lifetime); it lives on :class:`WorkerPool`.
 
 The wire type carries the camera name explicitly so the UI side can route a

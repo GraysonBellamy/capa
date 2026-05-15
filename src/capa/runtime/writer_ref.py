@@ -1,6 +1,6 @@
 """:class:`WriterRef` over a real :class:`WriterThread`.
 
-Migration doc §3.7 step (c–d) and §4.5: the :class:`Conductor` builds a
+The :class:`Conductor` builds a
 :class:`~capa.storage.writer_thread.WriterThread` at run start and installs a
 :class:`WriterRef` view of it into every :class:`~capa.runtime.runcontext.RunContext`.
 Workers and the conductor's drain tasks call into this view rather than
@@ -13,7 +13,7 @@ Two responsibilities the protocol can't carry:
    :meth:`WriterThread.write_event` requires ``t_mono_ns`` and ``t_utc``.
    :class:`WriterThreadRef` synthesizes them from the run's authoritative
    :class:`~capa.core.clock.RunClock` so every event is stamped against the
-   same time origin as adapter emissions (migration doc §5.1 line 1361).
+   same time origin as adapter emissions.
 2. **Attribution.** The writer thread tags every event with ``source``;
    workers attribute to ``"worker"``, the conductor to ``"conductor"``. A
    single :class:`WriterThreadRef` carries a fixed source so callers don't
@@ -71,7 +71,7 @@ class WriterThreadRef:
         Backpressure semantics are inherited: if the inbox is full the
         caller awaits inside ``anyio.to_thread.run_sync(submit_blocking)``
         until space frees. Sustained block surfaces as a saturation-monitor
-        escalation in the conductor (§4.5).
+        escalation in the conductor.
         """
         await self.writer_thread.submit(emission)
 
@@ -102,8 +102,8 @@ class WriterThreadRef:
     async def record_frame(self, receipt: FrameReceipt) -> None:
         """Forward a frame receipt to the writer thread's frame inbox.
 
-        Migration doc §6.1: the conductor's drain task dispatches by
-        emission type — :class:`FrameReceipt` lands here, everything else
+        The conductor's drain task dispatches by emission type —
+        :class:`FrameReceipt` lands here, everything else
         on :class:`~capa.devices.records.DeviceEmission` lands on
         :meth:`submit`. The writer thread internally wraps the receipt
         in a :class:`~capa.storage.writer_thread.FrameItem`.

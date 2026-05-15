@@ -1,19 +1,17 @@
 """:class:`ConductorState` — the per-run lifecycle states.
 
-Migration doc §3.2 (run lifetime) and §3.7 / §3.8. The :class:`Conductor`
-exposes its current state so callers (UI status bar in Phase 4, CLI logs,
-tests) can observe the run's macro phase without inspecting internal
-attributes.
+The :class:`Conductor` exposes its current state so callers (UI status
+bar, CLI logs, tests) can observe the run's macro lifecycle stage
+without inspecting internal attributes.
 
 The shape intentionally mirrors today's
-:class:`~capa.experiment.engine.EngineState` so the eventual UI cutover
-(Phase 4) is a pure rename rather than a redesign. Two differences:
+:class:`~capa.experiment.engine.EngineState`. Two differences:
 
 * No ``IDLE`` value. A :class:`Conductor` is constructed per-run; "no
   conductor" already means "no run". A pre-run state would be dead code.
-* :meth:`permits_dispatch` lives here, codifying the migration doc §3.5
-  rule that commands are accepted in PREPARING / RUNNING but refused in
-  DRAINING / FINALIZING (and later).
+* :meth:`permits_dispatch` lives here, codifying the rule that commands
+  are accepted in PREPARING / RUNNING but refused in DRAINING /
+  FINALIZING (and later).
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ class ConductorState(enum.StrEnum):
 
     DRAINING = "draining"
     """Procedure complete (or stop requested). Disarming workers; bridges
-    drain then close. Dispatch is refused (migration doc §3.5)."""
+    drain then close. Dispatch is refused."""
 
     FINALIZING = "finalizing"
     """Workers IDLE; writer-thread closing; bundle finalizing (Parquet
@@ -57,9 +55,9 @@ class ConductorState(enum.StrEnum):
     partially written but is not sealed."""
 
     def permits_dispatch(self) -> bool:
-        """Migration doc §3.5: commands accepted only during PREPARING and
-        RUNNING. PREPARING is included so dynamic preflight (which may need
-        to settle a setpoint) can issue commands before the procedure starts.
+        """Commands are accepted only during PREPARING and RUNNING.
+        PREPARING is included so dynamic preflight (which may need to
+        settle a setpoint) can issue commands before the procedure starts.
         """
         return self in (ConductorState.PREPARING, ConductorState.RUNNING)
 

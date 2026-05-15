@@ -1,10 +1,10 @@
 """:class:`WebcamMetadata` — cross-loop snapshot of webcam probe data.
 
-Phase 4 follow-up. The :class:`~capa.ui.manual.cards.webcam.WebcamCard`
+The :class:`~capa.ui.manual.cards.webcam.WebcamCard`
 needs UVC ranges, supported resolutions, and per-resolution fps caps to
 rebuild its widgets when the pool publishes. Those values live on the
-:class:`~capa.devices.camera.webcam.WebcamAdapter` instance, which after
-Phase 4 is owned by the worker loop (migration doc §3.11 invariant 2).
+:class:`~capa.devices.camera.webcam.WebcamAdapter` instance, which is
+owned by the worker loop (migration doc §3.11 invariant 2).
 Reading them from the qasync loop is a cross-loop access.
 
 The de facto read used to be safe — the attributes are populated at

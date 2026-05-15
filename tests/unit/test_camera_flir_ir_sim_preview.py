@@ -1,4 +1,4 @@
-""":class:`FlirIrSim` preview fixture tests (Phase 4 follow-up §5.8).
+""":class:`FlirIrSim` preview fixture tests.
 
 The IR sim previously emitted a 64-byte slice of the raw frame payload
 onto ``_preview_send``, which is not a JPEG. The dock's ``QImage.fromData``

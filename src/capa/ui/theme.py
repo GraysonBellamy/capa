@@ -1,5 +1,5 @@
-"""Minimal palette and font helpers. Plan §10 — all UI theming centralizes
-here so a future Simple/Expert mode preset (P6) can override one place."""
+"""Minimal palette and font helpers. All UI theming centralizes here so
+a future Simple/Expert mode preset can override in one place."""
 
 from __future__ import annotations
 

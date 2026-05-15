@@ -1,8 +1,7 @@
 """:class:`Step` types and :class:`Method` (segmented profile).
 
-Plan §5.3. P0a ships the *schema*; the runtime executor (:class:`MethodExecutor`)
-lands in P3 — most experiments are a list of Steps, and the schema is the same
-whether the executor is present or not.
+Plan §5.3. Ships the *schema*; most experiments are a list of Steps, and the
+schema is the same whether the executor is present or not.
 """
 
 from __future__ import annotations
@@ -157,7 +156,7 @@ class CustomStep(_StepBase):
     """Plugin-defined step.
 
     Dispatched at runtime to a handler keyed by ``handler_id``. The plugin's
-    Pydantic config schema validates ``params`` once the executor (P3) loads
+    Pydantic config schema validates ``params`` once the executor loads
     the plugin.
     """
 

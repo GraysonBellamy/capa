@@ -8,9 +8,9 @@ must
    can read it,
 3. exit the stream task; the rest of the worker stays consistent.
 
-Phase 1 doesn't implement the per-worker watchdog (that's Phase 2's job —
-it's the thing that reads ``fatal_error`` and escalates per ``on_failure``);
-here we verify the worker-side recording is correct.
+The per-worker watchdog (which reads ``fatal_error`` and escalates per
+``on_failure``) is tested elsewhere; here we verify the worker-side
+recording is correct.
 """
 
 from __future__ import annotations
@@ -26,10 +26,6 @@ from tests.integration.runtime.fakes import (
     make_fake_adapter,
     make_run_context,
 )
-
-
-async def _wait(fut: object) -> object:
-    return await asyncio.wrap_future(fut)  # type: ignore[arg-type]
 
 
 class TestStreamRaises:
@@ -53,11 +49,11 @@ class TestStreamRaises:
             adapters=[adapter],
             runner=ThreadedRunner(name="stream-err-event"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             ctx = make_run_context(writer=writer)
-            await _wait(worker.arm(ctx))
-            bridge = await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+            await worker.async_arm(ctx)
+            bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
 
             # Drain the two clean emissions.
             await bridge.get()
@@ -79,8 +75,8 @@ class TestStreamRaises:
             assert err_event["metadata"]["adapter"] == "a"
             assert err_event["metadata"]["error_type"] == "StreamBoomError"
         finally:
-            await _wait(worker.disarm(grace_s=2.0))
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_disarm(grace_s=2.0)
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_disarm_after_stream_error_still_returns(self) -> None:
@@ -102,10 +98,10 @@ class TestStreamRaises:
             adapters=[adapter],
             runner=ThreadedRunner(name="stream-err-cleanup"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
-            await _wait(worker.arm(make_run_context()))
-            bridge = await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+            await worker.async_arm(make_run_context())
+            bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             await bridge.get()  # one good emission
             # Stream task is about to raise. Wait briefly.
             await asyncio.sleep(0.1)
@@ -113,7 +109,7 @@ class TestStreamRaises:
             # Disarm should still return OK (the stream task already exited
             # via exception; disarm's asyncio.wait sees it as "done" and
             # doesn't need to cancel).
-            result = await _wait(worker.disarm(grace_s=2.0))
+            result = await worker.async_disarm(grace_s=2.0)
             # The result type matters less than reaching IDLE.
             from capa.runtime.lifecycle import WorkerState
 
@@ -122,7 +118,7 @@ class TestStreamRaises:
             # fatal_error surfaces from the stream task's exception.
             assert worker.fatal_error is not None
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)
 
     @pytest.mark.anyio
     async def test_fatal_error_cleared_on_next_arm(self) -> None:
@@ -143,22 +139,22 @@ class TestStreamRaises:
             adapters=[adapter],
             runner=ThreadedRunner(name="stream-err-clear"),
         )
-        await _wait(worker.start())
+        await worker.async_start()
         try:
             # Run 1: stream fails.
-            await _wait(worker.arm(make_run_context()))
-            bridge = await _wait(worker.begin_sampling(consumer_loop=asyncio.get_running_loop()))
+            await worker.async_arm(make_run_context())
+            bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             await bridge.get()
             await asyncio.sleep(0.1)
-            await _wait(worker.disarm(grace_s=2.0))
+            await worker.async_disarm(grace_s=2.0)
             assert worker.fatal_error is not None
 
             # Run 2: clear stream_raises, observe that arm() clears the
             # carry-over.
             adapter.stream_raises = None
             adapter.raise_after = 0
-            await _wait(worker.arm(make_run_context()))
+            await worker.async_arm(make_run_context())
             assert worker.fatal_error is None
-            await _wait(worker.disarm(grace_s=1.0))
+            await worker.async_disarm(grace_s=1.0)
         finally:
-            await _wait(worker.close(grace_s=1.0))
+            await worker.async_close(grace_s=1.0)

@@ -1,6 +1,6 @@
 """``capa`` CLI — typer-based subcommand dispatcher.
 
-Plan §14. The CLI is a first-class surface, not a debugging afterthought:
+The CLI is a first-class surface, not a debugging afterthought:
 ``capa validate``, ``capa run --headless``, ``capa finalize``,
 ``capa catalog list/verify/rebuild``, ``capa plugins list``.
 
@@ -19,7 +19,7 @@ import sys
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import anyio
 import typer
@@ -28,6 +28,8 @@ from capa import __version__ as capa_version
 from capa.core.errors import CapaError
 from capa.core.logging import configure_pre_run_logging
 from capa.core.plugins_lock import PluginsLock
+from capa.devices.discovery import discover_descriptor, discoverable_descriptors
+from capa.devices.registry import AdapterDescriptor
 from capa.experiment.config import ExperimentConfig
 from capa.runtime import RUNTIME_VERSION, install_sigint_handler
 from capa.runtime.build import _import_adapter_class
@@ -51,9 +53,21 @@ devices_app = typer.Typer(
     help="Discover hardware visible on the local system.",
     no_args_is_help=True,
 )
+config_app = typer.Typer(
+    name="config",
+    help="Validate and inspect experiment configs.",
+    no_args_is_help=True,
+)
+hardware_app = typer.Typer(
+    name="hardware",
+    help="Author and probe hardware profiles.",
+    no_args_is_help=True,
+)
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(plugins_app, name="plugins")
 app.add_typer(devices_app, name="devices")
+app.add_typer(config_app, name="config")
+app.add_typer(hardware_app, name="hardware")
 
 
 # ---------------------------------------------------------------------------
@@ -184,13 +198,12 @@ def validate(
         typer.echo("  method:    present")
 
     if strict:
-        # P0d: import each adapter module and, if it exposes a
+        # Import each adapter module and, if it exposes a
         # ``handshake(params)`` async function, run a non-disruptive
-        # read-only open + identify + close against the declared hardware.
-        # Plan §14: ``validate --strict`` is a "non-disruptive read-only
-        # handshake — no setpoint writes." Modules that do not expose
-        # ``handshake`` (sim adapters, P2-and-later real adapters that
-        # haven't grown the hook yet) fall back to the import-only check.
+        # read-only open + identify + close against the declared
+        # hardware — no setpoint writes. Modules that do not expose
+        # ``handshake`` (sim adapters, real adapters that haven't grown
+        # the hook yet) fall back to the import-only check.
         import importlib  # noqa: PLC0415
 
         for dev in ec.hardware.devices:
@@ -225,6 +238,317 @@ def validate(
                 )
                 raise typer.Exit(code=2) from exc
             typer.echo(f"  strict: {dev.name} -> {summary}")
+
+
+# ---------------------------------------------------------------------------
+# capa config validate — layered diagnostics for the Setup editor.
+# ---------------------------------------------------------------------------
+
+
+@config_app.command("validate")
+def config_validate(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+    live: Annotated[
+        bool,
+        typer.Option(
+            "--live",
+            help="Also run Layer 5 (live discovery + handshake) — touches hardware.",
+        ),
+    ] = False,
+) -> None:
+    """Run the layered validation pipeline against an experiment config.
+
+    Headless equivalent of the Setup tab's Problems panel: prints each
+    finding with section + path + severity. Exits non-zero if any error
+    is found; warnings and info do not change the exit code.
+    """
+    configure_pre_run_logging()
+    # Local imports keep capa's startup path lean — the validation
+    # surface only loads when the operator actually asks for it.
+    from capa.config import ConfigDocument  # noqa: PLC0415
+    from capa.config import validate as run_validate  # noqa: PLC0415
+
+    try:
+        document = ConfigDocument.load(path)
+    except CapaError as exc:
+        typer.secho(f"config validate: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+    problems = run_validate(document, with_live_checks=live)
+    error_count = sum(1 for p in problems if p.severity == "error")
+    warn_count = sum(1 for p in problems if p.severity == "warning")
+    info_count = sum(1 for p in problems if p.severity == "info")
+
+    for p in problems:
+        path_str = ".".join(str(x) for x in p.path) if p.path else "-"
+        colour = {
+            "error": typer.colors.RED,
+            "warning": typer.colors.YELLOW,
+            "info": typer.colors.BLUE,
+        }.get(p.severity, typer.colors.WHITE)
+        typer.secho(
+            f"[{p.severity}] {p.section}.{path_str} :: {p.code}",
+            fg=colour,
+        )
+        typer.echo(f"    {p.message}")
+        if p.source_file is not None:
+            typer.echo(f"    source: {p.source_file}")
+
+    summary = f"{error_count} error(s), {warn_count} warning(s), {info_count} info"
+    if error_count == 0 and warn_count == 0:
+        typer.secho(f"OK: {path}  ({summary})", fg=typer.colors.GREEN)
+    else:
+        typer.echo(summary)
+    if error_count > 0:
+        raise typer.Exit(code=2)
+
+
+# ---------------------------------------------------------------------------
+# capa hardware
+# ---------------------------------------------------------------------------
+
+
+def _render_problems(
+    problems: list[Any], *, source: Path | str | None = None
+) -> tuple[int, int, int]:
+    """Print ``ConfigProblem`` rows uniformly; return (errors, warnings, info)."""
+    error_count = sum(1 for p in problems if p.severity == "error")
+    warn_count = sum(1 for p in problems if p.severity == "warning")
+    info_count = sum(1 for p in problems if p.severity == "info")
+    for p in problems:
+        path_str = ".".join(str(x) for x in p.path) if p.path else "-"
+        colour = {
+            "error": typer.colors.RED,
+            "warning": typer.colors.YELLOW,
+            "info": typer.colors.BLUE,
+        }.get(p.severity, typer.colors.WHITE)
+        typer.secho(
+            f"[{p.severity}] {p.section}.{path_str} :: {p.code}",
+            fg=colour,
+        )
+        typer.echo(f"    {p.message}")
+        if p.source_file is not None:
+            typer.echo(f"    source: {p.source_file}")
+    summary = f"{error_count} error(s), {warn_count} warning(s), {info_count} info"
+    if error_count == 0 and warn_count == 0:
+        target = source if source is not None else "(unknown)"
+        typer.secho(f"OK: {target}  ({summary})", fg=typer.colors.GREEN)
+    else:
+        typer.echo(summary)
+    return error_count, warn_count, info_count
+
+
+async def _collect_discovery_rows(
+    descriptors: list[AdapterDescriptor],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    rows: list[dict[str, Any]] = []
+    notes: list[str] = []
+    for descriptor in descriptors:
+        result = await discover_descriptor(descriptor)
+        if result.error is not None:
+            notes.append(f"{descriptor.family}: {result.error}")
+            continue
+        rows.extend(result.rows)
+        if not result.rows:
+            notes.append(f"{descriptor.family}: no devices found")
+    return rows, notes
+
+
+def _emit_discovery_rows(
+    rows: list[dict[str, Any]],
+    notes: list[str],
+    *,
+    json_out: bool,
+) -> None:
+    if json_out:
+        typer.echo(json.dumps({"devices": rows, "notes": notes}, indent=2, default=str))
+        return
+
+    if not rows:
+        typer.echo("(no devices discovered)")
+        for note in notes:
+            typer.echo(f"  {note}")
+        return
+
+    by_adapter: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_adapter.setdefault(str(row.get("adapter", "?")), []).append(row)
+    for adapter_id, group in by_adapter.items():
+        typer.echo(f"\n[{adapter_id}]")
+        for row in group:
+            parts = [f"{k}={v!r}" for k, v in row.items() if k != "adapter"]
+            typer.echo("  " + ", ".join(parts))
+    if notes:
+        typer.echo("\nNotes:")
+        for note in notes:
+            typer.echo(f"  {note}")
+
+
+_HARDWARE_VALIDATE_STUB_EXPERIMENT: dict[str, Any] = {
+    "operator": {"id": "_hardware_validate_stub"},
+    "sample": {"id": "_hardware_validate_stub"},
+    "procedure": {"id": "capa.builtin.recipe_runner", "version": "0.1"},
+    "calibration_set": {"name": "default"},
+}
+"""Placeholder experiment-side fields injected by ``capa hardware
+validate`` so the layered pipeline can run against a hardware-only
+TOML. The values are never persisted — they live in the in-memory
+:class:`ConfigDocument` for the duration of the call so Layers 1-2 +
+Layer 4 can run their hardware-relevant checks without complaining
+about missing operator/sample/procedure entries."""
+
+
+@hardware_app.command("validate")
+def hardware_validate(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+) -> None:
+    """Validate a hardware TOML against Layers 1-2 + 4 (no live probes).
+
+    Stubs the experiment-side fields that an
+    experiment file would normally carry so the layered pipeline
+    surfaces *hardware* errors (channel binding references a missing
+    device, duplicate device names, resource-id conflicts on the same
+    serial port) without complaining about absent
+    ``procedure`` / ``operator`` / ``sample`` entries. For full
+    experiment-level validation use ``capa config validate``.
+    """
+    configure_pre_run_logging()
+    from capa.config import ConfigDocument  # noqa: PLC0415
+    from capa.config import validate as run_validate  # noqa: PLC0415
+
+    try:
+        document = ConfigDocument.load_hardware_only(path)
+    except CapaError as exc:
+        typer.secho(f"hardware validate: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+    document.experiment_payload.update(_HARDWARE_VALIDATE_STUB_EXPERIMENT)
+    problems = run_validate(document, with_live_checks=False)
+    errors, _, _ = _render_problems(problems, source=path)
+    if errors > 0:
+        raise typer.Exit(code=2)
+
+
+@hardware_app.command("check")
+def hardware_check(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+) -> None:
+    """Run Layer 5 (live handshake) against an experiment / hardware file.
+
+    Read-only: opens each adapter, identifies it, and closes — no
+    setpoints written. Headless equivalent of the Setup tab's
+    *Check Hardware* button.
+    """
+    configure_pre_run_logging()
+    from capa.config import (  # noqa: PLC0415
+        ConfigDocument,
+        validate_live_async,
+    )
+
+    try:
+        # ``check`` accepts either an experiment or a hardware file —
+        # try the experiment path first and fall back to hardware-only.
+        try:
+            document = ConfigDocument.load(path)
+        except CapaError:
+            document = ConfigDocument.load_hardware_only(path)
+    except CapaError as exc:
+        typer.secho(f"hardware check: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+    problems = anyio.run(validate_live_async, document)
+    errors, _, _ = _render_problems(problems, source=path)
+    if errors > 0:
+        raise typer.Exit(code=2)
+
+
+@hardware_app.command("discover")
+def hardware_discover(
+    adapter: Annotated[
+        str | None,
+        typer.Option(
+            "--adapter",
+            help=(
+                "Probe only the named adapter (watlow|alicat|sartorius|"
+                "nidaq|camera_visible|camera_ir). Default: probe every"
+                " discoverable adapter."
+            ),
+        ),
+    ] = None,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON instead of a table."),
+    ] = False,
+) -> None:
+    """Discover every adapter family visible on the local system.
+
+    Differs from ``capa devices discover`` by routing through the
+    :class:`AdapterDescriptor` registry, which means the output
+    includes cameras and any plugin adapters that registered via
+    the ``capa.adapters`` / ``capa.cameras`` entry-point groups.
+    """
+    configure_pre_run_logging()
+    descriptors = discoverable_descriptors(adapter=adapter, include_cameras=True)
+    if adapter is not None and not descriptors:
+        typer.secho(
+            f"discover: no discoverable adapter matches {adapter!r}",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    rows, notes = anyio.run(_collect_discovery_rows, descriptors)
+    _emit_discovery_rows(rows, notes, json_out=json_out)
+
+
+@hardware_app.command("new")
+def hardware_new(
+    path: Annotated[Path, typer.Argument(dir_okay=False)],
+    name: Annotated[
+        str,
+        typer.Option("--name", help="HardwareProfile.name field."),
+    ] = "new_profile",
+) -> None:
+    """Write a minimal blank hardware TOML at ``path``.
+
+    Produces a valid empty :class:`HardwareProfile` so operators can
+    ``capa hardware new ./configs/hardware/x.toml`` and immediately
+    open the file in the Setup tab.
+    """
+    if path.exists():
+        typer.secho(
+            f"hardware new: refusing to overwrite existing file {path}",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    from capa.config import ConfigDocument, SourceLayout  # noqa: PLC0415
+
+    doc = ConfigDocument(
+        hardware_payload={
+            "name": name,
+            "devices": [],
+            "channels": [],
+            "cameras": [],
+        },
+    )
+    layout = SourceLayout(
+        experiment_path=None,
+        experiment_format=None,
+        hardware_path=path,
+        hardware_format="toml",
+        hardware_mode="external",
+        method_path=None,
+        method_format=None,
+        method_mode="none",
+    )
+    try:
+        doc.save_as(layout)
+    except CapaError as exc:
+        typer.secho(f"hardware new: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    typer.secho(f"wrote {path}", fg=typer.colors.GREEN)
 
 
 # ---------------------------------------------------------------------------
@@ -304,9 +628,6 @@ def run(
     async def _go() -> HeadlessResult:
         with RunCatalog(root) as cat:
             cat.flip_orphans()
-            # Conductor / per-resource-worker entry point (migration doc §8
-            # Phase 2). Replaces the single-loop ExperimentEngine path; the
-            # GUI still goes through ExperimentEngine until Phase 4.
             return await run_headless(
                 ec,
                 runs_root=root,
@@ -650,8 +971,8 @@ def plugins_trust(
     already present its hash/version are refreshed. Production mode then
     treats the plugin as trusted on the next run.
 
-    Plan §17 #4 — the workflow owner is configurable via lab policy; this
-    command is the technical primitive only.
+    The workflow owner is configurable via lab policy; this command is
+    the technical primitive only.
     """
     from capa.core.plugins_lock import PluginEntry  # noqa: PLC0415
     from capa.core.plugins_runtime import discover_procedures  # noqa: PLC0415
@@ -811,7 +1132,7 @@ def profile_validate(
 
 
 # ---------------------------------------------------------------------------
-# capa devices discover (plan §14)
+# capa devices discover
 # ---------------------------------------------------------------------------
 
 
@@ -830,90 +1151,28 @@ def devices_discover(
         typer.Option("--json", help="Emit machine-readable JSON instead of a table."),
     ] = False,
 ) -> None:
-    """Discover devices visible on the local system.
+    """Discover non-camera devices visible on the local system.
 
-    Plan §14: ``capa devices discover``. Imports each registered real adapter
-    and invokes its module-level ``discover()`` coroutine. Sim adapters are
-    skipped — their "discovery" is a no-op. No bundle is created.
-
-    Adapters that don't ship a ``discover()`` hook (or are not importable on
-    this platform — e.g. ``nidaq`` without the NI runtime) are listed with
-    ``(no discovery)`` rather than failing.
+    Uses the same descriptor-driven path as ``capa hardware discover``.
+    This older command stays scoped to non-camera adapters so scripts that
+    expected serial/DAQ output do not suddenly see video devices.
     """
-    import importlib  # noqa: PLC0415
-
-    from capa.devices import ADAPTER_REGISTRY, REAL_ADAPTERS  # noqa: PLC0415
-
     configure_pre_run_logging()
+    descriptors = discoverable_descriptors(adapter=adapter, include_cameras=False)
+    if adapter is not None and not descriptors:
+        typer.secho(
+            f"discover: unknown adapter {adapter!r}",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
 
-    targets: tuple[str, ...]
-    if adapter is not None:
-        if adapter not in REAL_ADAPTERS:
-            typer.secho(
-                f"discover: unknown adapter {adapter!r}; valid: {list(REAL_ADAPTERS)}",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(code=2)
-        targets = (adapter,)
-    else:
-        targets = REAL_ADAPTERS
-
-    rows: list[dict[str, object]] = []
-    notes: list[str] = []
-
-    for adapter_id in targets:
-        module_path = ADAPTER_REGISTRY[adapter_id]
-        try:
-            module = importlib.import_module(module_path)
-        except ImportError as exc:
-            notes.append(f"{adapter_id}: not importable ({exc})")
-            continue
-        discover_fn = getattr(module, "discover", None)
-        if discover_fn is None:
-            notes.append(f"{adapter_id}: (no discovery hook)")
-            continue
-        try:
-            results = anyio.run(discover_fn)
-        except Exception as exc:
-            notes.append(f"{adapter_id}: failed ({type(exc).__name__}: {exc})")
-            continue
-        for r in results:
-            rows.append(r)
-        if not results:
-            notes.append(f"{adapter_id}: no devices found")
-
-    if json_out:
-        typer.echo(json.dumps({"devices": rows, "notes": notes}, indent=2, default=str))
-        return
-
-    if not rows:
-        typer.echo("(no devices discovered)")
-        for note in notes:
-            typer.echo(f"  {note}")
-        return
-
-    # Render as a per-adapter group, since the keys differ.
-    by_adapter: dict[str, list[dict[str, object]]] = {}
-    for r in rows:
-        by_adapter.setdefault(str(r.get("adapter", "?")), []).append(r)
-
-    for adapter_id, group in by_adapter.items():
-        typer.echo(f"\n[{adapter_id}]")
-        # Print each row as one indented line of `key=value` pairs, omitting
-        # the adapter key itself (already in the section header).
-        for row in group:
-            parts = [f"{k}={v!r}" for k, v in row.items() if k != "adapter"]
-            typer.echo("  " + ", ".join(parts))
-
-    if notes:
-        typer.echo("\nNotes:")
-        for note in notes:
-            typer.echo(f"  {note}")
+    rows, notes = anyio.run(_collect_discovery_rows, descriptors)
+    _emit_discovery_rows(rows, notes, json_out=json_out)
 
 
 # ---------------------------------------------------------------------------
-# capa version (small ergonomic helper, not in the plan §14 list)
+# capa version
 # ---------------------------------------------------------------------------
 
 

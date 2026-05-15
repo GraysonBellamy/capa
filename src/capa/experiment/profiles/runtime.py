@@ -381,8 +381,7 @@ async def _balance_stability(ctx: ProfilePreflightContext) -> Problem | None:
 async def _disk_projection(ctx: ProfilePreflightContext) -> Problem | None:
     """Verify the bundle volume has at least 1.5x the projected size free.
 
-    P3 implementation is conservative: assume 1 MB / s + 100 MB headroom over
-    a 30-minute run. Refined in P4/P5 once we have video-stream estimates."""
+    Conservative estimate: assume 1 MB / s + 100 MB headroom over a 30-minute run."""
 
     runs_root = Path(ctx.config.storage.bundle_root)
     runs_root = runs_root.resolve() if runs_root.is_absolute() else Path.cwd() / runs_root
