@@ -375,18 +375,19 @@ class TestV4L2IdentityProbe:
     async def test_open_populates_model_and_serial_from_sysfs(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from capa.devices.camera import webcam as webcam_module
+        from capa.devices.camera.webcam import adapter as adapter_module
+        from capa.devices.camera.webcam.probe import V4L2Probe
 
         monkeypatch.setattr(
-            webcam_module,
+            adapter_module,
             "_probe_v4l2_info",
-            lambda _path: webcam_module.V4L2Probe(
+            lambda _path: V4L2Probe(
                 card_name="Logitech Webcam C930e",
                 serial="E7501BDE",
                 bus_info="3-6.2",
             ),
         )
-        monkeypatch.setattr("capa.devices.camera.webcam.sys.platform", "linux")
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter.sys.platform", "linux")
         cam = WebcamAdapter(
             spec=_spec(),
             clock=RunClock.now(),
@@ -399,14 +400,15 @@ class TestV4L2IdentityProbe:
         await cam.close()
 
     async def test_probe_failure_leaves_spec_hints(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from capa.devices.camera import webcam as webcam_module
+        from capa.devices.camera.webcam import adapter as adapter_module
+        from capa.devices.camera.webcam.probe import V4L2Probe
 
         monkeypatch.setattr(
-            webcam_module,
+            adapter_module,
             "_probe_v4l2_info",
-            lambda _path: webcam_module.V4L2Probe(card_name=None, serial=None, bus_info=None),
+            lambda _path: V4L2Probe(card_name=None, serial=None, bus_info=None),
         )
-        monkeypatch.setattr("capa.devices.camera.webcam.sys.platform", "linux")
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter.sys.platform", "linux")
         spec = _spec()
         spec_with_hint = CameraSpec.model_validate(
             {**spec.model_dump(), "model_hint": "fallback-model", "serial": "fallback-serial"}
@@ -423,16 +425,17 @@ class TestV4L2IdentityProbe:
         await cam.close()
 
     async def test_probe_skipped_on_non_linux(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from capa.devices.camera import webcam as webcam_module
+        from capa.devices.camera.webcam import adapter as adapter_module
+        from capa.devices.camera.webcam.probe import V4L2Probe
 
         called: list[str] = []
 
-        def _spy(path: str) -> webcam_module.V4L2Probe:
+        def _spy(path: str) -> V4L2Probe:
             called.append(path)
-            return webcam_module.V4L2Probe(card_name="X", serial="Y", bus_info=None)
+            return V4L2Probe(card_name="X", serial="Y", bus_info=None)
 
-        monkeypatch.setattr(webcam_module, "_probe_v4l2_info", _spy)
-        monkeypatch.setattr("capa.devices.camera.webcam.sys.platform", "darwin")
+        monkeypatch.setattr(adapter_module, "_probe_v4l2_info", _spy)
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter.sys.platform", "darwin")
         cam = WebcamAdapter(
             spec=_spec(),
             clock=RunClock.now(),
@@ -445,7 +448,7 @@ class TestV4L2IdentityProbe:
 
     def test_probe_returns_empty_on_missing_node(self, tmp_path: Path) -> None:
         # Pointing at a path that doesn't exist must not raise.
-        from capa.devices.camera.webcam import _probe_v4l2_info
+        from capa.devices.camera.webcam.probe import _probe_v4l2_info
 
         result = _probe_v4l2_info("/dev/video999")
         assert result.card_name is None
@@ -611,11 +614,11 @@ class TestInputPumpLifecycle:
         await cam.open()
 
         monkeypatch.setattr(
-            "capa.devices.camera.webcam.av.open",
+            "capa.devices.camera.webcam.adapter.av.open",
             lambda *_a, **_kw: _FakeContainer(),
         )
-        monkeypatch.setattr("capa.devices.camera.webcam._advance_decoder", fake_advance)
-        monkeypatch.setattr("capa.devices.camera.webcam._reformat_to_rgb24", fake_reformat)
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter._advance_decoder", fake_advance)
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter._reformat_to_rgb24", fake_reformat)
 
         await cam.start_input_pump()
 
@@ -686,9 +689,9 @@ class TestInputPumpLifecycle:
         await cam.open()
         await cam.start_recording(tmp_path / "v.mkv")
 
-        monkeypatch.setattr("capa.devices.camera.webcam.av.open", fake_av_open)
-        monkeypatch.setattr("capa.devices.camera.webcam._advance_decoder", fake_advance)
-        monkeypatch.setattr("capa.devices.camera.webcam._reformat_to_rgb24", fake_reformat)
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter.av.open", fake_av_open)
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter._advance_decoder", fake_advance)
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter._reformat_to_rgb24", fake_reformat)
 
         await cam.start_input_pump()
 
@@ -816,8 +819,10 @@ class TestOpenInputRetry:
 
         # Patch ``av.open`` (called via ``anyio.to_thread.run_sync``) and
         # the backoff to keep the test fast.
-        monkeypatch.setattr("capa.devices.camera.webcam.av.open", lambda *a, **kw: _fake_av_open())
-        monkeypatch.setattr("capa.devices.camera.webcam.anyio.sleep", _no_sleep)
+        monkeypatch.setattr(
+            "capa.devices.camera.webcam.adapter.av.open", lambda *a, **kw: _fake_av_open()
+        )
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter.anyio.sleep", _no_sleep)
 
         result = await cam._open_input_with_retry()
         assert result is sentinel
@@ -839,7 +844,9 @@ class TestOpenInputRetry:
             attempts["n"] += 1
             raise OSError(2, "No such file or directory")
 
-        monkeypatch.setattr("capa.devices.camera.webcam.av.open", lambda *a, **kw: _fake_av_open())
+        monkeypatch.setattr(
+            "capa.devices.camera.webcam.adapter.av.open", lambda *a, **kw: _fake_av_open()
+        )
         with pytest.raises(OSError):
             await cam._open_input_with_retry()
         assert attempts["n"] == 1
@@ -856,12 +863,12 @@ class TestDshowFormatInfoProbe:
     """
 
     def test_returns_empty_when_av_open_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from capa.devices.camera.webcam import _probe_dshow_format_info_sync
+        from capa.devices.camera.webcam.probe import _probe_dshow_format_info_sync
 
         def _boom(*_args: object, **_kwargs: object) -> object:
             raise RuntimeError("simulated dshow failure")
 
-        monkeypatch.setattr("capa.devices.camera.webcam.av.open", _boom)
+        monkeypatch.setattr("capa.devices.camera.webcam.probe.av.open", _boom)
         # No matching log lines means an empty parse result, regardless
         # of whether av.open succeeded or failed.
         result = _probe_dshow_format_info_sync("video=Whatever")
@@ -872,12 +879,12 @@ class TestDshowFormatInfoProbe:
     ) -> None:
         """Resolution list is sorted by area, deduped across pixel formats;
         the fps dict holds the highest reported max-fps per resolution."""
-        from capa.devices.camera import webcam as webcam_mod
+        from capa.devices.camera.webcam import probe as probe_mod
 
         class _FakeContainer:
             def close(self) -> None: ...
 
-        monkeypatch.setattr(webcam_mod.av, "open", lambda *a, **kw: _FakeContainer())
+        monkeypatch.setattr(probe_mod.av, "open", lambda *a, **kw: _FakeContainer())
 
         fake_log_entries = [
             (0, "dshow", "  pixel_format=yuyv422  min s=1920x1080 fps=5 max s=1920x1080 fps=15"),
@@ -903,7 +910,7 @@ class TestDshowFormatInfoProbe:
         monkeypatch.setattr(_av_log, "set_level", lambda _level: None)
         monkeypatch.setattr(_av_log, "get_level", lambda: None)
 
-        resolutions, fps_caps = webcam_mod._probe_dshow_format_info_sync("video=Whatever")
+        resolutions, fps_caps = probe_mod._probe_dshow_format_info_sync("video=Whatever")
         assert resolutions == [(640, 480), (1280, 720), (1920, 1080)]
         # 1920x1080 had two pixel formats (15 and 30); the higher wins.
         assert fps_caps == {(640, 480): 30.0, (1280, 720): 30.0, (1920, 1080): 30.0}
@@ -911,12 +918,12 @@ class TestDshowFormatInfoProbe:
     def test_falls_back_to_min_when_max_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When a log line has only ``min s=WxH`` (no ``max s=``), the
         resolution still surfaces — fps_caps stays empty for it."""
-        from capa.devices.camera import webcam as webcam_mod
+        from capa.devices.camera.webcam import probe as probe_mod
 
         class _FakeContainer:
             def close(self) -> None: ...
 
-        monkeypatch.setattr(webcam_mod.av, "open", lambda *a, **kw: _FakeContainer())
+        monkeypatch.setattr(probe_mod.av, "open", lambda *a, **kw: _FakeContainer())
 
         fake_log_entries = [
             # No "max s=" — only "min s=", fps annotation present but lives
@@ -939,6 +946,6 @@ class TestDshowFormatInfoProbe:
         monkeypatch.setattr(_av_log, "set_level", lambda _level: None)
         monkeypatch.setattr(_av_log, "get_level", lambda: None)
 
-        resolutions, fps_caps = webcam_mod._probe_dshow_format_info_sync("video=X")
+        resolutions, fps_caps = probe_mod._probe_dshow_format_info_sync("video=X")
         assert resolutions == [(1280, 720)]
         assert fps_caps == {(1280, 720): 10.0}

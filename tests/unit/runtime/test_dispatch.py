@@ -22,8 +22,8 @@ from capa.runtime.dispatch import (
     ConductorDispatcher,
     ManualClient,
     PoolDispatcher,
-    UnknownDeviceError,
 )
+from capa.runtime.errors import UnknownDeviceError
 from capa.runtime.state import ConductorState
 
 pytestmark = pytest.mark.anyio
@@ -79,7 +79,8 @@ class TestAdapterDispatcher:
         d = AdapterDispatcher({"heater": _FakeAdapter()})
         with pytest.raises(UnknownDeviceError) as exc_info:
             await d.dispatch("balance", _cmd())
-        assert exc_info.value.device == "balance"
+        assert exc_info.value.name == "balance"
+        assert exc_info.value.configured_names == ("heater",)
 
     async def test_propagates_adapter_errors(self) -> None:
         a = _FakeAdapter(raises=RuntimeError("serial timeout"))
@@ -197,7 +198,7 @@ class TestConductorDispatcher:
         ],
     )
     async def test_dispatch_refused_outside_active_states(self, state) -> None:
-        from capa.runtime.conductor import ConductorStateError
+        from capa.runtime.errors import ConductorStateError
 
         c = _FakeConductor(state=state, pool_results={"heater": _ok()})
         d = ConductorDispatcher(conductor=c)  # type: ignore[arg-type]
@@ -241,9 +242,7 @@ class _FakePoolWithCameras(_FakePool):
 
     def worker_for(self, device: str) -> _FakeWorkerForCamera:
         if device not in self.workers_by_device:
-            from capa.runtime.errors import UnknownDeviceError as _RTUnknown
-
-            raise _RTUnknown(device)
+            raise UnknownDeviceError(device)
         return self.workers_by_device[device]
 
 

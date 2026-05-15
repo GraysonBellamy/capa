@@ -48,6 +48,7 @@ from capa.storage.bundle import RunBundleWriter
 from capa.storage.finalize import finalize_in_place
 from capa.storage.integrity import verify
 from capa.storage.manifest import BundleManifest
+from tests._adapter_helpers import make_start_ctx
 
 
 def _hardware() -> HardwareProfile:
@@ -167,7 +168,7 @@ def sealed_bundle(tmp_path: Path) -> Path:
     async def _arm() -> None:
         for sim in (watlow, alicat, sartorius, nidaq):
             await sim.open()
-            await sim.start(clock=clock)
+            await sim.start(make_start_ctx(clock=clock))
 
     asyncio.run(_arm())
 

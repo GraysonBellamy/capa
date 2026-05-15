@@ -17,6 +17,7 @@ from typing import Any
 
 from capa.devices.adapter import (
     AdapterLifecycle,
+    AdapterStartContext,
     Capability,
     CommandResult,
     DeviceCommand,
@@ -84,7 +85,7 @@ class StubRecordingAdapter:
         self.close_count += 1
         self._lifecycle.close()
 
-    async def start(self, *args: Any, **kwargs: Any) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         self._lifecycle.start()
 
     async def stop(self) -> None:

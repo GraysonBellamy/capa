@@ -1,16 +1,10 @@
 """Adapter-error handling tests for :class:`Worker`.
 
-Migration doc §5.4: when ``adapter.stream()`` raises mid-stream, the worker
-must
+When ``adapter.stream()`` raises mid-stream, the worker must
 
 1. record an event into the run bundle (``worker_adapter_error``),
-2. set ``worker.fatal_error`` so the conductor's per-worker policy decision
-   can read it,
+2. set ``worker.fatal_error`` so future conductor policy code can read it,
 3. exit the stream task; the rest of the worker stays consistent.
-
-The per-worker watchdog (which reads ``fatal_error`` and escalates per
-``on_failure``) is tested elsewhere; here we verify the worker-side
-recording is correct.
 """
 
 from __future__ import annotations

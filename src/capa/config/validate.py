@@ -19,7 +19,7 @@ import asyncio
 import importlib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import anyio
 from pydantic import ValidationError
@@ -311,40 +311,49 @@ def _layer3_domain(config: Any, document: ConfigDocument) -> list[ConfigProblem]
 def _layer4_resource(config: Any, document: ConfigDocument) -> list[ConfigProblem]:
     """Construct adapters (passive) and run resource-conflict checks.
 
-    Reuses ``capa.runtime.build.collect_resource_problems`` so the
-    editor catches exactly the conflicts the runtime would catch
-    at pool open — without opening anything. The adapter constructors
-    are required to be passive (no I/O on ``__init__``) for this to be
-    safe; the contract is documented on
-    :class:`~capa.devices.registry.AdapterDescriptor`.
+    Calls :func:`capa.devices.materialize.materialize_adapters` so the
+    editor catches exactly the conflicts the runtime would catch at pool
+    open — without opening anything, and without depending on the
+    runtime layer. The adapter constructors are required to be passive
+    (no I/O on ``__init__``) for this to be safe; the contract is
+    documented on :class:`~capa.devices.registry.AdapterDescriptor`.
     """
-    from capa.devices.adapter import DeviceAdapter  # noqa: PLC0415
-    from capa.runtime.build import (  # noqa: PLC0415
-        _construct_adapters_from_config,
-        _construct_camera_adapters_from_config,
+    from capa.devices.materialize import (  # noqa: PLC0415
+        ConfigMaterializationError,
         collect_resource_problems,
+        materialize_adapters,
     )
 
     try:
-        device_adapters = _construct_adapters_from_config(config)
-        camera_adapters = _construct_camera_adapters_from_config(config)
-    except Exception as exc:
-        # Adapter construction failed (typically TypeError → wrapped in
-        # ResourceConflict by build.py). Surface as a single error.
-        return [
-            ConfigProblem(
-                severity="error",
-                code="resource.adapter_construction_failed",
-                message=str(exc),
-                section="devices",
-                source_file=document.hardware_path,
-            )
-        ]
-    all_adapters = [
-        *device_adapters,
-        *(cast(DeviceAdapter, adapter) for adapter in camera_adapters),
+        materialized = materialize_adapters(config)
+    except ConfigMaterializationError as exc:
+        # Attach a source file to each problem so the Problems panel
+        # navigates correctly. The construction errors come from
+        # devices/cameras tables; both live in the hardware file.
+        return [_attach_source(problem, document.hardware_path) for problem in exc.problems]
+    return [
+        _attach_source(p, document.hardware_path) for p in collect_resource_problems(materialized)
     ]
-    return collect_resource_problems(all_adapters, config)
+
+
+def _attach_source(problem: ConfigProblem, source_file: Path | None) -> ConfigProblem:
+    """Return ``problem`` with :attr:`ConfigProblem.source_file` populated.
+
+    The materialize layer doesn't know about :class:`ConfigDocument` paths;
+    the validation layer attaches them here so the Problems panel can
+    open the right file.
+    """
+    if problem.source_file is not None or source_file is None:
+        return problem
+    return ConfigProblem(
+        severity=problem.severity,
+        code=problem.code,
+        message=problem.message,
+        section=problem.section,
+        path=problem.path,
+        source_file=source_file,
+        fix_label=problem.fix_label,
+    )
 
 
 # ---------------------------------------------------------------------------

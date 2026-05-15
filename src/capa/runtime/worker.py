@@ -28,15 +28,23 @@ an option; async callers wrap them with :func:`asyncio.wrap_future`.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future
+from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
+import anyio
 import structlog
 
-from capa.devices.adapter import CommandResult, DeviceAdapter, DeviceCommand
+from capa.devices.adapter import (
+    AdapterStartContext,
+    CommandResult,
+    DeviceAdapter,
+    DeviceCommand,
+    FailurePolicy,
+)
 from capa.devices.camera.metadata import WebcamMetadata
 from capa.devices.records import DeviceEmission, SourceRecord
 from capa.runtime.bridge import BridgePolicy, ThreadBridge
@@ -46,6 +54,7 @@ from capa.runtime.errors import (
     UnknownDeviceError,
     WorkerStateError,
 )
+from capa.runtime.heartbeat import heartbeat_task
 from capa.runtime.lifecycle import (
     LEGAL_WORKER_EDGES,
     WorkerState,
@@ -91,6 +100,7 @@ class Worker:
         outbound_capacity: int = 64,
         preview_bridges: Mapping[str, ThreadBridge[PreviewFrame]] | None = None,
         shutdown_config: WorkerShutdownConfig | None = None,
+        on_failure: Mapping[str, FailurePolicy] | None = None,
     ) -> None:
         if not adapters:
             raise ValueError(f"Worker {resource_id!r}: must have at least one adapter")
@@ -106,6 +116,18 @@ class Worker:
         self._adapter_list: tuple[DeviceAdapter, ...] = tuple(adapters)
         self._runner: WorkerRunner = runner or ThreadedRunner(name=f"worker-{resource_id}")
         self._outbound_capacity = outbound_capacity
+        # Per-adapter failure policy, carried over from
+        # :class:`~capa.devices.resolved.ResolvedAdapter`. Missing entries
+        # default to :attr:`FailurePolicy.ABORT` (the historical
+        # implicit behavior). Diagnostics-only today; conductor-side
+        # enforcement is intentionally deferred.
+        resolved_on_failure: dict[str, FailurePolicy] = {
+            a.name: FailurePolicy.ABORT for a in adapters
+        }
+        if on_failure is not None:
+            for name, policy in on_failure.items():
+                if name in resolved_on_failure:
+                    resolved_on_failure[name] = policy
         # Preview bridges, one per camera adapter hosted by this worker.
         # Non-camera workers (Watlow, Alicat, NI-DAQ) receive an empty map
         # and never touch it. The pool partitions bridges by adapter name
@@ -138,10 +160,17 @@ class Worker:
         # so close can include it in WorkerCloseResult. ``None`` when
         # the worker has never been disarmed in its current open cycle.
         self._last_disarm_result: DisarmResult | None = None
+        # Per-worker heartbeat. The task is spawned on the worker loop on
+        # the CLOSED → IDLE edge and torn down on IDLE → CLOSED, so its
+        # observations span every arm/sample/disarm cycle within one open
+        # lifetime. ``None`` outside that window.
+        self._heartbeat_task: asyncio.Task[None] | None = None
+        self._heartbeat_stop: anyio.Event | None = None
 
         self._metrics = WorkerMetrics(
             resource_id=resource_id,
             adapter_names=tuple(a.name for a in adapters),
+            on_failure=MappingProxyType(resolved_on_failure),
         )
 
     # ---- introspection (any thread) -------------------------------------
@@ -521,6 +550,15 @@ class Worker:
                 )
             raise
         self._transition(WorkerState.IDLE)
+        # Heartbeat lives for the whole open lifetime: observations span
+        # every arm/sample/disarm cycle so the metric reflects "is this
+        # worker's loop healthy" rather than "is it healthy *right now*."
+        self._heartbeat_stop = anyio.Event()
+        loop = asyncio.get_running_loop()
+        self._heartbeat_task = loop.create_task(
+            heartbeat_task(self._metrics.loop_lag, self._heartbeat_stop),
+            name=f"worker-{self._resource_id}-heartbeat",
+        )
 
     async def _close_all_impl(self) -> tuple[str, ...]:
         """IDLE → CLOSED. Close every adapter; return per-adapter errors.
@@ -538,6 +576,30 @@ class Worker:
         """
         errors: list[str] = []
         cfg = self._shutdown_config
+        # Stop the heartbeat before adapter close so its final wake-up doesn't
+        # race the loop teardown. Bounded so a wedged heartbeat (shouldn't
+        # happen — it only sleeps) can't pin worker close.
+        if self._heartbeat_stop is not None:
+            self._heartbeat_stop.set()
+        if self._heartbeat_task is not None:
+            try:
+                await asyncio.wait_for(self._heartbeat_task, timeout=cfg.adapter_close_grace_s)
+            except TimeoutError:
+                self._heartbeat_task.cancel()
+                _logger.warning(
+                    "worker.heartbeat_stop_timeout",
+                    resource_id=self._resource_id,
+                    grace_s=cfg.adapter_close_grace_s,
+                )
+            except BaseException as exc:
+                _logger.warning(
+                    "worker.heartbeat_stop_failed",
+                    resource_id=self._resource_id,
+                    error=str(exc),
+                )
+            finally:
+                self._heartbeat_task = None
+                self._heartbeat_stop = None
         for adapter in reversed(self._adapter_list):
             camera_adapter = _as_camera_adapter(adapter)
             if camera_adapter is not None:
@@ -681,50 +743,27 @@ class Worker:
         return bridge
 
     async def _adapter_start(self, adapter: DeviceAdapter) -> None:
-        """Dispatch ``adapter.start`` against the signature it declares.
+        """Drive ``adapter.start`` with a freshly-built :class:`AdapterStartContext`.
 
-        Three flavors of ``start`` co-exist in this codebase:
-
-        * :class:`~capa.runtime.camera_adapter.CameraDeviceAdapter`'s
-          ``start(run_context: RunContext)`` — needs the full context so
-          it can compute the camera output_path from
-          ``bundle.root + run_id``.
-        * Device adapters (Watlow, Alicat, Sartorius, NI-DAQ) declare
-          ``start(self, clock: RunClock | None = None)`` — need the
-          clock for emission timestamps.
-        * The :class:`DeviceAdapter` Protocol itself is ``start(self)``
-          (zero positional args beyond self).
-
-        We inspect the bound method's signature and call the right
-        shape. Inspection is one call per arm — negligible cost. The
-        previous TypeError-fallback chain conflated binding mismatches
-        with runtime TypeErrors from inside the adapter body; the
-        signature probe avoids that ambiguity.
-
-        Adapters that declare a single non-self parameter receive the
-        ``RunContext`` when it's named ``run_context`` / ``ctx`` /
-        ``context``; otherwise the parameter is treated as the clock.
-        Names match by exact string; this is enough to disambiguate
-        without making adapters import a marker type.
+        Every adapter — real, sim, and camera — accepts the same
+        :class:`~capa.devices.adapter.AdapterStartContext` shape. The
+        context is constructed once per arm from the worker's current
+        :class:`RunContext`.
         """
         assert self._run_context is not None
-        bound = adapter.start
-        try:
-            sig = inspect.signature(bound)
-        except (TypeError, ValueError):
-            # Builtins / C-implemented methods can refuse introspection.
-            # Fall back to the historical clock-first call.
-            await bound(self._run_context.clock)  # type: ignore[call-arg]
-            return
-        params = list(sig.parameters.values())
-        if not params:
-            await bound()
-            return
-        first = params[0]
-        if first.name in {"run_context", "ctx", "context"}:
-            await bound(self._run_context)  # type: ignore[call-arg]
-            return
-        await bound(self._run_context.clock)  # type: ignore[call-arg]
+        bundle_root = self._run_context.bundle.root
+        if not isinstance(bundle_root, Path):
+            # Test fakes sometimes hand us a stub bundle ref whose root is
+            # a string or other path-coercible value. Adapters consuming
+            # ``ctx.bundle_root`` expect a real :class:`Path`, so absorb
+            # the coercion here once instead of at every reader.
+            bundle_root = Path(str(bundle_root))
+        ctx = AdapterStartContext(
+            clock=self._run_context.clock,
+            run_id=self._run_context.run_id,
+            bundle_root=bundle_root,
+        )
+        await adapter.start(ctx)
 
     async def _disarm_impl(self, *, grace_s: float) -> DisarmResult:
         """SAMPLING/ARMED → DRAINING → IDLE.
@@ -871,10 +910,9 @@ class Worker:
             # Forced disarm. Re-raise so the task's outcome is "cancelled."
             raise
         except BaseException as exc:
-            # Record event into bundle, mark fatal, signal disarm by
-            # exiting the stream loop. The conductor's per-worker watchdog
-            # is what escalates to run abort for adapters with
-            # ``on_failure = abort``.
+            # Adapter stream raised; record event, mark fatal, exit.
+            # Conductor-side per-device policy enforcement is not wired
+            # yet, so this remains advisory metadata after disarm.
             self._fatal_error = exc
             try:
                 await run_context.writer.write_event(
@@ -1000,11 +1038,12 @@ def _failed_future(exc: BaseException) -> Future[Any]:
 def _as_camera_adapter(adapter: DeviceAdapter) -> CameraDeviceAdapter | None:
     """Return ``adapter`` as a camera wrapper when it is one.
 
-    ``CameraDeviceAdapter.start(run_context)`` is intentionally more specific
-    than the generic ``DeviceAdapter.start()`` protocol; the worker dispatches
-    the correct call shape in :meth:`_adapter_start`. Narrow through
-    ``object`` so mypy does not treat this runtime wrapper check as
-    unreachable because of that one signature difference.
+    Used by the preview-channel and open-rollback paths in
+    :meth:`_open_all_impl` / :meth:`_close_all_impl` — camera adapters
+    expose extra surface (``start_preview_channel`` /
+    ``stop_preview_channel``) that the worker drives outside the
+    Protocol. Narrow through ``object`` so mypy sees the runtime check
+    as live regardless of structural overlap with the generic Protocol.
     """
     adapter_obj: object = adapter
     if isinstance(adapter_obj, CameraDeviceAdapter):

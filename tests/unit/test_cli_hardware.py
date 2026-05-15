@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from capa.app import app
+from capa.cli import app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SIM_CAPA_EXP = REPO_ROOT / "configs" / "experiments" / "sim_capa_pyrolysis.yaml"

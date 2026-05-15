@@ -27,6 +27,7 @@ from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
 from capa.devices.adapter import (
     AdapterLifecycle,
+    AdapterStartContext,
     Capability,
     CommandResult,
     DeviceCommand,
@@ -39,8 +40,10 @@ from capa.devices.records import (
 from capa.devices.sim._base import (
     build_channel_sample,
     channels_for_device,
+    make_accepted_result,
     make_record_id,
     now_utc,
+    reject_unless_authorized,
     synth_timing,
 )
 from capa.devices.sim._signals import SignalFn, signals_from_mapping
@@ -125,9 +128,9 @@ class AlicatSim:
     async def close(self) -> None:
         self._lifecycle.close()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         self._lifecycle.start()
-        self._clock = clock or RunClock.now()
+        self._clock = ctx.clock
 
     async def stop(self) -> None:
         self._lifecycle.stop()
@@ -222,20 +225,13 @@ class AlicatSim:
         return emissions
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
-        if cmd.authorization_id is None and cmd.confirmed_by is None:
-            return CommandResult(
-                accepted=False,
-                detail="alicat_sim refuses unauthorized commands",
-                t_mono_ns=(self._clock or RunClock.now()).t_mono_ns(),
-                t_utc=now_utc(),
-            )
         clock = self._clock or RunClock.now()
-        return CommandResult(
-            accepted=True,
-            detail=f"sim ack {cmd.kind} target={cmd.target}",
-            t_mono_ns=clock.t_mono_ns(),
-            t_utc=now_utc(),
+        rejection = reject_unless_authorized(
+            cmd, adapter_id=ADAPTER_ID, device_name=self.name, clock=clock
         )
+        if rejection is not None:
+            return rejection
+        return make_accepted_result(detail=f"sim ack {cmd.kind} target={cmd.target}", clock=clock)
 
     async def set_flow_setpoint(
         self,

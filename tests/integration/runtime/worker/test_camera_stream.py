@@ -5,10 +5,10 @@ the Worker's perspective:
 
 * :meth:`Worker.start` opens the camera handle on the worker loop.
 * :meth:`Worker.arm` installs the RunContext into the wrapper.
-* :meth:`Worker.begin_sampling` calls ``wrapper.start(run_context)``,
-  which the worker's signature-probing dispatcher hands the full context —
-  the wrapper then opens the camera's
-  output container and spawns the multiplexer.
+* :meth:`Worker.begin_sampling` calls ``wrapper.start(ctx)`` with an
+  :class:`AdapterStartContext` built from the worker's RunContext —
+  the wrapper then opens the camera's output container and spawns
+  the multiplexer.
 * The outbound bridge carries :class:`FrameReceipt` and
   :class:`CameraEvent` values produced by the wrapper's multiplexer.
 * :meth:`Worker.disarm` returns ``OK`` within grace — the wrapper's

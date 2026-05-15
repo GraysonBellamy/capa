@@ -58,7 +58,8 @@ class CapaStatusBar(QStatusBar):
       that).
     * **Saturation** reads ``blocked_since_ms`` per bridge and colors against
       the configured ``saturation_deadline_s``.
-    * **Loop lag** is the conductor's loop-lag p99 (warn 50ms, fail 200ms).
+    * **Loop lag** is the conductor's loop-lag p99, colored from
+      ``RuntimeConfig.loop_lag_warn_ms`` (default warn 50 ms, fail 200 ms).
     * **Queue depth** shows current ``depth`` and lifetime ``depth_max``
       so historical worst is visible without pinning the current reading.
 
@@ -246,13 +247,16 @@ class CapaStatusBar(QStatusBar):
         so the pill turns yellow at 25% and red at 50% of the deadline.
 
         Loop lag: conductor loop p99 over its sliding window. Warn at
-        50 ms, fail at 200 ms.
+        ``runtime.loop_lag_warn_ms``; fail at four times that threshold.
 
         Depth: worst current depth and lifetime max across bridges,
         rendered as ``cur/max`` for at-a-glance backlog. Current depth
         is what matters; max is shown for context only.
         """
-        deadline_s = float(diag.get("runtime", {}).get("saturation_deadline_s", 10.0))
+        runtime = diag.get("runtime", {})
+        deadline_s = float(runtime.get("saturation_deadline_s", 10.0))
+        loop_warn_ms = float(runtime.get("loop_lag_warn_ms", 50.0))
+        loop_fail_ms = loop_warn_ms * 4.0
         worst_blocked_ms = -1.0
         worst_depth = 0
         worst_depth_max = 0
@@ -285,9 +289,9 @@ class CapaStatusBar(QStatusBar):
         cond = diag.get("loop.conductor", {})
         lag_p99 = float(cond.get("lag_p99_ms", 0.0))
         self._loop_lag_label.setText(f"loop {lag_p99:.0f} ms")
-        if lag_p99 >= 200.0:
+        if lag_p99 >= loop_fail_ms:
             self._loop_lag_label.setStyleSheet(f"color: {COLOR_FAIL.name()};")
-        elif lag_p99 >= 50.0:
+        elif lag_p99 >= loop_warn_ms:
             self._loop_lag_label.setStyleSheet(f"color: {COLOR_WARN.name()};")
         else:
             self._loop_lag_label.setStyleSheet("")

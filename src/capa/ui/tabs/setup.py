@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QFileDialog,
     QFrame,
     QLabel,
     QMessageBox,
@@ -190,7 +189,6 @@ class SetupTab(QWidget):
         self._toolbar = QToolBar("Setup", self)
         self._toolbar.setMovable(False)
         self._action_new = self._toolbar.addAction("New", self._on_new)
-        self._action_open = self._toolbar.addAction("Open", self._on_open)
         self._action_save = self._toolbar.addAction("Save", self._on_save)
         self._action_save_as = self._toolbar.addAction("Save As", self._on_save_as)
         self._action_validate = self._toolbar.addAction("Validate", self._on_validate)
@@ -295,6 +293,13 @@ class SetupTab(QWidget):
                 self._controller.state_changed.connect(self._on_controller_state)
             with contextlib.suppress(AttributeError):
                 self._controller.config_load_finished.connect(self._on_config_load_finished)
+            # Hardware-ready state gates Check Hardware. When the pool is
+            # open and the draft hasn't been edited since apply, a fresh
+            # handshake would conflict with the pool's open port — so we
+            # disable the button rather than letting the operator
+            # discover the conflict via a row of failures.
+            with contextlib.suppress(AttributeError):
+                self._controller.hardware_ready_changed.connect(self._on_hardware_ready_changed)
             with contextlib.suppress(Exception):
                 self._on_controller_state(self._controller.state)
         self._refresh_banner()
@@ -399,7 +404,22 @@ class SetupTab(QWidget):
     # --------------------------------------------------------------- toolbar
 
     def _on_new(self) -> None:
-        """Open the New Setup wizard."""
+        """Open the New Setup wizard.
+
+        A wizard-produced draft is by definition not the same as the
+        currently-applied config (or there is no applied config), so we
+        mark ``unapplied`` so the Apply to Rig button lights up as the
+        next logical step. Without this, opening the wizard and clicking
+        Apply immediately would be impossible — the operator would have
+        to make a stray edit just to unlock the button.
+        """
+        if self._is_controller_busy():
+            QMessageBox.information(
+                self,
+                "New refused",
+                "A run is active. Creating a new setup is disabled until the run completes.",
+            )
+            return
         from capa.ui.tabs.setup_wizard import SetupWizard  # noqa: PLC0415
 
         document = SetupWizard.run(self)
@@ -409,6 +429,9 @@ class SetupTab(QWidget):
 
         self._draft = SetupDraft(document=document)
         self._draft.validate()
+        self._draft.unapplied = True
+        self._apply_in_flight = False
+        self._apply_outcome = None
         self._refresh_all_sections()
         self._problems.set_problems(self._draft.problems)
         self._refresh_outline_markers()
@@ -416,17 +439,6 @@ class SetupTab(QWidget):
         self._refresh_banner()
         self._refresh_apply_enabled()
         self.draftLoaded.emit()
-
-    def _on_open(self) -> None:
-        path_str, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open setup",
-            str(self._initial_dir()),
-            "Configs (*.yaml *.yml *.toml);;All files (*)",
-        )
-        if not path_str:
-            return
-        self.load_path(Path(path_str))
 
     def _on_save(self) -> None:
         if self._draft.document.experiment_path is None:
@@ -911,6 +923,10 @@ class SetupTab(QWidget):
         self._refresh_banner()
         self._refresh_apply_enabled()
 
+    def _on_hardware_ready_changed(self, _ready: bool) -> None:
+        """Pool readiness flipped — re-evaluate Check Hardware gating."""
+        self._refresh_apply_enabled()
+
     def _on_config_load_finished(self, progress: object) -> None:
         """Listen for the controller's terminal config-load phase.
 
@@ -1009,10 +1025,14 @@ class SetupTab(QWidget):
         self._banner.setVisible(True)
 
     def _refresh_apply_enabled(self) -> None:
-        """Toggle the Apply / Discover / Check buttons.
+        """Toggle the New / Apply / Discover / Check buttons.
 
         Apply: only available when there's an unapplied valid draft and
         no run is in progress.
+
+        New: refused during an armed run — the operator's mental model
+        is that the rig's setup is fixed for the duration of the run, so
+        dropping a fresh draft on top of it would be confusing.
 
         Discover / Check Hardware: gated by frozen-while-armed and by
         check-in-flight (one bus operation at a time).
@@ -1029,19 +1049,37 @@ class SetupTab(QWidget):
             and not self._draft.has_errors
             and self._draft.unapplied
         )
+        self._action_new.setEnabled(not controller_is_active)
         self._action_apply.setEnabled(apply_enabled)
         self._action_discover.setEnabled(not bus_locked)
-        # Check Hardware also requires a non-empty, error-free draft —
-        # there's nothing to handshake otherwise. Allow it without an
-        # ``unapplied`` flag because the operator may want to check
-        # the *applied* config too. Layer-5 (``live.*``) errors are
-        # excluded here: a failed handshake is exactly the thing the
-        # operator wants to retry after fixing a cable or power-cycling
-        # a controller, so it must not disable its own re-run button.
+        # Check Hardware: gated by frozen-while-armed, schema errors,
+        # AND by "the pool already owns the ports we'd want to handshake
+        # against". A fresh handshake opens its own connection to the
+        # device — if the pool is already open on the same port, the
+        # second open fails and we'd report every connected device as
+        # broken. Disable instead. Re-enable the moment the draft is
+        # edited (``unapplied=True``) so the operator can verify their
+        # changes before applying.
+        #
+        # Layer-5 (``live.*``) errors are excluded from the schema-error
+        # check: a failed handshake is exactly the thing the operator
+        # wants to retry after fixing a cable or power-cycling a
+        # controller, so it must not disable its own re-run button.
         schema_has_errors = any(
             p.severity == "error" and not p.code.startswith("live.") for p in self._draft.problems
         )
-        self._action_check.setEnabled(not bus_locked and not schema_has_errors)
+        hardware_ready = bool(
+            self._controller is not None and getattr(self._controller, "hardware_ready", False)
+        )
+        applied_and_synced = hardware_ready and not self._draft.unapplied
+        check_enabled = not bus_locked and not schema_has_errors and not applied_and_synced
+        self._action_check.setEnabled(check_enabled)
+        if applied_and_synced:
+            self._action_check.setToolTip(
+                "Hardware is connected and verified — edit the draft to re-enable."
+            )
+        else:
+            self._action_check.setToolTip("Read-only handshake against each device in the draft.")
 
     # ------------------------------------------------------------------ helpers
 
@@ -1135,14 +1173,6 @@ class SetupTab(QWidget):
         if self._draft.unapplied:
             text = f"{text}  ↑ Unapplied"
         self._source_label.setText(text)
-
-    def _initial_dir(self) -> Path:
-        doc = self._draft.document
-        if doc.experiment_path is not None:
-            return doc.experiment_path.parent
-        if doc.hardware_path is not None:
-            return doc.hardware_path.parent
-        return Path.cwd()
 
     def _show_save_error(self, exc: SaveError) -> None:
         rolled = ", ".join(str(p) for p in exc.rolled_back_paths)

@@ -1,7 +1,7 @@
 """Real :class:`SartoriusAdapter` — wraps a :class:`sartoriuslib.Balance`.
 
 Plan §16: "real ``SartoriusAdapter``. Capability flags. Device
-watchdogs and health surfacing. Discovery (``capa devices discover``).
+health surfacing. Discovery (``capa devices discover``).
 ``capa validate --strict``."
 
 Architecture (plan §5.2 / §5.6 / §7.2):
@@ -49,7 +49,6 @@ from capa.channels.spec import ChannelSpec, SartoriusReading
 from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
 from capa.devices._helpers import (
-    LastSampleTracker,
     WatchdogState,
     build_channel_sample,
     channels_for_device,
@@ -60,7 +59,7 @@ from capa.devices._helpers import (
     serial_resource_id,
 )
 from capa.devices.adapter import (
-    AdapterLifecycle,
+    AdapterStartContext,
     Capability,
     CommandResult,
     DeviceCommand,
@@ -71,6 +70,7 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+from capa.devices.runtime_state import AdapterRuntimeState
 
 if TYPE_CHECKING:
     from capa.devices.registry import AdapterDescriptor
@@ -237,19 +237,13 @@ class SartoriusAdapter:
         "_balance",
         "_balance_factory",
         "_channels",
-        "_clock",
         "_cold_open_retry_count",
         "_device_info",
         "_interval_max_ms",
         "_interval_min_ms",
         "_interval_narrow_count",
         "_last_monotonic_ns",
-        "_last_sample",
-        "_last_snapshot_t_mono_ns",
-        "_lifecycle",
-        "_recoverable_error_count",
-        "_seq",
-        "_stop_requested",
+        "_state",
         "capabilities",
         "name",
         "params",
@@ -289,13 +283,7 @@ class SartoriusAdapter:
         self._balance: Balance | None = None
         self._device_info: DeviceInfo | None = None
         self._channels: list[ChannelSpec] = []
-        self._clock: RunClock | None = None
-        self._lifecycle = AdapterLifecycle()
-        self._seq = 0
-        self._last_snapshot_t_mono_ns = -(2**62)
-        self._last_sample = LastSampleTracker()
-        self._recoverable_error_count = 0
-        self._stop_requested = False
+        self._state = AdapterRuntimeState()
         self._cold_open_retry_count = 0
         self._last_monotonic_ns: int | None = None
         self._interval_min_ms: float = math.inf
@@ -331,7 +319,7 @@ class SartoriusAdapter:
 
         Idempotent: a second call on an already-open adapter is a no-op.
         """
-        if self._lifecycle.state in ("open", "running"):
+        if self._state.lifecycle.state in ("open", "running"):
             return
         try:
             self._balance = await self._build_balance()
@@ -342,24 +330,20 @@ class SartoriusAdapter:
             ) from exc
         # ``Balance.info`` is populated by ``open_device(identify=True)``.
         self._device_info = self._balance.info
-        self._lifecycle.open()
+        self._state.lifecycle.open()
 
     async def close(self) -> None:
         """Release the bus / handle. Idempotent."""
-        if self._lifecycle.state == "closed":
+        if self._state.lifecycle.state == "closed":
             return
         await self._safe_close_balance()
         self._balance = None
-        self._lifecycle.close()
+        self._state.lifecycle.close()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         """Capture the :class:`RunClock` anchor and arm the streaming loop."""
-        self._lifecycle.start()
-        self._clock = clock or RunClock.now()
-        self._stop_requested = False
-        self._last_sample.reset()
-        self._recoverable_error_count = 0
-        self._last_snapshot_t_mono_ns = -(2**62)
+        self._state.on_start(ctx.clock)
+        # Sartorius-specific: reset wire-spacing jitter tracking on each run.
         self._last_monotonic_ns = None
         self._interval_min_ms = math.inf
         self._interval_max_ms = 0.0
@@ -367,14 +351,11 @@ class SartoriusAdapter:
 
     async def stop(self) -> None:
         """Request the streaming loop to exit cleanly. Idempotent."""
-        if self._lifecycle.state != "running":
-            return
-        self._stop_requested = True
-        self._lifecycle.stop()
+        self._state.request_stop()
 
     async def snapshot(self) -> DeviceSnapshot:
         """Build a :class:`DeviceSnapshot` from cached identity + live health."""
-        clock = self._clock or RunClock.now()
+        clock = self._state.clock or RunClock.now()
         return DeviceSnapshot(
             adapter=ADAPTER_ID,
             device=self.name,
@@ -403,14 +384,14 @@ class SartoriusAdapter:
                 f"sartorius {self.name!r} stream() requires open() first",
                 device=self.name,
             )
-        if self._clock is None:
+        if self._state.clock is None:
             raise AdapterError(
                 f"sartorius {self.name!r} stream() requires start() first",
                 device=self.name,
             )
 
         snap = await self.snapshot()
-        self._last_snapshot_t_mono_ns = snap.t_mono_ns
+        self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
         yield snap
 
         source = _SingleDevicePollSource(self.name, self._balance)
@@ -423,13 +404,13 @@ class SartoriusAdapter:
                 buffer_size=64,
             ) as batches:
                 async for batch in batches:
-                    if self._stop_requested:
+                    if self._state.stop_requested:
                         break
                     sample = batch.get(self.name)
                     if sample is None:
                         # Source returned no row at all — recorder oddity;
                         # treat as missed tick.
-                        self._recoverable_error_count += 1
+                        self._state.recoverable_error_count += 1
                         continue
                     # Track wire-midpoint spacing so we can diagnose jitter.
                     cur_mono = sample.monotonic_ns
@@ -445,12 +426,12 @@ class SartoriusAdapter:
                     self._last_monotonic_ns = cur_mono
                     record = self._record_for(sample)
                     yield record
-                    self._last_sample.mark(record.t_mono_ns)
+                    self._state.last_sample.mark(record.t_mono_ns)
                     if sample.reading is None:
                         # Error sample — native row is preserved (with
                         # error_type / error_message), but no calibrated
                         # ChannelSample can be derived.
-                        self._recoverable_error_count += 1
+                        self._state.recoverable_error_count += 1
                         if not self.params.auto_reconnect:
                             err = sample.error
                             raise AdapterError(
@@ -461,9 +442,9 @@ class SartoriusAdapter:
                         continue
                     for cs in self._channel_samples_for(sample, record.record_id):
                         yield cs
-                    if self._snapshot_due():
+                    if self._state.snapshot_due(period_s=self.params.snapshot_period_s):
                         snap = await self.snapshot()
-                        self._last_snapshot_t_mono_ns = snap.t_mono_ns
+                        self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
                         yield snap
         except* SartoriusError as eg:
             first = next(iter(eg.exceptions))
@@ -475,7 +456,7 @@ class SartoriusAdapter:
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
         """Issue a generic command. Authorization gate first, then dispatch."""
-        clock = self._clock or RunClock.now()
+        clock = self._state.clock or RunClock.now()
         rejection = reject_unless_authorized(
             cmd, adapter_id=ADAPTER_ID, device_name=self.name, clock=clock
         )
@@ -811,13 +792,14 @@ class SartoriusAdapter:
         so the row schema matches what an offline ``sartoriuslib`` recorder
         would produce.
         """
-        assert self._clock is not None
+        clock = self._state.clock
+        assert clock is not None
         row = sample_to_row(sample)
-        t_mono_ns = sample.monotonic_ns - self._clock.started_mono_ns
-        self._seq += 1
+        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
+        self._state.seq += 1
         protocol_str = sample.protocol.value if sample.protocol is not None else None
         return SourceRecord(
-            record_id=make_record_id(ADAPTER_ID, self.name, self._seq),
+            record_id=make_record_id(ADAPTER_ID, self.name, self._state.seq),
             adapter=ADAPTER_ID,
             device=self.name,
             shape="single_value_row",
@@ -829,11 +811,12 @@ class SartoriusAdapter:
 
     def _channel_samples_for(self, sample: Any, record_id: str) -> list[DeviceEmission]:
         """Map ``sample`` against the configured :class:`SartoriusReading` bindings."""
-        assert self._clock is not None
+        clock = self._state.clock
+        assert clock is not None
         reading = sample.reading
         if reading is None:
             return []
-        t_mono_ns = sample.monotonic_ns - self._clock.started_mono_ns
+        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
         emissions: list[DeviceEmission] = []
         for spec in self._channels:
             binding = spec.source
@@ -877,34 +860,12 @@ class SartoriusAdapter:
         return None
 
     def watchdog_state(self) -> WatchdogState:
-        """Watchdog view for the engine's silent-device task (plan §13.2)."""
-        return WatchdogState(
-            device=self.name,
-            last_t_mono_ns=self._last_sample.last_t_mono_ns,
-            expected_period_ns=int(1e9 / self.params.rate_hz),
-            lifecycle_state=self._lifecycle.state,
-        )
-
-    def _snapshot_due(self) -> bool:
-        if self._clock is None:
-            return False
-        elapsed_ns = self._clock.t_mono_ns() - self._last_snapshot_t_mono_ns
-        return elapsed_ns >= int(self.params.snapshot_period_s * 1e9)
+        """Return a compact silence-state view for tests and future policy work."""
+        return self._state.watchdog(device=self.name, rate_hz=self.params.rate_hz)
 
     def _compute_health(self, *, clock: RunClock) -> DeviceHealth:
         """Derive the :class:`DeviceHealth` pill from adapter state."""
-        if self._lifecycle.state == "closed":
-            return "down"
-        if self._lifecycle.state == "open":
-            return "ok"
-        if self._recoverable_error_count > 0:
-            return "degraded"
-        age_ns = self._last_sample.age_ns(now_t_mono_ns=clock.t_mono_ns())
-        if age_ns is not None:
-            stale_threshold_ns = int(3.0 * (1e9 / self.params.rate_hz))
-            if age_ns > stale_threshold_ns:
-                return "degraded"
-        return "ok"
+        return self._state.compute_health(clock=clock, rate_hz=self.params.rate_hz)
 
     def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
         info = self._device_info
@@ -915,8 +876,8 @@ class SartoriusAdapter:
             "protocol": self.params.protocol,
             "rate_hz": self.params.rate_hz,
             "channel_count": len(self._channels),
-            "state": self._lifecycle.state,
-            "recoverable_errors": self._recoverable_error_count,
+            "state": self._state.lifecycle.state,
+            "recoverable_errors": self._state.recoverable_error_count,
             "wire_interval_min_ms": interval_min,
             "wire_interval_max_ms": round(self._interval_max_ms, 2)
             if self._interval_max_ms

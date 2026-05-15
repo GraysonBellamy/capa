@@ -23,6 +23,8 @@ hardware tests run the same assertions against real hardware.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future, InvalidStateError
+from typing import Any
 
 import pytest
 
@@ -43,6 +45,31 @@ async def _wait(fut: object) -> object:
     return await asyncio.wrap_future(fut)  # type: ignore[arg-type]
 
 
+async def _install_loop_recorder(runner: ThreadedRunner) -> list[dict[str, Any]]:
+    """Install an exception recorder on the runner's loop and return the
+    list it appends to. The runner's loop is on another thread, so we
+    route the install through ``call_soon_threadsafe`` and synchronize via
+    a concurrent future."""
+    entries: list[dict[str, Any]] = []
+
+    def _handler(_loop: asyncio.AbstractEventLoop, ctx: dict[str, Any]) -> None:
+        entries.append(ctx)
+
+    done: Future[None] = Future()
+
+    def _install() -> None:
+        runner.loop.set_exception_handler(_handler)
+        done.set_result(None)
+
+    runner.loop.call_soon_threadsafe(_install)
+    await asyncio.wrap_future(done)
+    return entries
+
+
+def _has_invalid_state_error(entries: list[dict[str, Any]]) -> bool:
+    return any(isinstance(e.get("exception"), InvalidStateError) for e in entries)
+
+
 # ---------------------------------------------------------------------------
 # Mechanism test — FakeAdapter, fully controllable.
 # ---------------------------------------------------------------------------
@@ -61,16 +88,20 @@ class TestShieldMechanism:
         4. After waiting > command_delay_s, the adapter's commands_completed
            list contains the command — proving the worker-side coroutine
            ran to completion despite the cancellation.
+        5. The worker loop saw no ``InvalidStateError`` (Phase 6 guarantee:
+           caller cancellation must not leave noise on the runner loop).
 
         This is the exact mechanism that prevents the Watlow ReadResponse
         regression (§1.1)."""
         adapter = make_fake_adapter("a", command_delay_s=0.2)
+        runner = ThreadedRunner(name="shield-cancel")
         worker = Worker(
             resource_id=adapter.resource_id,
             adapters=[adapter],
-            runner=ThreadedRunner(name="shield-cancel"),
+            runner=runner,
         )
         await worker.async_start()
+        loop_errors = await _install_loop_recorder(runner)
         try:
             cmd = fake_command(kind="slow_set")
             dispatch_fut = worker.dispatch("a", cmd)
@@ -91,6 +122,9 @@ class TestShieldMechanism:
             # Metrics agree: the worker counted one full command lifecycle.
             assert worker.metrics.commands_total == 1
             assert worker.metrics.commands_failed == 0
+            # Phase 6: caller cancellation must not produce InvalidStateError
+            # on the runner's loop.
+            assert not _has_invalid_state_error(loop_errors), loop_errors
         finally:
             await worker.async_close(grace_s=1.0)
 
@@ -195,9 +229,9 @@ class _SlowCommandProxy:
     async def close(self) -> None:
         await self._inner.close()  # type: ignore[attr-defined]
 
-    async def start(self, clock: object | None = None) -> None:
-        # Sims accept clock; pass through.
-        await self._inner.start(clock)  # type: ignore[attr-defined]
+    async def start(self, ctx: object) -> None:
+        # Pass through to the wrapped sim/fake adapter.
+        await self._inner.start(ctx)  # type: ignore[attr-defined]
 
     async def stop(self) -> None:
         await self._inner.stop()  # type: ignore[attr-defined]

@@ -44,6 +44,7 @@ from capa.storage.channel_samples_sink import (
 from capa.storage.finalize import finalize_in_place
 from capa.storage.integrity import verify
 from capa.storage.manifest import BundleManifest
+from tests._adapter_helpers import make_start_ctx
 
 
 def _config() -> ExperimentConfig:
@@ -85,7 +86,7 @@ def _crashed_bundle(tmp_path: Path) -> Path:
     watlow.configure_channels(list(_config().hardware.channels))
 
     asyncio.run(watlow.open())
-    asyncio.run(watlow.start(clock=clock))
+    asyncio.run(watlow.start(make_start_ctx(clock=clock)))
 
     runs_root = tmp_path / "runs"
     runs_root.mkdir()

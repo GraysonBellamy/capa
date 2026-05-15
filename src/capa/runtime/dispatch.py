@@ -30,7 +30,7 @@ concurrency layer is appropriate:
   in use.
 
 All implementations satisfy the same async :meth:`dispatch` contract,
-so the executor code path is unchanged across engine and conductor.
+so the executor code path stays uniform across run-armed and idle states.
 """
 
 from __future__ import annotations
@@ -42,7 +42,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import structlog
 
 from capa.runtime.camera_adapter import CameraDeviceAdapter
-from capa.runtime.conductor import Conductor, ConductorStateError
+from capa.runtime.conductor import Conductor
+from capa.runtime.errors import ConductorStateError, UnknownDeviceError
 
 if TYPE_CHECKING:
     from capa.devices.adapter import CommandResult, DeviceAdapter, DeviceCommand
@@ -53,28 +54,6 @@ if TYPE_CHECKING:
 
 
 _logger = structlog.get_logger("capa.runtime.dispatch")
-
-
-# ---------------------------------------------------------------------------
-# Errors
-# ---------------------------------------------------------------------------
-
-
-class DispatchError(RuntimeError):
-    """Base class for dispatcher-side failures."""
-
-
-class UnknownDeviceError(DispatchError):
-    """The requested device name isn't known to the dispatcher.
-
-    Distinct from :class:`capa.runtime.errors.UnknownDeviceError` only in
-    intent — the runtime one is raised at pool routing time, this one at
-    the executor seam. Both carry the device name.
-    """
-
-    def __init__(self, device: str) -> None:
-        super().__init__(f"unknown device: {device!r}")
-        self.device = device
 
 
 # ---------------------------------------------------------------------------
@@ -104,17 +83,15 @@ class CommandDispatcher(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# AdapterDispatcher — direct in-loop call (Engine compatibility)
+# AdapterDispatcher — direct in-loop call
 # ---------------------------------------------------------------------------
 
 
 class AdapterDispatcher:
     """Direct ``adapter.command(cmd)`` dispatch.
 
-    Used by today's :class:`ExperimentEngine` so the executor cutover
-    doesn't change Engine behaviour. The adapter map is built at engine
-    ``run()`` time and stays alive for the run; the dispatcher holds it
-    by reference and does **not** mutate.
+    The adapter map is built at run-start and stays alive for the run;
+    the dispatcher holds it by reference and does **not** mutate.
     """
 
     __slots__ = ("_adapters",)
@@ -126,7 +103,7 @@ class AdapterDispatcher:
         try:
             adapter = self._adapters[device]
         except KeyError as exc:
-            raise UnknownDeviceError(device) from exc
+            raise UnknownDeviceError(device, configured_names=tuple(self._adapters)) from exc
         return await adapter.command(cmd)
 
 
@@ -371,8 +348,6 @@ __all__ = [
     "AdapterDispatcher",
     "CommandDispatcher",
     "ConductorDispatcher",
-    "DispatchError",
     "ManualClient",
     "PoolDispatcher",
-    "UnknownDeviceError",
 ]

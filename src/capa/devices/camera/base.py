@@ -118,9 +118,11 @@ CameraTransport = Literal["usb", "ethernet", "file", "loopback"]
 """How the camera connects. ``loopback`` is the sim fixture's transport."""
 
 CameraOnFailure = Literal["warn", "abort_run", "safe_shutdown"]
-"""What the engine does when a camera's recording stalls or errors out
-(plan §12.6). The watchdog watches file-size growth + frame count;
-this flag picks the escalation."""
+"""Policy for future camera recording-stall/error handling.
+
+Current camera adapters surface events and health snapshots; safety-system
+escalation based on this field is not wired yet.
+"""
 
 
 class CameraSpec(BaseModel):
@@ -165,8 +167,7 @@ class CameraSpec(BaseModel):
     ``None`` (default), the file lives inside the bundle directory."""
 
     on_failure: CameraOnFailure = "warn"
-    """Policy applied by :class:`~capa.experiment.safety.SafetyMonitor` when
-    the camera watchdog raises a stall."""
+    """Policy metadata for future camera safety escalation."""
 
     estimated_bps: int = Field(default=4_000_000, gt=0)
     """Bytes-per-second estimate used by the disk-space preflight (plan §12.6).
@@ -219,8 +220,7 @@ class CameraHealth(BaseModel):
     """Periodic camera-health snapshot.
 
     Plan §12.1 / §12.6. Routed to ``status.sqlite`` via the existing snapshot
-    sink path; the watchdog also reads the latest one to decide whether to
-    escalate per :attr:`CameraSpec.on_failure`.
+    sink path.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -232,14 +232,13 @@ class CameraHealth(BaseModel):
     """``True`` while a :meth:`Camera.start_recording` ↔ ``stop_recording``
     pair is active."""
     frame_count: int
-    """Cumulative frames since the most recent ``start_recording``. Watchdog
-    asserts this advances within ``stall_grace_s`` (plan §12.1: 2 s)."""
+    """Cumulative frames since the most recent ``start_recording``."""
     file_size_bytes: int = 0
     """Bytes written to the output container so far (best effort: vendor-
     managed writers may report stale values within a few hundred ms)."""
     last_frame_t_mono_ns: int | None = None
     """``t_mono_ns`` of the most recent frame, or ``None`` if no frame has
-    been seen since recording started. Used by the watchdog stall detector."""
+    been seen since recording started."""
     healthy: bool = True
     error: str | None = None
     dropped_frames: int = 0

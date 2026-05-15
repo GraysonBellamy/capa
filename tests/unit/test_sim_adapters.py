@@ -25,6 +25,7 @@ from capa.devices.sim.nidaq_block_sim import NIDAQBlockSim
 from capa.devices.sim.nidaq_polled_sim import NIDAQPolledSim
 from capa.devices.sim.sartorius_sim import SartoriusSim
 from capa.devices.sim.watlow_sim import WatlowSim
+from tests._adapter_helpers import make_start_ctx
 
 pytestmark = pytest.mark.anyio
 
@@ -70,7 +71,7 @@ class TestWatlowSim:
     async def test_native_row_layout(self) -> None:
         sim, _ = self._make()
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         records, samples = _split(sim.tick_once())
         # one record + one sample per (parameter, instance)
         assert len(records) == 2
@@ -97,7 +98,7 @@ class TestWatlowSim:
     async def test_channel_samples_link_to_records(self) -> None:
         sim, _channels = self._make()
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         records, samples = _split(sim.tick_once())
         record_ids = {r.record_id for r in records}
         for s in samples:
@@ -113,7 +114,7 @@ class TestWatlowSim:
         # ~thousands of Hz because per-parameter yields are sub-millisecond.
         sim, _ = self._make()
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         records, _ = _split(sim.tick_once())
         assert len(records) == 2
         assert records[0].metadata["tick_first"] is True
@@ -122,7 +123,7 @@ class TestWatlowSim:
     async def test_command_unauthorized_rejected(self) -> None:
         sim, _ = self._make()
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         result = await sim.command(
             DeviceCommand(kind="set_setpoint", target="setpoint:1", issued_by="abr")
         )
@@ -131,7 +132,7 @@ class TestWatlowSim:
     async def test_command_with_authorization_accepted(self) -> None:
         sim, _ = self._make()
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         result = await sim.command(
             DeviceCommand(
                 kind="set_setpoint",
@@ -148,7 +149,7 @@ class TestWatlowSim:
         with pytest.raises(Exception):
             sim.tick_once()
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         assert sim._lifecycle.state == "running"
         await sim.stop()
         await sim.close()
@@ -171,7 +172,7 @@ class TestAlicatSim:
         )
         sim.configure_channels([channel])
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         records, samples = _split(sim.tick_once())
         assert len(records) == 1
         rec = records[0]
@@ -207,7 +208,7 @@ class TestSartoriusSim:
         )
         sim.configure_channels([channel])
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         records, samples = _split(sim.tick_once())
         rec = records[0]
         assert rec.shape == "single_value_row"
@@ -250,7 +251,7 @@ class TestNIDAQPolledSim:
         )
         sim.configure_channels([channel])
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         records, samples = _split(sim.tick_once())
         rec = records[0]
         assert rec.adapter == "nidaq_polled"
@@ -292,7 +293,7 @@ class TestNIDAQPolledSim:
         )
         sim.configure_channels([channel])
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         _, samples = _split(sim.tick_once())
         s = samples[0]
         assert s.value == pytest.approx(50.0)
@@ -312,7 +313,7 @@ class TestNIDAQBlockSim:
             signals={"AI0": Sine(amplitude=1, frequency_hz=50)},
         )
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         emissions = sim.tick_once()
         records, samples = _split(emissions)
         # P0a: block adapter does NOT emit per-sample ChannelSamples.
@@ -339,7 +340,7 @@ class TestNIDAQBlockSim:
             signals={"AI0": Constant(1.0)},
         )
         await sim.open()
-        await sim.start()
+        await sim.start(make_start_ctx())
         sim.tick_once()
         sim.tick_once()
         block0, block1 = sim.emitted_blocks[:2]

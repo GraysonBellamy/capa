@@ -17,7 +17,7 @@ The status bar polls live metrics from the conductor and UI ring buffers at 1 Hz
 | **elapsed** | Run wall time | n/a | n/a | n/a |
 | **UI overflow** | UI ring buffer rollovers — oldest sample evicted (excludes decimation) | informational | — | — |
 | **sat** | Worst current `blocked_since_ms` across worker→conductor bridges | `sat ok` (green) | `blocked Ns` ≥ 25% of `saturation_deadline_s` (yellow) | ≥ 50% of deadline (red) |
-| **loop** | Conductor loop p99 lag (sliding 1024-sample window, ~51 s at 20 Hz) | `< 50 ms` | `50–200 ms` (yellow) | `≥ 200 ms` (red) |
+| **loop** | Conductor loop p99 lag (sliding 1024-sample window, ~51 s at 20 Hz) | `< runtime.loop_lag_warn_ms` | `warn–4×warn` (yellow) | `≥ 4×warn` (red) |
 | **q** | Worst `current depth / lifetime max depth` across bridges | `cur` near 0 | `cur` climbing toward `max` | `cur ≈ capacity` |
 | **safety queue** | Placeholder (P3+) | always 0 today | — | — |
 | **disk** | Free space on `runs_root` | `> 15%` free | `< 15%` (yellow) | `< 5%` (red) |
@@ -65,11 +65,11 @@ The status bar polls live metrics from the conductor and UI ring buffers at 1 Hz
 
 **What it shows.** Conductor loop p99 lag in ms, over a sliding 1024-observation window at 20 Hz heartbeat (≈51 seconds of memory) ([`heartbeat.py`](../src/capa/runtime/heartbeat.py)). Lag is the difference between when a 50 ms heartbeat *should* have fired and when it actually did — i.e. how long the loop was not scheduling tasks.
 
-**Healthy.** `< 50 ms`. From [migration plan performance targets](per-resource-worker-migration.md#57-performance-baseline).
+**Healthy.** Below `runtime.loop_lag_warn_ms` (default 50 ms).
 
-**Warn.** `50–200 ms` (yellow). The conductor's drain tasks, watchdog, and saturation monitor are not getting fair scheduling. Procedure preflight `_wait_for` may start missing its target cadence.
+**Warn.** Between `runtime.loop_lag_warn_ms` and four times that value (default 50–200 ms, yellow). The conductor's drain tasks, heartbeat, and saturation monitor are not getting fair scheduling. Procedure preflight `_wait_for` may start missing its target cadence.
 
-**Fail.** `≥ 200 ms` (red). Something on the conductor loop is doing heavy synchronous work. The most common cause is a `CustomStep` handler ignoring the [§11 contract](runtime-architecture.md#11-procedure-cpu-offload) — every plugin author's custom step MUST wrap CPU work in `anyio.to_thread.run_sync`.
+**Fail.** At or above four times `runtime.loop_lag_warn_ms` (default ≥ 200 ms, red). Something on the conductor loop is doing heavy synchronous work. The most common cause is a `CustomStep` handler ignoring the [§11 contract](runtime-architecture.md#11-procedure-cpu-offload) — every plugin author's custom step MUST wrap CPU work in `anyio.to_thread.run_sync`.
 
 **How to triage.**
 - `loop` high + `sat ok` → conductor loop is CPU-busy but bridges aren't filling yet (busy loop is processing emissions, just slowly). Will become saturation if sustained.
@@ -131,4 +131,4 @@ disk red                  → free space; writer will stall imminently
 
 ---
 
-*See also: [`runtime-architecture.md`](runtime-architecture.md) for the runtime concepts, [`per-resource-worker-migration.md`](per-resource-worker-migration.md) for the performance targets and hardening plan.*
+*See also: [`runtime-architecture.md`](runtime-architecture.md) for the runtime concepts.*

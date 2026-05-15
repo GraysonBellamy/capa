@@ -19,13 +19,12 @@ takes the cheaper path: a thin wrapper that **implements**
 1. Multiplexes ``frame_stream`` + ``event_stream`` into the single
    ``stream()`` the worker iterates. Preview stays addressable on the
    underlying Camera for UI cards (preview path unchanged).
-2. Translates ``start(run_context)`` into the camera's
+2. Translates ``start(ctx)`` into the camera's
    ``start_recording(output_path)``, computing the path via
-   :meth:`_resolve_output_path`. The wrapper takes a
-   :class:`RunContext` parameter rather than just a :class:`RunClock`
-   so it can derive the bundle path + run id —
-   :meth:`Worker._adapter_start` falls back from ``start(ctx)`` →
-   ``start(clock)`` → ``start()`` for non-camera adapters.
+   :meth:`_resolve_output_path`. Camera and device adapters share the
+   single :class:`~capa.devices.adapter.AdapterStartContext` shape —
+   the wrapper reads ``ctx.clock`` / ``ctx.run_id`` / ``ctx.bundle_root``;
+   non-camera adapters typically use only ``ctx.clock``.
 3. Late-binds the run-authoritative :class:`RunClock`. Cameras are
    constructed at :meth:`WorkerPool.open`-time (before any run exists);
    the wrapper hands the underlying camera a :class:`_ClockProxy` at
@@ -71,7 +70,12 @@ import anyio
 import structlog
 
 from capa.core.clock import RunClock
-from capa.devices.adapter import Capability, CommandResult, DeviceCommand
+from capa.devices.adapter import (
+    AdapterStartContext,
+    Capability,
+    CommandResult,
+    DeviceCommand,
+)
 from capa.devices.camera.base import (
     Camera,
     CameraCapability,
@@ -85,7 +89,6 @@ from capa.runtime.preview import PreviewFrame, run_preview_drain
 if TYPE_CHECKING:
     from capa.runtime.bridge import ThreadBridge
     from capa.runtime.emissions import WorkerEmission
-    from capa.runtime.runcontext import RunContext
 
 
 _logger = structlog.get_logger("capa.runtime.camera_adapter")
@@ -118,8 +121,7 @@ class _ClockProxy:
     in the real run clock when :meth:`CameraDeviceAdapter.start`
     receives a :class:`RunContext`. Without rebinding, every frame
     receipt would carry a ``t_mono_ns`` relative to the pool-open
-    monotonic origin, not the run-start origin — bundles would not
-    match the engine baseline.
+    monotonic origin, not the run-start origin.
     """
 
     __slots__ = ("_inner",)
@@ -206,6 +208,7 @@ class CameraDeviceAdapter:
         "_camera",
         "_channel_task",
         "_clock_proxy",
+        "_idle_preview_task",
         "_mux_queue",
         "_mux_scope",
         "_mux_task",
@@ -248,6 +251,12 @@ class CameraDeviceAdapter:
         # Preview channel (drainer) — open()..close() lifetime.
         self._preview_bridge: ThreadBridge[PreviewFrame] | None = None
         self._channel_task: asyncio.Task[None] | None = None
+        # IDLE preview source task. Only populated for cameras that expose
+        # the :meth:`start_preview` / :meth:`run_preview_pump` surface
+        # (FLIR Atlas today). Cameras with a long-lived input pump (webcam)
+        # leave this ``None`` — their pump feeds the preview stream
+        # unconditionally across every phase.
+        self._idle_preview_task: asyncio.Task[None] | None = None
 
     # ---- DeviceAdapter Protocol surface --------------------------------
 
@@ -308,13 +317,21 @@ class CameraDeviceAdapter:
         :class:`WebcamAdapter` advertises ``start_input_pump``), this
         also spawns the pump so the live preview tile stays current for
         the entire pool lifetime — across runs and between them.
-        Cameras without that surface (IR sim, FLIR Atlas, …) keep their
-        per-run pump driven by the multiplexer in :meth:`stream`.
+
+        For cameras whose frames are vendor-callback driven and only flow
+        during recording (FLIR Atlas advertises
+        :meth:`start_preview` / :meth:`run_preview_pump` /
+        :meth:`stop_preview`), this also brings up the IDLE preview
+        source so the tile is hot between runs too. Mutual exclusion with
+        recording is enforced by :meth:`start` / :meth:`stop`, which
+        tear the source down for SAMPLING and bring it back on the
+        return to IDLE.
         """
         await self._camera.open()
         start_pump = getattr(self._camera, "start_input_pump", None)
         if callable(start_pump):
             await start_pump()
+        await self._start_idle_preview_source()
 
     async def close(self) -> None:
         """Close the camera handle. Idempotent.
@@ -325,20 +342,27 @@ class CameraDeviceAdapter:
         before releasing the handle (see [flir_ir_sim.py:305-314]) and
         — for cameras with a long-lived input pump — also stops the
         pump.
+
+        Tears down the IDLE preview source (if one is running) before
+        :meth:`Camera.close` so the source task cleanly exits while the
+        camera handle is still valid. ``Camera.close`` has its own
+        belt-and-braces ``stop_preview`` for non-cooperative shutdown
+        paths, so reordering here doesn't introduce a leak window.
         """
+        await self._stop_idle_preview_source()
         await self._camera.close()
 
-    async def start(self, run_context: RunContext) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         """Begin recording for the named run.
 
         Wraps ``Camera.start_recording(path)`` with the path resolution
-        from :func:`camera_output_path`. The clock proxy is rebound
-        here so every :class:`FrameReceipt`'s ``t_mono_ns`` is
-        relative to the new run's :class:`RunClock` origin.
+        from :meth:`_resolve_output_path`. The clock proxy is rebound
+        here so every :class:`FrameReceipt`'s ``t_mono_ns`` is relative
+        to the new run's :class:`RunClock` origin.
 
-        :param run_context: The conductor's per-run context. Carries
-            the bundle path (via :attr:`bundle.root`), the run id, and
-            the authoritative clock.
+        :param ctx: The per-run :class:`AdapterStartContext`. Carries the
+            authoritative clock, the run id, and the bundle root used to
+            compute the recording's output path.
 
         Raises if recording is already active — the worker state
         machine guarantees ``start`` only runs on ARMED→SAMPLING.
@@ -347,9 +371,14 @@ class CameraDeviceAdapter:
             raise RuntimeError(
                 f"CameraDeviceAdapter[{self._spec.name!r}]: start() called while already recording"
             )
-        self._clock_proxy.rebind(run_context.clock)
-        self._run_id = run_context.run_id
-        output_path = self._resolve_output_path(run_context)
+        # Tear down the IDLE preview source BEFORE start_recording so the
+        # camera's single-owner stream (FLIR Atlas) isn't contended at
+        # ``ACS_Stream_start``. No-op for cameras without the surface
+        # (webcam's input pump owns its preview frames across both phases).
+        await self._stop_idle_preview_source()
+        self._clock_proxy.rebind(ctx.clock)
+        self._run_id = ctx.run_id
+        output_path = self._resolve_output_path(ctx)
         await self._camera.start_recording(output_path)
         self._recording = True
         # Build the mux queue on the worker loop so it binds to the
@@ -384,6 +413,11 @@ class CameraDeviceAdapter:
             scope = self._mux_scope
             if scope is not None:
                 scope.cancel()
+        # Bring the IDLE preview source back up so the tile stays hot
+        # between runs. Done outside the ``try`` above so a recorder
+        # close error still propagates; preview restart is best-effort
+        # and a failure here is logged inside the helper.
+        await self._start_idle_preview_source()
 
     async def stream(self) -> AsyncIterator[WorkerEmission]:
         """Yield interleaved frame receipts and camera events.
@@ -575,13 +609,96 @@ class CameraDeviceAdapter:
 
     # ---- preview lifecycle ---------------------------------------------
     #
-    # One long-lived drainer per adapter-open. The drainer pumps
-    # ``camera.preview_stream()`` onto the worker-owned
-    # :class:`ThreadBridge` for the entire IDLE/ARMED/SAMPLING/DRAINING
-    # lifecycle. Cameras that need a continuous input pump (the visible
-    # :class:`WebcamAdapter`) own one themselves and start it from
-    # :meth:`open` via ``camera.start_input_pump`` (see :meth:`open`
-    # above); the wrapper does not manage a per-state preview source.
+    # Two orthogonal pieces:
+    #
+    # * **Drainer** (:meth:`start_preview_channel` /
+    #   :meth:`stop_preview_channel`) — long-lived, pumps
+    #   ``camera.preview_stream()`` onto the worker-owned
+    #   :class:`ThreadBridge` for the entire IDLE/ARMED/SAMPLING/DRAINING
+    #   span. Same task across runs and between them.
+    #
+    # * **Source** (:meth:`_start_idle_preview_source` /
+    #   :meth:`_stop_idle_preview_source`) — what makes the camera
+    #   actually emit preview JPEGs while between runs. Cameras come in
+    #   two shapes:
+    #
+    #     - **Continuous input pump** (the visible :class:`WebcamAdapter`):
+    #       a single long-lived loop opens the OS capture handle once at
+    #       :meth:`start_input_pump` and emits 2 Hz previews whether or
+    #       not recording is active. The idle-source helpers below are
+    #       no-ops (the camera doesn't expose ``start_preview``).
+    #     - **Vendor-callback driven** (the FLIR Atlas adapter): frames
+    #       only flow once the SDK's stream is started, which is
+    #       done by ``start_recording`` during a run. The adapter
+    #       exposes a parallel ``start_preview`` / ``run_preview_pump``
+    #       / ``stop_preview`` trio that registers a recorder-free
+    #       streamer for the IDLE phase; the helpers below run that
+    #       task across CLOSED→IDLE / DRAINING→IDLE and tear it down
+    #       at IDLE→ARMED / IDLE→CLOSED so the single-owner SDK stream
+    #       is never contended.
+
+    async def _start_idle_preview_source(self) -> None:
+        """Bring up the camera's IDLE preview source. Idempotent.
+
+        Capability-probed via ``getattr``: cameras that don't expose
+        :meth:`start_preview` + :meth:`run_preview_pump` (the webcam,
+        whose input pump already covers IDLE) get a no-op. Calling
+        while already recording is also a no-op — recording owns the
+        SDK stream and produces its own previews via the recording-time
+        pump.
+
+        Errors are logged and swallowed: a missing IDLE tile is a
+        degraded UI, not a fatal worker condition.
+        """
+        if self._recording:
+            return
+        start = getattr(self._camera, "start_preview", None)
+        pump = getattr(self._camera, "run_preview_pump", None)
+        if not callable(start) or not callable(pump):
+            return
+        task = self._idle_preview_task
+        if task is not None and not task.done():
+            return
+        try:
+            await start()
+        except BaseException as exc:
+            _logger.warning(
+                "camera_adapter.idle_preview_start_failed",
+                camera=self._spec.name,
+                error=str(exc),
+            )
+            return
+        loop = asyncio.get_running_loop()
+        self._idle_preview_task = loop.create_task(
+            pump(),
+            name=f"idle-preview-{self._spec.name}",
+        )
+
+    async def _stop_idle_preview_source(self) -> None:
+        """Tear down the IDLE preview source. Idempotent.
+
+        Cancels the pump task and then calls the camera's
+        :meth:`stop_preview` so the SDK stream releases its single-owner
+        lock before :meth:`start_recording` reclaims it. Safe to call
+        when no source is running (a no-op for cameras without the
+        surface, or when already stopped).
+        """
+        task = self._idle_preview_task
+        self._idle_preview_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
+        stop = getattr(self._camera, "stop_preview", None)
+        if callable(stop):
+            try:
+                await stop()
+            except BaseException as exc:
+                _logger.warning(
+                    "camera_adapter.idle_preview_stop_failed",
+                    camera=self._spec.name,
+                    error=str(exc),
+                )
 
     async def start_preview_channel(self, bridge: ThreadBridge[PreviewFrame]) -> None:
         """Start the long-lived drainer that pumps
@@ -634,7 +751,7 @@ class CameraDeviceAdapter:
 
     # ---- internals -----------------------------------------------------
 
-    def _resolve_output_path(self, run_context: RunContext) -> Path:
+    def _resolve_output_path(self, ctx: AdapterStartContext) -> Path:
         """Compute the camera's container path.
 
         Layout:
@@ -647,15 +764,9 @@ class CameraDeviceAdapter:
         """
         ext = ".csq" if self._spec.kind == "ir" else ".mkv"
         if self._spec.output_root is not None:
-            base = Path(self._spec.output_root).expanduser() / run_context.run_id / "video"
+            base = Path(self._spec.output_root).expanduser() / ctx.run_id / "video"
         else:
-            root = run_context.bundle.root
-            if not isinstance(root, Path):
-                # Tests sometimes pass a stub bundle ref with a string
-                # root. Coerce here so the rest of the path arithmetic
-                # works uniformly.
-                root = Path(str(root))
-            base = root / "video"
+            base = ctx.bundle_root / "video"
         base.mkdir(parents=True, exist_ok=True)
         return base / f"{self._spec.name}{ext}"
 

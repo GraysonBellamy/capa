@@ -42,6 +42,7 @@ from capa.experiment.config import (
     SampleInfo,
 )
 from capa.runtime.headless import run_headless
+from tests._adapter_helpers import make_start_ctx
 
 pytestmark = [
     pytest.mark.hardware,
@@ -150,7 +151,7 @@ class TestRealNIDAQ:
         adapter.configure_channels(list(_capa_channels()))
         await adapter.open()
         try:
-            await adapter.start(clock)
+            await adapter.start(make_start_ctx(clock=clock))
             records: list[SourceRecord] = []
             samples: list[ChannelSample] = []
             async for emission in adapter.stream_until_stopped(max_records=8):

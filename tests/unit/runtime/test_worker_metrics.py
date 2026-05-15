@@ -26,10 +26,7 @@ class TestWorkerMetricsInit:
         assert m.commands_inflight == 0
         assert m.commands_failed == 0
         assert m.samples_emitted == 0
-        assert m.samples_late == 0
         assert m.polls_emitted == 0
-        assert m.disconnects == 0
-        assert m.bridge_out is None
         assert m.poll_rate_hz == 0.0
         assert m.last_sample_age_s == 0.0
 
@@ -77,23 +74,11 @@ class TestCommandCounters:
 
 
 class TestSampleCounters:
-    def test_default_emit_not_late(self) -> None:
+    def test_emit_increments_counter(self) -> None:
         m = WorkerMetrics(resource_id="r", adapter_names=("a",))
         m.observe_sample_emitted()
-        assert m.samples_emitted == 1
-        assert m.samples_late == 0
-
-    def test_late_increments_both(self) -> None:
-        m = WorkerMetrics(resource_id="r", adapter_names=("a",))
-        m.observe_sample_emitted(late=True)
-        assert m.samples_emitted == 1
-        assert m.samples_late == 1
-
-    def test_disconnect_counter(self) -> None:
-        m = WorkerMetrics(resource_id="r", adapter_names=("a",))
-        m.observe_disconnect()
-        m.observe_disconnect()
-        assert m.disconnects == 2
+        m.observe_sample_emitted()
+        assert m.samples_emitted == 2
 
 
 class TestTickDurationPercentiles:

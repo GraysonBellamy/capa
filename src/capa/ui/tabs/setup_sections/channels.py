@@ -51,7 +51,7 @@ from capa.devices.registry import (
     ensure_adapters_loaded,
     get_descriptor,
 )
-from capa.ui.forms.widgets import _DiscriminatedUnionField
+from capa.ui.forms.widgets._nested import _DiscriminatedUnionField
 from capa.ui.tabs.setup_sections._base import SectionWidget
 from capa.ui.tabs.setup_sections._models import horizontal_header, unique_name
 

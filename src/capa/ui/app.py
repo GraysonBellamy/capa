@@ -1,6 +1,6 @@
 """qasync bootstrap — bring up :class:`MainWindow` in the asyncio loop.
 
-Called from ``capa.app:run`` when ``--gui`` is in effect (or no
+Called from ``capa.cli.run:run`` when ``--gui`` is in effect (or no
 ``--headless`` flag is passed). The GUI takes the same arguments as the
 headless ``capa run``: an :class:`ExperimentConfig` path, an optional runs
 root, and an optional ``plugins.lock``.

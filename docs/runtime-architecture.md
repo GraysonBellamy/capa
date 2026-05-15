@@ -2,7 +2,7 @@
 
 **Audience:** contributors touching `src/capa/runtime/`, adapter authors, procedure / plugin authors.
 **Scope:** how the per-resource-worker runtime is shaped today — components, data flow, lifetimes, invariants. Reference doc, not a plan.
-**Companion docs:** [`per-resource-worker-migration.md`](per-resource-worker-migration.md) (remaining hardening work), [`capa-plan.md`](capa-plan.md) (product surface).
+**Companion docs:** [`capa-plan.md`](capa-plan.md) (product surface).
 
 ---
 
@@ -13,7 +13,7 @@ CAPA runs every hardware resource (one serial port, one DAQmx chassis, one camer
 The system has three nested lifetimes:
 
 1. **Config lifetime — `WorkerPool`.** Opened when a config loads. Builds one `Worker` per resource, opens every adapter, and lives across many runs. Closed only on config-reload or app-quit. Operators can issue manual commands while no run is active; the Sartorius cold-open race and other open-once costs are paid once per config load.
-2. **Run lifetime — `Conductor`.** Constructed when a run starts. Owns run-only state (clock, writer, procedure, drain tasks, watchdog, saturation monitor). Arms the existing workers, drives sampling, disarms on stop. Workers stay open for the next run.
+2. **Run lifetime — `Conductor`.** Constructed when a run starts. Owns run-only state (clock, writer, procedure, drain tasks, heartbeat, saturation monitor). Arms the existing workers, drives sampling, disarms on stop. Workers stay open for the next run.
 3. **Command lifetime — single dispatch.** A UI command crosses the thread seam once or twice and resolves.
 
 The **UI thread** owns Qt only and crosses to the Conductor (during a run) or to the WorkerPool (between runs) through thread-safe channels.
@@ -44,7 +44,7 @@ There is no parallel `engine_v2` / `engine_v1` path. The old single-loop `Engine
 │ Conductor thread (per-run; pure asyncio, no Qt)    │    │
 │                                                    │    │
 │  ┌──────────────┐  ┌─────────────┐  ┌──────────┐   │    │
-│  │ ProcedureRun │  │ Drain tasks │  │ Watchdog │   │    │
+│  │ ProcedureRun │  │ Drain tasks │  │ Heartbeat│   │    │
 │  └──────┬───────┘  │ (one per    │  │ Sat-dead-│   │    │
 │         │          │  worker)    │  │ line     │   │    │
 │  ┌──────┴───────┐  └──────┬──────┘  └──────────┘   │    │
@@ -86,7 +86,7 @@ There is no parallel `engine_v2` / `engine_v1` path. The old single-loop `Engine
 | Thread | Loop | Lifetime | Owns |
 |---|---|---|---|
 | `ui-main` | qasync | process | Qt widgets, plot timers, UIDataBus subscribers, manual cards |
-| `conductor` | asyncio | per-run | ProcedureRunner, drain tasks, watchdog, saturation monitor, ingest, RunClock |
+| `conductor` | asyncio | per-run | ProcedureRunner, drain tasks, heartbeat, saturation monitor, ingest, RunClock |
 | `worker-heater` | asyncio | config | WatlowAdapter + serial transport |
 | `worker-purge_mfc` | asyncio | config | AlicatAdapter + serial transport |
 | `worker-balance` | asyncio | config | SartoriusAdapter + serial transport |
@@ -257,7 +257,7 @@ Every adapter has a corresponding `test_<adapter>_dispatch_cancellation_does_not
         — every worker transitions ARMED → SAMPLING
      h. Run profile preflight (executor _wait_for path) via ConductorDataBus
         — samples now flowing; dynamic preflight can wait for stability
-     i. Spawn procedure, watchdog, saturation-deadline monitor, ingest
+     i. Spawn procedure, heartbeat, saturation-deadline monitor, ingest
      j. UI's start_run future resolves with RunStarted(run_id, bundle_path)
 4. Emissions flow; procedure executes; UI reflects state
 ```
@@ -315,7 +315,7 @@ Phase C: drain and exit
 
 ### 6.3 Saturation deadline
 
-The Conductor enforces an end-to-end durable-output deadline. Per-channel backpressure policies are necessary but insufficient: a writer/disk stall produces silent worker-side blocking that no per-device watchdog will catch.
+The Conductor enforces an end-to-end durable-output deadline. Per-channel backpressure policies are necessary but insufficient: a writer/disk stall produces silent worker-side blocking that no per-device silence policy will catch until that policy exists.
 
 [`SaturationMonitor`](../src/capa/runtime/saturation.py) polls per-bridge `blocked_since_ms` and the writer-inbox last-accept timestamp on a `saturation_deadline_s / 10` cadence (default 10s deadline, 1s poll). Escalation:
 
@@ -354,7 +354,7 @@ class ThreadBridge(Generic[T]):
 
 **`call_soon_threadsafe` is the only thread-crossing primitive used**; CPython implements it via the loop's self-pipe, which wakes the consumer's `epoll_wait` / `WaitForMultipleObjects` immediately — there is no polling overhead.
 
-`ThreadBridgeMetrics.blocked_since_ms` is the saturation-deadline signal: Conductor polls per-bridge `blocked_since_ms` and escalates if any worker has been blocked for `runtime.saturation_deadline_s`.
+`ThreadBridgeMetrics.blocked_since_ms` is the saturation-deadline signal: Conductor polls per-bridge `blocked_since_ms` and escalates if any worker has been blocked for `ConductorConfig.saturation_deadline_s`.
 
 ---
 
@@ -501,7 +501,7 @@ When two adapters share a `resource_id`, they share a Worker and their I/O seria
 ### 10.2 Adapter author responsibilities
 
 - Implement the contract above; the runtime takes care of everything else.
-- Wrap blocking calls in `anyio.to_thread.run_sync`. Adapters run on a worker's loop; blocking it freezes that worker (and only that worker — but it freezes its watchdog too).
+- Wrap blocking calls in `anyio.to_thread.run_sync`. Adapters run on a worker's loop; blocking it freezes that worker and its heartbeat.
 - Bound every blocking call with a timeout. The cancellation shield protects against task-cancel, not unbounded wait.
 - Stamp emissions with the adapter's own timestamps. The Worker only *adds* `t_bridge_put_ns` for observability; it never overwrites adapter timestamps.
 
@@ -520,11 +520,11 @@ Validation failures raise `ResourceConflict`; pool open aborts before any hardwa
 
 ## 11. Procedure CPU offload
 
-[`ProcedureRunner`](../src/capa/runtime/procedure.py) runs on the conductor loop, sharing it with per-worker drain tasks, the watchdog, and the saturation monitor. Default step kinds (Hold, Ramp, Wait, Acquire, SafeShutdown, Prompt — see [`executor.py`](../src/capa/experiment/executor.py)) are I/O-bound and behave.
+[`ProcedureRunner`](../src/capa/runtime/procedure.py) runs on the conductor loop, sharing it with per-worker drain tasks, the heartbeat, and the saturation monitor. Default step kinds (Hold, Ramp, Wait, Acquire, SafeShutdown, Prompt — see [`executor.py`](../src/capa/experiment/executor.py)) are I/O-bound and behave.
 
 The risk surface is `CustomStep`: plugin authors can register arbitrary handlers via the `capa.procedures` entry-point. A handler that performs heavy CPU work inline will stall every drain task on the conductor.
 
-**Contract for procedure authors:** custom handlers MUST wrap any non-trivial CPU work in `anyio.to_thread.run_sync`, the same way [`webcam.py`](../src/capa/devices/camera/webcam.py) wraps ffmpeg / libjpeg calls.
+**Contract for procedure authors:** custom handlers MUST wrap any non-trivial CPU work in `anyio.to_thread.run_sync`, the same way the webcam adapter wraps ffmpeg / libjpeg calls in [`adapter.py`](../src/capa/devices/camera/webcam/adapter.py).
 
 **Why not a third thread for the procedure?** It would mean another cross-thread channel for every `_command_setpoint` call and a thread-safe DataBus on the procedure side. The default handlers don't need it, and disciplined custom handlers are sufficient. If real-world plugins start consistently violating the contract, revisit with a dedicated `procedure` thread peer to the Conductor.
 
@@ -547,16 +547,14 @@ The risk surface is `CustomStep`: plugin authors can register arbitrary handlers
 
 | Channel | Capacity | Policy | Deadline | Rationale |
 |---|---|---|---|---|
-| Worker outbound bridge | `max(64, ceil(8 * rate_hz))` | `BLOCK` | `saturation_deadline_s` (default 10s) | Producer (adapter) throttles if Conductor lags; sustained block triggers saturation escalation. |
+| Worker outbound bridge | `max(64, ceil(8 * Σ rate_hz))` | `BLOCK` | `saturation_deadline_s` (default 10s) | Producer (adapter) throttles if Conductor lags; sustained block triggers saturation escalation. Per-worker capacity derived from the sum of each hosted adapter's `expected_emission_rate_hz`; adapters that return `None` contribute nothing. Factors live as code constants in [`build.py`](../src/capa/runtime/build.py). |
 | Worker command inbox | `8` | `BLOCK` | — | Commands are rare; bridge full means worker is stuck. Conductor sees a slow future. |
-| Conductor → UIBridge | `1024` | `DROP_OLDEST` | — | UI is best-effort viewport. |
+| Conductor → UIBridge | `runtime.ui_bridge_capacity` (default `4096`) | `DROP_OLDEST` | — | UI is best-effort viewport. |
 | Conductor → ConductorDataBus | (per-subscription) | (per-subscription) | implicit via saturation | Procedure subscribers may use BLOCK; sustained block surfaces as drain blocking → saturation. |
 | Conductor → WriterThread inbox | (existing) | (existing) | `saturation_deadline_s` | Inbox stall is the canonical saturation trigger. |
 | UIDataBus subscriptions | (existing) | `DROP_OLDEST` | — | Widgets cannot block UI loop. |
 
-**No `ABORT_RUN` on the worker-outbound bridge.** A stuck worker doesn't abort the run via the bridge — it logs and surfaces as either a per-worker watchdog escalation (stream silence) or a saturation-deadline escalation (sustained outbound block).
-
-**The watchdog** is per-worker. If a worker stops emitting for `2 / rate_hz`, it escalates per the device's `on_failure` policy.
+**No `ABORT_RUN` on the worker-outbound bridge.** A stuck worker doesn't abort the run via the bridge. Sustained bridge blockage is handled by the conductor's saturation-deadline path. Per-device silence escalation is not implemented today; `on_failure` is retained as resolved metadata for that future policy.
 
 ---
 
@@ -587,18 +585,22 @@ async def _heartbeat_task(self) -> None:
 class WorkerMetrics:
     resource_id: str
     adapter_names: tuple[str, ...]
+    on_failure: Mapping[str, FailurePolicy]
     state: WorkerState
-    tick_duration_ms_p50: float
-    tick_duration_ms_p99: float
-    samples_late: int
-    disconnects: int
     commands_total: int
     commands_inflight: int
-    bridge_out: ThreadBridgeMetrics
-    bridge_cmd: ThreadBridgeMetrics
-    loop_lag_ms_p99: float
-    last_sample_age_s: float
+    commands_failed: int
+    samples_emitted: int
+    polls_emitted: int
+    tick_duration_ms: _PercentileRing
+    poll_period_ms: _PercentileRing
+    loop_lag: LoopLagMetric
 ```
+
+`on_failure` is the resolved per-adapter failure policy from
+[`ResolvedAdapter`](../src/capa/devices/resolved.py). It is retained on
+`WorkerMetrics` as metadata; runtime enforcement for stream silence or
+per-device fatal-error escalation is not implemented today.
 
 **Per-thread CPU usage** is polled at 1 Hz inside the Conductor via `psutil.Process().threads()`.
 
@@ -625,12 +627,14 @@ Inside worker:
   AdapterError raised in _stream_task →
     1. Record bundle event (via writer ref from run_context)
     2. Set worker._fatal_error
-    3. Transition SAMPLING → DRAINING (best-effort adapter.stop)
+    3. Exit that adapter stream task
 
-Conductor monitors each worker._fatal_error:
-  When set → run-level decision based on device's on_failure:
-    - "warn":  log, continue, mark run "degraded"
-    - "abort": set external_stop, transition to FINALIZING
+Conductor today:
+  - Treats procedure, drain, preflight, pool, and conductor crashes as
+    run-level crashes.
+  - Treats saturation-deadline trips as `crashed_but_sealed`.
+  - Does not yet enforce per-device `on_failure` from `worker._fatal_error`;
+    that policy is advisory metadata until watchdog work is built.
 
 Crashes (uncaught BaseException in worker thread):
   Worker._thread_main has top-level try/except BaseException
@@ -669,9 +673,67 @@ Under PEP 703 free-threaded Python (3.13t+), the code does not change. Threads g
 
 ## 19. Config schema
 
-### 19.1 `resource_id`
+### 19.1 Per-runtime tunables
 
-Each device may declare `resource_id` explicitly; if omitted, the adapter's `resource_id` property is computed from its params.
+```toml
+[runtime]
+shutdown_grace_s = 5.0            # per-worker grace before hard-stop
+loop_lag_warn_ms = 50.0           # logged when exceeded
+ui_bridge_capacity = 4096         # Conductor → UI; DROP_OLDEST when full
+```
+
+All have sensible defaults. The corresponding schema type is
+[`RuntimeConfig`](../src/capa/experiment/config.py).
+
+**Not in `[runtime]`** (and intentionally so):
+
+- `bridge_capacity_factor` and `bridge_min_capacity` — internal
+  constants in [`build.py`](../src/capa/runtime/build.py)
+  (`_BRIDGE_CAPACITY_FACTOR = 8.0`, `_BRIDGE_MIN_CAPACITY = 64`). The
+  per-worker outbound bridge capacity is derived from the sum of each
+  adapter's `expected_emission_rate_hz`: `max(64, ceil(8 * total_rate))`.
+  An adapter that declines to declare a rate contributes nothing.
+- `saturation_deadline_s` and `saturation_poll_period_s` — live on
+  `ConductorConfig` (see [§6.3](#63-saturation-deadline)) but are
+  internal timing knobs. The headless CLI exposes
+  `saturation_deadline_s` as a flag for diagnostic runs.
+- The five adapter-grace timers (`adapter_start_grace_s`,
+  `adapter_stop_grace_s`, `adapter_close_grace_s`, `stream_cancel_grace_s`,
+  `runner_stop_grace_s`) — live on
+  [`WorkerShutdownConfig`](../src/capa/runtime/shutdown.py) as code-level
+  per-phase deadlines.
+
+Promote a constant to `RuntimeConfig` only when an operator actually
+needs to change it for a real experiment.
+
+### 19.2 `on_failure` per device
+
+```toml
+[[devices]]
+name = "heater"
+adapter = "capa.devices.watlow"
+on_failure = "abort"   # | "warn"
+```
+
+Resolved and recorded in
+[`WorkerMetrics.on_failure`](../src/capa/runtime/metrics.py) at
+worker construction. Enforcement is not wired today, so `on_failure` is
+advisory metadata. Default: `"abort"`.
+
+The camera-spec field of the same name
+([`CameraSpec.on_failure`](../src/capa/devices/camera/base.py)) is a
+*separate* policy: it layers on the camera/safety system, not the
+runtime failure-policy metadata. The two enums are deliberately kept
+distinct until a real case for unifying them appears.
+
+### 19.3 `resource_id` per device
+
+Each `DeviceConfig` may declare `resource_id` explicitly; otherwise the
+runtime reads the adapter's own
+[`DeviceAdapter.resource_id`](../src/capa/devices/adapter.py) (the
+historical default). When two adapters share the same `resource_id` the
+runtime groups them into one Worker so their I/O serialises through the
+resource's lock.
 
 ```toml
 [[devices]]
@@ -690,32 +752,6 @@ port = "COM6"
 address = 2
 ```
 
-When two adapters share a resource, they share a worker and serialize through the resource's lock.
-
-### 19.2 Per-runtime tunables
-
-```toml
-[runtime]
-shutdown_grace_s = 5.0            # per-worker grace before hard-stop
-loop_lag_warn_ms = 50.0           # logged when exceeded
-bridge_capacity_factor = 8.0      # per-worker capacity = max(64, ceil(factor * rate_hz))
-ui_bridge_capacity = 1024         # Conductor → UI; DROP_OLDEST when full
-saturation_deadline_s = 10.0      # end-to-end deadline (§6.3)
-```
-
-All have sensible defaults.
-
-### 19.3 `on_failure` per device
-
-```toml
-[[devices]]
-name = "heater"
-adapter = "capa.devices.watlow"
-on_failure = "abort"   # | "warn"
-```
-
-Watchdog uses this on per-worker stream failure. Default: `"abort"`.
-
 ---
 
 ## 20. Module layout
@@ -724,10 +760,10 @@ Watchdog uses this on per-worker stream failure. Default: `"abort"`.
 src/capa/runtime/
 ├── __init__.py           # public exports
 ├── bridge.py             # ThreadBridge + ThreadBridgeMetrics
-├── build.py              # build_workers, resource validation
+├── build.py              # build_workers
 ├── bundle_ref.py         # bundle reference plumbing
 ├── camera_adapter.py     # camera → DeviceAdapter wrapper
-├── conductor.py          # Conductor (replaces Engine)
+├── conductor.py          # Conductor
 ├── dispatch.py           # AdapterDispatcher, PoolDispatcher, ConductorDispatcher, ManualClient
 ├── emissions.py          # WorkerEmission type
 ├── errors.py             # PoolStateError, WorkerStateError, ResourceConflict, …
@@ -777,7 +813,7 @@ tests/hardware/                — real-rig smoke tests (manual / off-by-default
 - **Adapter** — A `DeviceAdapter` implementation. Owns one device's lifecycle, streams emissions, accepts commands. ([`src/capa/devices/adapter.py`](../src/capa/devices/adapter.py))
 - **ARMED** — Worker state: per-run context installed; streams not yet running; dispatch permitted.
 - **Bridge** (`ThreadBridge`) — Thread-safe bounded channel between two asyncio loops. ([`bridge.py`](../src/capa/runtime/bridge.py))
-- **Conductor** — Per-run coordinator. Owns clock, writer, procedure, drain tasks, watchdog, saturation monitor. ([`conductor.py`](../src/capa/runtime/conductor.py))
+- **Conductor** — Per-run coordinator. Owns clock, writer, procedure, drain tasks, heartbeat, saturation monitor. ([`conductor.py`](../src/capa/runtime/conductor.py))
 - **ConductorDispatcher** — `CommandDispatcher` that routes through the conductor; records command-issue events; gated by conductor state.
 - **ConductorDataBus** — Authoritative DataBus instance, lives on conductor loop. Procedure handlers subscribe here.
 - **DataBus** — Pub/sub for emissions, asyncio-loop-affine, with per-subscription backpressure. ([`databus.py`](../src/capa/core/databus.py))

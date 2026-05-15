@@ -1,16 +1,12 @@
 """The load-bearing manual-control-between-runs property.
 
-Migration doc §10.2 ``test_pool_supports_multiple_arm_disarm_cycles_without_reopen``
-and §2.1 goal #3:
-
     "Operators can issue commands and read PVs without an active run,
     without re-opening hardware."
 
-This is the acceptance gate for the WorkerPool-as-DeviceRegistry-replacement.
-If ``adapter.open`` is called more than once per pool, the migration has
+This is the acceptance gate for the WorkerPool's manual-dispatch surface.
+If ``adapter.open`` is called more than once per pool, behaviour has
 regressed: the Sartorius cold-open race would pay its cost on every run,
-and operators would lose the between-runs fiddling that today's
-``DeviceRegistry`` enables.
+and operators would lose the between-runs fiddling the pool enables.
 """
 
 from __future__ import annotations
@@ -87,8 +83,8 @@ class TestMultipleRunsNoReopen:
             assert a.close_calls == 1
             # adapter.start was called 5 times (once per cycle); adapter.stop
             # similarly. The connection layer (open/close) is split from the
-            # sampling layer (start/stop), which is the exact split today's
-            # DeviceRegistry preserves.
+            # sampling layer (start/stop) — pool.open / pool.close drive the
+            # former, conductor arm/disarm drives the latter.
             assert a.start_calls == 5
             assert a.stop_calls == 5
 

@@ -17,6 +17,7 @@ Hierarchy:
         ├── PoolStateError         — illegal pool operation (close while armed, etc.)
         ├── ResourceConflict       — two adapters claim the same hardware contention domain
         ├── RunnerStateError       — WorkerRunner used in a state it doesn't permit
+        ├── ConductorStateError    — operation attempted in an incompatible ConductorState
         └── UnknownDeviceError     — dispatch to a device not in the pool
 
 ``RunnerStateError`` exists because the
@@ -27,7 +28,12 @@ doesn't masquerade as a worker bug.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from capa.core.errors import CapaError
+
+if TYPE_CHECKING:
+    from capa.runtime.state import ConductorState
 
 
 class WorkerStateError(CapaError):
@@ -140,7 +146,21 @@ class RunnerStateError(CapaError):
     """
 
 
+class ConductorStateError(CapaError):
+    """Operation attempted in an incompatible :class:`~capa.runtime.state.ConductorState`.
+
+    Raised when a dispatch or other run-gated call arrives outside the
+    PREPARING / RUNNING window — typically a procedure-issued command
+    landing during DRAINING which would race with ``adapter.stop()``.
+    """
+
+    def __init__(self, message: str, *, current: ConductorState) -> None:
+        super().__init__(message)
+        self.current = current
+
+
 __all__ = [
+    "ConductorStateError",
     "PoolStateError",
     "ResourceConflict",
     "RunnerStateError",

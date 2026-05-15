@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from capa.core.clock import RunClock
-from capa.devices.adapter import CommandResult, DeviceCommand
+from capa.devices.adapter import AdapterStartContext, CommandResult, DeviceCommand
 from capa.devices.camera.base import (
     CameraEvent,
     CameraHealth,
@@ -34,8 +34,6 @@ from capa.runtime.camera_adapter import (
     _ClockProxy,
     make_camera_adapter,
 )
-from capa.runtime.runcontext import RunContext
-from tests.integration.runtime.fakes import FakeWriterRef
 
 pytestmark = pytest.mark.anyio
 
@@ -65,35 +63,24 @@ def _vis_spec(name: str = "visible_cam0") -> CameraSpec:
     )
 
 
-def _run_context(bundle_root: Path, *, run_id: str = "test-run") -> RunContext:
-    """Build a RunContext whose bundle root is a real tmp dir.
+def _start_ctx(
+    bundle_root: Path,
+    *,
+    run_id: str = "test-run",
+    clock: RunClock | None = None,
+) -> AdapterStartContext:
+    """Build an :class:`AdapterStartContext` whose bundle root is a real tmp dir.
 
-    The wrapper computes its output_path from ``bundle.root``; tests need
-    a real directory so :meth:`Path.mkdir(parents=True, exist_ok=True)`
-    in :meth:`_resolve_output_path` succeeds.
+    The wrapper's :meth:`start` computes its output_path from
+    ``ctx.bundle_root``; tests need a real directory so the
+    :meth:`Path.mkdir(parents=True, exist_ok=True)` call in
+    :meth:`_resolve_output_path` succeeds.
     """
-    return RunContext(
+    return AdapterStartContext(
+        clock=clock if clock is not None else RunClock.now(),
         run_id=run_id,
-        clock=RunClock.now(),
-        writer=FakeWriterRef(),
-        bundle=_PathBundleRef(bundle_root),
+        bundle_root=bundle_root,
     )
-
-
-class _PathBundleRef:
-    """Bundle ref whose ``root`` is a real :class:`pathlib.Path`.
-
-    :class:`FakeBundleRef` returns a string by default; the wrapper's
-    path resolution needs a Path or path-coercible object. Use this
-    instead in tests that drive ``start()``.
-    """
-
-    def __init__(self, root: Path) -> None:
-        self._root = root
-
-    @property
-    def root(self) -> object:
-        return self._root
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +182,7 @@ class TestStartStop:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec())
         await wrapper.open()
         try:
-            ctx = _run_context(tmp_path)
+            ctx = _start_ctx(tmp_path)
             await wrapper.start(ctx)
             try:
                 # Output container exists at <bundle>/video/<name>.csq
@@ -217,7 +204,7 @@ class TestStartStop:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=spec)
         await wrapper.open()
         try:
-            ctx = _run_context(tmp_path, run_id="run-42")
+            ctx = _start_ctx(tmp_path, run_id="run-42")
             await wrapper.start(ctx)
             try:
                 # With output_root: <override>/<run_id>/video/<name>.csq
@@ -242,7 +229,7 @@ class TestStartStop:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec())
         await wrapper.open()
         try:
-            ctx = _run_context(tmp_path)
+            ctx = _start_ctx(tmp_path)
             await wrapper.start(ctx)
             try:
                 with pytest.raises(RuntimeError, match="already recording"):
@@ -270,7 +257,7 @@ class TestStream:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=spec)
         await wrapper.open()
         try:
-            ctx = _run_context(tmp_path)
+            ctx = _start_ctx(tmp_path)
             await wrapper.start(ctx)
 
             frames: list[FrameReceipt] = []
@@ -313,7 +300,7 @@ class TestStream:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=spec)
         await wrapper.open()
         try:
-            ctx = _run_context(tmp_path)
+            ctx = _start_ctx(tmp_path)
             await wrapper.start(ctx)
 
             stopped_after_n: list[int] = []
@@ -459,17 +446,3 @@ class TestProtocolSurface:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec())
         for method in ("open", "close", "start", "stop", "stream", "command", "snapshot"):
             assert callable(getattr(wrapper, method, None)), f"missing {method}"
-
-    def test_start_signature_signals_run_context_param(self) -> None:
-        """:meth:`Worker._adapter_start` inspects the start signature
-        and dispatches by first-parameter name. The wrapper's start
-        MUST declare ``run_context`` (or ``ctx`` / ``context``) so the
-        worker hands it the full RunContext rather than just the clock.
-        """
-        import inspect
-
-        wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec())
-        sig = inspect.signature(wrapper.start)
-        params = list(sig.parameters.values())
-        assert len(params) >= 1
-        assert params[0].name in {"run_context", "ctx", "context"}

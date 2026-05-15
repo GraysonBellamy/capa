@@ -47,6 +47,7 @@ from capa.devices.adapter import Capability as CapaCapability
 from capa.devices.adapter import DeviceCommand
 from capa.devices.records import ChannelSample, DeviceEvent, DeviceSnapshot, SourceRecord
 from capa.devices.watlow import ADAPTER_ID, WatlowAdapter, WatlowAdapterParams
+from tests._adapter_helpers import make_start_ctx
 
 pytestmark = pytest.mark.anyio
 
@@ -448,7 +449,7 @@ class TestStreaming:
     async def test_emits_record_and_samples(self) -> None:
         adapter, _stub = _make_adapter(rate_hz=100.0)
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=4)
         await adapter.close()
 
@@ -479,7 +480,7 @@ class TestStreaming:
     async def test_channel_samples_link_back(self) -> None:
         adapter, _ = _make_adapter(rate_hz=100.0)
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=4)
         await adapter.close()
 
@@ -495,7 +496,7 @@ class TestStreaming:
         adapter, _ = _make_adapter(rate_hz=100.0)
         await adapter.open()
         clock = RunClock.now()
-        await adapter.start(clock)
+        await adapter.start(make_start_ctx(clock=clock))
         emissions = await _drain(adapter, max_records=2)
         await adapter.close()
 
@@ -549,7 +550,7 @@ class TestStreaming:
         )
         adapter.configure_channels([channel])
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=2)
         await adapter.close()
         _records, samples, _ = _split(emissions)
@@ -563,7 +564,7 @@ class TestStreaming:
     async def test_initial_snapshot_emitted(self) -> None:
         adapter, _ = _make_adapter(rate_hz=100.0)
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=2)
         await adapter.close()
         _records, _samples, snapshots = _split(emissions)
@@ -594,7 +595,7 @@ class TestStreaming:
         )
         adapter.configure_channels(_channels_for_heater())
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=8)
         await adapter.close()
         _records, _samples, snapshots = _split(emissions)
@@ -624,7 +625,7 @@ class TestStreaming:
         )
         adapter.configure_channels(_channels_for_heater())
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         # Even with the first poll raising, we should see records once the
         # transient is absorbed and the next tick succeeds.
         emissions = await _drain(adapter, max_records=2)
@@ -653,7 +654,7 @@ class TestStreaming:
         )
         adapter.configure_channels(_channels_for_heater())
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         with pytest.raises(AdapterError):
             async for _e in adapter.stream():
                 pass
@@ -905,7 +906,7 @@ class TestDisplayUnits:
     async def test_snapshot_includes_display_unit(self) -> None:
         adapter, _ = _make_adapter(rate_hz=100.0)
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=2)
         await adapter.close()
         _r, _s, snaps = _split(emissions)
@@ -932,7 +933,7 @@ class TestDisplayUnits:
         )
         adapter.configure_channels(_channels_for_heater())
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=2)
         await adapter.close()
         _r, _s, snaps = _split(emissions)
@@ -1033,7 +1034,7 @@ class TestUnitDrift:
         # degC channel + Unit.CELSIUS wire → no drift; happy path.
         adapter, _ = _make_adapter(rate_hz=100.0)
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=4)
         await adapter.close()
         _r, samples, _ = _split(emissions)
@@ -1063,7 +1064,7 @@ class TestUnitDrift:
         )
         adapter.configure_channels(_channels_for_heater_with_mass_unit())
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=4)
         await adapter.close()
 
@@ -1104,7 +1105,7 @@ class TestUnitDrift:
         )
         adapter.configure_channels(_channels_for_heater_with_fahrenheit())
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         emissions = await _drain(adapter, max_records=2)
         await adapter.close()
         events = [e for e in emissions if isinstance(e, DeviceEvent)]
@@ -1136,7 +1137,7 @@ class TestUnitDrift:
         )
         adapter.configure_channels(_channels_for_heater_with_mass_unit())
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         await _drain(adapter, max_records=2)
         # Mismatch is now recorded in the adapter's quarantine set.
         assert "heater.pv" in adapter._drift_skipped_channels  # type: ignore[attr-defined]

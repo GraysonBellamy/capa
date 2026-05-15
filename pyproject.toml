@@ -54,7 +54,7 @@ dependencies = [
 ]
 
 [project.scripts]
-capa = "capa.app:main"
+capa = "capa.cli:main"
 
 [project.entry-points."capa.procedures"]
 # Builtin procedures (plan §11). Discovered via importlib.metadata at startup
@@ -229,5 +229,6 @@ addopts = ["-q", "--strict-markers", "--strict-config"]
 qt_api = "pyside6"
 markers = [
     "hardware: requires real hardware (skipped unless CAPA_HARDWARE_TESTS=1)",
+    "smoke: thin behavioral baseline re-run after each cleanup phase (see docs/unified-architecture-cleanup-plan.md)",
 ]
 

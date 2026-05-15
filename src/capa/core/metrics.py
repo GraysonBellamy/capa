@@ -172,9 +172,9 @@ class _WriterTimer:
 class MetricsRegistry:
     """Owns every metric collector for one run.
 
-    The engine constructs one of these in :meth:`ExperimentEngine.run`,
-    hands references into the queue/writer setup, and calls
-    :meth:`snapshot_for_manifest` when finalizing the bundle.
+    :class:`~capa.runtime.session.RealRunSession` constructs one of these
+    at run start, hands references into the queue/writer setup, and
+    calls :meth:`snapshot_for_manifest` when finalizing the bundle.
     """
 
     queues: dict[str, QueueMetrics] = field(default_factory=dict)

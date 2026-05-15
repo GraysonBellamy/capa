@@ -54,9 +54,10 @@ import structlog
 
 from capa.core.databus import DataBus
 from capa.devices.camera.base import CameraEvent, FrameReceipt
+from capa.experiment.config import RuntimeConfig
 from capa.runtime.bridge import ThreadBridge
 from capa.runtime.emissions import WorkerEmission
-from capa.runtime.errors import PoolStateError
+from capa.runtime.errors import ConductorStateError, PoolStateError
 from capa.runtime.heartbeat import LoopLagMetric, heartbeat_task
 from capa.runtime.saturation import (
     DEFAULT_POLL_PERIOD_S,
@@ -241,11 +242,50 @@ disarm time."""
 
 @dataclass(frozen=True, slots=True)
 class ConductorConfig:
-    """Per-run knobs, all with sensible defaults so tests can omit them."""
+    """Per-run knobs, all with sensible defaults so tests can omit them.
+
+    Splits responsibilities with
+    :class:`~capa.experiment.config.RuntimeConfig`:
+
+    * ``RuntimeConfig`` carries the user-tunable knobs an operator may
+      reasonably want to set per experiment (``shutdown_grace_s``,
+      ``ui_bridge_capacity``, ``loop_lag_warn_ms``).
+    * ``ConductorConfig`` carries the internal saturation-monitor
+      timing in addition. The saturation knobs are not user-facing
+      today — promote them to ``RuntimeConfig`` when a real experiment
+      asks for it.
+
+    :meth:`from_runtime` builds a :class:`ConductorConfig` by copying the
+    user-tunable knobs off a :class:`RuntimeConfig` while keeping the
+    saturation defaults.
+    """
 
     saturation_deadline_s: float = DEFAULT_SATURATION_DEADLINE_S
     saturation_poll_period_s: float = DEFAULT_POLL_PERIOD_S
     shutdown_grace_s: float = DEFAULT_SHUTDOWN_GRACE_S
+    loop_lag_warn_ms: float = 50.0
+
+    @classmethod
+    def from_runtime(
+        cls,
+        runtime: RuntimeConfig,
+        *,
+        saturation_deadline_s: float = DEFAULT_SATURATION_DEADLINE_S,
+        saturation_poll_period_s: float = DEFAULT_POLL_PERIOD_S,
+    ) -> ConductorConfig:
+        """Build a :class:`ConductorConfig` from the user-facing
+        :class:`RuntimeConfig`.
+
+        Saturation parameters remain code defaults — overridable here
+        only because the headless CLI currently exposes
+        ``saturation_deadline_s`` as a top-level flag.
+        """
+        return cls(
+            saturation_deadline_s=saturation_deadline_s,
+            saturation_poll_period_s=saturation_poll_period_s,
+            shutdown_grace_s=runtime.shutdown_grace_s,
+            loop_lag_warn_ms=runtime.loop_lag_warn_ms,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,19 +309,6 @@ class RunResult:
     saturation_event: SaturationEvent | None
     started_mono_ns: int
     ended_mono_ns: int
-
-
-# ---------------------------------------------------------------------------
-# Errors
-# ---------------------------------------------------------------------------
-
-
-class ConductorStateError(RuntimeError):
-    """Operation attempted in an incompatible :class:`ConductorState`."""
-
-    def __init__(self, message: str, *, current: ConductorState) -> None:
-        super().__init__(message)
-        self.current = current
 
 
 # ---------------------------------------------------------------------------
@@ -443,8 +470,8 @@ class Conductor:
           plumbs it through here).
         * ``bridge.outbound:<resource_id>`` — per-worker outbound bridge
           latency + blocked time.
-        * ``worker:<resource_id>`` — tick durations, samples_late, command
-          counts.
+        * ``worker:<resource_id>`` — tick / poll durations, loop lag,
+          command counts, last-sample age.
 
         Returns an empty dict before :meth:`_run` enters its task group
         (i.e. before bridges and workers exist).
@@ -455,6 +482,7 @@ class Conductor:
         # to import ConductorConfig defaults.
         out["runtime"] = {
             "saturation_deadline_s": float(self._config.saturation_deadline_s),
+            "loop_lag_warn_ms": float(self._config.loop_lag_warn_ms),
         }
         # Conductor loop lag.
         out["loop.conductor"] = {
@@ -479,12 +507,15 @@ class Conductor:
                 "latency_p50_ms": float(m.latency_p50_ms),
                 "latency_p99_ms": float(m.latency_p99_ms),
             }
-        # Per-worker tick/loop metrics.
+        # Per-worker tick/loop metrics. Per-adapter failure policy
+        # (``WorkerMetrics.on_failure``) is intentionally not serialized
+        # into this float-valued diagnostics block. # TODO(watchdog):
+        # per-device stream-silence/fatal-error enforcement will attach
+        # here, using the resolved policy metadata on each worker.
         for rid, worker in self._pool.workers.items():
             wm = worker.metrics
             out[f"worker:{rid}"] = {
                 "samples_emitted": float(wm.samples_emitted),
-                "samples_late": float(wm.samples_late),
                 "polls_emitted": float(wm.polls_emitted),
                 "commands_total": float(wm.commands_total),
                 "commands_failed": float(wm.commands_failed),
@@ -816,7 +847,7 @@ class Conductor:
           behavior where frame receipts never reached the bus.
         * :class:`CameraEvent` → :meth:`WriterThread.write_event` with
           ``kind=f"camera.{event.kind}"`` and ``source=f"camera:{event.name}"``;
-          mirrors the camera_task drain ([cameras.py:519](src/capa/experiment/cameras.py#L519)).
+          camera events are written to the bundle but not published to the bus.
         * Everything else (the :data:`DeviceEmission` union) → durable
           submit + databus publish, same as the device-only path.
 
@@ -1107,7 +1138,6 @@ __all__ = [
     "Conductor",
     "ConductorConfig",
     "ConductorRunner",
-    "ConductorStateError",
     "NoOpRunner",
     "RunHandle",
     "RunOutcome",

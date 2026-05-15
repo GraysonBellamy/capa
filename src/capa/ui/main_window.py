@@ -258,10 +258,16 @@ class MainWindow(QMainWindow):
 
     def _on_open_config(self) -> None:
         if self._config_loading:
-            self._status.showMessage("Config is still loading; wait for hardware initialization.")
+            # 4 s timeout so the status bar's normal widgets (the pills)
+            # reappear afterwards — Qt hides them for the duration of any
+            # active showMessage. Same reason for every other transient
+            # status message in this window.
+            self._status.showMessage(
+                "Config is still loading; wait for hardware initialization.", 4000
+            )
             return
         if self._controller.shutdown_requested:
-            self._status.showMessage("Shutdown is in progress; cannot open a new config.")
+            self._status.showMessage("Shutdown is in progress; cannot open a new config.", 4000)
             return
         path_str, _ = QFileDialog.getOpenFileName(
             self,
@@ -297,9 +303,9 @@ class MainWindow(QMainWindow):
         self._apply_loaded_config(cfg, resolved_path)
 
     def _apply_loaded_config(self, cfg: ExperimentConfig, path: Path | None) -> None:
-        # Bind the controller's DeviceRegistry to the new config FIRST so
+        # Bind the controller's worker pool to the new config FIRST so
         # any consumer (manual control dock) that reacts to load_config
-        # already sees the new registry.
+        # already sees the new pool.
         try:
             self._controller.set_active_config(cfg, config_path=path)
         except Exception as exc:
@@ -403,7 +409,7 @@ class MainWindow(QMainWindow):
         """Handle "Open Manual Control" from the Setup tab right-click menu."""
         if not self._controller.hardware_ready:
             self._status.showMessage(
-                "Hardware is still initializing; manual controls are disabled."
+                "Hardware is still initializing; manual controls are disabled.", 4000
             )
             return
         self._manual_dock.reveal(name)
@@ -424,9 +430,20 @@ class MainWindow(QMainWindow):
         if isinstance(progress, ConfigLoadProgress):
             self._show_or_update_hardware_dialog(progress)
             if progress.phase is ConfigLoadPhase.READY:
-                self._status.showMessage("Hardware ready.")
+                # Auto-clear so the status bar's pills become visible
+                # again after the operator has had time to read the ack.
+                self._status.showMessage("Hardware ready.", 3000)
             elif progress.phase is ConfigLoadPhase.FAILED:
-                self._status.showMessage(progress.message)
+                # Failure: give the operator longer to read, but still
+                # auto-clear so the live pills aren't permanently hidden.
+                self._status.showMessage(progress.message, 8000)
+            else:
+                # Any other terminal phase still drops us back to the
+                # pills — clear the "Preparing hardware…" message that
+                # was set in _on_config_load_started.
+                self._status.clearMessage()
+        else:
+            self._status.clearMessage()
         self._set_config_loading_ui(False)
 
     def _on_hardware_ready_changed(self, ready: bool) -> None:
@@ -548,7 +565,10 @@ class MainWindow(QMainWindow):
             return
         msg = status_message_for_phase(phase)
         if msg is not None:
-            self._status.showMessage(msg)
+            # Shutdown phases replace each other quickly; the 4 s
+            # timeout matches the other transient status messages so a
+            # late "Phase X complete" doesn't permanently hide the pills.
+            self._status.showMessage(msg, 4000)
 
     def _on_shutdown_completed(self, result: object) -> None:
         """Flip the close-flow state machine and re-trigger window close.

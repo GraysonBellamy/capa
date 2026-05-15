@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from capa.channels.spec import ChannelSpec
 from capa.core.errors import ConfigError
+from capa.devices.adapter import FailurePolicy
 from capa.devices.camera.base import CameraSpec
 from capa.experiment.method import Method
 
@@ -40,6 +41,19 @@ class DeviceConfig(BaseModel):
     ``"capa.devices.alicat"``)."""
     params: dict[str, Any] = Field(default_factory=dict)
     """Adapter-specific parameters: serial port, baud rate, polling rate, etc."""
+    resource_id: str | None = None
+    """Optional override for the adapter's declared hardware contention
+    domain. When ``None`` (the default) the runtime reads
+    :attr:`~capa.devices.adapter.DeviceAdapter.resource_id` from the
+    constructed adapter; setting an explicit value lets two adapters
+    share a worker (e.g. a multi-drop RS-485 bus where the auto-derived
+    ids would otherwise differ) or split a worker for test fixtures."""
+    on_failure: FailurePolicy = FailurePolicy.ABORT
+    """Failure policy when this device's worker stream fails.
+
+    Recorded on resolved runtime metadata. Enforcement is not wired yet,
+    so the field is advisory until the conductor grows per-device failure
+    policy handling."""
 
 
 class HardwareProfile(BaseModel):
@@ -277,6 +291,33 @@ class OperatorRef(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Runtime tunables.
+# ---------------------------------------------------------------------------
+
+
+class RuntimeConfig(BaseModel):
+    """Operator-tunable runtime knobs.
+
+    Only fields an operator may reasonably want to adjust per experiment
+    live here. Internal timing constants (adapter grace timers, saturation
+    deadline, bridge capacity factor) remain code-level — promote one
+    here when a real experiment demands it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    shutdown_grace_s: float = Field(default=5.0, gt=0)
+    """Per-worker grace before the conductor forces a hard-stop during
+    disarm. Matches :data:`~capa.runtime.conductor.DEFAULT_SHUTDOWN_GRACE_S`."""
+    loop_lag_warn_ms: float = Field(default=50.0, gt=0)
+    """Threshold at which the per-loop heartbeat starts logging warnings.
+    Surfaced in the status-bar latency badge."""
+    ui_bridge_capacity: int = Field(default=4096, gt=0)
+    """Capacity of the Conductor → UI :class:`ThreadBridge`. ``DROP_OLDEST``
+    policy so the conductor loop never blocks on a slow UI subscriber."""
+
+
+# ---------------------------------------------------------------------------
 # ExperimentConfig — the top-level run recipe.
 # ---------------------------------------------------------------------------
 
@@ -316,6 +357,7 @@ class ExperimentConfig(BaseModel):
     calibration_set: CalibrationSetRef
     storage: StoragePolicy = Field(default_factory=StoragePolicy)
     safety: SafetyPolicy = Field(default_factory=SafetyPolicy)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     operator: OperatorRef
     sample: SampleInfo
     tags: tuple[str, ...] = Field(default_factory=tuple)
@@ -379,9 +421,11 @@ __all__ = [
     "DeviceConfig",
     "DomainProfileRef",
     "ExperimentConfig",
+    "FailurePolicy",
     "HardwareProfile",
     "OperatorRef",
     "ProcedureRef",
+    "RuntimeConfig",
     "SafetyPolicy",
     "SafetyRuleConfig",
     "SampleInfo",

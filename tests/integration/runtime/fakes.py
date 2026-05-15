@@ -31,6 +31,7 @@ from typing import Any
 from capa.core.clock import RunClock
 from capa.devices.adapter import (
     AdapterLifecycle,
+    AdapterStartContext,
     Capability,
     CommandResult,
     DeviceCommand,
@@ -220,12 +221,12 @@ class FakeAdapter:
         self.close_calls += 1
         self._lifecycle.close()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         import time as _t
 
         self.call_log.append(("start", _t.monotonic_ns()))
         self.start_calls += 1
-        self._clock = clock
+        self._clock = ctx.clock
         if self._start_raises is not None:
             raise self._start_raises
         self._lifecycle.start()
@@ -370,7 +371,7 @@ class HangingCloseAdapter:
         # Hang until cancelled (or the deadline fires above us).
         await asyncio.Event().wait()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         self.start_calls += 1
         self._lifecycle.start()
 
@@ -430,7 +431,7 @@ class HangingStopAdapter:
         self.close_calls += 1
         self._lifecycle.close()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         self.start_calls += 1
         self._lifecycle.start()
 
@@ -506,7 +507,7 @@ class CancelIgnoringStreamAdapter:
         self.close_calls += 1
         self._lifecycle.close()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         self.start_calls += 1
         self._lifecycle.start()
 

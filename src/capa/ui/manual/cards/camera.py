@@ -1,13 +1,14 @@
 """:class:`FlirCard` — manual control card for IR cameras (FLIR + sim).
 
-Cameras differ from devices in an important way: frame timestamps must be
-anchored to the engine's per-run clock, but the manual panel needs to
-issue commands between runs (when no run clock exists). Sharing a camera
-handle across panel-mode and run-mode would mis-anchor the frame
-``t_mono_ns`` column, so cameras are NOT routed through the shared
-:class:`DeviceRegistry`. The card constructs its own camera instance,
-closes it before the engine transitions to ``PREPARING``, and reopens on
-return to ``IDLE`` if the operator uses it again.
+Cameras differ from devices in an important way: frame timestamps must
+be anchored to the per-run :class:`~capa.core.clock.RunClock`, but the
+manual panel needs to issue commands between runs (when no run clock
+exists). Sharing a camera handle across panel-mode and run-mode would
+mis-anchor the frame ``t_mono_ns`` column, so cameras are NOT routed
+through the shared :class:`~capa.runtime.pool.WorkerPool`. The card
+constructs its own camera instance, closes it before the run transitions
+to ``PREPARING``, and reopens on return to ``IDLE`` if the operator uses
+it again.
 
 Gated on :class:`CameraCapability`:
 

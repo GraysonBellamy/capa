@@ -9,8 +9,8 @@ Both sim and real adapters need:
   §9: a command without either ``authorization_id`` or ``confirmed_by`` is
   refused at the adapter boundary regardless of the underlying device's own
   gates),
-* a uniform "last-sample-emitted" timestamp so the engine's safety
-  watchdog (plan §13.2 / §9 day-1 rules) can detect a silent producer.
+* a uniform "last-sample-emitted" timestamp so adapter health code can
+  reason about stale producers without duplicating timestamp bookkeeping.
 
 Lifting these here keeps the four real adapters from re-implementing the exact same logic.
 """
@@ -180,13 +180,10 @@ def reject_unless_authorized(
 
 
 # ---------------------------------------------------------------------------
-# Watchdog support — plan §9 / §13.2.
+# Last-sample tracking.
 #
-# Each producer task (one per adapter) updates ``LastSampleTracker`` whenever
-# it emits. The engine's :class:`SafetyMonitor` reads the tracker on its own
-# cadence and raises a ``device_silent`` fault if any adapter has gone quiet
-# past ``2 / sample_rate_hz``. The tracker is intentionally tiny so adapters
-# pay zero cost on the hot path.
+# Each producer task updates ``LastSampleTracker`` whenever it emits. The
+# tracker is intentionally tiny so adapters pay zero cost on the hot path.
 # ---------------------------------------------------------------------------
 
 
@@ -194,13 +191,9 @@ class LastSampleTracker:
     """Per-adapter "time of last emission" tracker.
 
     Adapters call :meth:`mark` on every successful poll tick (after the
-    library returns a sample). The engine reads :meth:`age_ns` to drive the
-    silent-device rule. Threadsafe by virtue of being simple int writes
-    under the GIL — adapters live on the same anyio task group, so there is
-    no real cross-thread access.
-
-    A fresh tracker reports an "infinite" age so the watchdog gives a
-    just-started adapter one tick of grace before complaining.
+    library returns a sample). Threadsafe by virtue of being simple int
+    writes under the GIL — adapters live on the same anyio task group, so
+    there is no real cross-thread access.
     """
 
     __slots__ = ("_t_mono_ns",)
@@ -224,24 +217,20 @@ class LastSampleTracker:
         return now_t_mono_ns - self._t_mono_ns
 
     def reset(self) -> None:
-        """Clear the timestamp — used at adapter ``start()`` to re-grace
-        the watchdog window."""
+        """Clear the timestamp at adapter ``start()``."""
         self._t_mono_ns = None
 
 
 class WatchdogState:
-    """Read-only view of an adapter's watchdog-relevant state.
+    """Read-only view of adapter silence-relevant state.
 
-    The engine's watchdog task constructs one of these per tick by calling
-    :meth:`adapter.watchdog_state()` on every real adapter. The struct is
-    plain attributes (no dependency on Pydantic) so the engine can call it
-    inside a hot loop without paying for model validation. Plan §13.2.
+    No runtime watchdog consumes this today. The struct remains a small,
+    dependency-free view used by adapter tests and by future health or
+    failure-policy work.
 
     ``lifecycle_state`` is the adapter's own ``open``/``running``/``closed``
-    label; the watchdog uses it to suppress ``device_silent`` warnings when
-    the adapter has already been told to stop. Without that grace, a clean
-    shutdown that races the 1 s watchdog sweep produces a spurious warning
-    (hardware-day 2026-05-09 followup #4).
+    label; callers use it to suppress silence checks when the adapter has
+    already been told to stop.
     """
 
     __slots__ = ("device", "expected_period_ns", "last_t_mono_ns", "lifecycle_state")
@@ -281,10 +270,10 @@ name (``cDAQ1Mod1`` → ``cDAQ1``)."""
 def serial_resource_id(port: str) -> str:
     """Return the ``resource_id`` for a serial-port adapter.
 
-    Per ``docs/per-resource-worker-migration.md`` §4.10: two adapters sharing
-    a serial port (multi-drop RS-485 bus) must share a worker. Windows COM
-    names are case-insensitive at the OS layer, so the body is normalized to
-    upper case — ``"com6"`` and ``"COM6"`` collapse to the same worker.
+    Per-resource worker contract: two adapters sharing a serial port
+    (multi-drop RS-485 bus) must share a worker. Windows COM names are
+    case-insensitive at the OS layer, so the body is normalized to upper
+    case — ``"com6"`` and ``"COM6"`` collapse to the same worker.
     """
     return f"serial:{port.strip().upper()}"
 

@@ -1,11 +1,11 @@
 """:func:`install_sigint_handler` — CLI SIGINT integration for the runtime.
 
-The headless CLI ([`capa.app`](../app.py)) and any in-tree harness that drives
+The headless CLI ([`capa.cli`](../cli/)) and any in-tree harness that drives
 a :class:`~capa.runtime.conductor.Conductor` from a script wants a clean
 two-stage Ctrl-C: the first stroke initiates a graceful shutdown, the second
 falls back to the OS default handler so a wedged run can still be terminated.
 
-Lives here (rather than in :mod:`capa.app`) so test harnesses and any
+Lives here (rather than in :mod:`capa.cli`) so test harnesses and any
 non-Typer driver can wire the same behaviour without depending on the CLI.
 """
 

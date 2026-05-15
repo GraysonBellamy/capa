@@ -16,6 +16,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class Constant:
     value: float
+    kind: str = "constant"
 
     def __call__(self, t_s: float) -> float:
         return self.value
@@ -29,6 +30,7 @@ class Sine:
     frequency_hz: float
     offset: float = 0.0
     phase: float = 0.0
+    kind: str = "sine"
 
     def __call__(self, t_s: float) -> float:
         return self.offset + self.amplitude * math.sin(
@@ -44,6 +46,7 @@ class Ramp:
     start: float
     end: float
     duration_s: float
+    kind: str = "ramp"
 
     def __call__(self, t_s: float) -> float:
         if t_s <= 0:
@@ -60,6 +63,7 @@ class Step:
     before: float
     after: float
     at_s: float
+    kind: str = "step"
 
     def __call__(self, t_s: float) -> float:
         return self.after if t_s >= self.at_s else self.before

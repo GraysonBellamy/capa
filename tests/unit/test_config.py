@@ -18,9 +18,11 @@ from capa.experiment.config import (
     CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
+    FailurePolicy,
     HardwareProfile,
     OperatorRef,
     ProcedureRef,
+    RuntimeConfig,
     SampleInfo,
 )
 from capa.experiment.method import (
@@ -167,3 +169,84 @@ class TestExperimentConfig:
         ec = ExperimentConfig.model_validate(data)
         assert ec.procedure.id == "capa.builtin.free_run"
         assert ec.method is None
+
+
+class TestDeviceConfigPhase2Fields:
+    """Phase 2 cleanup adds ``resource_id`` and ``on_failure`` to
+    :class:`DeviceConfig`. The defaults must keep existing configs
+    valid; explicit values must round-trip through ``model_validate``.
+    """
+
+    def test_defaults(self) -> None:
+        dc = DeviceConfig(name="d", adapter="x")
+        assert dc.resource_id is None
+        assert dc.on_failure is FailurePolicy.ABORT
+
+    def test_explicit_override(self) -> None:
+        dc = DeviceConfig(
+            name="d",
+            adapter="x",
+            resource_id="serial:COM6",
+            on_failure=FailurePolicy.WARN,
+        )
+        assert dc.resource_id == "serial:COM6"
+        assert dc.on_failure is FailurePolicy.WARN
+
+    def test_on_failure_string_coerced(self) -> None:
+        # TOML deserialisation yields strings; Pydantic must coerce.
+        dc = DeviceConfig.model_validate({"name": "d", "adapter": "x", "on_failure": "warn"})
+        assert dc.on_failure is FailurePolicy.WARN
+
+    def test_on_failure_rejects_unknown(self) -> None:
+        with pytest.raises(Exception):
+            DeviceConfig.model_validate({"name": "d", "adapter": "x", "on_failure": "ignore"})
+
+    def test_extra_field_still_forbidden(self) -> None:
+        with pytest.raises(Exception):
+            DeviceConfig.model_validate({"name": "d", "adapter": "x", "bogus": 1})
+
+
+class TestRuntimeConfig:
+    def test_defaults(self) -> None:
+        rc = RuntimeConfig()
+        assert rc.shutdown_grace_s == 5.0
+        assert rc.loop_lag_warn_ms == 50.0
+        assert rc.ui_bridge_capacity == 4096
+
+    def test_rejects_non_positive(self) -> None:
+        with pytest.raises(Exception):
+            RuntimeConfig(shutdown_grace_s=0.0)
+        with pytest.raises(Exception):
+            RuntimeConfig(loop_lag_warn_ms=-1.0)
+        with pytest.raises(Exception):
+            RuntimeConfig(ui_bridge_capacity=0)
+
+    def test_runtime_block_on_experiment_config_defaults(self) -> None:
+        ec = ExperimentConfig(
+            hardware=_hp_min(),
+            procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
+            calibration_set=CalibrationSetRef(name="default"),
+            operator=OperatorRef(id="abr"),
+            sample=SampleInfo(id="S001"),
+        )
+        assert ec.runtime == RuntimeConfig()
+
+    def test_runtime_block_round_trip(self) -> None:
+        ec = ExperimentConfig(
+            hardware=_hp_min(),
+            procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
+            calibration_set=CalibrationSetRef(name="default"),
+            operator=OperatorRef(id="abr"),
+            sample=SampleInfo(id="S001"),
+            runtime=RuntimeConfig(shutdown_grace_s=8.0, ui_bridge_capacity=512),
+        )
+        dumped = ec.model_dump(mode="json")
+        assert dumped["runtime"]["shutdown_grace_s"] == 8.0
+        assert dumped["runtime"]["ui_bridge_capacity"] == 512
+        reloaded = ExperimentConfig.model_validate(dumped)
+        assert reloaded.runtime.shutdown_grace_s == 8.0
+        assert reloaded.runtime.ui_bridge_capacity == 512
+
+    def test_runtime_extra_field_forbidden(self) -> None:
+        with pytest.raises(Exception):
+            RuntimeConfig.model_validate({"shutdown_grace_s": 1.0, "bogus": 1})

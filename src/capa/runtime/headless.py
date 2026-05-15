@@ -1,7 +1,7 @@
 """:func:`run_headless` — the conductor-based headless entry point.
 
-Replaces :meth:`ExperimentEngine.run` for command-line runs. The
-function assembles the full conductor stack:
+The headless entry point for command-line runs. The function assembles
+the full conductor stack:
 
 1. Resolve the procedure plugin.
 2. Build a :class:`WorkerPool` from config and open it (adapters open here).
@@ -10,8 +10,8 @@ function assembles the full conductor stack:
    :class:`ProcedureRunner` against the session's open resources.
 5. Start the conductor; wait for the result future on its own thread.
 6. Close the pool (adapters close).
-7. Return a :class:`HeadlessResult` shaped like today's :class:`EngineResult`
-   so CLI exit-code logic is unchanged across the cutover.
+7. Return a :class:`HeadlessResult` carrying the run status, bundle
+   status, and integrity status the CLI maps to exit codes.
 
 What this module does NOT do:
 
@@ -40,6 +40,7 @@ import structlog
 from capa.channels.registry import ChannelRegistry
 from capa.core.databus import DataBus
 from capa.core.plugins_runtime import ProcedureRegistry, resolve_mode
+from capa.devices.materialize import ConfigMaterializationError
 from capa.experiment.executor import MethodExecutor
 from capa.experiment.procedures.base import ProcedureContext, ProcedureError
 from capa.experiment.procedures.builtin.batch import Batch as _Batch
@@ -116,17 +117,18 @@ async def run_headless(
 ) -> HeadlessResult:
     """Run one experiment via the conductor / pool stack.
 
-    Mirrors the surface of :meth:`ExperimentEngine.run` so the CLI can
-    swap callers without reshaping its options. The caller owns
-    ``runs_root`` (this function does not create it) and the optional
-    ``catalog`` (lifecycle stays with the caller's ``with`` block).
+    The caller owns ``runs_root`` (this function does not create it) and
+    the optional ``catalog`` (lifecycle stays with the caller's ``with``
+    block).
     """
     if conductor_config is None:
-        conductor_config = (
-            ConductorConfig(saturation_deadline_s=saturation_deadline_s)
-            if saturation_deadline_s is not None
-            else ConductorConfig()
-        )
+        if saturation_deadline_s is not None:
+            conductor_config = ConductorConfig.from_runtime(
+                config.runtime,
+                saturation_deadline_s=saturation_deadline_s,
+            )
+        else:
+            conductor_config = ConductorConfig.from_runtime(config.runtime)
 
     # 1. Resolve the procedure. Refusal here = no bundle on disk.
     try:
@@ -151,15 +153,25 @@ async def run_headless(
             exit_reason=f"procedure_resolution: {exc}",
         )
 
-    # Batch procedure needs to know runs_root for child bundles. Lifted
-    # straight from engine.py:536-539 — small enough to inline rather than
-    # invent a generic "procedure post-construct hook" API.
+    # Batch procedure needs to know runs_root for child bundles. Small
+    # enough to inline rather than invent a generic "procedure
+    # post-construct hook" API.
     if isinstance(procedure, _Batch):
         procedure.configure_runs_root(runs_root)
 
     # 2. Build + open the worker pool.
     try:
         pool = WorkerPool.from_config(config)
+    except ConfigMaterializationError as exc:
+        _logger.error("headless.adapter_materialization_failed", error=str(exc))
+        return HeadlessResult(
+            run_id=run_id or "preflight-refused",
+            bundle_path=None,
+            run_status="aborted",
+            bundle_status="open",
+            integrity_status="unknown",
+            exit_reason=f"adapter_materialization: {exc}",
+        )
     except ResourceConflict as exc:
         _logger.error("headless.resource_conflict", error=str(exc))
         return HeadlessResult(
@@ -230,7 +242,7 @@ async def run_headless(
             # post-open() resources lazily off the session.
             assert isinstance(s, RealRunSession), "headless runner factory requires RealRunSession"
             # Build the frozen channel registry the executor + procedure
-            # resolve names against. Same shape as engine.py:634-635.
+            # resolve names against.
             channel_registry = ChannelRegistry.from_specs(list(config.hardware.channels))
             channel_registry.freeze()
 
@@ -360,8 +372,7 @@ def _build_method_executor_for_runner(
     executor sees a coherent ctx the moment a procedure invokes
     ``ctx.method_executor.run_to_completion(...)``.
 
-    Same pattern as :meth:`ExperimentEngine.run` lines 645-648. The
-    databus must be the conductor's authoritative bus so executor
+    The databus must be the conductor's authoritative bus so executor
     ``_wait_for`` subscriptions actually receive emissions.
     """
     exec_ctx = ProcedureContext(
@@ -413,8 +424,7 @@ async def _watch_external_stop(
 
 def _result_to_headless(result: RunResult, session: RealRunSession) -> HeadlessResult:
     """Translate the conductor's :class:`RunResult` into the
-    CLI-shaped :class:`HeadlessResult`. Mirrors the exit-status logic in
-    :meth:`ExperimentEngine.run` so exit codes match across the cutover.
+    CLI-shaped :class:`HeadlessResult` the caller maps to an exit code.
     """
     run_status = run_status_for_outcome(result.outcome)
     # Bundle status is read off the session's manifest after finalize.

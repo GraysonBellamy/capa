@@ -1,4 +1,4 @@
-"""Tests for the typer CLI in :mod:`capa.app`.
+"""Tests for the typer CLI in :mod:`capa.cli`.
 
 Drives the CLI in-process via :class:`typer.testing.CliRunner` so failures
 surface cleanly without spawning a subprocess.
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from capa.app import app
+from capa.cli import app
 from capa.storage.catalog import RunCatalog
 
 _FREE_RUN_TOML = """

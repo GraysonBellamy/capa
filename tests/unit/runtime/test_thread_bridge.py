@@ -5,8 +5,7 @@ spin up a real producer thread + producer loop and use the test's running
 loop as the consumer (or vice versa). The ``_DualLoop`` helper hides the
 boilerplate.
 
-Coverage targets the cross-thread cases listed in
-``docs/per-resource-worker-migration.md`` §10.2 "Cross-thread":
+Coverage targets the cross-thread cases:
 
 * order preservation,
 * close-drain semantics,

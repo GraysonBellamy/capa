@@ -35,7 +35,7 @@ import asyncio
 import contextlib
 import threading
 from collections.abc import Callable, Coroutine
-from concurrent.futures import Future
+from concurrent.futures import Future, InvalidStateError
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
 import structlog
@@ -46,6 +46,44 @@ from capa.runtime.shutdown import RunnerStopResult
 T = TypeVar("T")
 
 _logger = structlog.get_logger("capa.runtime.runner")
+
+
+def _bridge_task_to_future[T](out: Future[T], task: asyncio.Task[T]) -> None:
+    """Bridge an asyncio task's outcome onto a caller-owned future,
+    dropping the outcome if the caller has already cancelled (or otherwise
+    finalized) ``out``.
+
+    Why drop instead of error: the worker-side coroutine is shielded (see
+    :meth:`capa.runtime.worker.Worker._dispatch_impl`) and must run to
+    completion regardless of caller cancellation — that is the §4.2 rule
+    that keeps in-flight hardware transactions intact. If the caller has
+    abandoned the future before the task finishes, the result has nowhere
+    to go; setting it would raise ``InvalidStateError`` on the runner's
+    loop. The early return is the fast path; the ``except`` clause covers
+    the tight race where ``out`` becomes cancelled between the guard and
+    the set (cancellation can be propagated cross-thread via
+    :func:`asyncio.wrap_future` chaining).
+    """
+    if out.cancelled() or out.done():
+        return
+    with contextlib.suppress(InvalidStateError):
+        if task.cancelled():
+            out.cancel()
+        elif (exc := task.exception()) is not None:
+            out.set_exception(exc)
+        else:
+            out.set_result(task.result())
+
+
+def _fail_or_drop[T](out: Future[T], exc: BaseException) -> None:
+    """Surface a pre-task failure (factory raised before the coroutine was
+    created) onto ``out``, dropping the failure if the caller has already
+    finalized the future. Same rationale as :func:`_bridge_task_to_future`.
+    """
+    if out.cancelled() or out.done():
+        return
+    with contextlib.suppress(InvalidStateError):
+        out.set_exception(exc)
 
 
 @runtime_checkable
@@ -198,21 +236,10 @@ class ThreadedRunner:
             try:
                 coro = coro_factory()
             except BaseException as exc:
-                out.set_exception(exc)
+                _fail_or_drop(out, exc)
                 return
             task: asyncio.Task[T] = loop.create_task(coro)
-
-            def _bridge(t: asyncio.Task[T]) -> None:
-                if t.cancelled():
-                    out.cancel()
-                    return
-                exc = t.exception()
-                if exc is not None:
-                    out.set_exception(exc)
-                else:
-                    out.set_result(t.result())
-
-            task.add_done_callback(_bridge)
+            task.add_done_callback(lambda t: _bridge_task_to_future(out, t))
 
         loop.call_soon_threadsafe(_kick)
         return out
@@ -372,21 +399,10 @@ class InlineRunner:
         try:
             coro = coro_factory()
         except BaseException as exc:
-            out.set_exception(exc)
+            _fail_or_drop(out, exc)
             return out
         task: asyncio.Task[T] = loop.create_task(coro)
-
-        def _bridge(t: asyncio.Task[T]) -> None:
-            if t.cancelled():
-                out.cancel()
-                return
-            exc = t.exception()
-            if exc is not None:
-                out.set_exception(exc)
-            else:
-                out.set_result(t.result())
-
-        task.add_done_callback(_bridge)
+        task.add_done_callback(lambda t: _bridge_task_to_future(out, t))
         return out
 
     def stop(self, *, grace_s: float = 5.0) -> Future[RunnerStopResult]:

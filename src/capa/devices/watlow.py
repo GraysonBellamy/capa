@@ -51,15 +51,17 @@ from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
 from capa.core.units import canonicalize_unit, units_compatible
 from capa.devices._helpers import (
-    LastSampleTracker,
     WatchdogState,
     build_channel_sample,
     channels_for_device,
+    make_accepted_result,
+    make_not_open_result,
     make_record_id,
+    reject_unless_authorized,
     serial_resource_id,
 )
 from capa.devices.adapter import (
-    AdapterLifecycle,
+    AdapterStartContext,
     Capability,
     CommandResult,
     DeviceCommand,
@@ -70,6 +72,7 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+from capa.devices.runtime_state import AdapterRuntimeState
 
 if TYPE_CHECKING:
     from capa.devices.registry import AdapterDescriptor
@@ -148,8 +151,8 @@ class WatlowAdapterParams(BaseModel):
 
     auto_reconnect: bool = True
     """When ``True``, transient :class:`WatlowConnectionError`\\ s do not
-    terminate the stream — they count as ``samples_late`` and the recorder
-    retries on the next tick."""
+    terminate the stream — they are logged and the recorder retries on the
+    next tick."""
 
     snapshot_period_s: float = Field(gt=0, default=30.0)
     """Cadence of :class:`DeviceSnapshot` emissions during a run."""
@@ -257,9 +260,9 @@ class WatlowAdapter:
 
     Two construction shapes:
 
-    * ``WatlowAdapter(name=..., **params_kwargs)`` — the engine's
-      :func:`_construct_adapters` path uses this. Per-device params from
-      ``[devices.params]`` are forwarded as kwargs and parsed into a
+    * ``WatlowAdapter(name=..., **params_kwargs)`` — the materialization
+      path uses this. Per-device params from ``[devices.params]`` are
+      forwarded as kwargs and parsed into a
       :class:`WatlowAdapterParams`.
     * ``WatlowAdapter(name=..., params=WatlowAdapterParams(...))`` — for
       programmatic construction in tests.
@@ -268,22 +271,29 @@ class WatlowAdapter:
     seam: when supplied, the adapter calls it instead of
     :func:`watlowlib.open_device` so unit tests can wire up a
     :class:`watlowlib.transport.fake.FakeTransport`-backed controller.
+
+    File layout (Phase 8 cleanup):
+
+    * **Runtime state** — ``__init__``, ``configure_channels``, lifecycle
+      (``open``/``close``/``start``/``stop``), ``snapshot``, ``stream``,
+      ``watchdog_state``, snapshot-bookkeeping helpers.
+    * **Command surface** — ``command`` (authorization gate), ``_dispatch_command``,
+      typed wrappers (``set_setpoint``, ``write_parameter``, …), and the
+      manual-control card's ``read_state_snapshot``.
+    * **Vendor protocol** — watlowlib-specific code: controller construction,
+      sample → ``SourceRecord`` conversion, channel routing, drift detection.
+      Stays here because it is genuinely watlowlib-shaped.
     """
 
     __slots__ = (
         "_channels",
-        "_clock",
         "_controller",
         "_controller_factory",
         "_device_info",
         "_display_unit",
         "_drift_event_buffer",
         "_drift_skipped_channels",
-        "_last_sample",
-        "_last_snapshot_t_mono_ns",
-        "_lifecycle",
-        "_seq",
-        "_stop_requested",
+        "_state",
         "capabilities",
         "name",
         "params",
@@ -320,13 +330,7 @@ class WatlowAdapter:
         self._device_info: DeviceInfo | None = None
         self._display_unit: Unit | None = None
         self._channels: list[ChannelSpec] = []
-        self._clock: RunClock | None = None
-        self._lifecycle = AdapterLifecycle()
-        self._seq = 0
-        # Sentinel so the first poll tick always emits a snapshot.
-        self._last_snapshot_t_mono_ns = -(2**62)
-        self._last_sample = LastSampleTracker()
-        self._stop_requested = False
+        self._state = AdapterRuntimeState()
         # Channels whose wire-side unit was checked against the declared
         # channel unit and didn't match — we skip ChannelSample derivation
         # for these so a misconfigured rig surfaces in events.sqlite rather
@@ -336,6 +340,10 @@ class WatlowAdapter:
         # the next ``stream()`` iteration. Adapters cannot synchronously
         # yield from a helper method, so the event buffer is the bridge.
         self._drift_event_buffer: list[DeviceEvent] = []
+
+    # =====================================================================
+    # SECTION 1 — Runtime state: lifecycle, wiring, snapshot/stream/health
+    # =====================================================================
 
     # ------------------------------------------------------------------ wiring
 
@@ -373,7 +381,7 @@ class WatlowAdapter:
 
         Idempotent: a second call on an already-open adapter is a no-op.
         """
-        if self._lifecycle.state in ("open", "running"):
+        if self._state.lifecycle.state in ("open", "running"):
             return
         try:
             self._controller = await self._build_controller()
@@ -397,25 +405,19 @@ class WatlowAdapter:
             raise AdapterError(
                 f"watlow {self.name!r} open failed: {exc}", device=self.name
             ) from exc
-        self._lifecycle.open()
+        self._state.lifecycle.open()
 
     async def close(self) -> None:
         """Release the bus / handle. Idempotent."""
-        if self._lifecycle.state == "closed":
+        if self._state.lifecycle.state == "closed":
             return
         await self._safe_close_controller()
         self._controller = None
-        self._lifecycle.close()
+        self._state.lifecycle.close()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         """Capture the :class:`RunClock` anchor and arm the streaming loop."""
-        self._lifecycle.start()
-        self._clock = clock or RunClock.now()
-        self._stop_requested = False
-        self._last_sample.reset()
-        # Force a snapshot on the first stream tick so the manifest sees a
-        # device-health row from the start.
-        self._last_snapshot_t_mono_ns = -(2**62)
+        self._state.on_start(ctx.clock)
         # New run, fresh drift-check state — a misconfig that was fixed
         # between runs should not stay quarantined.
         self._drift_skipped_channels.clear()
@@ -427,10 +429,7 @@ class WatlowAdapter:
         The next batch arrival from :func:`watlowlib.record` lets ``stream``
         observe the request and break out of its async-cm. Idempotent.
         """
-        if self._lifecycle.state != "running":
-            return
-        self._stop_requested = True
-        self._lifecycle.stop()
+        self._state.request_stop()
 
     async def snapshot(self) -> DeviceSnapshot:
         """Build a :class:`DeviceSnapshot` from cached :class:`DeviceInfo`.
@@ -440,13 +439,13 @@ class WatlowAdapter:
         I/O so it is safe to call from the engine while the stream is in
         flight.
         """
-        clock = self._clock or RunClock.now()
+        clock = self._state.clock or RunClock.now()
         return DeviceSnapshot(
             adapter=ADAPTER_ID,
             device=self.name,
             t_mono_ns=clock.t_mono_ns(),
             t_utc=datetime.now(UTC),
-            health="ok" if self._lifecycle.state in ("open", "running") else "down",
+            health="ok" if self._state.lifecycle.state in ("open", "running") else "down",
             fields=self._snapshot_fields(),
         )
 
@@ -466,7 +465,7 @@ class WatlowAdapter:
                 f"watlow {self.name!r} stream() requires open() first",
                 device=self.name,
             )
-        if self._clock is None:
+        if self._state.clock is None:
             raise AdapterError(
                 f"watlow {self.name!r} stream() requires start() first",
                 device=self.name,
@@ -475,7 +474,7 @@ class WatlowAdapter:
         # Yield an initial snapshot so the manifest's equipment block has
         # something to show before the first poll lands.
         snap = await self.snapshot()
-        self._last_snapshot_t_mono_ns = snap.t_mono_ns
+        self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
         yield snap
 
         # The recorder runs inside an anyio task group; any
@@ -495,7 +494,7 @@ class WatlowAdapter:
                 auto_reconnect=self.params.auto_reconnect,
             ) as batches:
                 async for batch in batches:
-                    if self._stop_requested:
+                    if self._state.stop_requested:
                         break
                     # Watlow is the one adapter whose ``poll_many`` returns
                     # multiple Samples per acquisition tick (one per polled
@@ -507,7 +506,7 @@ class WatlowAdapter:
                     for i, sample in enumerate(batch):
                         record = self._record_for(sample, tick_first=(i == 0))
                         yield record
-                        self._last_sample.mark(record.t_mono_ns)
+                        self._state.last_sample.mark(record.t_mono_ns)
                         for cs in self._channel_samples_for(sample, record.record_id):
                             yield cs
                     # Drain any drift-mismatch events queued by
@@ -518,9 +517,9 @@ class WatlowAdapter:
                     while self._drift_event_buffer:
                         yield self._drift_event_buffer.pop(0)
                     # Periodic snapshot — cadence-bounded, never per-tick.
-                    if self._snapshot_due():
+                    if self._state.snapshot_due(period_s=self.params.snapshot_period_s):
                         snap = await self.snapshot()
-                        self._last_snapshot_t_mono_ns = snap.t_mono_ns
+                        self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
                         yield snap
         except* WatlowError as eg:
             first = next(iter(eg.exceptions))
@@ -528,7 +527,36 @@ class WatlowAdapter:
                 f"watlow {self.name!r} stream failed: {first}", device=self.name
             ) from first
 
-    # ------------------------------------------------------------------ commands
+    # --------------------------------------------------- silence state / snapshot
+
+    def watchdog_state(self) -> WatchdogState:
+        """Return a compact silence-state view for tests and future policy work."""
+        return self._state.watchdog(device=self.name, rate_hz=self.params.rate_hz)
+
+    def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
+        info = self._device_info
+        out: dict[str, float | int | str | bool | None] = {
+            "address": self.params.address,
+            "protocol": self.params.protocol,
+            "channel_count": len(self._channels),
+            "state": self._state.lifecycle.state,
+            "display_unit": self._display_unit.value if self._display_unit is not None else None,
+        }
+        if info is not None:
+            out["part_number"] = info.part_number.raw or None
+            out["family"] = info.family.value
+            out["hardware_id"] = info.hardware_id
+            out["firmware_id"] = info.firmware_id
+            out["serial_number"] = info.serial_number
+            out["health"] = info.health.value
+            out["loops"] = info.loops
+            if info.configured_protocol is not None:
+                out["configured_protocol"] = info.configured_protocol.value
+        return out
+
+    # =====================================================================
+    # SECTION 2 — Command surface: authorization gate + typed wrappers
+    # =====================================================================
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
         """Issue a generic command. Authorization gate first, then dispatch.
@@ -537,21 +565,14 @@ class WatlowAdapter:
         or ``confirmed_by`` (manual UI confirmation) are refused at the
         adapter boundary, regardless of the underlying device's own gates.
         """
-        clock = self._clock or RunClock.now()
-        if cmd.authorization_id is None and cmd.confirmed_by is None:
-            return CommandResult(
-                accepted=False,
-                detail=f"watlow {self.name!r} refuses unauthorized commands",
-                t_mono_ns=clock.t_mono_ns(),
-                t_utc=datetime.now(UTC),
-            )
+        clock = self._state.clock or RunClock.now()
+        rejection = reject_unless_authorized(
+            cmd, adapter_id=ADAPTER_ID, device_name=self.name, clock=clock
+        )
+        if rejection is not None:
+            return rejection
         if self._controller is None:
-            return CommandResult(
-                accepted=False,
-                detail=f"watlow {self.name!r} not open",
-                t_mono_ns=clock.t_mono_ns(),
-                t_utc=datetime.now(UTC),
-            )
+            return make_not_open_result(adapter_id=ADAPTER_ID, device_name=self.name, clock=clock)
 
         try:
             detail = await self._dispatch_command(cmd)
@@ -561,12 +582,7 @@ class WatlowAdapter:
                 device=self.name,
             ) from exc
 
-        return CommandResult(
-            accepted=True,
-            detail=detail,
-            t_mono_ns=clock.t_mono_ns(),
-            t_utc=datetime.now(UTC),
-        )
+        return make_accepted_result(detail=detail, clock=clock)
 
     async def _dispatch_command(self, cmd: DeviceCommand) -> str:
         """Dispatch a generic :class:`DeviceCommand` to the right typed call.
@@ -800,7 +816,9 @@ class WatlowAdapter:
         :attr:`WatlowAdapterParams.wire_temperature_unit`."""
         return self._display_unit
 
-    # ------------------------------------------------------------------ helpers
+    # =====================================================================
+    # SECTION 3 — Vendor protocol: watlowlib-specific controller / sample / drift
+    # =====================================================================
 
     async def _build_controller(self) -> Controller:
         """Construct the underlying :class:`Controller`.
@@ -851,14 +869,15 @@ class WatlowAdapter:
         can collapse the per-parameter fanout back into one observation per
         acquisition tick when computing the operator-facing poll rate.
         """
-        assert self._clock is not None
+        clock = self._state.clock
+        assert clock is not None
         row = sample_to_row(sample)
         # Translate the library's monotonic_ns (host clock) into a run-relative
         # offset so it joins cleanly with ChannelSample.t_mono_ns.
-        t_mono_ns = sample.monotonic_ns - self._clock.started_mono_ns
-        self._seq += 1
+        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
+        self._state.seq += 1
         return SourceRecord(
-            record_id=make_record_id(ADAPTER_ID, self.name, self._seq),
+            record_id=make_record_id(ADAPTER_ID, self.name, self._state.seq),
             adapter=ADAPTER_ID,
             device=self.name,
             shape="long_row",
@@ -906,13 +925,14 @@ class WatlowAdapter:
         Native row stays in ``device_records/watlow.parquet`` so an analyst
         can still see what the device was reporting.
         """
-        assert self._clock is not None
+        clock = self._state.clock
+        assert clock is not None
         if sample.value is None or isinstance(sample.value, str):
             # Sensor-fail / overload / textual values cannot be calibrated;
             # the row is still preserved in device_records, but no
             # ChannelSample is emitted.
             return []
-        t_mono_ns = sample.monotonic_ns - self._clock.started_mono_ns
+        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
         emissions: list[DeviceEmission] = []
         for spec in self._channels:
             binding = spec.source
@@ -992,42 +1012,6 @@ class WatlowAdapter:
                 "wire_unit": wire_unit.value,
             },
         )
-
-    def watchdog_state(self) -> WatchdogState:
-        """Watchdog view consumed by the engine's silent-device task (plan §13.2)."""
-        return WatchdogState(
-            device=self.name,
-            last_t_mono_ns=self._last_sample.last_t_mono_ns,
-            expected_period_ns=int(1e9 / self.params.rate_hz),
-            lifecycle_state=self._lifecycle.state,
-        )
-
-    def _snapshot_due(self) -> bool:
-        if self._clock is None:
-            return False
-        elapsed_ns = self._clock.t_mono_ns() - self._last_snapshot_t_mono_ns
-        return elapsed_ns >= int(self.params.snapshot_period_s * 1e9)
-
-    def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
-        info = self._device_info
-        out: dict[str, float | int | str | bool | None] = {
-            "address": self.params.address,
-            "protocol": self.params.protocol,
-            "channel_count": len(self._channels),
-            "state": self._lifecycle.state,
-            "display_unit": self._display_unit.value if self._display_unit is not None else None,
-        }
-        if info is not None:
-            out["part_number"] = info.part_number.raw or None
-            out["family"] = info.family.value
-            out["hardware_id"] = info.hardware_id
-            out["firmware_id"] = info.firmware_id
-            out["serial_number"] = info.serial_number
-            out["health"] = info.health.value
-            out["loops"] = info.loops
-            if info.configured_protocol is not None:
-                out["configured_protocol"] = info.configured_protocol.value
-        return out
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
-"""Unit tests for :mod:`capa.devices._helpers` (P2 refactor).
+"""Unit tests for :mod:`capa.devices._helpers`.
 
 Covers the shared adapter scaffolding lifted out of the per-adapter modules:
-the authorization gate, the last-sample tracker, and the watchdog state view.
+the authorization gate, the last-sample tracker, and the silence-state view.
 """
 
 from __future__ import annotations

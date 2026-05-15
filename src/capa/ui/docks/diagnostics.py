@@ -1,9 +1,9 @@
 """Acquisition diagnostics dock — per-worker rate, jitter, and health.
 
 Reads conductor.runtime_diagnostics() at 1 Hz and displays, for each
-worker: the actual poll rate, poll-period p50 / jitter, late-sample count,
-and time since the last poll. Rows turn yellow/red when thresholds are
-exceeded so the operator can spot a stalled or degraded device at a glance.
+worker: the actual poll rate, poll-period p50 / jitter, and time since
+the last poll. Rows turn yellow/red when thresholds are exceeded so the
+operator can spot a stalled or degraded device at a glance.
 
 The rate / period / age values are all keyed on ``SourceRecord``
 emissions (one per actual poll), NOT on every ``adapter.stream()`` yield.
@@ -35,24 +35,21 @@ if TYPE_CHECKING:
 
 REFRESH_INTERVAL_MS: Final[int] = 1000
 
-_HEADERS: Final = ("Device", "Rate (Hz)", "p50 (ms)", "Jitter (ms)", "Late", "Age (s)")
-_COL_WIDTHS: Final = (None, 82, 82, 90, 55, 62)  # None = stretch column
+_HEADERS: Final = ("Device", "Rate (Hz)", "p50 (ms)", "Jitter (ms)", "Age (s)")
+_COL_WIDTHS: Final = (None, 82, 82, 90, 62)  # None = stretch column
 _TOOLTIPS: Final = (
     "Adapter name(s) hosted by this worker.",
     "Actual poll rate — inverse of poll-period p50 (one observation per "
     "SourceRecord, not per emission).",
     "Poll period p50, ms. The typical wall-clock gap between consecutive polls.",
     "Poll period p99 − p50, ms. Long tail of poll lateness.",
-    "Cumulative samples_late count — emissions the adapter flagged as "
-    "behind the configured cadence.",
     "Wall-clock seconds since the most recent poll. Turns yellow at 2 s, red at 5 s.",
 )
 
 # Health thresholds
 _AGE_FAIL_S: Final = 5.0
 _AGE_WARN_S: Final = 2.0
-_LATE_PCT_WARN: Final = 0.05
-_LOOP_LAG_WARN_MS: Final = 50.0
+_DEFAULT_LOOP_LAG_WARN_MS: Final = 50.0
 
 
 def _val_label(font: object, width: int) -> QLabel:
@@ -70,23 +67,20 @@ class _RowLabels:
     rate: QLabel
     p50: QLabel
     jitter: QLabel
-    late: QLabel
     age: QLabel
 
     def set_idle(self) -> None:
         css = f"color: {COLOR_IDLE.name()};"
         self.device.setStyleSheet(css)
-        for lbl in (self.rate, self.p50, self.jitter, self.late, self.age):
+        for lbl in (self.rate, self.p50, self.jitter, self.age):
             lbl.setText("—")
             lbl.setStyleSheet(css)
 
-    def update(self, w: dict[str, float]) -> None:
+    def update(self, w: dict[str, float], *, loop_lag_warn_ms: float) -> None:
         polls = int(w.get("polls_emitted", 0.0))
         rate_hz = w.get("poll_rate_hz", 0.0)
         p50 = w.get("poll_period_p50_ms", 0.0)
         p99 = w.get("poll_period_p99_ms", 0.0)
-        emitted = w.get("samples_emitted", 0.0)
-        late = w.get("samples_late", 0.0)
         loop_lag = w.get("loop_lag_p99_ms", 0.0)
         age = w.get("last_sample_age_s", 0.0)
 
@@ -99,24 +93,22 @@ class _RowLabels:
         self.rate.setText(f"{rate_hz:.2f}" if have_period else "—")
         self.p50.setText(f"{p50:.1f}" if have_period else "—")
         self.jitter.setText(f"±{(p99 - p50):.1f}" if have_period else "—")
-        self.late.setText(str(int(late)))
         self.age.setText(f"{age:.1f}" if polls > 0 else "—")
 
-        late_pct = late / max(emitted, 1.0)
         if polls == 0:
             # No poll has landed yet — neutral (idle) coloring rather than
             # red, because the worker may simply still be warming up.
             color = COLOR_IDLE
         elif age > _AGE_FAIL_S:
             color = COLOR_FAIL
-        elif age > _AGE_WARN_S or late_pct > _LATE_PCT_WARN or loop_lag > _LOOP_LAG_WARN_MS:
+        elif age > _AGE_WARN_S or loop_lag > loop_lag_warn_ms:
             color = COLOR_WARN
         else:
             color = COLOR_OK
 
         css = f"color: {color.name()};"
         self.device.setStyleSheet(css)
-        for lbl in (self.rate, self.p50, self.jitter, self.late, self.age):
+        for lbl in (self.rate, self.p50, self.jitter, self.age):
             lbl.setStyleSheet(css)
 
 
@@ -168,11 +160,10 @@ class DiagnosticsDock(QDockWidget):
             rate_lbl = _val_label(font, 82)
             p50_lbl = _val_label(font, 82)
             jitter_lbl = _val_label(font, 90)
-            late_lbl = _val_label(font, 55)
             age_lbl = _val_label(font, 62)
 
             for lbl, tip in zip(
-                (dev_lbl, rate_lbl, p50_lbl, jitter_lbl, late_lbl, age_lbl),
+                (dev_lbl, rate_lbl, p50_lbl, jitter_lbl, age_lbl),
                 _TOOLTIPS,
                 strict=True,
             ):
@@ -182,15 +173,13 @@ class DiagnosticsDock(QDockWidget):
             grid.addWidget(rate_lbl, row_idx, 1)
             grid.addWidget(p50_lbl, row_idx, 2)
             grid.addWidget(jitter_lbl, row_idx, 3)
-            grid.addWidget(late_lbl, row_idx, 4)
-            grid.addWidget(age_lbl, row_idx, 5)
+            grid.addWidget(age_lbl, row_idx, 4)
 
             self._rows[rid] = _RowLabels(
                 device=dev_lbl,
                 rate=rate_lbl,
                 p50=p50_lbl,
                 jitter=jitter_lbl,
-                late=late_lbl,
                 age=age_lbl,
             )
 
@@ -225,12 +214,15 @@ class DiagnosticsDock(QDockWidget):
                 row.set_idle()
             return
         diag = conductor.runtime_diagnostics()
+        loop_lag_warn_ms = float(
+            diag.get("runtime", {}).get("loop_lag_warn_ms", _DEFAULT_LOOP_LAG_WARN_MS)
+        )
         for rid, row in self._rows.items():
             w = diag.get(f"worker:{rid}")
             if w is None:
                 row.set_idle()
             else:
-                row.update(w)
+                row.update(w, loop_lag_warn_ms=loop_lag_warn_ms)
 
 
 __all__ = ["DiagnosticsDock"]

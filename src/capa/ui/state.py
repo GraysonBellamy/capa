@@ -64,12 +64,18 @@ if TYPE_CHECKING:
     from capa.runtime.runcontext import RunContext
 
 UI_BRIDGE_CAPACITY: Final[int] = 4096
-"""Capacity of the Conductor → UI :class:`ThreadBridge`. DROP_OLDEST
-policy so the conductor loop never blocks on a slow UI subscriber."""
+"""Fallback capacity of the Conductor → UI :class:`ThreadBridge`.
+
+The active value at run-start is :attr:`RuntimeConfig.ui_bridge_capacity`
+off the loaded :class:`ExperimentConfig`; this constant is retained only
+for legacy/test paths that build a bridge without a config in scope.
+``DROP_OLDEST`` policy keeps the conductor loop from ever blocking on a
+slow UI subscriber."""
 
 ABORT_GRACE_S: Final[float] = 5.0
-"""Maximum time the conductor's disarm phase will wait for workers to
-finish their stream tasks. Matches :data:`ConductorConfig.shutdown_grace_s`."""
+"""Fallback maximum time the conductor's disarm phase will wait for
+workers to finish their stream tasks. The active value comes from
+:attr:`RuntimeConfig.shutdown_grace_s` via :meth:`ConductorConfig.from_runtime`."""
 
 _logger = structlog.get_logger("capa.ui.controller")
 
@@ -901,11 +907,16 @@ class RunController(QObject):
                 stop_signal=stop_signal,
             )
 
+        # Conductor knobs come from the user-facing RuntimeConfig.
+        # ``ABORT_GRACE_S`` is retained as a UI-side fallback constant
+        # only — the configured value wins so an operator can extend
+        # the disarm grace per experiment.
+        conductor_config = ConductorConfig.from_runtime(config.runtime)
         conductor = Conductor(
             pool=pool,
             session=session,
             runner_factory=_runner_factory,
-            config=ConductorConfig(shutdown_grace_s=ABORT_GRACE_S),
+            config=conductor_config,
         )
         _conductor_holder.append(conductor)
         self._conductor = conductor
@@ -923,7 +934,7 @@ class RunController(QObject):
         # conductor never blocks on UI subscribers.
         ui_bridge: ThreadBridge[WorkerEmission] = ThreadBridge(
             name="ui",
-            capacity=UI_BRIDGE_CAPACITY,
+            capacity=config.runtime.ui_bridge_capacity,
             consumer_loop=asyncio.get_running_loop(),
             policy=BridgePolicy.DROP_OLDEST,
         )

@@ -1,4 +1,4 @@
-"""Visible-camera adapter — PyAV-driven H.264 → MKV (plan §12.3).
+"""``WebcamAdapter`` — PyAV-driven H.264 → MKV (plan §12.3).
 
 The adapter has a single long-lived input pump
 (:meth:`WebcamAdapter._run_input_loop`) that opens the
@@ -33,24 +33,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import io
 import os
-import re
 import sys
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import anyio
 import av
 import numpy as np
 import structlog
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from PIL import Image
 
 from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
@@ -75,68 +71,26 @@ from capa.devices.camera.base import (
     make_stream_pair,
 )
 from capa.devices.camera.metadata import UvcRangeMetadata, WebcamMetadata
+from capa.devices.camera.webcam.constants import (
+    _BASE_CAPABILITIES,
+    DEFAULT_CODEC,
+    DEFAULT_FPS,
+    DEFAULT_PIX_FMT,
+    OPEN_RETRY_DEADLINE_S,
+    OPEN_RETRY_DELAYS_S,
+    PREVIEW_INTERVAL_NS,
+    _platform_default_format,
+)
+from capa.devices.camera.webcam.encoding import (
+    _advance_decoder,
+    _drain_stream,
+    _encode_preview_jpeg,
+    _is_transient_open_error,
+    _reformat_to_rgb24,
+)
+from capa.devices.camera.webcam.probe import _probe_dshow_format_info_sync, _probe_v4l2_info
 
 _logger = structlog.get_logger("capa.devices.camera.webcam")
-
-if TYPE_CHECKING:
-    from capa.devices.registry import AdapterDescriptor
-
-
-_BASE_CAPABILITIES: frozenset[CameraCapability] = frozenset(
-    {
-        CameraCapability.SUPPORTS_DISCOVERY,
-        CameraCapability.SERIAL_SELECT,
-        CameraCapability.MODEL_HINT,
-        CameraCapability.LIVE_PREVIEW,
-        # STREAM_FORMAT is always supported — PyAV reopens the input with
-        # the new resolution/framerate on the next start_recording().
-        # UVC control flags are added at open() time after duvc-ctl probes
-        # the device; off Windows / on cameras with no controllable UVC
-        # properties they stay absent.
-        CameraCapability.STREAM_FORMAT,
-    }
-)
-
-DEFAULT_CODEC = "libx264"
-DEFAULT_PIX_FMT = "yuv420p"
-DEFAULT_FPS = 30
-
-OPEN_RETRY_DELAYS_S: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 2.0, 2.0)
-"""Backoff schedule for transient ``av.open`` failures (Windows DirectShow
-hold-time after ``cam.close()``). Cumulative ≈ 7.75 s, which covers the
-worst-case observed C930e release latency on Windows 11. POSIX paths
-normally open first try, so retries are dormant on Linux/macOS."""
-
-OPEN_RETRY_DEADLINE_S: float = 8.0
-"""Hard ceiling on retries; if we haven't opened by then the underlying
-problem is not transient and we surface the original error."""
-
-PREVIEW_INTERVAL_NS = 500_000_000
-"""2 Hz preview cadence (plan §10.2; Camera Protocol docstring). At 30 fps the
-adapter encodes one preview every 15 frames; the encode itself runs in the
-worker thread already used for the H.264 pipeline."""
-
-PREVIEW_MAX_WIDTH = 320
-"""Preview thumbnails are width-capped, aspect preserved. 320 px keeps the
-JPEG payload well under 30 kB at quality=70 even for high-detail frames."""
-
-PREVIEW_JPEG_QUALITY = 70
-"""Visually lossless enough for a thumbnail; cheap to encode at 2 Hz."""
-
-_PLATFORM_DEFAULTS: dict[str, tuple[str, str]] = {
-    "linux": ("v4l2", "/dev/video0"),
-    "darwin": ("avfoundation", "default"),
-    "win32": ("dshow", "video=0"),
-}
-
-
-def _platform_default_format() -> tuple[str, str]:
-    """Return ``(input_format, default_input_url)`` for the current OS.
-
-    Used when :attr:`CameraSpec.params` does not override. Only consulted by
-    :meth:`WebcamAdapter.run_pump`; push-mode callers never hit this.
-    """
-    return _PLATFORM_DEFAULTS.get(sys.platform, ("v4l2", "/dev/video0"))
 
 
 class WebcamAdapter:
@@ -310,7 +264,7 @@ class WebcamAdapter:
 
     @property
     def resource_id(self) -> str:
-        """Per-resource worker key (``docs/per-resource-worker-migration.md`` §4.10).
+        """Per-resource worker key.
 
         Prefers the camera serial (stable across enumeration order); falls
         back to the configured camera ``name`` when no serial is declared
@@ -1010,461 +964,3 @@ class WebcamAdapter:
                     severity=severity,
                 )
             )
-
-
-@dataclass(frozen=True, slots=True)
-class V4L2Probe:
-    """Identity fields extracted from sysfs for a V4L2 device path.
-
-    Each field is ``None`` when sysfs didn't expose it (non-Linux,
-    non-V4L2 path, missing parent USB descriptor, …) — the adapter
-    falls back to whatever was in :class:`CameraSpec` for those.
-    """
-
-    card_name: str | None
-    serial: str | None
-    bus_info: str | None
-
-
-def _probe_v4l2_info(device_path: str) -> V4L2Probe:
-    """Read sysfs metadata for ``/dev/videoN`` (Linux only).
-
-    Returns a fully-``None`` :class:`V4L2Probe` on every error path so
-    :meth:`WebcamAdapter.open` doesn't have to special-case missing files,
-    non-Linux platforms, or non-USB cameras (built-in MIPI sensors don't
-    expose a USB ``serial``). Layout queried:
-
-    * ``/sys/class/video4linux/<node>/name`` — card name (e.g. card_type
-      from the V4L2 driver, ``"Logitech Webcam C930e"``).
-    * ``/sys/class/video4linux/<node>/device`` — symlink to the parent
-      USB *interface*; one level up is the USB *device* whose ``serial``,
-      ``idVendor``, ``idProduct`` files identify the unit.
-    """
-    empty = V4L2Probe(card_name=None, serial=None, bus_info=None)
-    if not _is_linux_platform():
-        return empty
-    if not device_path.startswith("/dev/video"):
-        return empty
-    node = device_path.rsplit("/", 1)[-1]  # "video4"
-    sysfs_root = Path("/sys/class/video4linux") / node
-    if not sysfs_root.exists():
-        return empty
-
-    card_name: str | None = None
-    name_file = sysfs_root / "name"
-    try:
-        if name_file.exists():
-            card_name = name_file.read_text().strip() or None
-    except OSError:
-        pass
-
-    serial: str | None = None
-    bus_info: str | None = None
-    device_link = sysfs_root / "device"
-    try:
-        if device_link.exists():
-            interface_dir = device_link.resolve()
-            usb_device_dir = interface_dir.parent
-            serial_file = usb_device_dir / "serial"
-            if serial_file.exists():
-                serial = serial_file.read_text().strip() or None
-            bus_info = usb_device_dir.name or None
-    except OSError:
-        pass
-
-    return V4L2Probe(card_name=card_name, serial=serial, bus_info=bus_info)
-
-
-_DSHOW_MAX_FORMAT_RE: re.Pattern[str] = re.compile(
-    r"\bmax s=(\d+)x(\d+)\s+fps=([\d.]+)", re.IGNORECASE
-)
-_DSHOW_MIN_FORMAT_RE: re.Pattern[str] = re.compile(
-    r"\bmin s=(\d+)x(\d+)\s+fps=([\d.]+)", re.IGNORECASE
-)
-_DSHOW_MAX_SIZE_RE: re.Pattern[str] = re.compile(r"\bmax s=(\d+)x(\d+)\b", re.IGNORECASE)
-_DSHOW_MIN_SIZE_RE: re.Pattern[str] = re.compile(r"\bmin s=(\d+)x(\d+)\b", re.IGNORECASE)
-
-
-def _is_linux_platform() -> bool:
-    return sys.platform.startswith("linux")
-
-
-def _probe_dshow_format_info_sync(
-    input_url: str,
-) -> tuple[list[tuple[int, int]], dict[tuple[int, int], float]]:
-    """Enumerate ``(width, height)`` pairs and per-resolution max fps caps.
-
-    FFmpeg's dshow demuxer prints the device's pin formats when opened with
-    ``options={"list_options": "true"}`` — the call always fails with the
-    expected ``Immediate exit requested``, but the format dump lands on the
-    libav log channel first. We capture those lines via
-    :func:`av.logging.Capture` and parse the ``max s=WxH fps=NN.NNN`` tail
-    of each ``pixel_format=…`` line. Multiple pixel formats per resolution
-    collapse to the highest reported fps for that size.
-
-    Uses ``Capture(local=False)`` because this helper is invoked through
-    :func:`anyio.to_thread.run_sync`; the libav log callback fires from the
-    worker thread, and ``local=True`` would only route logs back to the
-    constructing thread's id. Restores the prior log level on exit so the
-    rest of capa's PyAV usage stays silent.
-
-    Returns ``([], {})`` on any failure (PyAV missing, non-Windows path,
-    parse mismatch). Callers fall back to a static resolution set and an
-    uncapped fps spinbox when nothing was probed.
-    """
-    old_level = av.logging.get_level()
-    av.logging.set_level(av.logging.VERBOSE)
-    try:
-        with av.logging.Capture(local=False) as logs, contextlib.suppress(Exception):
-            container = av.open(input_url, format="dshow", options={"list_options": "true"})
-            container.close()
-    finally:
-        av.logging.set_level(old_level)
-
-    seen: set[tuple[int, int]] = set()
-    resolutions: list[tuple[int, int]] = []
-    fps_caps: dict[tuple[int, int], float] = {}
-    for entry in logs:
-        message = entry[2] if len(entry) >= 3 else ""
-        size_w: int | None = None
-        size_h: int | None = None
-        fps_value: float | None = None
-        fmt_match = _DSHOW_MAX_FORMAT_RE.search(message) or _DSHOW_MIN_FORMAT_RE.search(message)
-        if fmt_match is not None:
-            size_w = int(fmt_match.group(1))
-            size_h = int(fmt_match.group(2))
-            with contextlib.suppress(ValueError):
-                fps_value = float(fmt_match.group(3))
-        else:
-            size_match = _DSHOW_MAX_SIZE_RE.search(message) or _DSHOW_MIN_SIZE_RE.search(message)
-            if size_match is not None:
-                size_w = int(size_match.group(1))
-                size_h = int(size_match.group(2))
-        if size_w is None or size_h is None:
-            continue
-        wh = (size_w, size_h)
-        if wh not in seen:
-            seen.add(wh)
-            resolutions.append(wh)
-        if fps_value is not None and fps_value > 0:
-            existing = fps_caps.get(wh)
-            if existing is None or fps_value > existing:
-                fps_caps[wh] = fps_value
-    resolutions.sort(key=lambda wh: (wh[0] * wh[1], wh[0]))
-    return resolutions, fps_caps
-
-
-def _is_transient_open_error(exc: BaseException) -> bool:
-    """Return ``True`` for ``av.open`` errors that backoff is likely to clear.
-
-    Windows DirectShow returns ``OSError [Errno 5] I/O error`` while the
-    previous filter graph is still being torn down. PyAV surfaces this
-    directly via :class:`OSError` (and its :class:`av.error.FFmpegError`
-    subclass), so matching on ``errno == 5`` covers both code paths.
-    Non-transient errors (missing device node, codec not found, permission
-    denied) propagate immediately so we don't hide real wiring problems.
-    """
-    if not isinstance(exc, OSError):
-        return False
-    return getattr(exc, "errno", None) == 5
-
-
-def _advance_decoder(decoder: Any) -> av.VideoFrame | None:
-    """Pull the next decoded frame from a PyAV decoder; ``None`` at EOF.
-
-    Wrapped in :func:`anyio.to_thread.run_sync` by :meth:`WebcamAdapter.run_pump`
-    so the per-frame libav decode (~33 ms at 30 fps from a UVC source) does
-    not block the asyncio loop.
-    """
-    frame = next(decoder, None)
-    if frame is None:
-        return None
-    assert isinstance(frame, av.VideoFrame)
-    return frame
-
-
-def _reformat_to_rgb24(frame: av.VideoFrame) -> np.ndarray:
-    """Convert a decoded frame to an HxWx3 uint8 RGB ndarray.
-
-    Wrapped by :func:`anyio.to_thread.run_sync` for the same reason as
-    :func:`_advance_decoder` — colour conversion is CPU-heavy.
-    """
-    return frame.reformat(format="rgb24").to_ndarray()
-
-
-def _encode_preview_jpeg(frame: np.ndarray) -> bytes:
-    """Width-cap to :data:`PREVIEW_MAX_WIDTH` (aspect preserved) and JPEG-encode.
-
-    Runs inside ``_push_frame_sync``, which the async wrapper already executes
-    via :func:`anyio.to_thread.run_sync`, so the libjpeg work stays off the
-    asyncio loop.
-    """
-    img = Image.fromarray(frame)
-    if img.width > PREVIEW_MAX_WIDTH:
-        new_h = max(1, round(img.height * (PREVIEW_MAX_WIDTH / img.width)))
-        img = img.resize((PREVIEW_MAX_WIDTH, new_h), Image.Resampling.BILINEAR)
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=PREVIEW_JPEG_QUALITY)
-    return buf.getvalue()
-
-
-async def _drain_stream[T](recv: MemoryObjectReceiveStream[T]) -> AsyncIterator[T]:
-    """Yield items from a memory object stream until the send end is closed.
-
-    Mirrors :func:`capa.devices.sim.flir_ir_sim._drain_stream`. Centralizing
-    in :mod:`capa.devices.camera.base` would invite a circular import; keep
-    the duplicate.
-    """
-    async for item in recv:
-        yield item
-
-
-__all__ = [
-    "DEFAULT_CODEC",
-    "DEFAULT_FPS",
-    "DEFAULT_PIX_FMT",
-    "DESCRIPTOR",
-    "OPEN_RETRY_DEADLINE_S",
-    "OPEN_RETRY_DELAYS_S",
-    "PREVIEW_INTERVAL_NS",
-    "PREVIEW_JPEG_QUALITY",
-    "PREVIEW_MAX_WIDTH",
-    "WebcamAdapter",
-    "WebcamParams",
-    "discover_cameras",
-    "handshake",
-]
-
-
-# ---------------------------------------------------------------------------
-# Module-level discovery + handshake (plan §7.2 item 1).
-#
-# Both the Setup editor's DiscoveryDialog and Layer 5 of the validation
-# pipeline reach for these without ever constructing an adapter. They
-# must be passive (no recording, no RunClock) and platform-tolerant —
-# a missing OS API returns an empty list, not an exception.
-# ---------------------------------------------------------------------------
-
-
-async def discover_cameras() -> list[dict[str, Any]]:
-    """Walk the local OS camera enumeration APIs and return a row per
-    visible visible-light camera.
-
-    Returns dicts shaped like the other adapters' ``discover()`` output
-    so the CLI can render them uniformly::
-
-        {
-            "adapter": "capa.devices.camera.webcam",
-            "selector": "/dev/video0" | "video=Logitech C920" | "0",
-            "model":    "Logitech C920",
-            "serial":   "ABC123" | None,
-            "transport": "usb",
-        }
-
-    Platform paths:
-
-    * **Linux** — walks ``/sys/class/video4linux/video*`` and reuses the
-      existing :func:`_probe_v4l2_info` helper so card-name / USB serial
-      come from sysfs without opening the device.
-    * **Windows** — uses ``duvc_ctl.list_devices()`` when the wheel is
-      installed. Returns one row per visible DirectShow camera.
-    * **macOS / unsupported** — returns ``[]``. AVFoundation
-      enumeration is a follow-up; for now operators add macOS cameras
-      by hand.
-    """
-    platform = sys.platform
-    if platform.startswith("linux"):
-        return await anyio.to_thread.run_sync(_enumerate_v4l2_sync)
-    if platform == "win32":
-        return await _enumerate_directshow()
-    return []
-
-
-def _enumerate_v4l2_sync() -> list[dict[str, Any]]:
-    """List visible-light V4L2 capture nodes via sysfs (Linux only)."""
-    root = Path("/sys/class/video4linux")
-    if not root.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    seen_devices: set[str] = set()
-    for node_dir in sorted(root.iterdir()):
-        node = node_dir.name
-        if not re.fullmatch(r"video\d+", node):
-            continue
-        device_path = f"/dev/{node}"
-        probed = _probe_v4l2_info(device_path)
-        # bus_info is the USB device id; collapse the multiple
-        # /dev/videoN nodes one webcam exposes (capture + metadata) to
-        # a single row keyed on the bus.
-        bus = probed.bus_info or device_path
-        if bus in seen_devices:
-            continue
-        seen_devices.add(bus)
-        rows.append(
-            {
-                "adapter": "capa.devices.camera.webcam",
-                "selector": device_path,
-                "model": probed.card_name,
-                "serial": probed.serial,
-                "transport": "usb",
-            }
-        )
-    return rows
-
-
-async def _enumerate_directshow() -> list[dict[str, Any]]:
-    """List DirectShow cameras via duvc-ctl (Windows only).
-
-    Falls back to an empty list when the duvc-ctl wheel is missing —
-    operators on a stripped-down Windows install simply see no camera
-    rows rather than a crash.
-    """
-    try:
-        from capa.devices.camera._uvc import _duvc  # noqa: PLC0415
-    except ImportError:
-        return []
-    if _duvc is None:
-        return []
-    try:
-        devices = await anyio.to_thread.run_sync(_duvc.list_devices)
-    except Exception:
-        return []
-    rows: list[dict[str, Any]] = []
-    for dev in devices or ():
-        name = getattr(dev, "name", None)
-        path = getattr(dev, "path", None)
-        rows.append(
-            {
-                "adapter": "capa.devices.camera.webcam",
-                "selector": f"video={name}" if name else (path or ""),
-                "model": name,
-                "serial": path,  # duvc path is the DirectShow moniker
-                "transport": "directshow",
-            }
-        )
-    return rows
-
-
-def _match_camera_row(
-    rows: list[dict[str, Any]],
-    *,
-    model_hint: str | None,
-    serial: str | None,
-) -> dict[str, Any] | None:
-    """Apply the plan §12.1 selector rules to a discover result list.
-
-    Returns the chosen row or ``None`` when no unique match exists.
-    """
-    if serial is not None:
-        for row in rows:
-            row_serial = row.get("serial")
-            if isinstance(row_serial, str) and serial.lower() in row_serial.lower():
-                return row
-        return None
-    if model_hint is not None:
-        matches = [
-            row
-            for row in rows
-            if isinstance(row.get("model"), str) and model_hint.lower() in row["model"].lower()
-        ]
-        if not matches:
-            return None
-        return matches[0]
-    if len(rows) == 1:
-        return rows[0]
-    return None
-
-
-async def handshake(cam_spec: dict[str, Any]) -> str:
-    """Layer-5 read-only verification for a configured visible camera.
-
-    Unlike device handshakes (which open + identify + close a serial
-    port), a real DirectShow / V4L2 open holds the capture pin for
-    100s of ms and competes with whatever else might be watching the
-    camera. We use the cheaper "the camera shows up in discovery"
-    check instead — sufficient to catch the common wiring failure
-    (cable yanked, device path renumbered) without paying the
-    capture-pin cost. Plan §7.2 item 1.
-    """
-    rows = await discover_cameras()
-    if not rows:
-        raise AdapterError(
-            "no visible cameras enumerated on this host (sysfs/duvc-ctl returned no devices)"
-        )
-    model_hint = cam_spec.get("model_hint")
-    serial = cam_spec.get("serial")
-    chosen = _match_camera_row(
-        rows,
-        model_hint=model_hint if isinstance(model_hint, str) else None,
-        serial=serial if isinstance(serial, str) else None,
-    )
-    if chosen is None:
-        wanted = (
-            f"serial={serial!r}"
-            if serial is not None
-            else f"model_hint={model_hint!r}"
-            if model_hint is not None
-            else "no selector (and >1 camera present)"
-        )
-        raise AdapterError(f"no unique camera match for {wanted}; saw {len(rows)} devices")
-    model = chosen.get("model") or "?"
-    serial_seen = chosen.get("serial") or "?"
-    selector = chosen.get("selector") or "?"
-    return f"webcam model={model!r} serial={serial_seen!r} selector={selector!r}"
-
-
-# ---------------------------------------------------------------------------
-# Setup-editor descriptor (plan §5.7).
-# ---------------------------------------------------------------------------
-
-
-from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
-
-
-class WebcamParams(BaseModel):
-    """View model for :class:`WebcamAdapter`'s ``params`` dict (plan §4.9.3).
-
-    Mirrors :meth:`WebcamAdapter.__init__`'s keyword arguments. Used by
-    the Setup editor's Cameras section to produce a curated auto-form
-    over otherwise free-form scalar params; not consulted at runtime
-    (the adapter validates kwargs the existing way)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    fps: float = Field(default=DEFAULT_FPS, gt=0)
-    width: int = Field(default=1280, gt=0)
-    height: int = Field(default=720, gt=0)
-    codec: str = DEFAULT_CODEC
-    pix_fmt: str = DEFAULT_PIX_FMT
-    input_url: str | None = None
-    input_format: str | None = None
-
-
-def _build_descriptor() -> AdapterDescriptor:
-    from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
-
-    return AdapterDescriptor(
-        id="capa.devices.camera.webcam",
-        label="USB webcam (visible)",
-        family="camera_visible",
-        adapter_factory=WebcamAdapter,
-        params_model=WebcamParams,
-        supported_binding_sources=(),  # Cameras don't bind via SourceBinding
-        default_params={
-            "fps": DEFAULT_FPS,
-            "width": 1280,
-            "height": 720,
-            "codec": DEFAULT_CODEC,
-            "pix_fmt": DEFAULT_PIX_FMT,
-        },
-        channel_templates=(),
-        discoverable=True,
-        handshake_available=True,
-    )
-
-
-DESCRIPTOR = _build_descriptor()
-
-from capa.devices.registry import register as _register  # noqa: E402
-
-_register(DESCRIPTOR)

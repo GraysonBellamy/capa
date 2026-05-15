@@ -292,7 +292,7 @@ class FlirIrSim:
 
     @property
     def resource_id(self) -> str:
-        """Per-resource worker key (``docs/per-resource-worker-migration.md`` §4.10).
+        """Per-resource worker key.
 
         Sim cameras share the ``sim:`` scheme with sim device adapters so
         ``build_workers`` validation treats them uniformly. The body is the

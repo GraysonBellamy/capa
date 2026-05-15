@@ -20,7 +20,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from capa.app import app
+from capa.cli import app
 from capa.storage.catalog import RunCatalog
 from capa.storage.integrity import verify
 from capa.storage.manifest import BundleManifest

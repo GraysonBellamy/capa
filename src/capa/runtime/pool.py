@@ -2,8 +2,7 @@
 
 The pool owns every worker the loaded config produces, opens hardware
 once per config, lives across runs, and exposes manual dispatch when no
-run is armed (subsuming today's
-:class:`~capa.devices.registry.DeviceRegistry`).
+run is armed.
 
 State machine: ``CLOSED → OPENING → OPEN → CLOSING → CLOSED``
 (edges enumerated in :data:`~capa.runtime.lifecycle.LEGAL_POOL_EDGES`).
@@ -37,7 +36,6 @@ from capa.devices.camera.metadata import WebcamMetadata
 from capa.devices.records import DeviceEmission
 from capa.experiment.config import ExperimentConfig
 from capa.runtime.bridge import BridgePolicy, ThreadBridge
-from capa.runtime.build import build_workers
 from capa.runtime.emissions import WorkerEmission
 from capa.runtime.errors import PoolStateError, UnknownDeviceError
 from capa.runtime.lifecycle import (
@@ -109,22 +107,33 @@ class WorkerPool:
         config: ExperimentConfig,
         *,
         runner_factory: Callable[..., WorkerRunner] | None = None,
-        outbound_capacity: int = 64,
         preview_consumer_loop: asyncio.AbstractEventLoop | None = None,
         preview_capacity: int = 4,
     ) -> WorkerPool:
         """Build a pool from a real :class:`ExperimentConfig`.
 
-        Validation (resource conflicts) runs synchronously here; if it
-        fails, the resulting :class:`ResourceConflict` is raised before
-        any worker is constructed.
+        Materialization and validation run synchronously here.
+        :class:`~capa.devices.materialize.ConfigMaterializationError`
+        surfaces adapter construction failures; :class:`ResourceConflict`
+        surfaces grouping conflicts. Both fire before any worker is
+        constructed, so a misconfigured config has no hardware side
+        effects.
 
         ``preview_consumer_loop``: the loop that will drain preview
         bridges (the qasync UI loop in production; the test loop in
         integration tests). When ``None`` (headless), no preview bridges
         are constructed and the camera adapter's preview lifecycle
         no-ops — zero overhead for headless runs.
+
+        Outbound bridge capacity is derived per worker from each
+        adapter's :attr:`DeviceAdapter.expected_emission_rate_hz` inside
+        :func:`build_workers`; the previous ``outbound_capacity`` kwarg
+        has been retired.
         """
+        from capa.devices.materialize import materialize_adapters  # noqa: PLC0415
+        from capa.runtime.build import build_workers  # noqa: PLC0415
+
+        materialized = materialize_adapters(config)
         preview_bridges: dict[str, ThreadBridge[PreviewFrame]] = {}
         if preview_consumer_loop is not None:
             for cam in config.hardware.cameras:
@@ -135,9 +144,8 @@ class WorkerPool:
                     policy=BridgePolicy.DROP_OLDEST,
                 )
         workers, device_to_resource = build_workers(
-            config,
+            materialized,
             runner_factory=runner_factory,
-            outbound_capacity=outbound_capacity,
             preview_bridges=preview_bridges,
         )
         return cls(

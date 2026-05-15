@@ -10,7 +10,7 @@ Why a frozen dataclass over passing four arguments to ``arm()``:
 1. "The run context" is a single conceptual object — bundling reads
    naturally.
 2. The :class:`Conductor` passes the same context to several subsystems
-   (workers, drain tasks, procedure runner, watchdog). Bundling means
+   (workers, drain tasks, procedure runner, saturation monitor). Bundling means
    no plumbing churn when adding a new consumer.
 3. Tests construct a context once and re-use it across multiple
    arm/disarm cycles in the same run, which mirrors how real runs work.
@@ -86,8 +86,6 @@ class WriterRef(Protocol):
         their own timestamps and severity (from the
         :class:`~capa.devices.camera.base.CameraEvent`), and need a
         ``camera:<name>`` source attribution rather than the ref's default.
-        Mirrors the camera_task drain semantics in
-        ``cameras.py:_drain_events`` so bundle parity holds.
         """
         ...
 

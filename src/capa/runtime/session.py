@@ -1,12 +1,12 @@
 """:class:`RealRunSession` — production :class:`RunSession` impl.
 
-Bundles the per-run resources that today's :class:`ExperimentEngine`
-opens inline at the top of :meth:`run`: the :class:`RunBundleWriter`
-(durable storage), the :class:`WriterThread` (off-loop sink writes), the
-:class:`RunClock` (run-authoritative monotonic clock), the
-:class:`Authorization` handle (audit-stamping for device commands), and
-the catalog row registration. The conductor uses it as an async
-context-manager-ish lifecycle (``open()`` / ``set_outcome()`` / ``close()``).
+Bundles the per-run resources opened at run-start: the
+:class:`RunBundleWriter` (durable storage), the :class:`WriterThread`
+(off-loop sink writes), the :class:`RunClock` (run-authoritative
+monotonic clock), the :class:`Authorization` handle (audit-stamping for
+device commands), and the catalog row registration. The conductor uses
+it as an async context-manager-ish lifecycle (``open()`` /
+``set_outcome()`` / ``close()``).
 
 What this module owns (per run):
 
@@ -377,7 +377,7 @@ class RealRunSession:
                 self._logger = structlog.get_logger("capa")
 
             # Spawn the writer thread BEFORE anything records into the
-            # bundle. Same discipline as today's engine (engine.py:568-580).
+            # bundle, so no on-loop write path can race the worker.
             writer_metrics = self._metrics.writer("bundle") if self._metrics is not None else None
             self._writer_thread = WriterThread(
                 self._bundle_writer,
@@ -552,8 +552,7 @@ class RealRunSession:
         """Walk ``config.hardware.devices`` (canonical order) and pair each
         with its live adapter for identity introspection.
 
-        Mirrors :meth:`ExperimentEngine._collect_equipment_blocks` so
-        ``equipment.toml`` blocks are bit-identical across paths.
+        Emits one ``equipment.toml`` block per device in canonical order.
         """
         blocks: list[dict[str, Any]] = []
         for dev in self._config.hardware.devices:

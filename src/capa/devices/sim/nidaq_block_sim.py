@@ -30,6 +30,7 @@ from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
 from capa.devices.adapter import (
     AdapterLifecycle,
+    AdapterStartContext,
     Capability,
     CommandResult,
     DeviceCommand,
@@ -41,8 +42,10 @@ from capa.devices.records import (
 )
 from capa.devices.sim._base import (
     channels_for_device,
+    make_accepted_result,
     make_record_id,
     now_utc,
+    reject_unless_authorized,
     synth_timing,
 )
 from capa.devices.sim._signals import SignalFn
@@ -114,9 +117,9 @@ class NIDAQBlockSim:
     async def close(self) -> None:
         self._lifecycle.close()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         self._lifecycle.start()
-        self._clock = clock or RunClock.now()
+        self._clock = ctx.clock
         self._block_index = 0
         self._first_sample_index = 0
         self._task_started_at_utc = self._clock.started_utc
@@ -232,20 +235,13 @@ class NIDAQBlockSim:
         return list(self._blocks)
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
-        if cmd.authorization_id is None and cmd.confirmed_by is None:
-            return CommandResult(
-                accepted=False,
-                detail="nidaq_block_sim refuses unauthorized commands",
-                t_mono_ns=(self._clock or RunClock.now()).t_mono_ns(),
-                t_utc=now_utc(),
-            )
         clock = self._clock or RunClock.now()
-        return CommandResult(
-            accepted=True,
-            detail=f"sim ack {cmd.kind}",
-            t_mono_ns=clock.t_mono_ns(),
-            t_utc=now_utc(),
+        rejection = reject_unless_authorized(
+            cmd, adapter_id=ADAPTER_ID, device_name=self.name, clock=clock
         )
+        if rejection is not None:
+            return rejection
+        return make_accepted_result(detail=f"sim ack {cmd.kind}", clock=clock)
 
 
 __all__ = ["ADAPTER_ID", "DESCRIPTOR", "NIDAQBlockSim"]

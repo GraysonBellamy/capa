@@ -1,24 +1,29 @@
-""":func:`build_workers` — group adapters by resource and validate the grouping.
+""":func:`build_workers` — group resolved adapters into per-resource workers.
 
-The validation runs **synchronously, before any worker thread spawns**:
-a misconfigured config fails fast with no hardware side-effects. Any
-:class:`ResourceConflict` raised here propagates out of
-:meth:`WorkerPool.open` before the pool's state moves out of CLOSED.
+Materialization (TOML rows → constructed adapters) lives in
+:mod:`capa.devices.materialize`. This module accepts a
+:class:`~capa.devices.materialize.MaterializedHardware` and produces
+unstarted :class:`~capa.runtime.worker.Worker` instances grouped by
+``resource_id``. Resource-conflict validation runs synchronously here,
+**before any worker thread spawns**: a misconfigured config fails fast
+with no hardware side-effects. Any :class:`ResourceConflict` raised
+propagates out of :meth:`WorkerPool.open` before the pool's state moves
+out of CLOSED.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import Any, cast
+import math
+from collections.abc import Callable, Iterable, Mapping
+from typing import Final
 
 import structlog
 
 from capa.config.problems import ConfigProblem
-from capa.devices.adapter import DeviceAdapter
-from capa.devices.camera.base import Camera
-from capa.experiment.config import ExperimentConfig
+from capa.devices.materialize import MaterializedHardware, collect_resource_problems
+from capa.devices.resolved import ResolvedAdapter
+from capa.experiment.config import RuntimeConfig
 from capa.runtime.bridge import ThreadBridge
-from capa.runtime.camera_adapter import CameraDeviceAdapter, make_camera_adapter
 from capa.runtime.errors import ResourceConflict
 from capa.runtime.preview import PreviewFrame
 from capa.runtime.runner import ThreadedRunner, WorkerRunner
@@ -27,11 +32,22 @@ from capa.runtime.worker import Worker
 _logger = structlog.get_logger("capa.runtime.build")
 
 
+_BRIDGE_CAPACITY_FACTOR: Final[float] = 8.0
+"""How many seconds of emission headroom the worker outbound bridge
+holds at the adapter's declared rate. Documented at
+[runtime-architecture.md §13](docs/runtime-architecture.md). Internal
+constant — not part of the user-facing :class:`RuntimeConfig`."""
+
+_BRIDGE_MIN_CAPACITY: Final[int] = 64
+"""Floor for the per-worker outbound bridge. Below ~64 slots a transient
+GC pause or scheduler hiccup pushes BLOCK policy bridges into the
+saturation deadline path. Internal constant."""
+
+
 def build_workers(
-    config: ExperimentConfig,
+    materialized: MaterializedHardware,
     *,
     runner_factory: Callable[..., WorkerRunner] | None = None,
-    outbound_capacity: int = 64,
     preview_bridges: Mapping[str, ThreadBridge[PreviewFrame]] | None = None,
 ) -> tuple[dict[str, Worker], dict[str, str]]:
     """Build one :class:`Worker` per ``resource_id`` group.
@@ -40,8 +56,8 @@ def build_workers(
 
     * ``workers`` keys are ``resource_id`` strings; values are unstarted
       :class:`Worker` instances.
-    * ``device_to_resource`` maps each ``DeviceConfig.name`` / camera
-      name to its ``resource_id`` — the lookup the pool uses to route
+    * ``device_to_resource`` maps each adapter name (devices + cameras)
+      to its ``resource_id`` — the lookup the pool uses to route
       :meth:`WorkerPool.dispatch` calls.
 
     Validation runs *before* any :class:`Worker` is instantiated. A
@@ -49,38 +65,23 @@ def build_workers(
     :meth:`WorkerPool.open` and surfaces with the offending adapter
     names, so the operator's TOML fix is unambiguous.
 
-    Cameras are constructed alongside devices, wrapped in
-    :class:`CameraDeviceAdapter` (which implements the
-    :class:`DeviceAdapter` Protocol over a
-    :class:`~capa.devices.camera.base.Camera`), and grouped into
-    workers by their ``resource_id`` the same way device adapters are.
-    The wrapper translates the camera's ``start_recording`` /
-    ``stop_recording`` lifecycle onto the device-adapter
-    ``start`` / ``stop`` calls the worker drives.
+    Per-worker outbound bridge capacity is derived from the sum of each
+    adapter's :attr:`DeviceAdapter.expected_emission_rate_hz`:
+    ``max(_BRIDGE_MIN_CAPACITY, ceil(_BRIDGE_CAPACITY_FACTOR * total_rate))``.
+    Adapters that return ``None`` contribute nothing to the sum; a
+    worker whose adapters all return ``None`` falls back to the floor.
 
     ``runner_factory`` defaults to :class:`ThreadedRunner` — production
     use. Tests pass :class:`InlineRunner` (or a class compatible with the
     runner protocol) to get deterministic, single-loop behaviour.
-
-    ``outbound_capacity`` is the worker outbound :class:`ThreadBridge`
-    capacity. Currently a fixed value; a future change will derive
-    per-worker capacities from ``config.runtime.bridge_capacity_factor
-    * rate_hz``.
     """
-    device_adapters = _construct_adapters_from_config(config)
-    camera_adapters = _construct_camera_adapters_from_config(config)
-    all_adapters: list[DeviceAdapter] = [
-        *device_adapters,
-        *(cast(DeviceAdapter, adapter) for adapter in camera_adapters),
-    ]
-    _validate_resources(all_adapters, config)
+    _validate_resources(materialized)
 
-    by_resource: dict[str, list[DeviceAdapter]] = {}
+    by_resource: dict[str, list[ResolvedAdapter]] = {}
     device_to_resource: dict[str, str] = {}
-    for adapter in all_adapters:
-        rid = adapter.resource_id
-        by_resource.setdefault(rid, []).append(adapter)
-        device_to_resource[adapter.name] = rid
+    for r in materialized.adapters:
+        by_resource.setdefault(r.resource_id, []).append(r)
+        device_to_resource[r.name] = r.resource_id
 
     preview_bridges = preview_bridges or {}
     workers: dict[str, Worker] = {}
@@ -95,155 +96,62 @@ def build_workers(
         # Non-camera workers receive an empty map; camera workers
         # receive the bridge keyed by their camera spec name.
         per_worker_previews = {
-            a.name: preview_bridges[a.name] for a in group if a.name in preview_bridges
+            r.name: preview_bridges[r.name] for r in group if r.name in preview_bridges
         }
+        capacity = _outbound_capacity_for(r.expected_rate_hz for r in group)
+        on_failure = {r.name: r.on_failure for r in group}
         workers[resource_id] = Worker(
             resource_id=resource_id,
-            adapters=group,
+            adapters=[r.adapter for r in group],
             runner=runner,
-            outbound_capacity=outbound_capacity,
+            outbound_capacity=capacity,
             preview_bridges=per_worker_previews,
+            on_failure=on_failure,
         )
 
     _logger.info(
         "runtime.build_workers",
         worker_count=len(workers),
-        device_adapter_count=len(device_adapters),
-        camera_adapter_count=len(camera_adapters),
+        adapter_count=len(materialized.adapters),
         resources=tuple(workers),
     )
     return workers, device_to_resource
 
 
-def _construct_camera_adapters_from_config(
-    config: ExperimentConfig,
-) -> list[CameraDeviceAdapter]:
-    """Build a :class:`CameraDeviceAdapter` for each ``hardware.cameras`` entry.
+def _outbound_capacity_for(rates: Iterable[float | None]) -> int:
+    """Compute the worker outbound bridge capacity from declared rates.
 
-    The camera class is read from the adapter's :class:`AdapterDescriptor`
-    in the registry (each camera module registers a descriptor whose
-    ``adapter_factory`` is the camera class itself). The factory hands
-    the wrapper a :class:`_ClockProxy` that the wrapper rebinds at
-    :meth:`start` time; cameras themselves never learn that the clock
-    is late-bound.
+    Adapters that decline to declare a rate (return ``None``) contribute
+    nothing; a worker whose adapters all decline falls back to the
+    minimum floor. The formula matches the documented
+    ``bridge_capacity_factor`` at [runtime-architecture.md §13]
+    (docs/runtime-architecture.md).
     """
-    out: list[CameraDeviceAdapter] = []
-    for spec in config.hardware.cameras:
-        cls = _resolve_camera_class(spec.adapter)
-        out.append(make_camera_adapter(camera_cls=cls, spec=spec))
-    return out
-
-
-def _resolve_camera_class(adapter_id: str) -> type[Camera]:
-    """Look up the camera class for ``adapter_id`` via the registry."""
-    from capa.devices.registry import require_descriptor  # noqa: PLC0415
-
-    try:
-        descriptor = require_descriptor(adapter_id)
-    except KeyError as exc:
-        raise ResourceConflict(str(exc)) from exc
-    factory = descriptor.adapter_factory
-    if not isinstance(factory, type):
-        raise ResourceConflict(
-            f"camera descriptor {adapter_id!r} adapter_factory must be a Camera "
-            f"class, got {type(factory).__name__}"
-        )
-    return cast(type[Camera], factory)
-
-
-def _construct_adapters_from_config(config: ExperimentConfig) -> list[DeviceAdapter]:
-    """Walk ``config.hardware.devices`` and instantiate each declared adapter.
-
-    Each :class:`DeviceConfig.adapter` resolves to an
-    :class:`AdapterDescriptor` in the registry; the descriptor's
-    ``adapter_factory`` is invoked as
-    ``factory(name=..., **params)`` (or its ``from_params`` classmethod
-    when present, which sim adapters use to materialise signal dicts).
-
-    A :class:`TypeError` from either call is re-raised as
-    :class:`ResourceConflict` so pool-open surfaces config-shaped
-    failures alongside resource-ID collisions.
-    """
-    from capa.devices.registry import require_descriptor  # noqa: PLC0415
-
-    out: list[DeviceAdapter] = []
-    channels = list(config.hardware.channels)
-    for dev in config.hardware.devices:
-        try:
-            descriptor = require_descriptor(dev.adapter)
-        except KeyError as exc:
-            raise ResourceConflict(str(exc)) from exc
-        factory = descriptor.adapter_factory
-        from_params = getattr(factory, "from_params", None)
-        try:
-            if callable(from_params):
-                adapter = from_params(name=dev.name, **dev.params)
-            else:
-                adapter = factory(name=dev.name, **dev.params)
-        except TypeError as exc:
-            raise ResourceConflict(
-                f"failed to construct adapter {dev.name!r} ({dev.adapter}): {exc}"
-            ) from exc
-        # Bind the adapter to its channel specs so streams emit
-        # :class:`ChannelSample`\\ s alongside the raw
-        # :class:`SourceRecord`\\ s. The conductor does it here, before
-        # any worker is built, so the binding is immutable for the
-        # worker's lifetime.
-        configure = getattr(adapter, "configure_channels", None)
-        if callable(configure):
-            configure(channels)
-        out.append(cast(DeviceAdapter, adapter))
-    return out
+    total = sum(r for r in rates if r is not None)
+    if total <= 0.0:
+        return _BRIDGE_MIN_CAPACITY
+    return max(_BRIDGE_MIN_CAPACITY, math.ceil(_BRIDGE_CAPACITY_FACTOR * total))
 
 
 # ---------------------------------------------------------------------------
-# Resource validation.
+# Resource validation — raising boundary.
 # ---------------------------------------------------------------------------
 
 
-def _validate_resources(adapters: Sequence[DeviceAdapter], config: ExperimentConfig) -> None:
+def _validate_resources(materialized: MaterializedHardware) -> None:
     """Run resource-conflict checks; raise on first conflict.
 
-    Boundary wrapper: collects :class:`ConfigProblem`s via
-    :func:`collect_resource_problems`, then raises
-    :class:`ResourceConflict` for the first error so existing call sites
-    keep their exception contract. Setup-editor Layer-4 calls
-    :func:`collect_resource_problems` directly.
-
-    The active checks:
-
-    1. **DAQmx physical-channel uniqueness.** Two adapters cannot claim the
-       same physical channel (e.g. ``cDAQ1Mod1/ai0``) — DAQmx will throw
-       ``-50103 resource reserved`` if attempted.
-    2. **Webcam handle uniqueness.** Same ``webcam:N`` may not appear in
-       two adapters.
-    3. **Global SDK singletons** are recorded into a side log for the
-       conductor to include in the bundle manifest.
+    Boundary wrapper: collects :class:`ConfigProblem`\\ s via
+    :func:`capa.devices.materialize.collect_resource_problems`, then
+    raises :class:`ResourceConflict` for the first error so existing
+    call sites keep their exception contract. Setup-editor Layer-4
+    calls :func:`collect_resource_problems` directly.
     """
-    problems = collect_resource_problems(adapters, config)
+    problems = collect_resource_problems(materialized)
     errors = [p for p in problems if p.severity == "error"]
     if errors:
         first = errors[0]
         raise _resource_conflict_from_problem(first)
-
-
-def collect_resource_problems(
-    adapters: Sequence[DeviceAdapter], config: ExperimentConfig
-) -> list[ConfigProblem]:
-    """Layer-4 entry point: collect all resource problems without raising.
-
-    Same checks as :func:`_validate_resources`, but each yields a
-    :class:`ConfigProblem` instead of raising. The Setup editor's
-    validation pipeline calls this; ``build_workers`` calls the raising
-    boundary above.
-    """
-    problems: list[ConfigProblem] = []
-    problems.extend(_check_daqmx_channel_uniqueness(adapters))
-    problems.extend(_check_webcam_uniqueness(adapters))
-    # Global SDK constraints are still logged for the bundle manifest,
-    # not reported as problems.
-    _record_global_sdk_constraints(adapters, config)
-    return problems
 
 
 def _resource_conflict_from_problem(problem: ConfigProblem) -> ResourceConflict:
@@ -253,17 +161,9 @@ def _resource_conflict_from_problem(problem: ConfigProblem) -> ResourceConflict:
     runtime exception payload is unchanged from the pre-refactor shape.
     Auxiliary fields live under ``ConfigProblem.path`` and the message.
     """
-    # The collecting checks below stash the conflict metadata into a
-    # private extra-field on the dataclass-like model via the message
-    # and the path; here we reconstruct ResourceConflict from the
-    # problem's well-known fields. ``path`` is
-    # ("conflicting_names", a, b) for the two-name pair check.
     names: tuple[str, ...] = ()
     resource_key: str | None = None
-    # Convention: collecting helpers below put the names tuple at path[0:2]
-    # and the resource key in path[-1].
     if len(problem.path) >= 3 and problem.path[0] == "conflict":
-        # path = ("conflict", name_a, name_b, resource_key)
         names = (str(problem.path[1]), str(problem.path[2]))
         if len(problem.path) >= 4:
             resource_key = str(problem.path[3])
@@ -274,94 +174,13 @@ def _resource_conflict_from_problem(problem: ConfigProblem) -> ResourceConflict:
     )
 
 
-def _check_daqmx_channel_uniqueness(
-    adapters: Sequence[DeviceAdapter],
-) -> list[ConfigProblem]:
-    """No two adapters may claim the same DAQmx physical channel."""
-    problems: list[ConfigProblem] = []
-    channel_to_adapter: dict[str, str] = {}
-    for adapter in adapters:
-        if not adapter.resource_id.startswith("daqmx:"):
-            continue
-        channels: Sequence[str] = getattr(adapter, "physical_channels", ())
-        for ch in channels:
-            prev = channel_to_adapter.get(ch)
-            if prev is not None and prev != adapter.name:
-                problems.append(
-                    ConfigProblem(
-                        severity="error",
-                        code="devices.daqmx_channel_conflict",
-                        message=(
-                            f"DAQmx physical channel {ch!r} claimed by both "
-                            f"{prev!r} and {adapter.name!r}"
-                        ),
-                        section="devices",
-                        path=("conflict", prev, adapter.name, ch),
-                    )
-                )
-            channel_to_adapter[ch] = adapter.name
-    return problems
+# ---------------------------------------------------------------------------
+# Module re-exports.
+# ---------------------------------------------------------------------------
 
-
-def _check_webcam_uniqueness(adapters: Sequence[DeviceAdapter]) -> list[ConfigProblem]:
-    """Same ``webcam:<id>`` may not be claimed by two adapters."""
-    problems: list[ConfigProblem] = []
-    webcam_to_adapter: dict[str, str] = {}
-    for adapter in adapters:
-        rid = adapter.resource_id
-        if not rid.startswith("webcam:"):
-            continue
-        prev = webcam_to_adapter.get(rid)
-        if prev is not None and prev != adapter.name:
-            problems.append(
-                ConfigProblem(
-                    severity="error",
-                    code="cameras.webcam_handle_conflict",
-                    message=(
-                        f"webcam handle {rid!r} claimed by both {prev!r} and {adapter.name!r}"
-                    ),
-                    section="cameras",
-                    path=("conflict", prev, adapter.name, rid),
-                )
-            )
-        webcam_to_adapter[rid] = adapter.name
-    return problems
-
-
-def _record_global_sdk_constraints(
-    adapters: Sequence[DeviceAdapter], config: ExperimentConfig
-) -> None:
-    """Note global-SDK singletons in the structlog stream.
-
-    NI-DAQmx, PyAV, FLIR Spinnaker have process-singleton state that
-    ``resource_id`` cannot isolate. We don't raise here — the bundle's
-    ``diagnostics.runtime.global_sdk_constraints`` map records these so
-    an operator triaging a crash can see at a glance whether
-    process-singleton state was involved.
-    """
-    constraints: list[dict[str, Any]] = []
-    has_daqmx = any(a.resource_id.startswith("daqmx:") for a in adapters)
-    if has_daqmx:
-        constraints.append(
-            {
-                "sdk": "ni-daqmx",
-                "note": "system handle is process-singleton; reset affects all tasks",
-            }
-        )
-    has_webcam = any(a.resource_id.startswith("webcam:") for a in adapters)
-    if has_webcam:
-        constraints.append(
-            {
-                "sdk": "pyav",
-                "note": "format registration is one-shot global init",
-            }
-        )
-    if constraints:
-        _logger.info(
-            "runtime.global_sdk_constraints",
-            config_name=getattr(config.hardware, "name", "<unknown>"),
-            constraints=constraints,
-        )
-
-
-__all__ = ["build_workers", "collect_resource_problems"]
+# RuntimeConfig is re-exported so callers that need the schema (notably
+# `Conductor.from_runtime`-style wiring) can import via the runtime layer.
+__all__ = [
+    "RuntimeConfig",
+    "build_workers",
+]

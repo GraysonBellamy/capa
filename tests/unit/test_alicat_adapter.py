@@ -41,6 +41,7 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+from tests._adapter_helpers import make_start_ctx
 
 pytestmark = pytest.mark.anyio
 
@@ -482,7 +483,7 @@ class TestStream:
         adapter, _stub = _make_adapter(rate_hz=50.0)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
@@ -525,7 +526,7 @@ class TestStream:
         adapter, _ = _make_adapter()
         # AdapterLifecycle enforces open-before-start at the lifecycle level.
         with pytest.raises(RuntimeError, match="must be open"):
-            await adapter.start()
+            await adapter.start(make_start_ctx())
 
 
 # ---------------------------------------------------------------------------
@@ -908,7 +909,7 @@ class TestWatchdog:
     async def test_pre_first_sample_is_silent_false(self) -> None:
         adapter, _ = _make_adapter(rate_hz=10.0)
         await adapter.open()
-        await adapter.start()
+        await adapter.start(make_start_ctx())
         # No sample has been marked yet; tracker reports None → not silent.
         state = adapter.watchdog_state()
         assert state.last_t_mono_ns is None
@@ -926,7 +927,7 @@ class TestWatchdog:
         adapter, _ = _make_adapter(rate_hz=50.0)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             await _drain(adapter, max_records=1)
             live = adapter.watchdog_state()
             assert live.last_t_mono_ns is not None

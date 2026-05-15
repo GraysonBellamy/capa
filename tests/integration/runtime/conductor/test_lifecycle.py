@@ -14,10 +14,10 @@ import pytest
 
 from capa.runtime.conductor import (
     Conductor,
-    ConductorStateError,
     NoOpRunner,
     RunOutcome,
 )
+from capa.runtime.errors import ConductorStateError
 from capa.runtime.pool import WorkerPool
 from capa.runtime.runner import ThreadedRunner
 from capa.runtime.state import ConductorState

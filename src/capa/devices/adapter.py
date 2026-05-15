@@ -10,13 +10,69 @@ from without renegotiating the device.
 from __future__ import annotations
 
 from collections.abc import AsyncIterable
+from dataclasses import dataclass
 from datetime import datetime
-from enum import Flag, auto
-from typing import Any, Literal, Protocol, runtime_checkable
+from enum import Flag, StrEnum, auto
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from capa.devices.records import DeviceEmission
+
+if TYPE_CHECKING:
+    from capa.core.clock import RunClock
+
+
+class FailurePolicy(StrEnum):
+    """Per-device failure policy used by the runtime on a worker fault.
+
+    Lives in the device layer (alongside :class:`Capability`) so the
+    device-level :class:`ResolvedAdapter` metadata and the user-facing
+    :class:`~capa.experiment.config.DeviceConfig` schema can share one
+    type without `experiment → devices → experiment` import cycles.
+
+    Distinct from :data:`~capa.devices.camera.base.CameraOnFailure`,
+    which layers on top of the camera/safety system rather than the
+    runtime failure-policy metadata. Two values, not three: ``WARN``
+    covers "log and continue." Add ``IGNORE`` only when a real case
+    demands it.
+    """
+
+    ABORT = "abort"
+    """Run aborts when this device's worker stream fails, once enforcement exists."""
+
+    WARN = "warn"
+    """Worker fault is logged and the run continues degraded, once
+    enforcement exists. Used for devices whose absence does not
+    invalidate the experiment."""
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterStartContext:
+    """Per-run context handed to every adapter at :meth:`DeviceAdapter.start`.
+
+    Replaces the historical three-shape ``start`` signature (no-arg /
+    ``start(clock)`` / ``start(run_context)``). Adapters read only the
+    fields they need; the worker constructs one context per arm.
+
+    Fields:
+
+    * ``clock``: authoritative :class:`RunClock` for the run. Used by
+      device adapters to stamp emissions; rebound by camera adapters into
+      their internal proxy.
+    * ``run_id``: stable run identifier. Used by camera adapters to
+      compute per-run output paths.
+    * ``bundle_root``: filesystem root of the run bundle. Only consumed
+      today by adapters that write their own files (camera recorders).
+      Other adapters ignore it. Including it on the universal context
+      avoids per-shape dispatch at the cost of one unused field for
+      non-recording adapters.
+    """
+
+    clock: RunClock
+    run_id: str
+    bundle_root: Path
 
 
 class Capability(Flag):
@@ -45,7 +101,7 @@ class Capability(Flag):
     report stable for 5 s before ignition")."""
     SUPPORTS_AUTO_RECONNECT = auto()
     """Adapter retries transient connection errors silently and surfaces them
-    as a watchdog metric instead of failing the run. Informational; gated by
+    as health metadata instead of failing the run. Informational; gated by
     the per-adapter ``auto_reconnect`` parameter."""
     HAS_INTERNAL_CAL = auto()
     """Adapter exposes a device-driven internal calibration / adjustment
@@ -128,12 +184,11 @@ class DeviceAdapter(Protocol):
     resource_id: str
     """Stable identifier for the underlying hardware contention domain.
 
-    Per-resource worker migration (``docs/per-resource-worker-migration.md`` §4.10):
-    two adapters that share a physical resource (a serial port on an RS-485
-    multi-drop bus, a DAQmx chassis, a single camera handle) MUST expose the
-    same ``resource_id`` so that ``build_workers`` groups them into one
-    worker thread. Two adapters that do not share a resource MUST expose
-    different ``resource_id``\\ s.
+    Per-resource worker contract: two adapters that share a physical
+    resource (a serial port on an RS-485 multi-drop bus, a DAQmx chassis,
+    a single camera handle) MUST expose the same ``resource_id`` so that
+    ``build_workers`` groups them into one worker thread. Two adapters
+    that do not share a resource MUST expose different ``resource_id``\\ s.
 
     Format is ``<scheme>:<body>`` where ``scheme`` is one of:
     ``serial``, ``daqmx``, ``webcam``, ``sim``. The body is whatever
@@ -154,9 +209,14 @@ class DeviceAdapter(Protocol):
         """Release the bus / handle. Idempotent."""
         ...
 
-    async def start(self) -> None:
-        """Begin sampling / arm hardware-clocked tasks. Requires :meth:`open`
-        to have completed."""
+    async def start(self, ctx: AdapterStartContext) -> None:
+        """Begin sampling / arm hardware-clocked tasks.
+
+        ``ctx`` is the per-run context (see :class:`AdapterStartContext`).
+        Requires :meth:`open` to have completed. The worker constructs
+        exactly one context per arm and passes the same instance to every
+        adapter in the worker — adapters read only the fields they need.
+        """
         ...
 
     async def stop(self) -> None:
@@ -251,9 +311,11 @@ class AdapterLifecycle:
 
 __all__ = [
     "AdapterLifecycle",
+    "AdapterStartContext",
     "AdapterState",
     "Capability",
     "CommandResult",
     "DeviceAdapter",
     "DeviceCommand",
+    "FailurePolicy",
 ]

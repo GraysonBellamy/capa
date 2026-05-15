@@ -33,6 +33,7 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+from tests._adapter_helpers import make_start_ctx
 
 pytestmark = pytest.mark.anyio
 
@@ -209,7 +210,7 @@ class TestStreamPolled:
         adapter, _backend = _make_adapter(rate_hz=100.0)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
@@ -307,7 +308,7 @@ class TestStreamHardwareClocked:
         adapter, _ = _make_block_adapter(samples_per_channel=4, n_blocks=2)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
@@ -331,7 +332,7 @@ class TestStreamHardwareClocked:
         adapter, _ = _make_block_adapter(samples_per_channel=n, n_blocks=2)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
@@ -349,7 +350,7 @@ class TestStreamHardwareClocked:
         adapter, _ = _make_block_adapter(sample_rate_hz=rate, samples_per_channel=8, n_blocks=2)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
@@ -367,7 +368,7 @@ class TestStreamHardwareClocked:
         adapter, _ = _make_block_adapter(samples_per_channel=3, n_blocks=2)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
@@ -381,7 +382,7 @@ class TestStreamHardwareClocked:
         adapter, _ = _make_block_adapter(samples_per_channel=4, n_blocks=1)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=1)
         finally:
             await adapter.close()
@@ -491,7 +492,7 @@ class TestWatchdog:
         adapter, _ = _make_adapter(rate_hz=50.0)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             await _drain(adapter, max_records=1)
             live = adapter.watchdog_state()
             assert live.last_t_mono_ns is not None
@@ -623,7 +624,7 @@ class TestDeviceInfoProbe:
         adapter, _ = _make_adapter(rate_hz=200.0)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             records: list[SourceRecord] = []
             async for emission in adapter.stream_until_stopped(max_records=3):
                 if isinstance(emission, SourceRecord):
@@ -640,7 +641,7 @@ class TestDeviceInfoProbe:
         adapter, _ = _make_adapter(rate_hz=200.0)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             received: list[Any] = []
             count = 0
             async for emission in adapter.stream_until_stopped():
@@ -656,7 +657,7 @@ class TestDeviceInfoProbe:
         adapter, _ = _make_adapter()
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             with pytest.raises(ValueError, match="max_records"):
                 async for _ in adapter.stream_until_stopped(max_records=0):
                     pass

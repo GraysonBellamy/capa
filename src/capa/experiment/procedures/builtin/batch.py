@@ -3,24 +3,24 @@
 Plan §11 line 964: catches the most-common composition (replicate runs) so
 each researcher does not re-implement it badly.
 
-Each iteration produces its **own bundle** (a fresh :class:`ExperimentEngine`
-is constructed per iteration), so a crashed iteration does not contaminate
-its siblings. The parent batch id is mirrored into every child bundle's
-``manifest.json.custom['batch']`` block so the runs.sqlite catalog can pull
-the family back together.
+Each iteration produces its **own bundle** (a fresh
+:func:`~capa.runtime.headless.run_headless` call per iteration), so a
+crashed iteration does not contaminate its siblings. The parent batch id
+is mirrored into every child bundle's ``manifest.json.custom['batch']``
+block so the runs.sqlite catalog can pull the family back together.
 
 Notes on lifecycle:
 
-* Batch runs as a *procedure* in the parent engine, but it does not need
-  any of the parent engine's adapters / fan-out — its job is to orchestrate
-  N child engines. The parent engine's adapters still run (the data is
+* Batch runs as a *procedure* in the parent run, but it does not need
+  any of the parent run's adapters / fan-out — its job is to orchestrate
+  N child runs. The parent run's adapters still run (the data is
   available to the parent procedure via the databus) but Batch ignores
   them; the data of substance lands in the *child* bundles.
-* The simplest, least surprising shape is therefore: parent engine arms a
-  zero-device hardware profile, runs Batch, Batch executes children one at
-  a time inside its own task. We document this in the README; the
-  config-time linter doesn't enforce it because some experiments may legit
-  want shared sensor data correlated against children.
+* The simplest, least surprising shape is therefore: parent run arms a
+  zero-device hardware profile, runs Batch, Batch executes children one
+  at a time inside its own task. We document this in the README; the
+  config-time linter doesn't enforce it because some experiments may
+  legit want shared sensor data correlated against children.
 
 This implementation is conservative — synchronous iteration, no parallelism,
 fail-fast on the first crashed child. Concurrent-batch support may be added

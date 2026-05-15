@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QObject, Signal
 
+from capa.config import ConfigDocument
 from capa.experiment.config import ExperimentConfig
 from capa.runtime.progress import DeviceInitProgress, DeviceInitStatus
 from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress
@@ -240,6 +241,62 @@ def test_apply_enabled_only_when_unapplied_and_no_errors(qtbot: Any) -> None:
     setup._draft.validate()
     setup._refresh_apply_enabled()
     assert not setup._action_apply.isEnabled()
+
+
+# ---------------------------------------------------------------------------
+# New-wizard gates (unified-open-pipeline refactor)
+# ---------------------------------------------------------------------------
+
+
+def test_new_wizard_marks_draft_unapplied_and_enables_apply(qtbot: Any, monkeypatch: Any) -> None:
+    """The New wizard produces an apply-ready draft.
+
+    Before this fix, _on_new left ``unapplied=False`` (the default on a
+    fresh SetupDraft), so the Apply button stayed greyed out until the
+    operator made a stray edit. The wizard's output is by definition
+    not the same as the currently-applied config, so Apply should light
+    up the moment the wizard returns.
+    """
+    setup, _method, _coord, _controller = _make_triple(qtbot)
+    fixture_doc = ConfigDocument.load(SIM_CAPA_EXP)
+    monkeypatch.setattr(
+        "capa.ui.tabs.setup_wizard.SetupWizard.run",
+        classmethod(lambda cls, parent: fixture_doc),
+    )
+
+    setup._on_new()
+
+    assert setup._draft.unapplied is True
+    assert setup._action_apply.isEnabled()
+    assert setup._banner_state is _BannerState.UNAPPLIED
+
+
+def test_new_action_disabled_during_active_run(qtbot: Any) -> None:
+    """New is frozen while a run is armed.
+
+    Consistent with Apply / Discover / Check Hardware: changing the
+    setup mid-run is refused. Operators see a polite modal and the
+    toolbar action greys out.
+    """
+    setup, _method, _coord, controller = _make_triple(qtbot)
+    setup.load_path(SIM_CAPA_EXP)
+    controller.is_active = True
+    controller.state = RunUiState.RUNNING
+    controller.state_changed.emit(RunUiState.RUNNING)
+
+    assert setup._action_new.isEnabled() is False
+
+    captured: list[Any] = []
+    setup.draftLoaded.connect(lambda: captured.append(None))
+    with patch("capa.ui.tabs.setup.QMessageBox.information") as info:
+        setup._on_new()
+    assert captured == []
+    assert info.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Coordinator fallback
+# ---------------------------------------------------------------------------
 
 
 def test_apply_falls_back_when_coordinator_not_set(qtbot: Any) -> None:

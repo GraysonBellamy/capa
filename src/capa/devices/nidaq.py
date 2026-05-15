@@ -1,6 +1,6 @@
 """Real :class:`NIDAQAdapter` — wraps a :class:`nidaqlib.tasks.session.DaqSession`.
 
-Plan §16: "real ``NIDAQAdapter``. Capability flags. Device watchdogs
+Plan §16: "real ``NIDAQAdapter``. Capability flags. Device health
 and health surfacing. Discovery (``capa devices discover``).
 ``capa validate --strict``."
 
@@ -58,7 +58,6 @@ from capa.channels.spec import ChannelSpec, NIDAQBlockChannel, NIDAQReadingField
 from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
 from capa.devices._helpers import (
-    LastSampleTracker,
     WatchdogState,
     build_channel_sample,
     channels_for_device,
@@ -68,7 +67,7 @@ from capa.devices._helpers import (
     reject_unless_authorized,
 )
 from capa.devices.adapter import (
-    AdapterLifecycle,
+    AdapterStartContext,
     Capability,
     CommandResult,
     DeviceCommand,
@@ -80,6 +79,7 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+from capa.devices.runtime_state import AdapterRuntimeState
 
 if TYPE_CHECKING:
     from capa.devices.registry import AdapterDescriptor
@@ -259,16 +259,10 @@ class NIDAQAdapter:
     __slots__ = (
         "_backend",
         "_channels",
-        "_clock",
         "_device_info",
-        "_last_sample",
-        "_last_snapshot_t_mono_ns",
-        "_lifecycle",
-        "_recoverable_error_count",
-        "_seq",
         "_session",
         "_session_factory",
-        "_stop_requested",
+        "_state",
         "_task_spec",
         "capabilities",
         "name",
@@ -309,13 +303,7 @@ class NIDAQAdapter:
         self._session: DaqSession | None = None
         self._task_spec: TaskSpec | None = None
         self._channels: list[ChannelSpec] = []
-        self._clock: RunClock | None = None
-        self._lifecycle = AdapterLifecycle()
-        self._seq = 0
-        self._last_snapshot_t_mono_ns = -(2**62)
-        self._last_sample = LastSampleTracker()
-        self._recoverable_error_count = 0
-        self._stop_requested = False
+        self._state = AdapterRuntimeState()
         self._device_info: NIDAQDeviceInfo | None = None
 
     # ------------------------------------------------------------------ wiring
@@ -382,7 +370,7 @@ class NIDAQAdapter:
         deferred (e.g. trigger arming via a callback bridge) should
         bypass this adapter and use the recorder directly.
         """
-        if self._lifecycle.state in ("open", "running"):
+        if self._state.lifecycle.state in ("open", "running"):
             return
         try:
             self._task_spec = self.params.build_task_spec()
@@ -405,42 +393,34 @@ class NIDAQAdapter:
         # so ``_probe_device_info`` returns ``None`` and the manifest identity
         # block stays empty (same as before this change).
         self._device_info = self._probe_device_info()
-        self._lifecycle.open()
+        self._state.lifecycle.open()
 
     async def close(self) -> None:
         """Release the NI task. Idempotent."""
-        if self._lifecycle.state == "closed":
+        if self._state.lifecycle.state == "closed":
             return
         await self._safe_close_session()
         self._session = None
         self._task_spec = None
         self._device_info = None
-        self._lifecycle.close()
+        self._state.lifecycle.close()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         """Capture the :class:`RunClock` anchor and arm the streaming loop.
 
         :func:`nidaqlib.tasks.open_device` already started the NI task as
         part of :meth:`open` (``autostart=True``). This method only flips
         the capa-side lifecycle so :meth:`stream` knows it can emit.
         """
-        self._lifecycle.start()
-        self._clock = clock or RunClock.now()
-        self._stop_requested = False
-        self._last_sample.reset()
-        self._recoverable_error_count = 0
-        self._last_snapshot_t_mono_ns = -(2**62)
+        self._state.on_start(ctx.clock)
 
     async def stop(self) -> None:
         """Request the streaming loop to exit cleanly. Idempotent."""
-        if self._lifecycle.state != "running":
-            return
-        self._stop_requested = True
-        self._lifecycle.stop()
+        self._state.request_stop()
 
     async def snapshot(self) -> DeviceSnapshot:
         """Build a :class:`DeviceSnapshot` from cached identity + live health."""
-        clock = self._clock or RunClock.now()
+        clock = self._state.clock or RunClock.now()
         return DeviceSnapshot(
             adapter=self.params.adapter_id(),
             device=self.name,
@@ -474,14 +454,14 @@ class NIDAQAdapter:
                 f"nidaq {self.name!r} stream() requires open() first",
                 device=self.name,
             )
-        if self._clock is None:
+        if self._state.clock is None:
             raise AdapterError(
                 f"nidaq {self.name!r} stream() requires start() first",
                 device=self.name,
             )
 
         snap = await self.snapshot()
-        self._last_snapshot_t_mono_ns = snap.t_mono_ns
+        self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
         yield snap
 
         if self.params.is_block_mode():
@@ -531,7 +511,7 @@ class NIDAQAdapter:
                 emission_count += 1
                 if isinstance(emission, SourceRecord):
                     record_count += 1
-                if self._stop_requested:
+                if self._state.stop_requested:
                     continue  # let the inner stream wind down naturally
                 if (max_records is not None and record_count >= max_records) or (
                     max_emissions is not None and emission_count >= max_emissions
@@ -556,7 +536,7 @@ class NIDAQAdapter:
                 buffer_size=64,
             ) as (rx, _summary):
                 async for payload in rx:
-                    if self._stop_requested:
+                    if self._state.stop_requested:
                         break
                     # ``record_polled`` against a single ``DaqSession`` yields
                     # bare :class:`DaqReading` items (manager mode would
@@ -566,19 +546,19 @@ class NIDAQAdapter:
                         # Defensive: shouldn't happen with a session source.
                         continue
                     if payload.error is not None:
-                        self._recoverable_error_count += 1
+                        self._state.recoverable_error_count += 1
                         # Native row preserves the error fields — emit it
                         # so the device-records sink keeps the diagnostic.
                         yield self._record_for_reading(payload)
                         continue
                     record = self._record_for_reading(payload)
                     yield record
-                    self._last_sample.mark(record.t_mono_ns)
+                    self._state.last_sample.mark(record.t_mono_ns)
                     for cs in self._channel_samples_for(payload, record.record_id):
                         yield cs
-                    if self._snapshot_due():
+                    if self._state.snapshot_due(period_s=self.params.snapshot_period_s):
                         snap = await self.snapshot()
-                        self._last_snapshot_t_mono_ns = snap.t_mono_ns
+                        self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
                         yield snap
         except* NIDaqError as eg:
             first = next(iter(eg.exceptions))
@@ -618,10 +598,10 @@ class NIDAQAdapter:
                 buffer_size=16,
             ) as (rx, _summary):
                 async for block in rx:
-                    if self._stop_requested:
+                    if self._state.stop_requested:
                         break
                     if block.error is not None:
-                        self._recoverable_error_count += 1
+                        self._state.recoverable_error_count += 1
                         if not self.params.auto_reconnect:
                             raise AdapterError(
                                 f"nidaq {self.name!r} block error: {block.error}",
@@ -635,10 +615,10 @@ class NIDAQAdapter:
                         last_t_mono_ns = cs.t_mono_ns
                         yield cs
                     if last_t_mono_ns is not None:
-                        self._last_sample.mark(last_t_mono_ns)
-                    if self._snapshot_due():
+                        self._state.last_sample.mark(last_t_mono_ns)
+                    if self._state.snapshot_due(period_s=self.params.snapshot_period_s):
                         snap = await self.snapshot()
-                        self._last_snapshot_t_mono_ns = snap.t_mono_ns
+                        self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
                         yield snap
         except* NIDaqError as eg:
             first = next(iter(eg.exceptions))
@@ -653,7 +633,7 @@ class NIDAQAdapter:
 
         The command surface enforces the auth gate and rejects unknown verbs.
         """
-        clock = self._clock or RunClock.now()
+        clock = self._state.clock or RunClock.now()
         rejection = reject_unless_authorized(
             cmd, adapter_id=self.params.adapter_id(), device_name=self.name, clock=clock
         )
@@ -743,13 +723,14 @@ class NIDAQAdapter:
         """
         from nidaqlib.sinks.base import reading_to_row  # noqa: PLC0415
 
-        assert self._clock is not None
+        clock = self._state.clock
+        assert clock is not None
         row = reading_to_row(reading)
-        t_mono_ns = reading.monotonic_ns - self._clock.started_mono_ns
-        self._seq += 1
+        t_mono_ns = reading.monotonic_ns - clock.started_mono_ns
+        self._state.seq += 1
         adapter_id = self.params.adapter_id()
         return SourceRecord(
-            record_id=make_record_id(adapter_id, self.name, self._seq),
+            record_id=make_record_id(adapter_id, self.name, self._state.seq),
             adapter=adapter_id,
             device=self.name,
             shape="wide_row",
@@ -797,9 +778,10 @@ class NIDAQAdapter:
         this acquisition mode. Files key off ``adapter`` so this lands in
         ``device_records/nidaq_block.parquet``.
         """
-        assert self._clock is not None
-        self._seq += 1
-        t_mono_ns = block.monotonic_ns - self._clock.started_mono_ns
+        clock = self._state.clock
+        assert clock is not None
+        self._state.seq += 1
+        t_mono_ns = block.monotonic_ns - clock.started_mono_ns
         row: dict[str, float | int | str | bool | None] = {
             "block_index": block.block_index,
             "first_sample_index": block.first_sample_index,
@@ -812,7 +794,7 @@ class NIDAQAdapter:
             "elapsed_s": block.elapsed_s,
         }
         return SourceRecord(
-            record_id=make_record_id(ADAPTER_ID_BLOCK, self.name, self._seq),
+            record_id=make_record_id(ADAPTER_ID_BLOCK, self.name, self._state.seq),
             adapter=ADAPTER_ID_BLOCK,
             device=self.name,
             shape="wide_row",
@@ -834,11 +816,12 @@ class NIDAQAdapter:
         and monotonic at the same instant, so UTC drift over a single
         run stays sub-millisecond on a sane host. Plan §6.
         """
-        assert self._clock is not None
+        clock = self._state.clock
+        assert clock is not None
         rate = block.sample_rate_hz
         if rate is None or rate <= 0:
             return  # Cannot reconstruct timestamps without a rate.
-        run_started_utc = self._clock.started_utc
+        run_started_utc = clock.started_utc
         n_samples = block.samples_per_channel
 
         bindings: dict[str, ChannelSpec] = {}
@@ -874,8 +857,9 @@ class NIDAQAdapter:
 
     def _channel_samples_for(self, reading: DaqReading, record_id: str) -> list[DeviceEmission]:
         """Map ``reading`` against the configured :class:`NIDAQReadingField` bindings."""
-        assert self._clock is not None
-        t_mono_ns = reading.monotonic_ns - self._clock.started_mono_ns
+        clock = self._state.clock
+        assert clock is not None
+        t_mono_ns = reading.monotonic_ns - clock.started_mono_ns
         emissions: list[DeviceEmission] = []
         values: Mapping[str, float | int | bool] = reading.values
         task_name = reading.task or self.params.task_name
@@ -899,29 +883,34 @@ class NIDAQAdapter:
         return emissions
 
     def watchdog_state(self) -> WatchdogState:
-        """Watchdog view for the engine's silent-device task (plan §13.2)."""
+        """Return a compact silence-state view for tests and future policy work.
+
+        NI-DAQ's expected period is mode-dependent — polled uses ``1/rate_hz``,
+        block uses ``chunk/sample_rate_hz`` — so this can't go through the
+        ``rate_hz``-shaped :meth:`AdapterRuntimeState.watchdog` helper.
+        """
         return WatchdogState(
             device=self.name,
-            last_t_mono_ns=self._last_sample.last_t_mono_ns,
+            last_t_mono_ns=self._state.last_sample.last_t_mono_ns,
             expected_period_ns=self._expected_period_ns(),
-            lifecycle_state=self._lifecycle.state,
+            lifecycle_state=self._state.lifecycle.state,
         )
 
-    def _snapshot_due(self) -> bool:
-        if self._clock is None:
-            return False
-        elapsed_ns = self._clock.t_mono_ns() - self._last_snapshot_t_mono_ns
-        return elapsed_ns >= int(self.params.snapshot_period_s * 1e9)
-
     def _compute_health(self, *, clock: RunClock) -> DeviceHealth:
-        """Derive the :class:`DeviceHealth` pill from adapter state."""
-        if self._lifecycle.state == "closed":
+        """Derive the :class:`DeviceHealth` pill from adapter state.
+
+        Like :meth:`watchdog_state`, this inlines the mode-aware
+        ``_expected_period_ns()`` rather than going through
+        :meth:`AdapterRuntimeState.compute_health` (which assumes
+        ``1/rate_hz``).
+        """
+        if self._state.lifecycle.state == "closed":
             return "down"
-        if self._lifecycle.state == "open":
+        if self._state.lifecycle.state == "open":
             return "ok"
-        if self._recoverable_error_count > 0:
+        if self._state.recoverable_error_count > 0:
             return "degraded"
-        age_ns = self._last_sample.age_ns(now_t_mono_ns=clock.t_mono_ns())
+        age_ns = self._state.last_sample.age_ns(now_t_mono_ns=clock.t_mono_ns())
         if age_ns is not None:
             stale_threshold_ns = 3 * self._expected_period_ns()
             if age_ns > stale_threshold_ns:
@@ -934,8 +923,8 @@ class NIDAQAdapter:
             "rate_hz": self.params.rate_hz,
             "channel_count_declared": len(self.params.channels),
             "channel_count_bound": len(self._channels),
-            "state": self._lifecycle.state,
-            "recoverable_errors": self._recoverable_error_count,
+            "state": self._state.lifecycle.state,
+            "recoverable_errors": self._state.recoverable_error_count,
             "block_mode": self.params.is_block_mode(),
         }
         if self._task_spec is not None:

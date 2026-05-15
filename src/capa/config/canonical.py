@@ -31,6 +31,7 @@ EXPERIMENT_KEY_ORDER: tuple[str, ...] = (
     "sample",
     "storage",
     "safety",
+    "runtime",
     "tags",
     "custom",
 )
@@ -47,6 +48,8 @@ HARDWARE_KEY_ORDER: tuple[str, ...] = (
 DEVICE_KEY_ORDER: tuple[str, ...] = (
     "name",
     "adapter",
+    "resource_id",
+    "on_failure",
     "params",
 )
 

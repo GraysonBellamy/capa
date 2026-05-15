@@ -36,6 +36,7 @@ from capa.devices.sartorius import (
     SartoriusAdapter,
     SartoriusAdapterParams,
 )
+from tests._adapter_helpers import make_start_ctx
 
 pytestmark = pytest.mark.anyio
 
@@ -271,7 +272,7 @@ class TestStream:
         adapter, _ = _make_adapter(value=2.5)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
@@ -293,7 +294,7 @@ class TestStream:
         adapter, _ = _make_adapter(value=2.5, stable=False)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
@@ -305,7 +306,7 @@ class TestStream:
         adapter, _ = _make_adapter(value=999.0, overload=True)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
@@ -510,7 +511,7 @@ class TestWatchdog:
         adapter, _ = _make_adapter(rate_hz=50.0)
         await adapter.open()
         try:
-            await adapter.start()
+            await adapter.start(make_start_ctx())
             await _drain(adapter, max_records=1)
             live = adapter.watchdog_state()
             assert live.last_t_mono_ns is not None

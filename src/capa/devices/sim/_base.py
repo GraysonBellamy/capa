@@ -1,4 +1,4 @@
-"""Shared base for sim adapters.
+"""Shared helpers for sim adapters.
 
 Every sim adapter:
 
@@ -10,42 +10,26 @@ Every sim adapter:
 * applies the channel calibration directly via the shared
   :func:`~capa.devices._helpers.build_channel_sample` helper.
 
-The base does not implement ``stream()`` itself because every adapter has a
-slightly different per-tick payload (one wide row vs. many long rows vs. a
-balance row vs. a block).
-
-Calibration / channel-routing helpers live in
-:mod:`capa.devices._helpers` so the real adapters can reuse them
-without importing out of :mod:`capa.devices.sim`.
+Each adapter writes its own ``stream()`` because the per-tick payload differs
+(one wide row vs. many long rows vs. a balance row vs. a block). The helpers
+here cover the bits that *are* shared: the two-call timing synthesis, a UTC
+``now``, re-exports of the calibration / channel-routing helpers, and
+re-exports of the command authorization gate so sims and real adapters use
+the same accept/reject logic.
 """
 
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from capa.core.clock import RunClock
-from capa.core.errors import AdapterError
 from capa.devices._helpers import (
     build_channel_sample,
     channels_for_device,
+    make_accepted_result,
     make_record_id,
+    reject_unless_authorized,
 )
-from capa.devices.adapter import AdapterLifecycle
-from capa.devices.sim._signals import SignalFn
-
-
-@dataclass(slots=True)
-class SimContext:
-    """Per-adapter sim state."""
-
-    name: str
-    clock: RunClock
-    tick_period_s: float
-    lifecycle: AdapterLifecycle = field(default_factory=AdapterLifecycle)
-    record_seq: int = 0
-    next_tick_mono: float = 0.0
 
 
 def synth_timing(
@@ -75,37 +59,16 @@ def synth_timing(
     )
 
 
-def evaluate_signal(signals: dict[str, SignalFn], key: str, t_s: float) -> float:
-    """Look up ``key`` in ``signals`` and call it at ``t_s``."""
-    try:
-        fn = signals[key]
-    except KeyError as exc:
-        raise AdapterError(
-            f"sim adapter has no signal generator for {key!r}; "
-            f"declare one in the adapter constructor"
-        ) from exc
-    return float(fn(t_s))
-
-
 def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def perf_sleep_until(target_mono_s: float) -> None:
-    """Tight-busy-wait helper for tests that want sub-millisecond ticks
-    without bringing in anyio.sleep. Not used in the regular stream path
-    (which uses ``anyio.sleep``)."""
-    while time.monotonic() < target_mono_s:
-        pass
-
-
 __all__ = [
-    "SimContext",
     "build_channel_sample",
     "channels_for_device",
-    "evaluate_signal",
+    "make_accepted_result",
     "make_record_id",
     "now_utc",
-    "perf_sleep_until",
+    "reject_unless_authorized",
     "synth_timing",
 ]

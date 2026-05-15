@@ -19,11 +19,13 @@ SIM_CAPA_EXP = REPO_ROOT / "configs" / "experiments" / "sim_capa_pyrolysis.yaml"
 class _ControllerStub(QObject):
     state_changed = Signal(object)
     config_load_finished = Signal(object)
+    hardware_ready_changed = Signal(bool)
 
     def __init__(self) -> None:
         super().__init__()
         self.state = RunUiState.IDLE
         self.is_active = False
+        self.hardware_ready = False
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +85,47 @@ def test_check_button_stays_enabled_after_live_handshake_error(qtbot: Any) -> No
     ]
     tab._begin_check()
     tab._finish_check(live_fail)
+    assert tab._action_check.isEnabled()
+
+
+def test_check_button_disabled_when_hardware_ready_and_synced(qtbot: Any) -> None:
+    """Once a config has been applied (pool open) and the draft matches
+    the applied state, Check Hardware would conflict with the pool's
+    open ports — fresh handshake tries to re-open the same serial port
+    and reports every connected device as a failure. The button is
+    disabled instead, with a tooltip explaining why.
+    """
+    controller = _ControllerStub()
+    tab = SetupTab(controller=controller)  # type: ignore[arg-type]
+    qtbot.addWidget(tab)
+    tab.load_path(SIM_CAPA_EXP)
+    assert tab._action_check.isEnabled()
+
+    # Simulate "apply succeeded": pool is open, draft matches applied.
+    controller.hardware_ready = True
+    controller.hardware_ready_changed.emit(True)
+    assert tab._draft.unapplied is False
+    assert not tab._action_check.isEnabled()
+    assert "connected and verified" in tab._action_check.toolTip()
+
+
+def test_check_button_re_enables_after_draft_edit_post_apply(qtbot: Any) -> None:
+    """Editing the draft after apply re-enables Check Hardware so the
+    operator can verify the new config before applying again. Fresh
+    handshake against an edited (typically different) port doesn't
+    conflict with the open pool.
+    """
+    controller = _ControllerStub()
+    tab = SetupTab(controller=controller)  # type: ignore[arg-type]
+    qtbot.addWidget(tab)
+    tab.load_path(SIM_CAPA_EXP)
+    controller.hardware_ready = True
+    controller.hardware_ready_changed.emit(True)
+    assert not tab._action_check.isEnabled()
+
+    # Operator edits the draft — unapplied flips True.
+    tab._draft.unapplied = True
+    tab._refresh_apply_enabled()
     assert tab._action_check.isEnabled()
 
 

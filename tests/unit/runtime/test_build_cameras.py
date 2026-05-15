@@ -21,6 +21,12 @@ from __future__ import annotations
 
 import pytest
 
+from capa.devices.materialize import (
+    ConfigMaterializationError,
+    _materialize_cameras,
+    _resolve_camera_class,
+    materialize_adapters,
+)
 from capa.experiment.config import (
     CalibrationSetRef,
     ExperimentConfig,
@@ -29,11 +35,7 @@ from capa.experiment.config import (
     ProcedureRef,
     SampleInfo,
 )
-from capa.runtime.build import (
-    _construct_camera_adapters_from_config,
-    _resolve_camera_class,
-    build_workers,
-)
+from capa.runtime.build import build_workers
 from capa.runtime.camera_adapter import CameraDeviceAdapter
 from capa.runtime.errors import ResourceConflict
 from capa.runtime.runner import InlineRunner
@@ -84,20 +86,21 @@ class TestResolveCameraClass:
         assert cls.__name__ == "WebcamAdapter"
 
     def test_raises_on_unknown_adapter(self) -> None:
-        with pytest.raises(ResourceConflict, match="no AdapterDescriptor"):
+        with pytest.raises(ConfigMaterializationError, match="no AdapterDescriptor"):
             _resolve_camera_class("capa.devices.does_not_exist")
 
 
 # ---------------------------------------------------------------------------
-# _construct_camera_adapters_from_config
+# _materialize_cameras
 # ---------------------------------------------------------------------------
 
 
-class TestConstructCameraAdapters:
+class TestMaterializeCameras:
     def test_empty_cameras_returns_empty_list(self) -> None:
         cfg = _config_with_cameras([])
-        adapters = _construct_camera_adapters_from_config(cfg)
-        assert adapters == []
+        resolved, problems = _materialize_cameras(cfg)
+        assert resolved == []
+        assert problems == []
 
     def test_constructs_wrapper_per_camera(self) -> None:
         cfg = _config_with_cameras(
@@ -114,10 +117,11 @@ class TestConstructCameraAdapters:
                 },
             ]
         )
-        adapters = _construct_camera_adapters_from_config(cfg)
-        assert len(adapters) == 2
-        assert all(isinstance(a, CameraDeviceAdapter) for a in adapters)
-        names = {a.name for a in adapters}
+        resolved, problems = _materialize_cameras(cfg)
+        assert problems == []
+        assert len(resolved) == 2
+        assert all(isinstance(r.adapter, CameraDeviceAdapter) for r in resolved)
+        names = {r.name for r in resolved}
         assert names == {"thermal_top", "thermal_side"}
 
     def test_constructed_wrapper_has_clock_proxy_rebindable(self) -> None:
@@ -135,8 +139,10 @@ class TestConstructCameraAdapters:
                 }
             ]
         )
-        adapters = _construct_camera_adapters_from_config(cfg)
-        wrapper = adapters[0]
+        resolved, problems = _materialize_cameras(cfg)
+        assert problems == []
+        wrapper = resolved[0].adapter
+        assert isinstance(wrapper, CameraDeviceAdapter)
         # Underlying camera received the proxy as its clock
         clock_attr = wrapper.camera._clock
         assert hasattr(clock_attr, "rebind")
@@ -166,7 +172,9 @@ class TestBuildWorkersWithCameras:
                 },
             ]
         )
-        workers, device_to_resource = build_workers(cfg, runner_factory=InlineRunner)
+        workers, device_to_resource = build_workers(
+            materialize_adapters(cfg), runner_factory=InlineRunner
+        )
         # FlirIrSim.resource_id == "sim:<spec.name>" → two distinct
         # workers
         assert set(workers.keys()) == {"sim:thermal_top", "sim:thermal_side"}
@@ -206,7 +214,9 @@ class TestBuildWorkersWithCameras:
             operator=OperatorRef(id="op_test"),
             sample=SampleInfo(id="sample_test"),
         )
-        workers, device_to_resource = build_workers(cfg, runner_factory=InlineRunner)
+        workers, device_to_resource = build_workers(
+            materialize_adapters(cfg), runner_factory=InlineRunner
+        )
         assert "sim:ir_cam" in workers
         assert device_to_resource["ir_cam"] == "sim:ir_cam"
 
@@ -236,4 +246,4 @@ class TestBuildWorkersWithCameras:
             ]
         )
         with pytest.raises(ResourceConflict, match="webcam"):
-            build_workers(cfg, runner_factory=InlineRunner)
+            build_workers(materialize_adapters(cfg), runner_factory=InlineRunner)

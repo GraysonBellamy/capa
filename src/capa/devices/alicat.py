@@ -1,6 +1,6 @@
 """Real :class:`AlicatAdapter` — wraps an :class:`alicatlib.devices.base.Device`.
 
-Plan §16: "real ``AlicatAdapter``. Capability flags. Device watchdogs
+Plan §16: "real ``AlicatAdapter``. Capability flags. Device health
 and health surfacing. Discovery (``capa devices discover``).
 ``capa validate --strict``."
 
@@ -51,7 +51,6 @@ from capa.channels.spec import AlicatFrameField, ChannelSpec
 from capa.core.clock import RunClock
 from capa.core.errors import AdapterError
 from capa.devices._helpers import (
-    LastSampleTracker,
     WatchdogState,
     build_channel_sample,
     channels_for_device,
@@ -62,7 +61,7 @@ from capa.devices._helpers import (
     serial_resource_id,
 )
 from capa.devices.adapter import (
-    AdapterLifecycle,
+    AdapterStartContext,
     Capability,
     CommandResult,
     DeviceCommand,
@@ -73,6 +72,7 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+from capa.devices.runtime_state import AdapterRuntimeState
 
 if TYPE_CHECKING:
     from capa.devices.registry import AdapterDescriptor
@@ -118,8 +118,8 @@ class AlicatAdapterParams(BaseModel):
 
     auto_reconnect: bool = True
     """When ``True``, transient :class:`AlicatConnectionError`\\ s do not
-    terminate the stream — the recorder counts them as ``samples_late`` and
-    the adapter increments its degradation counter."""
+    terminate the stream — they are logged and the adapter retries on the
+    next tick."""
 
     overflow: Literal["block", "drop_newest"] = "block"
     """Recorder overflow policy. ``BLOCK`` matches plan §7.1: producers
@@ -178,27 +178,34 @@ class AlicatAdapter:
 
     Two construction shapes:
 
-    * ``AlicatAdapter(name=..., **params_kwargs)`` — the engine's
-      :func:`_construct_adapters` path forwards ``DeviceConfig.params`` as
-      kwargs. They are parsed into an :class:`AlicatAdapterParams`.
+    * ``AlicatAdapter(name=..., **params_kwargs)`` — the materialization
+      path forwards ``DeviceConfig.params`` as kwargs. They are parsed
+      into an :class:`AlicatAdapterParams`.
     * ``AlicatAdapter(name=..., params=AlicatAdapterParams(...))`` — for
       programmatic construction in tests.
 
     Both shapes accept an optional ``device_factory`` kwarg as a test seam.
+
+    File layout (Phase 8 cleanup):
+
+    * **Runtime state** — ``__init__``, ``configure_channels``, lifecycle
+      (``open``/``close``/``start``/``stop``), ``snapshot``, ``stream``,
+      ``watchdog_state`` / ``_snapshot_due`` / ``_compute_health`` /
+      ``_snapshot_fields``. Candidates for the shared
+      ``AdapterRuntimeState`` helper.
+    * **Command surface** — ``command`` (authorization gate),
+      ``_dispatch_command``, typed wrappers, and the read-only
+      ``read_gas_list``.
+    * **Vendor protocol** — alicatlib-specific code: device construction,
+      sample → ``SourceRecord`` conversion, channel routing.
     """
 
     __slots__ = (
         "_channels",
-        "_clock",
         "_device",
         "_device_factory",
         "_device_info",
-        "_last_sample",
-        "_last_snapshot_t_mono_ns",
-        "_lifecycle",
-        "_recoverable_error_count",
-        "_seq",
-        "_stop_requested",
+        "_state",
         "capabilities",
         "name",
         "params",
@@ -242,13 +249,11 @@ class AlicatAdapter:
         self._device: AlicatDevice | None = None
         self._device_info: DeviceInfo | None = None
         self._channels: list[ChannelSpec] = []
-        self._clock: RunClock | None = None
-        self._lifecycle = AdapterLifecycle()
-        self._seq = 0
-        self._last_snapshot_t_mono_ns = -(2**62)
-        self._last_sample = LastSampleTracker()
-        self._recoverable_error_count = 0
-        self._stop_requested = False
+        self._state = AdapterRuntimeState()
+
+    # =====================================================================
+    # SECTION 1 — Runtime state: lifecycle, wiring, snapshot/stream/health
+    # =====================================================================
 
     # ------------------------------------------------------------------ wiring
 
@@ -298,7 +303,7 @@ class AlicatAdapter:
 
         Idempotent: a second call on an already-open adapter is a no-op.
         """
-        if self._lifecycle.state in ("open", "running"):
+        if self._state.lifecycle.state in ("open", "running"):
             return
         try:
             self._device = await self._build_device()
@@ -309,32 +314,23 @@ class AlicatAdapter:
             ) from exc
         self._device_info = self._device.info
         self.update_capabilities_from_device(self._device)
-        self._lifecycle.open()
+        self._state.lifecycle.open()
 
     async def close(self) -> None:
         """Release the bus / handle. Idempotent."""
-        if self._lifecycle.state == "closed":
+        if self._state.lifecycle.state == "closed":
             return
         await self._safe_close_device()
         self._device = None
-        self._lifecycle.close()
+        self._state.lifecycle.close()
 
-    async def start(self, clock: RunClock | None = None) -> None:
+    async def start(self, ctx: AdapterStartContext) -> None:
         """Capture the :class:`RunClock` anchor and arm the streaming loop."""
-        self._lifecycle.start()
-        self._clock = clock or RunClock.now()
-        self._stop_requested = False
-        self._last_sample.reset()
-        self._recoverable_error_count = 0
-        # Force a snapshot on the first stream tick.
-        self._last_snapshot_t_mono_ns = -(2**62)
+        self._state.on_start(ctx.clock)
 
     async def stop(self) -> None:
         """Request the streaming loop to exit cleanly. Idempotent."""
-        if self._lifecycle.state != "running":
-            return
-        self._stop_requested = True
-        self._lifecycle.stop()
+        self._state.request_stop()
 
     async def snapshot(self) -> DeviceSnapshot:
         """Build a :class:`DeviceSnapshot` from cached identity + live health.
@@ -343,7 +339,7 @@ class AlicatAdapter:
         method does no I/O so it is safe to call from the engine while the
         stream is in flight.
         """
-        clock = self._clock or RunClock.now()
+        clock = self._state.clock or RunClock.now()
         return DeviceSnapshot(
             adapter=ADAPTER_ID,
             device=self.name,
@@ -370,7 +366,7 @@ class AlicatAdapter:
                 f"alicat {self.name!r} stream() requires open() first",
                 device=self.name,
             )
-        if self._clock is None:
+        if self._state.clock is None:
             raise AdapterError(
                 f"alicat {self.name!r} stream() requires start() first",
                 device=self.name,
@@ -379,7 +375,7 @@ class AlicatAdapter:
         # Initial snapshot so the manifest's equipment block has something
         # to show before the first poll lands.
         snap = await self.snapshot()
-        self._last_snapshot_t_mono_ns = snap.t_mono_ns
+        self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
         yield snap
 
         source = _SingleDevicePollSource(self.name, self._device)
@@ -392,14 +388,14 @@ class AlicatAdapter:
                 buffer_size=64,
             ) as batches:
                 async for batch in batches:
-                    if self._stop_requested:
+                    if self._state.stop_requested:
                         break
                     sample = batch.get(self.name)
                     if sample is None:
                         # Errored tick — already logged at WARN by the recorder.
                         # Bump the degradation counter so the next snapshot
                         # surfaces it; under auto_reconnect we keep going.
-                        self._recoverable_error_count += 1
+                        self._state.recoverable_error_count += 1
                         if not self.params.auto_reconnect:
                             raise AdapterError(
                                 f"alicat {self.name!r} poll failed and auto_reconnect is disabled",
@@ -408,12 +404,12 @@ class AlicatAdapter:
                         continue
                     record = self._record_for(sample)
                     yield record
-                    self._last_sample.mark(record.t_mono_ns)
+                    self._state.last_sample.mark(record.t_mono_ns)
                     for cs in self._channel_samples_for(sample, record.record_id):
                         yield cs
-                    if self._snapshot_due():
+                    if self._state.snapshot_due(period_s=self.params.snapshot_period_s):
                         snap = await self.snapshot()
-                        self._last_snapshot_t_mono_ns = snap.t_mono_ns
+                        self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
                         yield snap
         except* AlicatError as eg:
             first = next(iter(eg.exceptions))
@@ -421,11 +417,46 @@ class AlicatAdapter:
                 f"alicat {self.name!r} stream failed: {first}", device=self.name
             ) from first
 
-    # ------------------------------------------------------------------ commands
+    # ---------------------------------------- silence state / snapshot / health
+
+    def watchdog_state(self) -> WatchdogState:
+        """Return a compact silence-state view for tests and future policy work."""
+        return self._state.watchdog(device=self.name, rate_hz=self.params.rate_hz)
+
+    def _compute_health(self, *, clock: RunClock) -> DeviceHealth:
+        """Derive the :class:`DeviceHealth` pill from adapter state.
+
+        ``down`` if the lifecycle reports closed.
+        ``degraded`` when auto-reconnect retries have fired since the last
+        snapshot, *or* the last sample is older than 3× the polling period.
+        ``ok`` otherwise.
+        """
+        return self._state.compute_health(clock=clock, rate_hz=self.params.rate_hz)
+
+    def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
+        info = self._device_info
+        out: dict[str, float | int | str | bool | None] = {
+            "unit_id": self.params.unit_id,
+            "rate_hz": self.params.rate_hz,
+            "channel_count": len(self._channels),
+            "state": self._state.lifecycle.state,
+            "recoverable_errors": self._state.recoverable_error_count,
+        }
+        if info is not None:
+            out["model"] = info.model
+            out["serial"] = info.serial
+            out["firmware"] = str(info.firmware)
+            out["kind"] = info.kind.value
+            out["media"] = str(info.media)
+        return out
+
+    # =====================================================================
+    # SECTION 2 — Command surface: authorization gate + typed wrappers
+    # =====================================================================
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
         """Issue a generic command. Authorization gate first, then dispatch."""
-        clock = self._clock or RunClock.now()
+        clock = self._state.clock or RunClock.now()
         rejection = reject_unless_authorized(
             cmd, adapter_id=ADAPTER_ID, device_name=self.name, clock=clock
         )
@@ -884,7 +915,9 @@ class AlicatAdapter:
                 f"alicat {self.name!r} read_gas_list failed: {exc}", device=self.name
             ) from exc
 
-    # ------------------------------------------------------------------ helpers
+    # =====================================================================
+    # SECTION 3 — Vendor protocol: alicatlib-specific device / sample / channels
+    # =====================================================================
 
     async def _build_device(self) -> AlicatDevice:
         """Construct the underlying :class:`AlicatDevice`.
@@ -917,14 +950,15 @@ class AlicatAdapter:
         produce — important for ``device_records/alicat.parquet`` parity
         across sim and real bundles.
         """
-        assert self._clock is not None
+        clock = self._state.clock
+        assert clock is not None
         row = sample_to_row(sample)
         # Translate the library's monotonic_ns (host clock) into a run-relative
         # offset so it joins cleanly with ChannelSample.t_mono_ns.
-        t_mono_ns = sample.monotonic_ns - self._clock.started_mono_ns
-        self._seq += 1
+        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
+        self._state.seq += 1
         return SourceRecord(
-            record_id=make_record_id(ADAPTER_ID, self.name, self._seq),
+            record_id=make_record_id(ADAPTER_ID, self.name, self._state.seq),
             adapter=ADAPTER_ID,
             device=self.name,
             shape="wide_row",
@@ -936,8 +970,9 @@ class AlicatAdapter:
 
     def _channel_samples_for(self, sample: Any, record_id: str) -> list[DeviceEmission]:
         """Map ``sample`` against the configured :class:`AlicatFrameField` bindings."""
-        assert self._clock is not None
-        t_mono_ns = sample.monotonic_ns - self._clock.started_mono_ns
+        clock = self._state.clock
+        assert clock is not None
+        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
         values = sample.frame.as_dict()
         emissions: list[DeviceEmission] = []
         for spec in self._channels:
@@ -959,61 +994,6 @@ class AlicatAdapter:
                 )
             )
         return emissions
-
-    def watchdog_state(self) -> WatchdogState:
-        """Return the watchdog-relevant view consumed by the engine's
-        silent-device watchdog (plan §13.2)."""
-        return WatchdogState(
-            device=self.name,
-            last_t_mono_ns=self._last_sample.last_t_mono_ns,
-            expected_period_ns=int(1e9 / self.params.rate_hz),
-            lifecycle_state=self._lifecycle.state,
-        )
-
-    def _snapshot_due(self) -> bool:
-        if self._clock is None:
-            return False
-        elapsed_ns = self._clock.t_mono_ns() - self._last_snapshot_t_mono_ns
-        return elapsed_ns >= int(self.params.snapshot_period_s * 1e9)
-
-    def _compute_health(self, *, clock: RunClock) -> DeviceHealth:
-        """Derive the :class:`DeviceHealth` pill from adapter state.
-
-        ``down`` if the lifecycle reports closed.
-        ``degraded`` when auto-reconnect retries have fired since the last
-        snapshot, *or* the last sample is older than 3× the polling period.
-        ``ok`` otherwise.
-        """
-        if self._lifecycle.state == "closed":
-            return "down"
-        if self._lifecycle.state == "open":
-            # Opened but not started — neutral; the watchdog hasn't armed yet.
-            return "ok"
-        if self._recoverable_error_count > 0:
-            return "degraded"
-        age_ns = self._last_sample.age_ns(now_t_mono_ns=clock.t_mono_ns())
-        if age_ns is not None:
-            stale_threshold_ns = int(3.0 * (1e9 / self.params.rate_hz))
-            if age_ns > stale_threshold_ns:
-                return "degraded"
-        return "ok"
-
-    def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
-        info = self._device_info
-        out: dict[str, float | int | str | bool | None] = {
-            "unit_id": self.params.unit_id,
-            "rate_hz": self.params.rate_hz,
-            "channel_count": len(self._channels),
-            "state": self._lifecycle.state,
-            "recoverable_errors": self._recoverable_error_count,
-        }
-        if info is not None:
-            out["model"] = info.model
-            out["serial"] = info.serial
-            out["firmware"] = str(info.firmware)
-            out["kind"] = info.kind.value
-            out["media"] = str(info.media)
-        return out
 
 
 # ---------------------------------------------------------------------------

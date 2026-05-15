@@ -263,6 +263,9 @@ class DiscoveryDialog(QDialog):
         # scan's mark_scan_complete (producing duplicate rows), and
         # leaks pyserial threads that prevent the process from exiting.
         self._scan_tasks: list[asyncio.Task[None]] = []
+        # Live cancellation-drain tasks. Held so they aren't garbage-
+        # collected mid-flight by the event loop's weak task registry.
+        self._drain_tasks: set[asyncio.Task[None]] = set()
         # Set on close so a scan task that completes after cancellation
         # short-circuits before touching deleted Qt widgets.
         self._closed = False
@@ -411,10 +414,12 @@ class DiscoveryDialog(QDialog):
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(
+        drain = loop.create_task(
             self._drain_cancelled(cancelled),
             name="discover.drain_cancelled",
         )
+        self._drain_tasks.add(drain)
+        drain.add_done_callback(self._drain_tasks.discard)
 
     @staticmethod
     async def _drain_cancelled(tasks: list[asyncio.Task[None]]) -> None:

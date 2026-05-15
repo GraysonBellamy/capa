@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from capa.devices.camera import webcam
+from capa.devices.camera.webcam import probe as webcam_probe
 from capa.devices.sim import flir_ir_sim
 
 # ---------------------------------------------------------------------------
@@ -78,7 +79,7 @@ async def test_webcam_discover_linux_walks_sysfs(
     def fake_enum() -> list[dict[str, Any]]:
         return fake_rows
 
-    monkeypatch.setattr(webcam, "_enumerate_v4l2_sync", fake_enum)
+    monkeypatch.setattr(webcam_probe, "_enumerate_v4l2_sync", fake_enum)
     rows = await webcam.discover_cameras()
     assert rows == fake_rows
 
@@ -101,7 +102,7 @@ async def test_webcam_discover_windows_walks_dshow(
     async def fake_enum() -> list[dict[str, Any]]:
         return fake_rows
 
-    monkeypatch.setattr(webcam, "_enumerate_directshow", fake_enum)
+    monkeypatch.setattr(webcam_probe, "_enumerate_directshow", fake_enum)
     rows = await webcam.discover_cameras()
     assert rows == fake_rows
 
@@ -131,7 +132,7 @@ async def test_webcam_handshake_matches_on_serial(
             },
         ]
 
-    monkeypatch.setattr(webcam, "discover_cameras", fake_discover)
+    monkeypatch.setattr(webcam_probe, "discover_cameras", fake_discover)
     summary = await webcam.handshake({"serial": "XYZ999", "model_hint": None})
     assert "XYZ999" in summary
     assert "C930" in summary
@@ -157,7 +158,7 @@ async def test_webcam_handshake_matches_on_model_hint_when_no_serial(
             },
         ]
 
-    monkeypatch.setattr(webcam, "discover_cameras", fake_discover)
+    monkeypatch.setattr(webcam_probe, "discover_cameras", fake_discover)
     summary = await webcam.handshake({"serial": None, "model_hint": "C920"})
     assert "C920" in summary
 
@@ -178,7 +179,7 @@ async def test_webcam_handshake_unique_no_selector(
             },
         ]
 
-    monkeypatch.setattr(webcam, "discover_cameras", fake_discover)
+    monkeypatch.setattr(webcam_probe, "discover_cameras", fake_discover)
     summary = await webcam.handshake({"serial": None, "model_hint": None})
     assert "C920" in summary
 
@@ -199,7 +200,7 @@ async def test_webcam_handshake_raises_on_no_match(
             },
         ]
 
-    monkeypatch.setattr(webcam, "discover_cameras", fake_discover)
+    monkeypatch.setattr(webcam_probe, "discover_cameras", fake_discover)
     with pytest.raises(AdapterError):
         await webcam.handshake({"serial": "NOPE", "model_hint": None})
 
@@ -213,7 +214,7 @@ async def test_webcam_handshake_raises_when_empty(
     async def fake_discover() -> list[dict[str, Any]]:
         return []
 
-    monkeypatch.setattr(webcam, "discover_cameras", fake_discover)
+    monkeypatch.setattr(webcam_probe, "discover_cameras", fake_discover)
     with pytest.raises(AdapterError):
         await webcam.handshake({"serial": "anything", "model_hint": None})
 

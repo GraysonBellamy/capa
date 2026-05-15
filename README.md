@@ -2,19 +2,24 @@
 
 Control and DAQ application for a custom cone-calorimeter-class lab instrument.
 
-See [docs/capa-plan.md](docs/capa-plan.md) for the high-level architecture
-plan, and [docs/per-resource-worker-migration.md](docs/per-resource-worker-migration.md)
-for the runtime layer (per-resource workers, conductor / pool / manual
-client) that supersedes the legacy single-loop engine described in
-`capa-plan.md`.
+See [docs/runtime-architecture.md](docs/runtime-architecture.md) for the
+current runtime layer (per-resource workers, conductor / pool / manual
+client) and [docs/capa-plan.md](docs/capa-plan.md) for the high-level
+architecture plan (parts predating the runtime cutover are marked stale).
 
 ## Status
 
-Pre-alpha. Phase 4 of the per-resource-worker migration is complete:
+Pre-alpha. The per-resource-worker runtime is the current runtime:
 the single-loop `ExperimentEngine` has been replaced by `Conductor` +
-`WorkerPool` (`src/capa/runtime/`); the GUI's `RunController` runs
-against the new stack; the legacy `engine.py`, `cameras.py`, and
-`registry.py` modules are deleted.
+`WorkerPool` (`src/capa/runtime/`), and the GUI's `RunController` runs
+against that stack.
+
+## Unstable API
+
+The public surface of `capa.runtime`, `capa.devices`, and `capa.config` is
+**unstable**. Imports, exception types, and adapter contracts may change
+between commits without backward-compatibility shims. Pin to a specific
+commit if you are building against capa today.
 
 ## Development
 
