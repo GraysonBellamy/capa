@@ -254,9 +254,18 @@ class ChannelSpec(BaseModel):
     channel-sample sink (in addition to the calibrated value). Useful when
     a researcher wants the raw counts alongside the engineering value."""
 
-    sample_rate_hz: float | None = Field(default=None, gt=0)
-    """``None`` for event-driven channels (cameras) or channels whose cadence
-    is set by their adapter rather than declared on the spec."""
+    sample_rate_hz: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "Hz",
+            "capa_help": (
+                "Producer sampling rate. Leave unset for event-driven "
+                "channels (cameras) or channels whose cadence is set by "
+                "the adapter rather than declared here."
+            ),
+        },
+    )
 
     calibration: Calibration = Field(default_factory=_default_identity)
 
@@ -270,7 +279,18 @@ class ChannelSpec(BaseModel):
     """Which named sinks receive this channel. Matches keys in the storage
     layer."""
 
-    decimate_to_hz: float = Field(default=60.0, gt=0)
+    decimate_to_hz: float = Field(
+        default=60.0,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "Hz",
+            "capa_help": (
+                "Plot-only decimation rate. Disk capture stays at the "
+                "native producer rate; only the live-plot ring buffer "
+                "thins samples to this cap."
+            ),
+        },
+    )
     """Plot-only decimation. Underlying disk capture is at native rate.
     Default is intentionally above the fastest producer (50 Hz Sartorius
     balance) so the ring buffer keeps every sample — the plot pane's

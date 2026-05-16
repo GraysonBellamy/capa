@@ -47,14 +47,26 @@ class OutlineEntry:
 
 
 # Section tree. ``section_id`` strings match :data:`capa.config.problems.Section`
-# (so problem-navigation lands on the right entry); ``hardware`` is a
-# UI-only grouping that has no matching ``Section`` literal.
+# (so problem-navigation lands on the right entry); ``hardware`` /
+# ``experiment_group`` / ``recording`` / ``advanced`` are UI-only groupings
+# that have no matching ``Section`` literal.
+#
+# Structure mirrors the operator's three questions — *what experiment,
+# what hardware, where does data go* — rather than the underlying
+# Pydantic shape. Files (inline vs. external layout) is a power-user
+# concern and lives under an Advanced parent.
 SECTIONS: tuple[OutlineEntry, ...] = (
     OutlineEntry("overview", "Overview"),
-    OutlineEntry("files", "Files"),
-    OutlineEntry("experiment", "Experiment"),
-    OutlineEntry("procedure", "Procedure"),
-    OutlineEntry("capa_profile", "CAPA Profile"),
+    OutlineEntry(
+        "experiment_group",
+        "Experiment",
+        children=(
+            OutlineEntry("capa_profile", "CAPA Profile"),
+            OutlineEntry("experiment", "Operator & sample"),
+            OutlineEntry("procedure", "Procedure"),
+        ),
+        rolls_up=("capa_profile", "experiment", "procedure"),
+    ),
     OutlineEntry(
         "hardware",
         "Hardware",
@@ -65,9 +77,22 @@ SECTIONS: tuple[OutlineEntry, ...] = (
         ),
         rolls_up=("devices", "channels", "cameras"),
     ),
-    OutlineEntry("storage", "Storage"),
-    OutlineEntry("safety", "Safety"),
-    OutlineEntry("calibration", "Calibration"),
+    OutlineEntry(
+        "recording",
+        "Recording",
+        children=(
+            OutlineEntry("storage", "Storage"),
+            OutlineEntry("safety", "Safety"),
+            OutlineEntry("calibration", "Calibration"),
+        ),
+        rolls_up=("storage", "safety", "calibration"),
+    ),
+    OutlineEntry(
+        "advanced",
+        "Advanced",
+        children=(OutlineEntry("files", "Files"),),
+        rolls_up=("files",),
+    ),
 )
 
 
@@ -118,12 +143,17 @@ class SetupOutline(QTreeWidget):
         for entry in SECTIONS:
             self._build_entry(entry, parent=None)
         # Expand every parent so children are visible by default — the
-        # operator should see the full structure on first paint.
+        # operator should see the full structure on first paint. Advanced
+        # is the exception: Files is a power-user concern that we keep
+        # collapsed so it doesn't compete for attention with the main
+        # editing surface.
         for entry in SECTIONS:
-            if entry.children:
-                item = self._items.get(entry.section_id)
-                if item is not None:
-                    item.setExpanded(True)
+            if not entry.children:
+                continue
+            item = self._items.get(entry.section_id)
+            if item is None:
+                continue
+            item.setExpanded(entry.section_id != "advanced")
 
         self.itemSelectionChanged.connect(self._on_selection_changed)
 

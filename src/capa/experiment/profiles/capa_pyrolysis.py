@@ -79,23 +79,50 @@ class CapaSpecimen(BaseModel):
 
     id: str
     material: str
-    initial_mass_g: float = Field(gt=0)
+    initial_mass_g: float = Field(
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "g",
+            "capa_help": "Initial sample mass on the load cell, before heating begins.",
+        },
+    )
     form: SpecimenForm
-    particle_size_um: float | None = Field(default=None, gt=0)
-    """Median particle size for the rare powder/granulate run (``form``
-    set to ``other``). ``None`` for the typical disk."""
+    particle_size_um: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "µm",
+            "capa_help": (
+                "Median particle size for powder / granulate runs. Leave unset "
+                "for the typical solid disk."
+            ),
+        },
+    )
 
     specimen_holder: str
     """Specimen-holder description (e.g. ``"stainless steel cup"``). The
     holder geometry varies by run — depth and diameter, plus optional
     insulation, change the exposed surface area."""
 
-    specimen_holder_diameter_mm: float | None = Field(default=None, gt=0)
-    """Outside / nominal diameter of the holder cup, when applicable."""
-
-    specimen_holder_depth_mm: float | None = Field(default=None, gt=0)
-    """Internal cup depth. Combined with diameter, captures the cavity
-    geometry that affects exposed surface area."""
+    specimen_holder_diameter_mm: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "mm",
+            "capa_help": "Outside / nominal diameter of the holder cup.",
+        },
+    )
+    specimen_holder_depth_mm: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "mm",
+            "capa_help": (
+                "Internal cup depth. Together with diameter, captures the "
+                "cavity geometry that affects exposed surface area."
+            ),
+        },
+    )
 
     conditioning: str | None = None
     """Free-text description of pre-test conditioning (drying, desiccator,
@@ -118,22 +145,41 @@ class HeaterProgram(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    target_heat_flux_kw_m2: float = Field(gt=0)
-    """Target radiant heat flux at the specimen surface — the scientific
-    parameter for the run."""
-
-    heater_setpoint_c: float
-    """Heater temperature setpoint commanded to deliver the target flux,
-    chosen via the flux-vs-temperature calibration."""
-
+    target_heat_flux_kw_m2: float = Field(
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "kW/m²",
+            "capa_help": (
+                "Target radiant heat flux at the specimen surface — the "
+                "scientific parameter for the run. The heater setpoint is "
+                "derived from this via the flux-vs-temperature calibration."
+            ),
+        },
+    )
+    heater_setpoint_c: float = Field(
+        json_schema_extra={
+            "capa_unit": "°C",
+            "capa_help": (
+                "Heater temperature setpoint chosen to deliver the target "
+                "flux. Comes from the flux-vs-temperature calibration."
+            ),
+        },
+    )
     flux_calibration_ref: str | None = None
     """Pointer to the heat-flux ↔ heater-setpoint calibration used
     (date-stamped lookup-table id, lab-notebook entry, etc.). Free-form."""
 
-    ramp_rate_c_per_min: float | None = Field(default=None, gt=0)
-    """Optional ramp rate for dynamic programs. ``None`` for the common
-    case of a single static-flux setpoint hold; populated for the minority
-    of runs that ramp the heater."""
+    ramp_rate_c_per_min: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "°C/min",
+            "capa_help": (
+                "Optional ramp rate for dynamic programs. Leave unset for "
+                "the common single-setpoint hold."
+            ),
+        },
+    )
 
 
 AtmosphereMode = Literal["inert", "oxidative", "reducing", "reactive_blend"]
@@ -154,12 +200,17 @@ class PurgeGas(BaseModel):
 
     supplier: str | None = None
     cylinder_lot: str | None = None
-    target_flow_sccm: float = Field(ge=0)
-    """Target purge flow at standard conditions. The actual MFC channel is
-    the source of truth; this is the operator's intended setpoint. Set to
-    ``0`` for runs where the purge gas is wired but intentionally not flowed
-    — the ``capa.purge_flow_established`` preflight check treats explicit
-    zero as opt-out and skips verification."""
+    target_flow_sccm: float = Field(
+        ge=0,
+        json_schema_extra={
+            "capa_unit": "sccm",
+            "capa_help": (
+                "Operator's intended purge-flow setpoint at standard "
+                "conditions. The MFC channel is the actual source of truth; "
+                "set to 0 to opt out of the purge-flow preflight check."
+            ),
+        },
+    )
 
 
 class ReactiveGas(BaseModel):
@@ -172,10 +223,24 @@ class ReactiveGas(BaseModel):
     """e.g. ``"O2"``, ``"H2"``, ``"CO"``."""
 
     purity: str
-    target_flow_sccm: float = Field(ge=0)
-    target_mole_fraction: float | None = Field(default=None, ge=0.0, le=1.0)
-    """Computed downstream blend fraction, when known. The actual blend
-    depends on both MFCs; this records the operator's intent."""
+    target_flow_sccm: float = Field(
+        ge=0,
+        json_schema_extra={
+            "capa_unit": "sccm",
+            "capa_help": "Operator's intended secondary-gas flow setpoint.",
+        },
+    )
+    target_mole_fraction: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={
+            "capa_help": (
+                "Computed downstream blend fraction, when known. Records the "
+                "operator's intent — the actual blend depends on both MFCs."
+            ),
+        },
+    )
 
 
 class Atmosphere(BaseModel):
@@ -186,9 +251,18 @@ class Atmosphere(BaseModel):
     mode: AtmosphereMode
     purge: PurgeGas
     reactive: ReactiveGas | None = None
-    purge_duration_s: float = Field(default=0.0, ge=0)
-    """Purge time before heating begins. Recorded so downstream analysis
-    knows how long the reactor was being swept before the run started."""
+    purge_duration_s: float = Field(
+        default=0.0,
+        ge=0,
+        json_schema_extra={
+            "capa_unit": "s",
+            "capa_help": (
+                "How long the reactor is swept with purge gas before heating "
+                "begins. Captured so downstream analysis knows the pre-run "
+                "sweep duration."
+            ),
+        },
+    )
 
     leak_check_at: datetime | None = None
     """Most-recent leak / pressure-decay check timestamp. Preflight
@@ -209,8 +283,28 @@ class DownstreamAnalyzer(BaseModel):
 
     kind: Literal["ftir", "gc", "ms", "gc_ms", "ndir", "other"]
     serial: str | None = None
-    sampling_line_delay_s: float = Field(default=0.0, ge=0)
-    response_time_s: float | None = Field(default=None, gt=0)
+    sampling_line_delay_s: float = Field(
+        default=0.0,
+        ge=0,
+        json_schema_extra={
+            "capa_unit": "s",
+            "capa_help": (
+                "Transport delay from sample point to analyzer detector. "
+                "Used to time-align analyzer output with capa channels."
+            ),
+        },
+    )
+    response_time_s: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "s",
+            "capa_help": (
+                "Analyzer 90% step response time — the time-constant of the "
+                "instrument's measurement, not the sampling-line delay."
+            ),
+        },
+    )
     external_file_ref: str | None = None
     """Pointer to the analyzer's data file/dataset. Free-form path or URI;
     captured into the bundle so a later analyzer can re-locate the

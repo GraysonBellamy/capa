@@ -41,7 +41,13 @@ from typing import Final
 
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
+from PySide6.QtGui import QFont, QFontDatabase, QResizeEvent, QShowEvent
+from PySide6.QtWidgets import (
+    QLabel,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
 from capa.channels.spec import ChannelSpec
 from capa.core.ringbuffer import RingBufferRegistry
@@ -87,10 +93,11 @@ class PlotPane(QWidget):
     ) -> None:
         super().__init__(parent)
         self._registry: RingBufferRegistry = registry
+        self._channels: list[ChannelSpec] = list(channels)
 
         # Group channels by plot_group; keep declaration order.
         groups: dict[str, list[ChannelSpec]] = {}
-        for ch in channels:
+        for ch in self._channels:
             key = ch.plot_group or "misc"
             groups.setdefault(key, []).append(ch)
 
@@ -100,23 +107,76 @@ class PlotPane(QWidget):
         # skip ``setData`` for curves whose ring buffer has not advanced
         # since the previous repaint tick. ``-1`` forces a first paint.
         self._last_kept: dict[str, int] = {}
+        # Has the first sample arrived? Used to drop the "Press Start"
+        # overlay the moment real data starts drawing.
+        self._has_data: bool = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(4)
+
         self._splitter = QSplitter(Qt.Orientation.Vertical, self)
-        layout.addWidget(self._splitter)
+        layout.addWidget(self._splitter, 1)
 
         pg.setConfigOptions(antialias=False, useOpenGL=False)
+        # Shared tick font — pyqtgraph defaults to the system font at
+        # whatever the theme picks, which on Windows leaves tick labels
+        # large enough to clip against the axis line on dense plots.
+        tick_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+        tick_font.setPointSize(8)
+        # Style for the axis title labels. White-space ``color`` keeps
+        # the label readable on the white plot background.
+        label_style = {"color": "#344054", "font-size": "9pt"}
+        self._plots: list[pg.PlotWidget] = []
+        self._overlays: list[QLabel] = []
         for group_name, group_channels in groups.items():
             plot = pg.PlotWidget()
             plot.setBackground("w")
             plot.showGrid(x=True, y=True, alpha=0.3)
-            plot.setLabel("bottom", "t (s)")
+            plot.setLabel("bottom", "t (s)", **label_style)
             unit = group_channels[0].derived_unit or group_channels[0].unit
             self._unit_per_group[group_name] = unit
-            plot.setLabel("left", f"{group_name} [{unit}]")
+            plot.setLabel("left", f"{group_name} [{unit}]", **label_style)
+            # Reserve fixed axis-area sizes so long tick labels (large
+            # temperatures, scientific-notation flows) don't clip
+            # against the plot edge and the axis title text always has
+            # room. Without these, pyqtgraph's auto-sizing can leave the
+            # leftmost tick label half-cut on first paint.
+            left_axis = plot.getAxis("left")
+            bottom_axis = plot.getAxis("bottom")
+            left_axis.setWidth(64)
+            bottom_axis.setHeight(32)
+            left_axis.setStyle(tickFont=tick_font)
+            bottom_axis.setStyle(tickFont=tick_font)
+            # Disable pyqtgraph's autoSIPrefix. The unit is already
+            # embedded in the label text rather than passed via
+            # ``setLabel(units=…)``, so pyqtgraph's labelString() treats
+            # ``labelUnits`` as empty and, once the data range triggers
+            # a non-unity scale, appends ``(x0.001)`` to the label —
+            # which overflows the fixed axis reservations the moment a
+            # run starts. Tick values stay in the channel's declared
+            # unit instead of being silently rescaled.
+            left_axis.enableAutoSIPrefix(False)
+            bottom_axis.enableAutoSIPrefix(False)
             plot.addLegend(offset=(8, 8))
+            # Centered "Press Start" overlay. Hidden the moment the
+            # first sample arrives in :meth:`_refresh`. The overlay is
+            # a child of the plot's viewport-equivalent (the
+            # ``PlotWidget`` itself) so resize tracking is automatic.
+            overlay = QLabel(
+                "Press Start to begin recording.\nLive values appear in the Numerics dock.", plot
+            )
+            overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            font = QFont()
+            font.setPointSize(11)
+            overlay.setFont(font)
+            overlay.setStyleSheet(
+                "color: #98a2b3; background: rgba(255,255,255,0.6); "
+                "padding: 12px 18px; border-radius: 8px;"
+            )
+            overlay.adjustSize()
+            self._overlays.append(overlay)
+            self._plots.append(plot)
             # autoDownsample + peak method: pyqtgraph picks the downsample
             # factor from the curve's pixel width vs point count, then
             # plots min/max per bucket so transient peaks survive. Lets
@@ -170,6 +230,10 @@ class PlotPane(QWidget):
         self._registry = registry
         for name in self._last_kept:
             self._last_kept[name] = -1
+        self._has_data = False
+        for overlay in self._overlays:
+            overlay.show()
+        self._reposition_overlays()
 
     def clear(self) -> None:
         for name, curve in self._curves.items():
@@ -179,6 +243,7 @@ class PlotPane(QWidget):
     # ------------------------------------------------------------------ internal
 
     def _refresh(self) -> None:
+        new_data = False
         for channel, curve in self._curves.items():
             buf = self._registry.get(channel)
             if buf is None:
@@ -195,6 +260,26 @@ class PlotPane(QWidget):
             # Convert t_mono_ns → seconds-since-run-start for display.
             curve.setData(t_ns.astype("float64") / 1e9, v)
             self._last_kept[channel] = kept
+            new_data = True
+        if new_data and not self._has_data:
+            self._has_data = True
+            for overlay in self._overlays:
+                overlay.hide()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._reposition_overlays()
+
+    def _reposition_overlays(self) -> None:
+        for plot, overlay in zip(self._plots, self._overlays, strict=False):
+            overlay.adjustSize()
+            x = (plot.width() - overlay.width()) // 2
+            y = (plot.height() - overlay.height()) // 2
+            overlay.move(max(x, 0), max(y, 0))
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._reposition_overlays()
 
 
 __all__ = ["REPAINT_INTERVAL_MS", "PlotPane"]

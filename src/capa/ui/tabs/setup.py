@@ -8,21 +8,29 @@ against the underlying :class:`ConfigDocument`.
 from __future__ import annotations
 
 import contextlib
-from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QGuiApplication
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
     QFrame,
+    QHBoxLayout,
     QLabel,
+    QMenu,
     QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +40,11 @@ from capa.config.problems import ConfigProblem
 from capa.core.errors import CapaError
 from capa.experiment.config import ExperimentConfig
 from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState
+from capa.ui.recents import load_recents
+from capa.ui.tabs.setup_connection_strip import (
+    ConnectionInputs,
+    ConnectionStrip,
+)
 from capa.ui.tabs.setup_outline import ALL_SECTIONS, SetupOutline
 from capa.ui.tabs.setup_problems import SetupProblems
 from capa.ui.tabs.setup_sections._base import SectionWidget
@@ -48,49 +61,6 @@ if TYPE_CHECKING:
     from capa.ui.state import RunController, RunUiState
 
 _logger = structlog.get_logger("capa.ui.setup")
-
-
-class _BannerState(StrEnum):
-    """Mutually-exclusive Setup-tab banner states."""
-
-    HIDDEN = "hidden"
-    APPLIED_OK = "applied_ok"
-    UNAPPLIED = "unapplied"
-    APPLIED_FAILED = "applied_failed"
-    CHECKING = "checking"
-    APPLYING = "applying"
-    FROZEN = "frozen"
-
-
-# Per-state (text-template, css). ``{detail}`` is substituted from the
-# Setup tab's ``_banner_detail`` slot before being displayed.
-_BANNER_STYLES: dict[_BannerState, tuple[str, str]] = {
-    _BannerState.FROZEN: (
-        "Run is active — Apply to Rig is disabled until the run completes.",
-        "background: #fff3cd; color: #856404; padding: 4px 8px; border: 1px solid #ffeeba;",
-    ),
-    _BannerState.APPLYING: (
-        "Applying to rig — opening devices…",
-        "background: #d1ecf1; color: #0c5460; padding: 4px 8px; border: 1px solid #bee5eb;",
-    ),
-    _BannerState.CHECKING: (
-        "Checking hardware — read-only handshake in progress…",
-        "background: #e2e3f3; color: #2c2e6b; padding: 4px 8px; border: 1px solid #c2c3e3;",
-    ),
-    _BannerState.APPLIED_FAILED: (
-        "Apply failed: {detail}. No rig is currently applied — fix and Apply again.",
-        "background: #f8d7da; color: #721c24; padding: 4px 8px; border: 1px solid #f5c6cb;",
-    ),
-    _BannerState.UNAPPLIED: (
-        "Draft has unapplied changes — Apply to Rig to take effect.",
-        "background: #fefbf3; color: #7c6f3a; padding: 4px 8px; border: 1px dashed #d9c878;",
-    ),
-    _BannerState.APPLIED_OK: (
-        "Applied to rig: {detail}.",
-        "background: #d4edda; color: #155724; padding: 4px 8px; border: 1px solid #c3e6cb;",
-    ),
-    _BannerState.HIDDEN: ("", ""),
-}
 
 
 # Top-level dict keys whose payload slice lives in ``hardware_payload``
@@ -127,7 +97,7 @@ class SetupTab(QWidget):
 
     applyRequested = Signal(object, object)  # noqa: N815 — Qt signal naming convention
     """``(ExperimentConfig, Path | None)`` — fires when the operator
-    clicks Apply to Rig on a valid draft. :class:`MainWindow` consumes
+    clicks Apply & Connect on a valid draft. :class:`MainWindow` consumes
     this to drive ``RunController.set_active_config`` + the existing
     rebuild-docks side effects."""
 
@@ -150,17 +120,23 @@ class SetupTab(QWidget):
         # banner correctly — and so the banner never lags behind the
         # signal in production either.
         self._controller_state: object | None = None
-        # Apply-to-Rig state machine: True while an apply is mid-flight
+        # Apply & Connect state machine: True while an apply is mid-flight
         # (between ``applyRequested`` emit and the controller's
         # ``config_load_finished`` signal). Gates the Apply button so
         # the operator can't double-click during hardware preparation.
         self._apply_in_flight: bool = False
-        # Last apply outcome, used by the banner state machine to keep
-        # transient success / failure messages visible until either a
-        # new edit happens or another apply attempt fires.
-        self._apply_outcome: tuple[_BannerState, str] | None = None
+        # Most recent failure detail (full error text from a failed
+        # apply). Cleared on the next apply attempt or any draft edit;
+        # surfaced to the operator via the connection strip's
+        # Details… dialog so the failure is never silently hidden.
+        self._last_apply_failed: bool = False
+        self._last_apply_succeeded: bool = False
+        self._last_failure_detail: str = ""
+        # Most recent connected detail ("12 devices · 8 channels") shown
+        # in the green CONNECTED state. Re-derived on every config-load.
+        self._connected_detail: str = ""
         # Check-Hardware in-flight flag — gates the Check button and
-        # drives the CHECKING banner. The actual coroutine is scheduled
+        # drives the CHECKING strip. The actual coroutine is scheduled
         # against the qasync loop in :meth:`_on_check_hardware`.
         self._check_in_flight: bool = False
 
@@ -173,42 +149,35 @@ class SetupTab(QWidget):
         self._validate_timer.setInterval(200)
         self._validate_timer.timeout.connect(self._run_validate)
 
-        # Auto-fade timer for the "applied_ok" banner — green pill
-        # stays up for 4 seconds, then drops to whatever lower-priority
-        # state is true (typically ``HIDDEN``).
-        self._banner_fade_timer = QTimer(self)
-        self._banner_fade_timer.setSingleShot(True)
-        self._banner_fade_timer.setInterval(4000)
-        self._banner_fade_timer.timeout.connect(self._on_apply_ok_fade)
-
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
         outer.setSpacing(4)
 
-        # Toolbar.
+        # Toolbar — three primary actions plus an overflow. Open carries
+        # New / Open / Recent in a submenu so the seven-button row that
+        # used to live here collapses to a single line.
         self._toolbar = QToolBar("Setup", self)
         self._toolbar.setMovable(False)
-        self._action_new = self._toolbar.addAction("New", self._on_new)
-        self._action_save = self._toolbar.addAction("Save", self._on_save)
-        self._action_save_as = self._toolbar.addAction("Save As", self._on_save_as)
-        self._action_validate = self._toolbar.addAction("Validate", self._on_validate)
-        self._toolbar.addSeparator()
-        # Discover / Check Hardware / Apply to Rig — all gated by
-        # frozen-while-armed. Check Hardware drives Layer 5 against the
-        # current draft; Apply hands the validated config to the run
-        # controller.
-        self._action_discover = self._toolbar.addAction("Discover", self._on_discover)
-        self._action_discover.setEnabled(False)
-        self._action_discover.setToolTip(
-            "Scan for connected devices and offer to add them to the draft."
-        )
-        self._action_check = self._toolbar.addAction("Check Hardware", self._on_check_hardware)
-        self._action_check.setEnabled(False)
-        self._action_check.setToolTip("Read-only handshake against each device in the draft.")
-        self._action_apply = self._toolbar.addAction("Apply to Rig", self._on_apply_to_rig)
-        self._action_apply.setEnabled(False)
-        self._action_apply.setToolTip("Validate the draft and apply it to the run controller.")
 
+        # Open ▾ toolbutton with submenu.
+        self._open_btn = QToolButton(self._toolbar)
+        self._open_btn.setText("Open")
+        self._open_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._open_menu = QMenu(self._open_btn)
+        self._action_new = self._open_menu.addAction("New from template…", self._on_new)
+        self._open_menu.addAction("Open file…", self._on_open_file)
+        self._recent_submenu = self._open_menu.addMenu("Recent")
+        self._recent_submenu.aboutToShow.connect(self._populate_recent_submenu)
+        self._open_btn.setMenu(self._open_menu)
+        self._toolbar.addWidget(self._open_btn)
+
+        # Save stays as a single-action button.
+        self._action_save = self._toolbar.addAction("Save", self._on_save)
+
+        # Spacer to push the overflow to the right edge. Source label
+        # sits just before it so the operator can see which config the
+        # tab is editing without taking up toolbar width that primary
+        # actions need.
         spacer = QWidget(self._toolbar)
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._toolbar.addWidget(spacer)
@@ -216,17 +185,58 @@ class SetupTab(QWidget):
         self._source_label.setContentsMargins(0, 0, 8, 0)
         self._toolbar.addWidget(self._source_label)
 
+        # ⋮ overflow — actions that exist but aren't primary. Save As,
+        # Validate, Scan, Verify, Revert. Apply & Connect lives in the
+        # connection strip so it isn't duplicated here.
+        self._overflow_btn = QToolButton(self._toolbar)
+        self._overflow_btn.setText("⋮")
+        self._overflow_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._overflow_btn.setToolTip("More actions")
+        self._overflow_menu = QMenu(self._overflow_btn)
+        self._action_save_as = self._overflow_menu.addAction("Save As…", self._on_save_as)
+        self._action_validate = self._overflow_menu.addAction("Validate", self._on_validate)
+        self._overflow_menu.addSeparator()
+        self._action_discover = self._overflow_menu.addAction("Scan for devices", self._on_discover)
+        self._action_discover.setEnabled(False)
+        self._action_discover.setToolTip(
+            "Scan each device family's bus / network / USB tree and offer to "
+            "add reachable devices to the draft."
+        )
+        self._action_check = self._overflow_menu.addAction(
+            "Verify connection", self._on_check_hardware
+        )
+        self._action_check.setEnabled(False)
+        self._action_check.setToolTip(
+            "Read-only handshake against each device in the draft — confirms the "
+            "rig can be reached without opening long-lived connections."
+        )
+        self._overflow_menu.addSeparator()
+        self._action_revert = self._overflow_menu.addAction("Revert draft", self._on_revert_draft)
+        self._overflow_btn.setMenu(self._overflow_menu)
+        self._toolbar.addWidget(self._overflow_btn)
+
+        # Apply & Connect retained as an internal action so existing
+        # gating + tooltip code paths (and the tests that drive
+        # ``_action_apply``) keep working. The visible Apply button lives
+        # on the connection strip; this action is the keyboard / API
+        # entry point.
+        self._action_apply = QAction("Apply && Connect", self)
+        self._action_apply.triggered.connect(self._on_apply_to_rig)
+        self._action_apply.setEnabled(False)
+        self._action_apply.setToolTip(
+            "Validate the draft, open hardware connections, and start background acquisition."
+        )
+
         outer.addWidget(self._toolbar)
 
-        # Multi-state banner — frozen-while-armed, applying,
-        # applied_ok, applied_failed, unapplied. Priority handled by
-        # ``_compute_banner_state``; only one state visible at a time.
-        self._banner_state: _BannerState = _BannerState.HIDDEN
-        self._banner_detail: str = ""
-        self._banner = QLabel("", self)
-        self._banner.setWordWrap(True)
-        self._banner.setVisible(False)
-        outer.addWidget(self._banner)
+        # Persistent connection strip — always-on answer to "is the rig
+        # live?". State priority is resolved inside
+        # :class:`ConnectionStrip`; this tab only feeds it inputs.
+        self._connection_strip = ConnectionStrip(self)
+        self._connection_strip.applyRequested.connect(self._on_apply_to_rig)
+        self._connection_strip.revertRequested.connect(self._on_revert_draft)
+        self._connection_strip.detailsRequested.connect(self._on_show_failure_details)
+        outer.addWidget(self._connection_strip)
 
         # Outline + main editor splitter.
         body = QSplitter(Qt.Orientation.Horizontal, self)
@@ -302,7 +312,7 @@ class SetupTab(QWidget):
                 self._controller.hardware_ready_changed.connect(self._on_hardware_ready_changed)
             with contextlib.suppress(Exception):
                 self._on_controller_state(self._controller.state)
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
 
     # ------------------------------------------------------------------ API
@@ -312,7 +322,7 @@ class SetupTab(QWidget):
         return self._draft
 
     def set_document_coordinator(self, coordinator: DocumentCoordinator) -> None:
-        """Inject the :class:`DocumentCoordinator` for Apply-to-Rig.
+        """Inject the :class:`DocumentCoordinator` for Apply & Connect.
 
         Apply needs to compose Setup's draft with the Method tab's
         buffer (the operator may have edited the method without saving
@@ -340,12 +350,12 @@ class SetupTab(QWidget):
         self._draft = draft
         self._draft.unapplied = False
         self._apply_in_flight = False
-        self._apply_outcome = None
+        self._clear_apply_outcome()
         self._refresh_all_sections()
         self._refresh_source_label()
         self._refresh_outline_markers()
         self._problems.set_problems(self._draft.problems)
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self.draftLoaded.emit()
         _logger.info("ui.setup.loaded", path=str(path))
@@ -379,12 +389,12 @@ class SetupTab(QWidget):
         self._draft.validate()
         self._draft.unapplied = False
         self._apply_in_flight = False
-        self._apply_outcome = None
+        self._clear_apply_outcome()
         self._refresh_all_sections()
         self._refresh_source_label()
         self._refresh_outline_markers()
         self._problems.set_problems(self._draft.problems)
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self.draftLoaded.emit()
 
@@ -392,12 +402,12 @@ class SetupTab(QWidget):
         """Drop the current draft and re-seed with an empty document."""
         self._draft = SetupDraft.empty()
         self._apply_in_flight = False
-        self._apply_outcome = None
+        self._clear_apply_outcome()
         self._refresh_all_sections()
         self._refresh_source_label()
         self._refresh_outline_markers()
         self._problems.set_problems([])
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self.draftLoaded.emit()
 
@@ -408,7 +418,7 @@ class SetupTab(QWidget):
 
         A wizard-produced draft is by definition not the same as the
         currently-applied config (or there is no applied config), so we
-        mark ``unapplied`` so the Apply to Rig button lights up as the
+        mark ``unapplied`` so the Apply & Connect button lights up as the
         next logical step. Without this, opening the wizard and clicking
         Apply immediately would be impossible — the operator would have
         to make a stray edit just to unlock the button.
@@ -431,12 +441,12 @@ class SetupTab(QWidget):
         self._draft.validate()
         self._draft.unapplied = True
         self._apply_in_flight = False
-        self._apply_outcome = None
+        self._clear_apply_outcome()
         self._refresh_all_sections()
         self._problems.set_problems(self._draft.problems)
         self._refresh_outline_markers()
         self._refresh_source_label()
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self.draftLoaded.emit()
 
@@ -596,7 +606,7 @@ class SetupTab(QWidget):
         self._refresh_section("overview")
         self._refresh_outline_markers()
         self._refresh_source_label()
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self._validate_timer.start()
 
@@ -663,7 +673,7 @@ class SetupTab(QWidget):
         self._refresh_section("channels")
         self._refresh_outline_markers()
         self._refresh_source_label()
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self._validate_timer.start()
 
@@ -675,7 +685,7 @@ class SetupTab(QWidget):
         self._refresh_section("calibration")
         self._refresh_outline_markers()
         self._refresh_source_label()
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self._validate_timer.start()
 
@@ -764,7 +774,7 @@ class SetupTab(QWidget):
         # operator can't fire two long-running adapter sequences at
         # once against the same bus.
         self._refresh_apply_enabled()
-        self._refresh_banner()
+        self._refresh_connection_strip()
 
     def _finish_check(self, live_problems: list[ConfigProblem]) -> None:
         """Merge live findings + clear the CHECKING banner."""
@@ -779,10 +789,10 @@ class SetupTab(QWidget):
         self._problems.set_problems(merged)
         self._refresh_outline_markers()
         self._refresh_apply_enabled()
-        self._refresh_banner()
+        self._refresh_connection_strip()
 
     def _on_apply_to_rig(self) -> None:
-        """Apply-to-Rig flow.
+        """Apply & Connect flow.
 
         1. Re-run layers 1–4. Refuse on errors.
         2. Refuse if a run is currently active (frozen-while-armed).
@@ -804,7 +814,7 @@ class SetupTab(QWidget):
             QMessageBox.information(
                 self,
                 "Apply refused",
-                "A run is active. Apply to Rig is disabled until the run completes.",
+                "A run is active. Apply & Connect is disabled until the run completes.",
             )
             return
 
@@ -833,9 +843,9 @@ class SetupTab(QWidget):
             return
 
         self._apply_in_flight = True
-        self._apply_outcome = None
+        self._clear_apply_outcome()
         self._refresh_apply_enabled()
-        self._refresh_banner()
+        self._refresh_connection_strip()
         _logger.info(
             "ui.setup.apply_requested",
             path=str(self._draft.document.experiment_path)
@@ -866,13 +876,13 @@ class SetupTab(QWidget):
             if slice_payload is not None:
                 self._apply_payload(section_id, slice_payload)
         self._draft.mark_dirty(section_id)
-        # An edit invalidates any sticky apply-outcome banner; the
-        # operator is moving on and the green/red pill becomes stale.
-        if self._apply_outcome is not None:
-            self._apply_outcome = None
+        # An edit invalidates any sticky apply-outcome state; the
+        # operator is moving on and the strip's red failure detail or
+        # green connected detail becomes stale.
+        self._clear_apply_outcome()
         self._refresh_outline_markers()
         self._refresh_source_label()
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
         # Live Overview update — read-only but driven by the same payload.
         self._refresh_section("overview")
@@ -905,7 +915,7 @@ class SetupTab(QWidget):
         self._problems.set_problems(self._draft.problems)
         self._refresh_outline_markers()
         self._refresh_section("overview")
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
 
     def _on_method_ref_changed(self) -> None:
@@ -920,11 +930,14 @@ class SetupTab(QWidget):
 
     def _on_controller_state(self, state: RunUiState | object) -> None:
         self._controller_state = state
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
 
     def _on_hardware_ready_changed(self, _ready: bool) -> None:
-        """Pool readiness flipped — re-evaluate Check Hardware gating."""
+        """Pool readiness flipped — re-evaluate Check Hardware gating
+        and the connection strip (which reads ``controller.hardware_ready``
+        to decide CONNECTED vs UNAPPLIED)."""
+        self._refresh_connection_strip()
         self._refresh_apply_enabled()
 
     def _on_config_load_finished(self, progress: object) -> None:
@@ -950,44 +963,27 @@ class SetupTab(QWidget):
                 if progress.devices
                 else "no devices"
             )
-            self._apply_outcome = (_BannerState.APPLIED_OK, detail)
-            self._banner_fade_timer.start()
+            self._last_apply_failed = False
+            self._last_apply_succeeded = True
+            self._last_failure_detail = ""
+            self._connected_detail = detail
             _logger.info("ui.setup.apply_succeeded", devices=ready)
         elif state is ConfigLoadState.FAILED:
             self._apply_in_flight = False
             self._draft.unapplied = True
-            self._apply_outcome = (
-                _BannerState.APPLIED_FAILED,
-                progress.message or "device initialization failed",
-            )
+            self._last_apply_failed = True
+            self._last_apply_succeeded = False
+            self._last_failure_detail = progress.message or "device initialization failed"
+            self._connected_detail = ""
             _logger.warning("ui.setup.apply_failed", message=progress.message)
         else:
             # IDLE / interim states: keep waiting.
             return
-        self._refresh_banner()
+        self._refresh_connection_strip()
         self._refresh_source_label()
         self._refresh_apply_enabled()
 
-    def _on_apply_ok_fade(self) -> None:
-        if self._apply_outcome is not None and self._apply_outcome[0] is _BannerState.APPLIED_OK:
-            self._apply_outcome = None
-            self._refresh_banner()
-
-    # --------------------------------------------------- banner state machine
-
-    def _compute_banner_state(self) -> tuple[_BannerState, str]:
-        """Resolve the highest-priority banner the operator should see."""
-        if self._is_controller_busy():
-            return (_BannerState.FROZEN, "")
-        if self._apply_in_flight:
-            return (_BannerState.APPLYING, "")
-        if self._check_in_flight:
-            return (_BannerState.CHECKING, "")
-        if self._apply_outcome is not None:
-            return self._apply_outcome
-        if self._draft.unapplied and not self._draft.has_errors:
-            return (_BannerState.UNAPPLIED, "")
-        return (_BannerState.HIDDEN, "")
+    # --------------------------------------------------- connection strip helpers
 
     def _is_controller_busy(self) -> bool:
         """``True`` if the run controller is in any non-IDLE state.
@@ -995,7 +991,7 @@ class SetupTab(QWidget):
         Prefers the cached ``_controller_state`` (updated by the
         ``state_changed`` signal) over the attribute on the controller
         so test stubs that emit the signal without updating their own
-        attribute still drive the banner correctly.
+        attribute still drive the strip correctly.
         """
         if self._controller is None:
             return False
@@ -1011,18 +1007,141 @@ class SetupTab(QWidget):
             RunUiState.FINALIZING,
         )
 
-    def _refresh_banner(self) -> None:
-        state, detail = self._compute_banner_state()
-        self._banner_state = state
-        self._banner_detail = detail
-        if state is _BannerState.HIDDEN:
-            self._banner.setVisible(False)
+    def _refresh_connection_strip(self) -> None:
+        """Compose the latest :class:`ConnectionInputs` and push to the strip."""
+        has_config = self._draft.document.experiment_path is not None or bool(
+            self._draft.document.experiment_payload
+        )
+        hardware_ready = bool(
+            self._controller is not None and getattr(self._controller, "hardware_ready", False)
+        )
+        inputs = ConnectionInputs(
+            has_config=has_config,
+            hardware_ready=hardware_ready,
+            draft_unapplied=self._draft.unapplied,
+            draft_dirty_count=self._draft.dirty_section_count,
+            draft_has_errors=self._draft.has_errors,
+            apply_in_flight=self._apply_in_flight,
+            check_in_flight=self._check_in_flight,
+            controller_busy=self._is_controller_busy(),
+            last_apply_failed=self._last_apply_failed,
+            last_apply_succeeded=self._last_apply_succeeded,
+            failure_detail=self._last_failure_detail,
+            connected_detail=self._connected_detail,
+        )
+        self._connection_strip.update_state(inputs)
+
+    def _clear_apply_outcome(self) -> None:
+        """Reset failure / connection-detail bookkeeping.
+
+        Called on every draft-load, draft-edit, or new apply attempt so
+        the connection strip stops showing stale "Last apply failed…" or
+        "Connected — N devices" text once those snapshots are no longer
+        accurate.
+        """
+        self._last_apply_failed = False
+        self._last_apply_succeeded = False
+        self._last_failure_detail = ""
+        self._connected_detail = ""
+
+    def _on_open_file(self) -> None:
+        """Open a config from disk via the toolbar's Open ▾ menu.
+
+        The :class:`MainWindow`'s File → Open still works the same way;
+        this is the inline shortcut so the operator doesn't have to
+        leave the Setup tab to load a different config. Routes through
+        :meth:`load_path` so the same load pipeline (validation,
+        recents persistence, draft-state reset) runs.
+        """
+        if self._is_controller_busy():
+            QMessageBox.information(
+                self,
+                "Open refused",
+                "A run is active. Open is disabled until the run completes.",
+            )
             return
-        template, css = _BANNER_STYLES[state]
-        text = template.format(detail=detail) if "{detail}" in template else template
-        self._banner.setText(text)
-        self._banner.setStyleSheet(css)
-        self._banner.setVisible(True)
+        start_dir = ""
+        if self._draft.document.experiment_path is not None:
+            start_dir = str(self._draft.document.experiment_path.parent)
+        path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open experiment config",
+            start_dir,
+            "Configs (*.yaml *.yml *.toml);;All files (*)",
+        )
+        if not path_str:
+            return
+        self.load_path(Path(path_str))
+
+    def _populate_recent_submenu(self) -> None:
+        """Rebuild the Open → Recent submenu just before it opens.
+
+        Lazy population keeps the menu in sync with whatever other capa
+        sessions have written to ``~/.capa/recents.json`` without
+        forcing the tab to subscribe to filesystem changes.
+        """
+        self._recent_submenu.clear()
+        entries = load_recents()
+        if not entries:
+            placeholder = self._recent_submenu.addAction("(no recent configs)")
+            placeholder.setEnabled(False)
+            return
+        for entry in entries:
+            action = self._recent_submenu.addAction(str(entry.path))
+            action.triggered.connect(lambda _checked=False, p=entry.path: self.load_path(p))
+
+    def _on_revert_draft(self) -> None:
+        """Connection-strip Revert button: drop unsaved edits.
+
+        Re-loads the underlying document so any in-progress section
+        edits are discarded. If the draft has no on-disk source, falls
+        back to clearing the dirty/unapplied bits.
+        """
+        path = self._draft.document.experiment_path
+        if path is not None and path.is_file():
+            self.load_path(path)
+            return
+        self._draft.clear_dirty()
+        self._draft.unapplied = False
+        self._clear_apply_outcome()
+        self._refresh_all_sections()
+        self._refresh_source_label()
+        self._refresh_outline_markers()
+        self._refresh_connection_strip()
+        self._refresh_apply_enabled()
+
+    def _on_show_failure_details(self) -> None:
+        """Connection-strip Details… button: open a modal with the full error.
+
+        The strip's single-line label can only carry so much; the
+        detail dialog renders the entire message in a copyable text
+        area so the operator can paste it into a bug report.
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Apply failed")
+        dialog.resize(560, 360)
+        layout = QVBoxLayout(dialog)
+        header = QLabel(
+            "The last Apply & Connect failed. Fix the issue and try again.",
+            dialog,
+        )
+        header.setWordWrap(True)
+        layout.addWidget(header)
+        body = QPlainTextEdit(dialog)
+        body.setReadOnly(True)
+        body.setPlainText(self._last_failure_detail or "(no detail captured)")
+        layout.addWidget(body)
+        button_row = QHBoxLayout()
+        copy_btn = QPushButton("Copy", dialog)
+        copy_btn.clicked.connect(lambda: QGuiApplication.clipboard().setText(body.toPlainText()))
+        button_row.addWidget(copy_btn)
+        button_row.addStretch(1)
+        close_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=dialog)
+        close_box.rejected.connect(dialog.reject)
+        close_box.accepted.connect(dialog.accept)
+        button_row.addWidget(close_box)
+        layout.addLayout(button_row)
+        dialog.exec()
 
     def _refresh_apply_enabled(self) -> None:
         """Toggle the New / Apply / Discover / Check buttons.
@@ -1057,9 +1176,12 @@ class SetupTab(QWidget):
         # against". A fresh handshake opens its own connection to the
         # device — if the pool is already open on the same port, the
         # second open fails and we'd report every connected device as
-        # broken. Disable instead. Re-enable the moment the draft is
-        # edited (``unapplied=True``) so the operator can verify their
-        # changes before applying.
+        # broken. Stays disabled for the entire duration the pool is
+        # open: even after the operator edits the draft, the pool still
+        # holds the original ports until the next apply, so any
+        # handshake against an unchanged port would still collide. The
+        # operator's path to re-verify is "apply the new config" or
+        # disconnect — not "edit and re-check".
         #
         # Layer-5 (``live.*``) errors are excluded from the schema-error
         # check: a failed handshake is exactly the thing the operator
@@ -1071,12 +1193,11 @@ class SetupTab(QWidget):
         hardware_ready = bool(
             self._controller is not None and getattr(self._controller, "hardware_ready", False)
         )
-        applied_and_synced = hardware_ready and not self._draft.unapplied
-        check_enabled = not bus_locked and not schema_has_errors and not applied_and_synced
+        check_enabled = not bus_locked and not schema_has_errors and not hardware_ready
         self._action_check.setEnabled(check_enabled)
-        if applied_and_synced:
+        if hardware_ready:
             self._action_check.setToolTip(
-                "Hardware is connected and verified — edit the draft to re-enable."
+                "Hardware is connected — apply the new config or disconnect to re-verify."
             )
         else:
             self._action_check.setToolTip("Read-only handshake against each device in the draft.")

@@ -182,21 +182,22 @@ def test_save_as_writes_chosen_layout(qtbot: Any, tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Banner / frozen-while-armed.
+# Connection strip / frozen-while-armed.
 # ---------------------------------------------------------------------------
 
 
-def test_banner_visible_when_run_active(qtbot: Any) -> None:
+def test_strip_frozen_when_run_active(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    # isHidden() reflects the local visibility intent regardless of
-    # whether the parent has been shown yet (it hasn't in tests).
-    assert tab._banner.isHidden()
+    # IDLE state and no config — strip starts in IDLE.
+    from capa.ui.tabs.setup_connection_strip import ConnectionState
+
+    assert tab._connection_strip.state is ConnectionState.IDLE
     controller.state_changed.emit(RunUiState.RUNNING)
-    assert not tab._banner.isHidden()
+    assert tab._connection_strip.state is ConnectionState.FROZEN
     controller.state_changed.emit(RunUiState.IDLE)
-    assert tab._banner.isHidden()
+    assert tab._connection_strip.state is ConnectionState.IDLE
 
 
 @pytest.mark.parametrize(
@@ -208,12 +209,14 @@ def test_banner_visible_when_run_active(qtbot: Any) -> None:
         RunUiState.FINALIZING,
     ],
 )
-def test_banner_visible_for_each_active_state(qtbot: Any, state: RunUiState) -> None:
+def test_strip_frozen_for_each_active_state(qtbot: Any, state: RunUiState) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
+    from capa.ui.tabs.setup_connection_strip import ConnectionState
+
     controller.state_changed.emit(state)
-    assert not tab._banner.isHidden()
+    assert tab._connection_strip.state is ConnectionState.FROZEN
 
 
 # ---------------------------------------------------------------------------

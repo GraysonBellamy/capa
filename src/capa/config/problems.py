@@ -35,7 +35,7 @@ Section = Literal[
 class ConfigProblem(BaseModel):
     """One validation finding addressable by ``(section, path)``.
 
-    ``severity`` controls colour and whether Apply-to-Rig stays disabled
+    ``severity`` controls colour and whether Apply & Connect stays disabled
     (any ``"error"`` blocks). ``code`` is a stable identifier
     (``"channel.missing_source_device"``) so the UI can offer code-keyed
     quick fixes; ``message`` is the operator-facing prose.

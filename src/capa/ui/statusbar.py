@@ -30,6 +30,26 @@ from capa.ui.theme import (
 
 REFRESH_INTERVAL_MS: Final[int] = 1000
 
+
+_TOOLTIP_SATURATION: Final[str] = (
+    "Saturation — worst current blocked_since_ms across worker→conductor "
+    "bridges. Yellow at 25% of saturation_deadline_s, red at 50%. A "
+    "non-zero value means a producer is currently waiting for room in a "
+    "bridge; sustained saturation triggers crashed_but_sealed."
+)
+
+_TOOLTIP_LOOP_LAG: Final[str] = (
+    "Conductor loop p99 lag, in milliseconds, over a sliding window. Warn "
+    "at runtime.loop_lag_warn_ms (default 50 ms), fail at 4× that. Healthy "
+    "rigs sit near single-digit milliseconds."
+)
+
+_TOOLTIP_DEPTH: Final[str] = (
+    "Bridge queue depth: current / lifetime maximum across outbound "
+    "bridges. Current is what matters; max is shown for context. "
+    "Sustained max growth means the conductor is falling behind producers."
+)
+
 _STATE_COLORS = {
     RunUiState.IDLE: COLOR_IDLE,
     RunUiState.PREPARING: COLOR_WARN,
@@ -85,17 +105,43 @@ class CapaStatusBar(QStatusBar):
 
         self._state_label = QLabel("idle", self)
         self._state_label.setFont(font)
+        self._state_label.setToolTip(
+            "Run state. Idle → Preparing → Running → Draining → Finalizing "
+            "→ Sealed (or Failed). Color tracks the same gradient."
+        )
         self.addWidget(self._state_label, 0)
 
         self._elapsed_label = self._add_pill("00:00:00", font)
+        self._elapsed_label.setToolTip(
+            "Elapsed time since the current run started (or last completed)."
+        )
         self._ui_overflow_label = self._add_pill("UI overflow 0", font)
         self._saturation_label = self._add_pill("sat ok", font)
+        self._saturation_label.setToolTip(_TOOLTIP_SATURATION)
         self._loop_lag_label = self._add_pill("loop —", font)
+        self._loop_lag_label.setToolTip(_TOOLTIP_LOOP_LAG)
         self._depth_label = self._add_pill("q —", font)
+        self._depth_label.setToolTip(_TOOLTIP_DEPTH)
         self._safety_label = self._add_pill("safety queue 0", font)
+        self._safety_label.setToolTip(
+            "Pending safety events queued for the safety monitor. Placeholder "
+            "until SafetyMonitor lands — currently always 0."
+        )
         self._disk_label = self._add_pill("disk —", font)
+        self._disk_label.setToolTip(
+            "Free space on the bundle drive. Yellow above 85% used; red above "
+            "95%. The active run sizing assumes radiometric IR captures take "
+            "1–20 GB."
+        )
         self._camera_label = self._add_pill("cam n/a", font)
+        self._camera_label.setToolTip(
+            "Camera health. Placeholder until the camera-probe wiring lands."
+        )
         self._operator_label = self._add_pill("op: —", font)
+        self._operator_label.setToolTip(
+            "Operator id from the loaded config. Captured into every event "
+            "row and the run manifest for traceability."
+        )
 
         self._bundle_label = QLabel("", self)
         self._bundle_label.setFont(font)

@@ -23,6 +23,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -58,6 +59,51 @@ from capa.ui.tabs.setup_sections._models import horizontal_header, unique_name
 if TYPE_CHECKING:
     from capa.devices.registry import ChannelTemplate
     from capa.ui.tabs.setup_state import SetupDraft
+
+
+def _compose_reads_from(source: object) -> str:
+    """One-line "device.parameter" rendering for the Simple view.
+
+    Falls back to ``"—"`` for missing / malformed sources, and to a
+    parenthesised variant name when the operator hasn't filled in the
+    device / parameter fields yet (so the Simple view still tells them
+    the binding *type* even before it's complete).
+    """
+    if not isinstance(source, dict):
+        return "—"
+    variant = source.get("source")
+    device = source.get("device")
+    if not isinstance(variant, str):
+        return "—"
+    if variant == "watlow_parameter":
+        param = source.get("parameter") or "?"
+        instance = source.get("instance", 1)
+        if device:
+            return f"{device}.{param} (loop {instance})"
+        return f"({variant})"
+    if variant in ("alicat_frame_field", "sartorius_reading"):
+        field = source.get("field") or "?"
+        if device:
+            return f"{device}.{field}"
+        return f"({variant})"
+    if variant == "nidaq_reading_field":
+        task = source.get("task") or "?"
+        field = source.get("field") or "?"
+        if device:
+            return f"{device}.{task}.{field}"
+        return f"({variant})"
+    if variant == "nidaq_block_channel":
+        task = source.get("task") or "?"
+        channel = source.get("channel") or "?"
+        if device:
+            return f"{device}.{task}.{channel}"
+        return f"({variant})"
+    if variant == "derived":
+        expr = source.get("expression") or "?"
+        return f"derived: {expr}"
+    if device:
+        return f"{device} ({variant})"
+    return f"({variant})"
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +158,8 @@ class ChannelTableModel(QAbstractTableModel):
 
     channelsChanged = Signal()  # noqa: N815 — Qt signal naming convention
 
-    HEADERS: tuple[str, ...] = ("name", "kind", "device", "binding", "unit")
+    COLUMN_KEYS: tuple[str, ...] = ("name", "kind", "device", "binding", "unit")
+    HEADERS: tuple[str, ...] = ("name", "kind", "device", "reads from", "unit")
 
     def __init__(self) -> None:
         super().__init__()
@@ -185,7 +232,7 @@ class ChannelTableModel(QAbstractTableModel):
         rec = self._rows[row] if 0 <= row < len(self._rows) else None
         if rec is None:
             return None
-        key = self.HEADERS[index.column()]
+        key = self.COLUMN_KEYS[index.column()]
         if key == "device":
             source = rec.get("source") or {}
             return str(source.get("device", "—")) if isinstance(source, dict) else "—"
@@ -273,7 +320,7 @@ class _SourceBindingEditor(QWidget):
 
         self._variant_combo = QComboBox(self)
         self._variant_combo.currentIndexChanged.connect(self._on_variant_changed)
-        form.addRow("Binding:", self._variant_combo)
+        form.addRow("Reads from:", self._variant_combo)
 
         self._fields_host = QWidget(self)
         self._fields_layout = QFormLayout(self._fields_host)
@@ -527,6 +574,34 @@ class ChannelsSection(SectionWidget):
         self._detail_placeholder.setStyleSheet("color: #888;")
         detail_layout.addWidget(self._detail_placeholder)
 
+        # Simple / Expert toggle. The Channels detail pane is the most
+        # intimidating surface in capa — most users want to rename a
+        # channel, change its plot group, or apply a calibration, not
+        # edit raw binding parameters. Simple is the default per
+        # channel; Expert exposes the source-binding editor, sample
+        # rate, and full calibration sub-form.
+        toggle_row = QHBoxLayout()
+        toggle_row.setContentsMargins(0, 0, 0, 0)
+        toggle_row.setSpacing(8)
+        self._expert_toggle = QCheckBox("Expert view", self._detail)
+        self._expert_toggle.setToolTip(
+            "Show the source-binding editor, sample-rate field, and full "
+            "calibration sub-form. Per-channel — switching channels reverts "
+            "to that channel's last state."
+        )
+        self._expert_toggle.toggled.connect(self._on_expert_toggled)
+        toggle_row.addWidget(self._expert_toggle)
+        toggle_row.addStretch(1)
+        self._toggle_row_widget = QWidget(self._detail)
+        self._toggle_row_widget.setLayout(toggle_row)
+        self._toggle_row_widget.hide()
+        detail_layout.addWidget(self._toggle_row_widget)
+
+        # Per-channel expert-mode state. Indexed by channel name so it
+        # survives row reorderings; defaults to Simple for any unknown
+        # name. Stored as a set of channel names currently in Expert.
+        self._expert_channels: set[str] = set()
+
         # Identity block.
         self._identity_widget = QWidget(self._detail)
         identity_form = QFormLayout(self._identity_widget)
@@ -548,6 +623,22 @@ class ChannelsSection(SectionWidget):
         identity_form.addRow("CAPA group:", self._capa_group_edit)
         self._identity_widget.hide()
         detail_layout.addWidget(self._identity_widget)
+
+        # Simple-view summary row showing where the channel reads from
+        # without exposing the discriminated-union details. Hidden in
+        # Expert view; the full _source_box takes over.
+        self._reads_from_widget = QWidget(self._detail)
+        reads_layout = QFormLayout(self._reads_from_widget)
+        reads_layout.setContentsMargins(0, 8, 0, 0)
+        self._reads_from_label = QLabel("—", self._reads_from_widget)
+        self._reads_from_label.setStyleSheet("color: #475467;")
+        self._reads_from_label.setToolTip(
+            "Where this channel's value comes from. Switch to Expert view "
+            "to edit the source binding."
+        )
+        reads_layout.addRow("Reads from:", self._reads_from_label)
+        self._reads_from_widget.hide()
+        detail_layout.addWidget(self._reads_from_widget)
 
         # Source binding block.
         self._source_box = QWidget(self._detail)
@@ -740,6 +831,9 @@ class ChannelsSection(SectionWidget):
     def _on_source_changed(self) -> None:
         source = self._source_editor.value()
         self._mutate_current(lambda ch: ch.update({"source": source}))
+        # Keep the Simple-view summary in sync so toggling back to Simple
+        # after an Expert edit shows the new binding immediately.
+        self._reads_from_label.setText(_compose_reads_from(source))
 
     def _on_unit_changed(self, text: str) -> None:
         self._mutate_current(lambda ch: ch.update({"unit": text.strip()}))
@@ -815,7 +909,9 @@ class ChannelsSection(SectionWidget):
 
     def _reset_detail(self) -> None:
         self._current_row = -1
+        self._toggle_row_widget.hide()
         self._identity_widget.hide()
+        self._reads_from_widget.hide()
         self._source_box.hide()
         self._units_widget.hide()
         self._calibration_box.hide()
@@ -826,10 +922,21 @@ class ChannelsSection(SectionWidget):
 
     def _build_detail(self, channel: dict[str, Any]) -> None:
         self._detail_placeholder.hide()
+        self._toggle_row_widget.show()
         self._identity_widget.show()
-        self._source_box.show()
         self._units_widget.show()
         self._calibration_box.show()
+
+        # Sync the toggle to the per-channel expert state. ``_on_expert_toggled``
+        # would re-fire under normal Qt signals; ``_suppress`` blocks that.
+        channel_name = str(channel.get("name", ""))
+        is_expert = channel_name in self._expert_channels
+        self._suppress = True
+        try:
+            self._expert_toggle.setChecked(is_expert)
+        finally:
+            self._suppress = False
+        self._apply_expert_visibility(is_expert)
 
         self._suppress = True
         try:
@@ -855,10 +962,45 @@ class ChannelsSection(SectionWidget):
             )
             self._source_editor.set_value(channel.get("source") or {})
 
+            # Simple-view summary.
+            self._reads_from_label.setText(_compose_reads_from(channel.get("source")))
+
             # Calibration sub-form — uses _DiscriminatedUnionField directly.
             self._rebuild_calibration(channel.get("calibration") or {})
         finally:
             self._suppress = False
+
+    def _on_expert_toggled(self, checked: bool) -> None:
+        if self._suppress or self._current_row < 0:
+            return
+        channel = self._model.channel_at(self._current_row)
+        if channel is None:
+            return
+        name = str(channel.get("name", ""))
+        if checked:
+            self._expert_channels.add(name)
+        else:
+            self._expert_channels.discard(name)
+        self._apply_expert_visibility(checked)
+
+    def _apply_expert_visibility(self, expert: bool) -> None:
+        """Swap which sub-widgets render the source / sample-rate fields.
+
+        Simple view shows the auto-derived "Reads from: device.field"
+        label; Expert view shows the full discriminated-union editor and
+        the sample-rate row. The two are mutually exclusive; the
+        calibration block stays visible in both views.
+        """
+        self._reads_from_widget.setVisible(not expert)
+        self._source_box.setVisible(expert)
+        # Sample-rate row is part of the units form; hide it individually
+        # so the unit / derived-unit rows remain in Simple view.
+        self._sample_rate_edit.setVisible(expert)
+        units_layout = self._units_widget.layout()
+        if isinstance(units_layout, QFormLayout):
+            label = units_layout.labelForField(self._sample_rate_edit)
+            if label is not None:
+                label.setVisible(expert)
 
     def _rebuild_calibration(self, calibration: dict[str, Any]) -> None:
         # Drop the previous widget.

@@ -43,10 +43,19 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFormLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtWidgets import (
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QToolTip,
+    QVBoxLayout,
+    QWidget,
+)
 
 from capa.ui.forms.widgets import CollapsibleGroup, FieldWidget, build_field_widget
+from capa.ui.forms.widgets._helpers import _help_from_field, _unit_from_field
 
 # Discriminator-style fields that the form should never render — the
 # enclosing tagged union picks the model class, not the user.
@@ -65,6 +74,66 @@ def _humanize(name: str) -> str:
 
 def _label_for(field_name: str, field: FieldInfo) -> str:
     return field.title or _humanize(field_name)
+
+
+class _HelpButton(QLabel):
+    """Tiny ``(?)`` label that pops the field's help text when clicked.
+
+    Plain ``QLabel`` rather than ``QPushButton`` so the row reads as
+    label-text without an inset button outline. Behaves like a button:
+    cursor flips to a pointing hand on hover, click pops a tooltip
+    anchored to the label.
+    """
+
+    def __init__(self, help_text: str, parent: QWidget | None = None) -> None:
+        super().__init__("(?)", parent)
+        self._help_text = help_text
+        self.setStyleSheet("color: #5a6c7d; font-weight: 600;")
+        self.setToolTip(help_text)
+        self.setCursor(Qt.CursorShape.WhatsThisCursor)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        QToolTip.showText(self.mapToGlobal(self.rect().bottomLeft()), self._help_text, self)
+
+
+def _build_field_label(
+    field_name: str,
+    info: FieldInfo,
+    *,
+    parent: QWidget,
+) -> QWidget:
+    """Compose the label cell for a form row.
+
+    For plain fields, returns the same ``QLabel`` the form has always
+    used. For fields that declare ``capa_unit`` or ``capa_help``, wraps
+    the label in a small ``QWidget`` so the unit appears appended to the
+    text (``Heater setpoint [°C]``) and a ``(?)`` button sits next to
+    it. The ``capa_help`` text also lands in the label's tooltip so
+    hovering anywhere on the row shows it.
+    """
+    base_text = _label_for(field_name, info)
+    unit = _unit_from_field(info)
+    help_text = _help_from_field(info) or info.description or ""
+    annotated_text = f"{base_text} [{unit}]" if unit else base_text
+
+    if not help_text and unit is None:
+        label = QLabel(annotated_text, parent)
+        if info.description:
+            label.setToolTip(info.description)
+        return label
+
+    host = QWidget(parent)
+    layout = QHBoxLayout(host)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
+    label = QLabel(annotated_text, host)
+    if help_text:
+        label.setToolTip(help_text)
+    layout.addWidget(label)
+    if help_text:
+        layout.addWidget(_HelpButton(help_text, host))
+    layout.addStretch(1)
+    return host
 
 
 def _group_metadata(info: FieldInfo) -> tuple[str, bool | None, str | None]:
@@ -269,14 +338,12 @@ class ModelForm(QWidget):
         layout or a collapsible group. Exactly one of ``primary_form`` /
         ``group_widget`` is non-None."""
         widget = build_field_widget(info.annotation, info, parent=self, field_name=name)
-        label = QLabel(_label_for(name, info), self)
-        if info.description:
-            label.setToolTip(info.description)
+        label_widget = _build_field_label(name, info, parent=self)
         if primary_form is not None:
-            primary_form.addRow(label, widget)
+            primary_form.addRow(label_widget, widget)
         else:
             assert group_widget is not None
-            group_widget.add_row(label, widget)
+            group_widget.add_row(label_widget, widget)
             self._field_group[name] = group_widget
         widget.valueChanged.connect(self.valuesChanged)
         self._fields[name] = widget

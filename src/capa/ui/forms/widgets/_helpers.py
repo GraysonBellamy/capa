@@ -42,6 +42,36 @@ def _is_optional(annotation: Any) -> tuple[bool, Any]:
     return False, annotation
 
 
+def _unit_from_field(field: FieldInfo) -> str | None:
+    """Read ``Field(json_schema_extra={"capa_unit": "°C"})``.
+
+    Returns ``None`` when the field has no declared unit. The widget
+    layer uses this to append a suffix on numeric spinboxes and a label
+    annotation on the form row.
+    """
+    extra = getattr(field, "json_schema_extra", None)
+    if isinstance(extra, dict):
+        unit = extra.get("capa_unit")
+        if isinstance(unit, str) and unit:
+            return unit
+    return None
+
+
+def _help_from_field(field: FieldInfo) -> str | None:
+    """Read ``Field(json_schema_extra={"capa_help": "..."})``.
+
+    The label-side ``(?)`` popover renders this text. Returns ``None``
+    when the field doesn't declare extra help — the row falls back to
+    ``Field(description=...)`` via the existing tooltip path.
+    """
+    extra = getattr(field, "json_schema_extra", None)
+    if isinstance(extra, dict):
+        help_text = extra.get("capa_help")
+        if isinstance(help_text, str) and help_text:
+            return help_text
+    return None
+
+
 def _path_mode_from_field(field: FieldInfo) -> typing.Literal["file", "dir"]:
     """Read ``Field(json_schema_extra={"capa_path_mode": "dir"})``.
 

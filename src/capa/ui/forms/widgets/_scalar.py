@@ -53,6 +53,7 @@ class _SpinBoxField(FieldWidget):
         self,
         *,
         constraints: dict[str, float],
+        unit: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -66,6 +67,8 @@ class _SpinBoxField(FieldWidget):
             self._spin.setMaximum(int(constraints["le"]))
         if "lt" in constraints:
             self._spin.setMaximum(int(constraints["lt"]) - 1)
+        if unit:
+            self._spin.setSuffix(f" {unit}")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._spin)
@@ -85,6 +88,7 @@ class _DoubleSpinBoxField(FieldWidget):
         *,
         constraints: dict[str, float],
         decimals: int = 3,
+        unit: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -105,6 +109,8 @@ class _DoubleSpinBoxField(FieldWidget):
             self._spin.setMaximum(constraints["le"])
         if "lt" in constraints:
             self._spin.setMaximum(constraints["lt"] - eps)
+        if unit:
+            self._spin.setSuffix(f" {unit}")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._spin)

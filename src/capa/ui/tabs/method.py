@@ -29,6 +29,7 @@ from pydantic import ValidationError
 from PySide6.QtCore import QItemSelectionModel, Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QMenu,
@@ -36,6 +37,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QTableView,
     QToolBar,
     QVBoxLayout,
@@ -179,10 +181,21 @@ class MethodTab(QWidget):
 
         outer.addWidget(self._toolbar)
 
-        # Top half: table + detail panel.
-        upper = QSplitter(Qt.Orientation.Horizontal, self)
+        # Method body: either the table/detail/graph editor or a
+        # free-run empty state. The stack swaps between them whenever
+        # the model gains or loses its last step.
+        self._body_stack = QStackedWidget(self)
+        outer.addWidget(self._body_stack, stretch=1)
 
-        self._table = QTableView(self)
+        # Editor pane.
+        editor_pane = QWidget(self._body_stack)
+        editor_layout = QVBoxLayout(editor_pane)
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Top half: table + detail panel.
+        upper = QSplitter(Qt.Orientation.Horizontal, editor_pane)
+
+        self._table = QTableView(editor_pane)
         self._table.setModel(self._model)
         self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
@@ -201,20 +214,87 @@ class MethodTab(QWidget):
         upper.addWidget(self._table)
 
         # Detail container — replaced on every selection change.
-        self._detail_container = QWidget(self)
+        self._detail_container = QWidget(editor_pane)
         detail_layout = QVBoxLayout(self._detail_container)
         detail_layout.setContentsMargins(0, 0, 0, 0)
         upper.addWidget(self._detail_container)
         upper.setSizes([400, 600])
 
-        outer.addWidget(upper, stretch=2)
+        editor_layout.addWidget(upper, stretch=2)
 
         # Profile graph.
-        self._plot = pg.PlotWidget(self)
+        self._plot = pg.PlotWidget(editor_pane)
         self._plot.setMinimumHeight(200)
-        outer.addWidget(self._plot, stretch=1)
+        editor_layout.addWidget(self._plot, stretch=1)
+
+        self._body_stack.addWidget(editor_pane)
+
+        # Free-run empty state pane.
+        empty_pane = self._build_empty_state()
+        self._body_stack.addWidget(empty_pane)
+
+        # Re-evaluate which pane is shown whenever the model changes.
+        self._model.modelReset.connect(self._refresh_body_visibility)
+        self._model.rowsInserted.connect(self._refresh_body_visibility)
+        self._model.rowsRemoved.connect(self._refresh_body_visibility)
+        self._refresh_body_visibility()
 
     # ------------------------------------------------------------------ API
+
+    def _build_empty_state(self) -> QWidget:
+        """Build the free-run-mode placeholder pane.
+
+        Shown whenever the method has zero steps. Explains free-run
+        behavior and offers shortcuts to add a hold step or open an
+        existing ``.method.toml`` file. Replaces the prior blank
+        table/empty-form surface that gave operators no hint about why
+        Free Run is a legitimate state.
+        """
+        pane = QWidget(self._body_stack)
+        outer = QVBoxLayout(pane)
+        outer.setContentsMargins(48, 48, 48, 48)
+        outer.setSpacing(16)
+        outer.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        title = QLabel("Free-run mode — no method loaded", pane)
+        title.setStyleSheet("font-size: 14pt; font-weight: 600; color: #344054;")
+        outer.addWidget(title)
+
+        body = QLabel(
+            "Recording will start when you press Start in the Run tab. "
+            "The heater holds its current setpoint; nothing in capa drives "
+            "it. About 90% of CAPA experiments are free runs.",
+            pane,
+        )
+        body.setWordWrap(True)
+        body.setStyleSheet("color: #475467;")
+        outer.addWidget(body)
+
+        prompt = QLabel("Want a programmed setpoint sequence?", pane)
+        prompt.setStyleSheet("color: #344054; font-weight: 600;")
+        outer.addWidget(prompt)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        add_hold_btn = QPushButton("+ Add a hold step", pane)
+        add_hold_btn.clicked.connect(lambda: self._on_add_step(_default_hold()))
+        button_row.addWidget(add_hold_btn)
+        open_btn = QPushButton("Open .method.toml…", pane)
+        open_btn.clicked.connect(self._on_open)
+        button_row.addWidget(open_btn)
+        button_row.addStretch(1)
+        outer.addLayout(button_row)
+
+        outer.addStretch(1)
+        return pane
+
+    def _refresh_body_visibility(self, *_args: object) -> None:
+        """Swap the body stack between the editor and the empty state.
+
+        Index 0 = editor; index 1 = empty state.
+        """
+        has_steps = self._model.rowCount() > 0
+        self._body_stack.setCurrentIndex(0 if has_steps else 1)
 
     def method(self) -> Method | None:
         """Return the current method as a validated :class:`Method`.

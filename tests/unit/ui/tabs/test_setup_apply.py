@@ -1,4 +1,4 @@
-"""Apply to Rig flow tests.
+"""Apply & Connect flow tests.
 
 Covers:
 
@@ -29,7 +29,8 @@ from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState
 from capa.ui.document_coordinator import DocumentCoordinator
 from capa.ui.state import RunUiState
 from capa.ui.tabs.method import MethodTab
-from capa.ui.tabs.setup import SetupTab, _BannerState
+from capa.ui.tabs.setup import SetupTab
+from capa.ui.tabs.setup_connection_strip import ConnectionState
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SIM_CAPA_EXP = REPO_ROOT / "configs" / "experiments" / "sim_capa_pyrolysis.yaml"
@@ -104,7 +105,7 @@ def test_apply_emits_request_and_shows_applying_banner(qtbot: Any) -> None:
     assert isinstance(cfg, ExperimentConfig)
     assert path == SIM_CAPA_EXP.resolve()
     assert setup._apply_in_flight is True
-    assert setup._banner_state is _BannerState.APPLYING
+    assert setup._connection_strip.state is ConnectionState.CONNECTING
     # The button is disabled while the apply is mid-flight.
     assert not setup._action_apply.isEnabled()
 
@@ -120,7 +121,7 @@ def test_apply_succeeded_flips_banner_and_clears_unapplied(qtbot: Any) -> None:
     controller.config_load_finished.emit(_make_progress(ConfigLoadState.READY))
     assert setup._apply_in_flight is False
     assert setup._draft.unapplied is False
-    assert setup._banner_state is _BannerState.APPLIED_OK
+    assert setup._connection_strip.state is ConnectionState.CONNECTED
     # Apply button is grey now — nothing to apply.
     assert not setup._action_apply.isEnabled()
 
@@ -140,7 +141,7 @@ def test_apply_failed_flips_banner_and_preserves_unapplied(qtbot: Any) -> None:
     )
     assert setup._apply_in_flight is False
     assert setup._draft.unapplied is True
-    assert setup._banner_state is _BannerState.APPLIED_FAILED
+    assert setup._connection_strip.state is ConnectionState.FAILED
     # Apply remains available so the operator can retry once the
     # underlying problem is resolved.
     assert setup._action_apply.isEnabled()
@@ -168,7 +169,7 @@ def test_apply_refused_during_active_run(qtbot: Any) -> None:
     assert captured == []
     assert info.call_count == 1
     assert setup._apply_in_flight is False
-    assert setup._banner_state is _BannerState.FROZEN
+    assert setup._connection_strip.state is ConnectionState.FROZEN
 
 
 def test_apply_refused_when_draft_has_errors(qtbot: Any) -> None:
@@ -200,14 +201,15 @@ def test_apply_ok_banner_clears_on_next_edit(qtbot: Any) -> None:
     setup._draft.unapplied = True
     setup._on_apply_to_rig()
     controller.config_load_finished.emit(_make_progress(ConfigLoadState.READY))
-    assert setup._banner_state is _BannerState.APPLIED_OK
+    assert setup._connection_strip.state is ConnectionState.CONNECTED
 
     # Simulate an edit. The Setup tab clears the green pill.
     setup._on_section_edited("storage")
-    assert setup._apply_outcome is None
+    assert setup._last_apply_failed is False
+    assert setup._connected_detail == ""
     # The new edit also marked the section dirty → unapplied true → banner UNAPPLIED.
     assert setup._draft.unapplied is True
-    assert setup._banner_state is _BannerState.UNAPPLIED
+    assert setup._connection_strip.state is ConnectionState.UNAPPLIED
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +223,9 @@ def test_frozen_banner_trumps_applying(qtbot: Any) -> None:
     setup.load_path(SIM_CAPA_EXP)
     setup._draft.unapplied = True
     setup._on_apply_to_rig()
-    assert setup._banner_state is _BannerState.APPLYING
+    assert setup._connection_strip.state is ConnectionState.CONNECTING
     controller.state_changed.emit(RunUiState.RUNNING)
-    assert setup._banner_state is _BannerState.FROZEN
+    assert setup._connection_strip.state is ConnectionState.FROZEN
 
 
 def test_apply_enabled_only_when_unapplied_and_no_errors(qtbot: Any) -> None:
@@ -268,13 +270,13 @@ def test_new_wizard_marks_draft_unapplied_and_enables_apply(qtbot: Any, monkeypa
 
     assert setup._draft.unapplied is True
     assert setup._action_apply.isEnabled()
-    assert setup._banner_state is _BannerState.UNAPPLIED
+    assert setup._connection_strip.state is ConnectionState.UNAPPLIED
 
 
 def test_new_action_disabled_during_active_run(qtbot: Any) -> None:
     """New is frozen while a run is armed.
 
-    Consistent with Apply / Discover / Check Hardware: changing the
+    Consistent with Apply & Connect / Scan / Verify connection: changing the
     setup mid-run is refused. Operators see a polite modal and the
     toolbar action greys out.
     """

@@ -138,6 +138,7 @@ ignore = [
 "src/capa/ui/tabs/setup_problems.py" = ["N802", "B008"]
 "src/capa/ui/tabs/setup_sections/*.py" = ["N802", "B008"]
 "src/capa/ui/tabs/setup_wizard.py" = ["N802"]
+"src/capa/ui/welcome.py" = ["N802"]
 
 [tool.ruff.format]
 quote-style = "double"

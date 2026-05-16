@@ -32,6 +32,7 @@ from capa.ui.forms.widgets._helpers import (
     _is_optional,
     _numeric_constraints,
     _path_mode_from_field,
+    _unit_from_field,
 )
 from capa.ui.forms.widgets._nested import (
     _DiscriminatedUnionField,
@@ -101,11 +102,16 @@ def _build_inner(
     if annotation is bool:
         return _CheckBoxField(parent=parent)
     if annotation is int:
-        return _SpinBoxField(constraints=_numeric_constraints(field), parent=parent)
+        return _SpinBoxField(
+            constraints=_numeric_constraints(field),
+            unit=_unit_from_field(field),
+            parent=parent,
+        )
     if annotation is float:
         return _DoubleSpinBoxField(
             constraints=_numeric_constraints(field),
             decimals=_decimals_for_field(field_name, field),
+            unit=_unit_from_field(field),
             parent=parent,
         )
     if annotation is datetime:

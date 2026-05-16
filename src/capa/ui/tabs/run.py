@@ -15,13 +15,10 @@ import time
 from typing import Final
 
 from PySide6.QtCore import QSize, QTimer
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QMenu,
     QPushButton,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -29,6 +26,7 @@ from PySide6.QtWidgets import (
 from capa.core.ringbuffer import RingBufferRegistry
 from capa.experiment.config import ExperimentConfig
 from capa.runtime.lifecycle import PoolState
+from capa.ui.hold_to_confirm import HoldToConfirmButton
 from capa.ui.plots.pane import PlotPane
 from capa.ui.state import RunController, RunUiResult, RunUiState
 from capa.ui.theme import (
@@ -142,25 +140,36 @@ class RunTab(QWidget):
         self._start_btn.clicked.connect(self._on_start_clicked)
         h.addWidget(self._start_btn)
 
-        # Abort = QToolButton with a popup so Safe-Shutdown vs Emergency are
-        # one click apart.
-        self._abort_btn = QToolButton(header)
-        self._abort_btn.setText("Abort ▾")
-        self._abort_btn.setMinimumSize(QSize(110, 36))
-        self._abort_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
-        abort_menu = QMenu(self._abort_btn)
-        safe_action = QAction("Safe Shutdown", self)
-        safe_action.triggered.connect(lambda: self._on_abort_clicked("safe_shutdown"))
-        emergency_action = QAction("Emergency Abort", self)
-        emergency_action.triggered.connect(lambda: self._on_abort_clicked("immediate"))
-        abort_menu.addAction(safe_action)
-        abort_menu.addAction(emergency_action)
-        self._abort_btn.setMenu(abort_menu)
-        # Default action (clicking the body of the button) = Safe Shutdown,
-        # the lower-blast-radius option.
-        self._abort_btn.setDefaultAction(safe_action)
-        self._abort_btn.setEnabled(False)
-        h.addWidget(self._abort_btn)
+        # Stop run — safe graceful shutdown. Single click is fine
+        # because it runs the method's safe-shutdown step (or a default
+        # cooldown for free-run) and seals the bundle. Non-destructive.
+        self._stop_btn = QPushButton("Stop run", header)
+        self._stop_btn.setMinimumSize(QSize(110, 36))
+        self._stop_btn.setToolTip(
+            "Graceful shutdown — runs the safe-shutdown step (or default "
+            "cooldown for free-run), seals the bundle."
+        )
+        self._stop_btn.clicked.connect(lambda: self._on_abort_clicked("safe_shutdown"))
+        self._stop_btn.setEnabled(False)
+        h.addWidget(self._stop_btn)
+
+        # Emergency stop — hold-to-confirm. Mis-clicks during a long
+        # run can lose hours of data, so a single click is not enough.
+        # Holding for 1 second fills the button with a progress bar;
+        # release before that cancels.
+        self._emergency_btn = HoldToConfirmButton(
+            "⛔  Emergency stop",
+            accent=COLOR_FAIL,
+            parent=header,
+        )
+        self._emergency_btn.setMinimumSize(QSize(160, 36))
+        self._emergency_btn.setToolTip(
+            "Hold for 1 second to immediately abort the run. Skips the safe "
+            "shutdown step; bundle is still sealed."
+        )
+        self._emergency_btn.confirmed.connect(lambda: self._on_abort_clicked("immediate"))
+        self._emergency_btn.setEnabled(False)
+        h.addWidget(self._emergency_btn)
 
         return header
 
@@ -170,7 +179,7 @@ class RunTab(QWidget):
         """Stage a config for the next :meth:`_on_start_clicked`. Replaces
         the live plot pane with one matching the new channel set."""
         self._config = config
-        self._run_id_label.setText(f"sample: {config.sample.id}  procedure: {config.procedure.id}")
+        self._run_id_label.setText(self._build_run_id_text(config))
         # Build a placeholder plot pane against an empty registry so the UI
         # has axes/legends visible before Start is clicked.
         empty = RingBufferRegistry()
@@ -203,10 +212,19 @@ class RunTab(QWidget):
         self._run_started_mono = time.monotonic()
         self._elapsed_timer.start()
         self._start_btn.setEnabled(False)
-        self._abort_btn.setEnabled(True)
+        self._set_abort_buttons_enabled(True)
 
     def _on_abort_clicked(self, mode: str) -> None:
         self._controller.request_abort(mode=mode)
+
+    def _set_abort_buttons_enabled(self, enabled: bool) -> None:
+        """Toggle Stop run + Emergency stop together.
+
+        Both buttons share the same enabled state: either there's a run
+        to stop or there isn't.
+        """
+        self._stop_btn.setEnabled(enabled)
+        self._emergency_btn.setEnabled(enabled)
 
     def _on_pool_changed(self, _pool: object) -> None:
         """``RunController.pool_changed`` fires when the pool finishes
@@ -226,13 +244,13 @@ class RunTab(QWidget):
         color = _STATE_COLOR.get(state, COLOR_IDLE)
         self._state_label.setStyleSheet(f"color: {color.name()};")
         if state is RunUiState.RUNNING:
-            self._abort_btn.setEnabled(True)
+            self._set_abort_buttons_enabled(True)
             # Buffers were rebuilt during controller.start(); rebind the
             # plot pane now that the new registry is populated.
             if self._config is not None:
                 self._set_plot_pane(self._controller.buffers, self._config)
         if state in (RunUiState.SEALED, RunUiState.FAILED):
-            self._abort_btn.setEnabled(False)
+            self._set_abort_buttons_enabled(False)
 
     def _on_run_finished(self, result: object) -> None:
         if isinstance(result, RunUiResult):
@@ -246,7 +264,7 @@ class RunTab(QWidget):
         # and `can_start()` would return False. One event-loop tick later
         # the task is finished and the check is accurate.
         QTimer.singleShot(0, lambda: self._start_btn.setEnabled(self.can_start()))
-        self._abort_btn.setEnabled(False)
+        self._set_abort_buttons_enabled(False)
         if self._plot_pane is not None:
             self._plot_pane.stop()
 
@@ -257,6 +275,21 @@ class RunTab(QWidget):
         h, rem = divmod(elapsed, 3600)
         m, s = divmod(rem, 60)
         self._elapsed_label.setText(f"{h:02d}:{m:02d}:{s:02d}")
+
+    def _build_run_id_text(self, config: ExperimentConfig) -> str:
+        """Compose the header's run-id label.
+
+        Folds the sample / procedure / mode triplet into one line.
+        Mode is *Free run* when no method is loaded or *Method: <name>*
+        otherwise — the same translation the old status strip carried,
+        now collapsed into the header so the Run tab only has one
+        "what's loaded" surface above the plot.
+        """
+        if config.method is None:
+            mode = "Free run"
+        else:
+            mode = f"Method: {getattr(config.method, 'name', None) or 'method'}"
+        return f"sample: {config.sample.id}  ·  procedure: {config.procedure.id}  ·  {mode}"
 
     # ------------------------------------------------------------------ internal
 

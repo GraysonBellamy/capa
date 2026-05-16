@@ -22,7 +22,7 @@ short-circuits. That prevents the obvious loop where Setup.methodRef →
 MethodTab.load → MethodTab.methodChanged → Setup.refresh →
 Setup.methodRef.
 
-:meth:`build_applied_config` gives Apply-to-Rig a single
+:meth:`build_applied_config` gives Apply & Connect a single
 source-of-truth composer for the current draft + the current Method
 tab state.
 """
@@ -122,12 +122,12 @@ class DocumentCoordinator(QObject):
         for hardware, profile, and everything else; the Method tab is
         authoritative for the method *iff* it holds a buffer the
         ``_on_method_tab_changed`` sync hasn't already pushed back into
-        the document. This guarantees Apply-to-Rig honours the operator's
+        the document. This guarantees Apply & Connect honours the operator's
         most recent intent even if they haven't saved the method yet.
 
         Raises :class:`~capa.core.errors.CapaError` (wrapping any
         Pydantic validation error) when the composed payload fails to
-        validate — callers surface it as the Apply-to-Rig failure
+        validate — callers surface it as the Apply & Connect failure
         message.
         """
         from capa.experiment.config import ExperimentConfig  # noqa: PLC0415
@@ -235,10 +235,21 @@ class DocumentCoordinator(QObject):
             if doc.method_mode == "none":
                 doc.method_mode = "inline"
         doc.method_payload = new_payload
-        # Only mark dirty when something actually changed — avoids
-        # flipping a freshly-loaded draft dirty during initial sync.
+        # Compare in canonical form: prior_payload may be a raw TOML dict
+        # (from ConfigDocument.load) that omits defaults, while new_payload
+        # is a Pydantic dump that includes them. Without normalisation, a
+        # spurious re-emit of methodChanged on an unchanged method would
+        # falsely mark Files dirty.
+        prior_canonical: dict[str, Any] | None
+        if isinstance(prior_payload, dict):
+            try:
+                prior_canonical = Method.model_validate(prior_payload).model_dump(mode="python")
+            except (ValueError, CapaError):
+                prior_canonical = prior_payload
+        else:
+            prior_canonical = prior_payload
         changed = (
-            prior_payload != new_payload
+            prior_canonical != new_payload
             or prior_path != doc.method_path
             or prior_mode != doc.method_mode
             or prior_format != doc.method_format

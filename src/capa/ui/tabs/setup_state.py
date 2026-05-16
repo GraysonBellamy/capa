@@ -67,6 +67,19 @@ class SetupDraft:
         return bool(self.dirty_sections)
 
     @property
+    def dirty_section_count(self) -> int:
+        """Number of sections with unsaved edits.
+
+        The connection strip surfaces this as "draft has N unsaved
+        edit(s)". Counts sections rather than fields because the draft
+        layer only tracks edits at section granularity — a field-level
+        count would require plumbing every section widget's per-field
+        diff back into the draft, which buys very little for the
+        operator.
+        """
+        return len(self.dirty_sections)
+
+    @property
     def has_errors(self) -> bool:
         return any(p.severity == "error" for p in self.problems)
 

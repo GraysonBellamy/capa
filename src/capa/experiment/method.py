@@ -65,7 +65,17 @@ class HoldStep(_StepBase):
     kind: Literal["hold"] = "hold"
     target: ChannelRef
     value: float
-    duration_s: float | None = Field(default=None, ge=0)
+    duration_s: float | None = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={
+            "capa_unit": "s",
+            "capa_help": (
+                "How long to hold the value. Leave unset if the step ends "
+                "on an end_condition (e.g. mass loss fraction)."
+            ),
+        },
+    )
     end_condition: EndCondition | None = None
 
     @model_validator(mode="after")
@@ -88,8 +98,26 @@ class RampStep(_StepBase):
     start_value: float | None = None
     """``None`` means "ramp from the current setpoint"."""
     end_value: float
-    rate_per_second: float | None = None
-    duration_s: float | None = Field(default=None, gt=0)
+    rate_per_second: float | None = Field(
+        default=None,
+        json_schema_extra={
+            "capa_help": (
+                "Rate of change per second. Set this OR duration_s — capa "
+                "derives the other from the endpoints."
+            ),
+        },
+    )
+    duration_s: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "s",
+            "capa_help": (
+                "Total ramp duration. Set this OR rate_per_second — capa "
+                "derives the other from the endpoints."
+            ),
+        },
+    )
 
     @model_validator(mode="after")
     def _check_consistent(self) -> RampStep:
@@ -115,8 +143,22 @@ class WaitStep(_StepBase):
 
     kind: Literal["wait"] = "wait"
     end_condition: EndCondition | None = None
-    duration_s: float | None = Field(default=None, ge=0)
-    timeout_s: float | None = Field(default=None, gt=0)
+    duration_s: float | None = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={"capa_unit": "s"},
+    )
+    timeout_s: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "s",
+            "capa_help": (
+                "Engine-side deadline. If the end_condition has not fired "
+                "by then, the on_timeout policy applies."
+            ),
+        },
+    )
     on_timeout: Literal["warn", "abort", "safe_shutdown"] = "warn"
 
     @model_validator(mode="after")
@@ -132,14 +174,21 @@ class PromptStep(_StepBase):
     kind: Literal["prompt"] = "prompt"
     title: str = "Operator confirmation"
     message: str
-    timeout_s: float | None = Field(default=None, gt=0)
+    timeout_s: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={"capa_unit": "s"},
+    )
 
 
 class AcquireStep(_StepBase):
     """Record without changing any control outputs."""
 
     kind: Literal["acquire"] = "acquire"
-    duration_s: float = Field(gt=0)
+    duration_s: float = Field(
+        gt=0,
+        json_schema_extra={"capa_unit": "s"},
+    )
 
 
 class SafeShutdownStep(_StepBase):
@@ -149,7 +198,11 @@ class SafeShutdownStep(_StepBase):
     kind: Literal["safe_shutdown"] = "safe_shutdown"
     cool_target: dict[str, float] = Field(default_factory=dict)
     """``{channel_name: setpoint}`` to drive to during shutdown."""
-    duration_s: float | None = Field(default=None, ge=0)
+    duration_s: float | None = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={"capa_unit": "s"},
+    )
 
 
 class CustomStep(_StepBase):

@@ -14,16 +14,21 @@ from pathlib import Path
 from typing import Final
 
 import structlog
-from PySide6.QtCore import QByteArray, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QDockWidget,
     QFileDialog,
     QMainWindow,
-    QMenu,
     QMessageBox,
+    QStackedWidget,
     QStatusBar,
     QTabWidget,
+    QTextBrowser,
+    QVBoxLayout,
 )
 
 from capa.core.errors import CapaError
@@ -37,6 +42,7 @@ from capa.ui.docks.log import LogDock
 from capa.ui.docks.manual_control import ManualControlDock
 from capa.ui.docks.numerics import NumericsDock
 from capa.ui.document_coordinator import DocumentCoordinator
+from capa.ui.recents import record_open
 from capa.ui.shutdown import (
     ShutdownCoordinator,
     ShutdownResult,
@@ -48,6 +54,7 @@ from capa.ui.statusbar import CapaStatusBar, OperatorIdProvider
 from capa.ui.tabs.method import MethodTab
 from capa.ui.tabs.run import RunTab
 from capa.ui.tabs.setup import SetupTab
+from capa.ui.welcome import SIMULATOR_CONFIG, WelcomeHero
 
 WINDOW_STATE_PATH: Final[Path] = Path.home() / ".capa" / "window_state.json"
 
@@ -95,7 +102,10 @@ class MainWindow(QMainWindow):
         self._config_loading: bool = False
         self._open_config_action: QAction | None = None
         self._hardware_dialog: HardwareInitDialog | None = None
-        self._devices_menu: QMenu
+        # Default window state captured before the first restore so the
+        # View → Reset window layout action has something to restore to.
+        self._default_window_state: QByteArray | None = None
+        self._default_window_geometry: QByteArray | None = None
 
         self._controller = RunController(
             runs_root=runs_root,
@@ -137,10 +147,10 @@ class MainWindow(QMainWindow):
             method_tab=self._method_tab,
             parent=self,
         )
-        # Inject the coordinator into SetupTab so Apply-to-Rig can
+        # Inject the coordinator into SetupTab so Apply & Connect can
         # compose the draft + Method-tab buffer.
         self._setup_tab.set_document_coordinator(self._document_coordinator)
-        # Apply-to-Rig: SetupTab emits the composed config + path; we
+        # Apply & Connect: SetupTab emits the composed config + path; we
         # route it through the same loader that File→Open already uses
         # so the Numerics / CameraPreview / Diagnostics / Manual docks
         # rebuild exactly once.
@@ -150,7 +160,21 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._setup_tab, "Setup")
         self._tabs.addTab(self._method_tab, "Method")
         self._tabs.addTab(self._run_tab, "Run")
-        self.setCentralWidget(self._tabs)
+
+        # Central pane is a stack: welcome hero until a config loads,
+        # then the tab widget. The two children are constructed up
+        # front so swap()ing is just an index change.
+        self._welcome_hero = WelcomeHero(self)
+        self._welcome_hero.newRequested.connect(self._on_welcome_new)
+        self._welcome_hero.openRequested.connect(self._on_open_config)
+        self._welcome_hero.simulatorRequested.connect(self._on_welcome_simulator)
+        self._welcome_hero.recentRequested.connect(self._on_welcome_recent)
+
+        self._central = QStackedWidget(self)
+        self._central.addWidget(self._welcome_hero)
+        self._central.addWidget(self._tabs)
+        self.setCentralWidget(self._central)
+        self._central.setCurrentWidget(self._welcome_hero)
 
         # Keep the Method tab label in sync with whatever method is loaded.
         # The signal fires on load_method/clear, so opening an experiment
@@ -162,7 +186,9 @@ class MainWindow(QMainWindow):
         # then, the events dock keeps the bottom area populated so the
         # layout stays consistent.
         self._numerics_dock: NumericsDock | None = None
+        self._numerics_toggle: QAction | None = None
         self._camera_preview_dock: CameraPreviewDock | None = None
+        self._camera_toggle: QAction | None = None
         self._diagnostics_dock: DiagnosticsDock | None = None
         self._diagnostics_toggle: QAction | None = None
         self._events_dock = EventsDock(self)
@@ -177,16 +203,16 @@ class MainWindow(QMainWindow):
         self.splitDockWidget(self._events_dock, self._log_dock, Qt.Orientation.Horizontal)
         self.resizeDocks([self._events_dock, self._log_dock], [1, 1], Qt.Orientation.Horizontal)
 
-        # Manual control dock — single dock with per-device cards. Hidden
-        # by default; the Devices menu toggles visibility. Rebuilt on
-        # config-load like the other config-driven docks.
+        # Manual control dock — single dock with per-device cards. The
+        # View menu toggles visibility; first-launch starts it visible
+        # so new operators discover the surface, but returning users
+        # keep whatever they left it as.
         self._manual_dock = ManualControlDock(
             controller=self._controller,
             operator_provider=self._operator_provider,
             parent=self,
         )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._manual_dock)
-        self._manual_dock.hide()
 
         # Wire events dock to the controller.
         self._controller.event_received.connect(self._events_dock.append_event)
@@ -214,7 +240,19 @@ class MainWindow(QMainWindow):
         self._build_menus()
         self._set_config_loading_ui(False)
 
-        # Restore prior layout if any.
+        # Capture default state BEFORE restoring user state so View →
+        # Reset window layout has a target to revert to. First-launch
+        # detection (no prior state file) also keys off this — Manual
+        # Control stays visible-but-empty so new users see the dock
+        # surface exists. Returning users get whatever their last layout
+        # was, including a hidden Manual Control dock if they closed it.
+        is_first_launch = not WINDOW_STATE_PATH.exists()
+        self._default_window_state = self.saveState()
+        self._default_window_geometry = self.saveGeometry()
+        if is_first_launch:
+            self._manual_dock.show()
+        else:
+            self._manual_dock.hide()
         self._restore_window_state()
 
         # Optional initial config (when launched with a positional path).
@@ -242,17 +280,53 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
-        # Devices menu — gateway to the manual control dock and the
-        # diagnostics dock. The dock toggleViewActions keep their checked
-        # state in sync with visibility so closing via [×] flips the
-        # menu check off. The diagnostics action is added/replaced each
-        # time a config loads (the dock is rebuilt then).
-        self._devices_menu = menu.addMenu("&Devices")
-        toggle_action = self._manual_dock.toggleViewAction()
-        if toggle_action is not None:
-            toggle_action.setText("&Manual Control")
-            toggle_action.setShortcut("Ctrl+M")
-            self._devices_menu.addAction(toggle_action)
+        # View menu — every dock is reachable here, regardless of whether
+        # the operator has accidentally closed one. The dock
+        # toggleViewActions keep their checked state in sync with
+        # visibility so closing via [×] flips the menu check off.
+        # Config-driven docks (Numerics, Camera, Diagnostics) register
+        # themselves into this menu via :meth:`_register_dock_view_action`
+        # each time a config loads.
+        self._view_menu = menu.addMenu("&View")
+        self._view_actions_dynamic: list[QAction] = []
+        # Static docks first (Events, Log, Manual Control).
+        events_toggle = self._events_dock.toggleViewAction()
+        if events_toggle is not None:
+            events_toggle.setText("&Events")
+            events_toggle.setShortcut("Ctrl+3")
+            self._view_menu.addAction(events_toggle)
+        log_toggle = self._log_dock.toggleViewAction()
+        if log_toggle is not None:
+            log_toggle.setText("&Log")
+            log_toggle.setShortcut("Ctrl+4")
+            self._view_menu.addAction(log_toggle)
+        manual_toggle = self._manual_dock.toggleViewAction()
+        if manual_toggle is not None:
+            manual_toggle.setText("&Manual Control")
+            manual_toggle.setShortcut("Ctrl+M")
+            self._view_menu.addAction(manual_toggle)
+        # Dynamic insertion anchor — Numerics / Camera / Diagnostics
+        # actions get inserted before this separator each config-load.
+        self._view_dynamic_anchor = self._view_menu.addSeparator()
+        reset_action = QAction("Reset window layout", self)
+        reset_action.triggered.connect(self._on_reset_window_layout)
+        self._view_menu.addAction(reset_action)
+
+        help_menu = menu.addMenu("&Help")
+        quick_start_action = QAction("&Quick Start", self)
+        quick_start_action.triggered.connect(self._open_quick_start)
+        help_menu.addAction(quick_start_action)
+        glossary_action = QAction("&Glossary", self)
+        glossary_action.triggered.connect(self._show_glossary)
+        help_menu.addAction(glossary_action)
+        help_menu.addSeparator()
+        logs_action = QAction("Open &logs folder", self)
+        logs_action.triggered.connect(self._open_logs_folder)
+        help_menu.addAction(logs_action)
+        help_menu.addSeparator()
+        about_action = QAction("&About capa", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
 
     # ------------------------------------------------------------------ slots
 
@@ -287,7 +361,7 @@ class MainWindow(QMainWindow):
         self._apply_loaded_config(cfg, path)
 
     def _on_setup_apply_requested(self, cfg: object, path: object) -> None:
-        """Apply-to-Rig from the Setup tab.
+        """Apply & Connect from the Setup tab.
 
         ``SetupTab`` has already validated the draft and composed the
         config; we just need to drive the same loader that File→Open
@@ -296,13 +370,25 @@ class MainWindow(QMainWindow):
         ``RunController.config_load_finished`` for completion state, so
         we don't need to surface success/failure ourselves — the
         existing modal progress dialog covers the in-flight load.
+
+        Pass ``reload_setup_tab=False`` so we don't re-read the file from
+        disk into the Setup tab — that would clobber any unsaved edits
+        the operator just composed into ``cfg`` and would reset the
+        ``_apply_in_flight`` flag, causing ``_on_config_load_finished``
+        to bail before flipping the strip into CONNECTED.
         """
         if not isinstance(cfg, ExperimentConfig):
             return
         resolved_path = path if isinstance(path, Path) else None
-        self._apply_loaded_config(cfg, resolved_path)
+        self._apply_loaded_config(cfg, resolved_path, reload_setup_tab=False)
 
-    def _apply_loaded_config(self, cfg: ExperimentConfig, path: Path | None) -> None:
+    def _apply_loaded_config(
+        self,
+        cfg: ExperimentConfig,
+        path: Path | None,
+        *,
+        reload_setup_tab: bool = True,
+    ) -> None:
         # Bind the controller's worker pool to the new config FIRST so
         # any consumer (manual control dock) that reacts to load_config
         # already sees the new pool.
@@ -318,25 +404,25 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self._setup_tab.load_config(cfg, path=path)
+        if reload_setup_tab:
+            self._setup_tab.load_config(cfg, path=path)
         self._run_tab.load_config(cfg)
         self._manual_dock.load_config(cfg)
         self._operator_provider.set_operator_id(cfg.operator.id)
 
-        # Method tab: mirror whatever the experiment declared. A method
-        # attached as a string ref carries ``method_source_path`` so the
-        # tab's Save writes back to the same file; an inlined method has
-        # no source path and behaves like an unsaved buffer. Free runs
-        # (no method) clear the tab so it agrees with the loaded config.
-        if cfg.method is not None:
-            self._method_tab.load_method(cfg.method, path=cfg.method_source_path)
-        else:
-            self._method_tab.clear()
+        # Method tab is populated by DocumentCoordinator._on_setup_draft_loaded
+        # in response to setup_tab's draftLoaded signal — loading it again
+        # here would fire methodChanged outside the coordinator's
+        # _applying guard and falsely mark Files dirty (raw-TOML dict vs
+        # Pydantic-canonical dump never compare equal).
 
         # Replace the numerics dock with one whose tile set matches this
         # config. Old dock (if any) is removed and deleted. The bare empty
         # registry is OK — tiles will pick up live values on the next run.
         if self._numerics_dock is not None:
+            if self._numerics_toggle is not None:
+                self._view_menu.removeAction(self._numerics_toggle)
+                self._numerics_toggle = None
             self.removeDockWidget(self._numerics_dock)
             self._numerics_dock.deleteLater()
         self._numerics_dock = NumericsDock(
@@ -346,6 +432,9 @@ class MainWindow(QMainWindow):
         )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._numerics_dock)
         self._numerics_dock.start()
+        self._numerics_toggle = self._register_dock_view_action(
+            self._numerics_dock, "&Numerics", "Ctrl+1"
+        )
 
         # Replace the camera-preview dock the same way. The dock
         # subscribes to ``preview_received``; the signal is driven by
@@ -367,6 +456,9 @@ class MainWindow(QMainWindow):
                 self._controller.camera_event_received.disconnect(
                     self._camera_preview_dock.note_event
                 )
+            if self._camera_toggle is not None:
+                self._view_menu.removeAction(self._camera_toggle)
+                self._camera_toggle = None
             self.removeDockWidget(self._camera_preview_dock)
             self._camera_preview_dock.deleteLater()
         self._camera_preview_dock = CameraPreviewDock(
@@ -376,13 +468,19 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._camera_preview_dock)
         self._controller.preview_received.connect(self._camera_preview_dock.update_preview)
         self._controller.camera_event_received.connect(self._camera_preview_dock.note_event)
+        self._camera_toggle = self._register_dock_view_action(
+            self._camera_preview_dock, "Camera &Preview", "Ctrl+2"
+        )
 
         # Rebuild the acquisition diagnostics dock. The worker topology
         # (resource_id → adapter_names) is snapshotted once here; values
-        # are polled live from the conductor at 1 Hz during a run.
+        # are polled live from the conductor at 1 Hz during a run. The
+        # dock stays hidden by default — it's an opt-in diagnostic
+        # surface, not part of normal operation — but it's reachable
+        # from the View menu.
         if self._diagnostics_dock is not None:
             if self._diagnostics_toggle is not None:
-                self._devices_menu.removeAction(self._diagnostics_toggle)
+                self._view_menu.removeAction(self._diagnostics_toggle)
                 self._diagnostics_toggle = None
             self.removeDockWidget(self._diagnostics_dock)
             self._diagnostics_dock.deleteLater()
@@ -396,14 +494,132 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._diagnostics_dock)
+        self._diagnostics_dock.hide()
         self._diagnostics_dock.start()
-        self._diagnostics_toggle = self._diagnostics_dock.toggleViewAction()
-        self._diagnostics_toggle.setText("&Acquisition Diagnostics")
-        self._devices_menu.addAction(self._diagnostics_toggle)
+        self._diagnostics_toggle = self._register_dock_view_action(
+            self._diagnostics_dock, "Acquisition &Diagnostics", "Ctrl+D"
+        )
 
         title_path = f" — {path.name}" if path else ""
         self.setWindowTitle(f"capa{title_path}")
+        # First successful load swaps the central pane from the welcome
+        # hero to the tab widget. Subsequent loads keep showing the tabs.
+        self._central.setCurrentWidget(self._tabs)
+        if path is not None:
+            record_open(path)
         _logger.info("ui.config_loaded", path=str(path) if path else None)
+
+    def _on_welcome_new(self) -> None:
+        """Welcome hero "New setup" — switch to Setup tab and open wizard."""
+        self._central.setCurrentWidget(self._tabs)
+        self._tabs.setCurrentWidget(self._setup_tab)
+        self._setup_tab._on_new()
+
+    def _on_welcome_simulator(self) -> None:
+        """Welcome hero "Try a simulator" — load the bundled simulator config.
+
+        The path is resolved against the repo root when available, then
+        falls back to the working directory. Failure surfaces as a modal
+        so the operator knows the bundled config isn't present.
+        """
+        candidates = [
+            SIMULATOR_CONFIG,
+            Path.cwd() / SIMULATOR_CONFIG,
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                self._load_config_path(candidate)
+                return
+        QMessageBox.warning(
+            self,
+            "Simulator unavailable",
+            f"Could not find {SIMULATOR_CONFIG}. The repo's bundled simulator "
+            "config is missing from the working directory.",
+        )
+
+    def _on_welcome_recent(self, path: object) -> None:
+        if isinstance(path, Path):
+            self._load_config_path(path)
+
+    def _load_config_path(self, path: Path) -> None:
+        try:
+            cfg = ExperimentConfig.load(path)
+        except CapaError as exc:
+            QMessageBox.critical(self, "Config error", str(exc))
+            _logger.warning("ui.config_load_failed", path=str(path), error=str(exc))
+            return
+        self._apply_loaded_config(cfg, path)
+
+    def _show_glossary(self) -> None:
+        """Open the bundled glossary in a modal text browser."""
+        glossary_path = self._locate_doc("glossary.md")
+        if glossary_path is None or not glossary_path.is_file():
+            QMessageBox.information(
+                self,
+                "Glossary unavailable",
+                "Could not find docs/glossary.md. Reinstall capa or run from the repository root.",
+            )
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("capa — Glossary")
+        dialog.resize(640, 540)
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser(dialog)
+        browser.setOpenExternalLinks(True)
+        browser.setMarkdown(glossary_path.read_text(encoding="utf-8"))
+        layout.addWidget(browser)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=dialog)
+        buttons.rejected.connect(dialog.reject)
+        buttons.accepted.connect(dialog.accept)
+        layout.addWidget(buttons)
+        dialog.exec()
+
+    def _open_quick_start(self) -> None:
+        """Open docs/quick-start.md in the OS default markdown viewer / browser."""
+        path = self._locate_doc("quick-start.md")
+        if path is None or not path.is_file():
+            QMessageBox.information(
+                self,
+                "Quick Start unavailable",
+                "Could not find docs/quick-start.md.",
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
+
+    def _open_logs_folder(self) -> None:
+        """Reveal ``~/.capa/`` in the OS file manager."""
+        folder = Path.home() / ".capa"
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder.resolve())))
+
+    def _show_about(self) -> None:
+        try:
+            from capa import __version__  # noqa: PLC0415
+        except ImportError:
+            version = "unknown"
+        else:
+            version = __version__
+        QMessageBox.about(
+            self,
+            "About capa",
+            f"<b>capa</b><br/>"
+            f"Controlled-Atmosphere Cone Calorimeter<br/><br/>"
+            f"Version: {version}<br/>",
+        )
+
+    def _locate_doc(self, filename: str) -> Path | None:
+        """Find a doc by name relative to the repo root.
+
+        Walks up from this module's __file__ looking for a ``docs/``
+        directory. Returns ``None`` if no candidate exists — capa might
+        be running from a wheel install without bundled docs.
+        """
+        here = Path(__file__).resolve()
+        for parent in here.parents:
+            candidate = parent / "docs" / filename
+            if candidate.is_file():
+                return candidate
+        return None
 
     def _on_device_action(self, name: str) -> None:
         """Handle "Open Manual Control" from the Setup tab right-click menu."""
@@ -450,7 +666,6 @@ class MainWindow(QMainWindow):
         if self._config_loading:
             return
         self._manual_dock.setEnabled(ready)
-        self._devices_menu.setEnabled(ready)
 
     def _set_config_loading_ui(self, loading: bool) -> None:
         self._config_loading = loading
@@ -462,7 +677,41 @@ class MainWindow(QMainWindow):
                 and not self._controller.shutdown_requested
             )
         self._manual_dock.setEnabled(hardware_ready and not loading)
-        self._devices_menu.setEnabled(hardware_ready and not loading)
+
+    def _register_dock_view_action(
+        self,
+        dock: QDockWidget,
+        text: str,
+        shortcut: str,
+    ) -> QAction:
+        """Insert a dock's ``toggleViewAction`` into the View menu.
+
+        The action is inserted before the dynamic-anchor separator so
+        config-driven docks (Numerics / Camera / Diagnostics) stay
+        grouped after the static docks (Events / Log / Manual Control).
+        The returned :class:`QAction` is owned by the dock; callers keep
+        it so they can :meth:`removeAction` when the dock is rebuilt.
+        """
+        toggle = dock.toggleViewAction()
+        toggle.setText(text)
+        toggle.setShortcut(shortcut)
+        self._view_menu.insertAction(self._view_dynamic_anchor, toggle)
+        return toggle
+
+    def _on_reset_window_layout(self) -> None:
+        """View → Reset window layout — revert docks to the default state.
+
+        Also deletes the persisted state file so the *next* launch sees
+        a clean slate. The default layout was captured during
+        ``__init__`` before user state was restored.
+        """
+        if self._default_window_state is not None:
+            self.restoreState(self._default_window_state)
+        if self._default_window_geometry is not None:
+            self.restoreGeometry(self._default_window_geometry)
+        with contextlib.suppress(OSError):
+            if WINDOW_STATE_PATH.exists():
+                WINDOW_STATE_PATH.unlink()
 
     def _config_load_ui_available(self) -> bool:
         try:

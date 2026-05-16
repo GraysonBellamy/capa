@@ -13,6 +13,12 @@ COLOR_FAIL = QColor(208, 64, 64)
 COLOR_IDLE = QColor(140, 140, 140)
 COLOR_RUNNING = QColor(54, 130, 220)
 
+# QSS fragments that resolve against the active QPalette, so they adapt
+# to dark/light themes without per-widget hex values. Use these from any
+# QSS string that needs semantic text coloring.
+MUTED_TEXT_QSS = "color: palette(placeholder-text);"
+LINK_TEXT_QSS = "color: palette(link);"
+
 
 def monospace_font(*, point_size: int = 10) -> QFont:
     """Numeric readouts use a fixed-pitch font for stable column widths."""
@@ -35,6 +41,8 @@ __all__ = [
     "COLOR_OK",
     "COLOR_RUNNING",
     "COLOR_WARN",
+    "LINK_TEXT_QSS",
+    "MUTED_TEXT_QSS",
     "monospace_font",
     "numeric_display_font",
 ]
