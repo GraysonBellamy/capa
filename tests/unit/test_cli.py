@@ -123,7 +123,7 @@ class TestRun:
 
 
 class TestPluginsLockAutoDiscovery:
-    """Hardware-day §5.4 anomaly: production mode without ``--plugins-lock``
+    """Production mode without ``--plugins-lock``
     silently fell back to dev-mode behavior. The CLI must auto-discover
     ``./plugins.lock`` (or ``$XDG_CONFIG_HOME/capa/plugins.lock``) and
     fail loudly when neither exists.

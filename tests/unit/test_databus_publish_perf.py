@@ -1,4 +1,4 @@
-"""P0-3 acceptance: DataBus publish dispatch is indexed, not linear.
+"""DataBus publish dispatch is indexed, not linear.
 
 The plan's benchmark spec: with 100 channel subscribers and 1 wildcard,
 publishing 10k samples for one channel should be dramatically faster than

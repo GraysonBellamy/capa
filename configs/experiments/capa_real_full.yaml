@@ -9,7 +9,7 @@ procedure:
   version: "0.1"
   config:
     auto_acknowledge_prompts: true
-    notes: "Hardware-day variant C (Windows): all six adapters on real silicon."
+    notes: "Windows real-hardware run: all six adapters on real devices."
 
 domain_profile:
   id: capa.profiles.capa_pyrolysis
@@ -42,7 +42,7 @@ operator:
 sample:
   id: REAL-C-001
   material: PMMA
-  notes: "Hardware-day variant C all-real integration (Windows)"
+  notes: "All-real integration (Windows)"
 
 tags:
   - real

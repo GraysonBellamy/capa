@@ -1,7 +1,7 @@
 """Hardware smoke tests.
 
 Gated behind ``CAPA_HARDWARE_TESTS=1``; otherwise every test in this package
-is skipped. Plan §15.4: "run on the rig PC."
+is skipped. "run on the rig PC."
 
 Per-vendor envvars supply the connection parameters so the tests are
 portable across different rig wiring:

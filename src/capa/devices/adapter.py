@@ -1,6 +1,6 @@
 """:class:`DeviceAdapter` Protocol, :class:`Capability` flags, command surface.
 
-Plan §5.2. Adapters wrap each device library's Manager with a uniform API.
+Adapters wrap each device library's Manager with a uniform API.
 ``open``/``close`` is the connection layer (USB/serial/IP); ``start``/``stop``
 is the sampling layer — separated so hardware-clocked NI tasks can be armed at
 run start (not at adapter open) and so a transient I/O hiccup can be recovered
@@ -80,8 +80,7 @@ class Capability(Flag):
 
     Used by the UI to gate widgets ("show ramp control only if the adapter
     declares ``HAS_RAMP``") and by :meth:`Procedure.preflight` to validate
-    against requirements declared in plugin metadata. Plan §5.2.
-    """
+    against requirements declared in plugin metadata."""
 
     NONE = 0
     HAS_SETPOINT = auto()
@@ -125,7 +124,7 @@ class Capability(Flag):
 class DeviceCommand(BaseModel):
     """Generic command issued via :meth:`DeviceAdapter.command`.
 
-    Plan §9: every device-write carries ``issued_by``, ``authorization_id``,
+    every device-write carries ``issued_by``, ``authorization_id``,
     and ``confirmed_by``. Scheduled method/procedure commands inherit the
     arm/start authorization; manual overrides require an immediate confirmation
     in the UI. The engine refuses to issue a command without one of those.
@@ -168,7 +167,7 @@ class CommandResult(BaseModel):
 class DeviceAdapter(Protocol):
     """Uniform device surface.
 
-    Plan §5.2. Concrete adapters live under :mod:`capa.devices` (real) and
+    Concrete adapters live under :mod:`capa.devices` (real) and
     :mod:`capa.devices.sim` (simulated). All four production adapters
     wrap their respective library Manager.
     """

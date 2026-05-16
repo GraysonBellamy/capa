@@ -2,7 +2,7 @@
 ``bundle_status`` state machine, writes ``manifest.json`` at start and
 finalize.
 
-Plan §8 / §13.3. The writer is the only object that knows the bundle exists
+The writer is the only object that knows the bundle exists
 as a single coordinated unit; sinks know about themselves. The surface
 exposed here is what the engine bolts onto.
 
@@ -179,7 +179,7 @@ class RunBundleWriter:
         :func:`gather_provenance`. ``plugins_lock`` is the parsed
         ``plugins.lock`` at startup (mirrored verbatim into the manifest).
         ``engine_version`` is the engine revision marker recorded into
-        :attr:`CapaBlock.engine_version` (plan §13.1).
+        :attr:`CapaBlock.engine_version` ().
         """
         if self._opened:
             raise BundleWriterError("RunBundleWriter is already open")
@@ -194,12 +194,12 @@ class RunBundleWriter:
             engine_version=engine_version,
         )
 
-        # env/ snapshot — plan §8.1
+        # env/ snapshot — lockfile is optional (None when no uv.lock found).
         if self._provenance.lockfile_bytes is not None:
             (env_dir / "uv.lock").write_bytes(self._provenance.lockfile_bytes)
         (env_dir / "packages.json").write_bytes(self._provenance.packages_json_bytes)
 
-        # config.toml — plan §8 (canonicalized). model_dump(mode="json") emits
+        # config.toml — (canonicalized). model_dump(mode="json") emits
         # TOML-friendly primitives (tuples → lists, datetimes → ISO strings);
         # _toml_safe drops Nones and any other tomli_w-hostile shape.
         config_json = self._config.model_dump(mode="json")
@@ -217,7 +217,7 @@ class RunBundleWriter:
                 tomli_w.dumps(_toml_safe(method_dump)), encoding="utf-8"
             )
 
-        # profiles/<id>.toml — plan §5.4.1: dedicated snapshot of the active
+        # profiles/<id>.toml — dedicated snapshot of the active
         # domain profile's metadata, mirrored verbatim from config so a
         # downstream reader can pick it up without parsing the larger
         # config.toml.
@@ -392,9 +392,8 @@ class RunBundleWriter:
         ``cameras``: same shape as ``equipment`` but for cameras. Drives a
         ``[[cameras]]`` section in ``equipment.toml`` and overrides
         ``manifest.json.cameras[*].model`` / ``serial`` at finalize time
-        from the per-camera ``identity`` block. Hardware-day 2026-05-09 PM
-        finding #2 — V4L2 identity was probed but never reached either
-        artefact.
+        from the per-camera ``identity`` block. V4L2 identity is probed
+        before finalize so it reaches both artefacts.
         """
         if not self._opened:
             raise BundleWriterError("finalize() requires open()")
@@ -420,11 +419,10 @@ class RunBundleWriter:
         cameras: list[dict[str, Any]],
     ) -> None:
         """Replace the open()-time ``equipment.toml`` stub with the live
-        per-adapter blocks. Hardware-day §10: the stub captured only
-        configured ``name`` + ``adapter`` and never reflected the actual
-        probed identity (Watlow part number, Sartorius serial, …).
-        Hardware-day 2026-05-09 PM finding #2 added the ``[[cameras]]``
-        section so V4L2 / vendor camera identity is also surfaced.
+        per-adapter blocks. The stub captured only configured ``name`` +
+        ``adapter`` and never reflected the actual probed identity (Watlow
+        part number, Sartorius serial, …). The ``[[cameras]]`` section surfaces
+        V4L2 / vendor camera identity too.
         """
         payload: dict[str, Any] = {"devices": equipment}
         if cameras:
@@ -500,7 +498,7 @@ def _seed_camera_entry(spec: CameraSpec) -> CameraEntry:
     """
     ext = ".csq" if spec.kind == "ir" else ".mkv"
     if spec.output_root is not None:
-        # Plan §12.4 escape hatch: output lives outside the bundle.
+        # escape hatch: output lives outside the bundle.
         bundle_rel = f"{VIDEO_DIRNAME}/{spec.name}{ext}"
         external = f"{spec.output_root.rstrip('/')}/{spec.name}{ext}"
     else:

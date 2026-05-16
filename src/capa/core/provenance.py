@@ -1,6 +1,6 @@
 """Software-environment provenance.
 
-Plan §8.1. ``manifest.json`` carries:
+``manifest.json`` carries:
 
 * capa version + git sha + git_dirty,
 * Python version + implementation + executable,
@@ -120,7 +120,7 @@ def gather_capa(
     ``repo_root`` is the directory to ask git about. Pass ``None`` (default)
     to skip the git probe — useful when capa is installed from a wheel and
     the running tree is not a checkout. ``engine_version`` is the engine
-    code revision marker (plan §13.1); the engine plumbs this in at
+    code revision marker (); the engine plumbs this in at
     construction time.
     """
     sha, dirty = _git_metadata(repo_root)
@@ -234,8 +234,7 @@ def gather_provenance(
             :mod:`capa.core.plugins_lock`). Mirrored verbatim into the
             manifest's ``plugins`` block.
         engine_version: engine task-group revision marker recorded into
-            :attr:`CapaBlock.engine_version`. Plan §13.1.
-    """
+            :attr:`CapaBlock.engine_version`."""
     lockfile_block, lockfile_bytes = gather_lockfile(lockfile_source)
     return Provenance(
         capa=gather_capa(repo_root=repo_root, engine_version=engine_version),

@@ -1,6 +1,6 @@
 """Unit tests for :mod:`capa.runtime.runner`.
 
-The runner abstraction (plan §3.1) lets :class:`Worker` run inline (fast,
+The runner abstraction () lets :class:`Worker` run inline (fast,
 deterministic tests) and threaded (production). Both implementations satisfy
 the same :class:`WorkerRunner` protocol, so most tests run against both via
 ``pytest.mark.parametrize`` over a factory fixture.

@@ -1,4 +1,4 @@
-"""In-process IR-camera sim fixture (plan §12.1).
+"""In-process IR-camera sim fixture ().
 
 Writes a small, deterministic "fake-csq" file at the path the engine asks for.
 The format is **not** a real FLIR FFF/`.csq` — it is a capa-private layout
@@ -23,7 +23,7 @@ The sim's job is twofold:
    files appear in the bundle, ``manifest.json.cameras`` populates,
    ``manifest.sha256`` covers the file, the frame-index parquet round-trips.
 2. Give downstream tools a header-only parser target so the
-   "post-finalize frame index extractor" path (plan §12.1) is testable from
+   "post-finalize frame index extractor" path () is testable from
    capa core without importing ``capa-flir``.
 
 Because the file is capa-private, capa core ships its own
@@ -94,7 +94,7 @@ class FlirIrSim:
     sim cadence and pushes :class:`FrameReceipt`\\ s onto the frame stream
     while writing payload bytes to disk. This mirrors how the real
     :class:`capa_flir.FlirIrAdapter` pumps Atlas's ``OnImageReceived``
-    callbacks (plan §12.1) — only the source of frames differs.
+    callbacks () — only the source of frames differs.
     """
 
     __slots__ = (
@@ -269,7 +269,7 @@ class FlirIrSim:
         frame_payload_bytes: int = 1024,
         serial: str = "SIM-IR-0001",
     ) -> FlirIrSim:
-        """TOML-friendly constructor (plan §16 ``from_params`` convention)."""
+        """TOML-friendly constructor (``from_params`` convention)."""
         return cls(
             spec=spec,
             clock=clock,
@@ -546,7 +546,7 @@ class FlirIrSim:
         # real radiometric frame to render, so we synthesize a 64×48
         # gradient seeded by ``idx`` to give the operator a visible
         # cadence indicator. Best-effort drop (DROP_OLDEST semantics,
-        # matching plan §7.1).
+        # matching ).
         jpeg = self._encode_preview_jpeg(idx)
         with contextlib.suppress(anyio.WouldBlock):
             self._preview_send.send_nowait(jpeg)
@@ -622,7 +622,7 @@ class FlirIrSim:
     def _write_meta_sidecar(self, *, final: bool = False) -> None:
         """Write ``ir_cam0.csq.meta.json`` next to the .csq.
 
-        The meta sidecar carries the run-start anchor (plan §12.1: "captures
+        The meta sidecar carries the run-start anchor ("captures
         one ``t_mono_s`` anchor at ``start_recording()``"), the SDK config,
         and (when ``final``) the final file size.
         """
@@ -719,7 +719,7 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
-# Module-level discovery + handshake (plan §7.2 item 1).
+# Module-level discovery + handshake (item 1).
 # ---------------------------------------------------------------------------
 
 
@@ -760,7 +760,7 @@ async def handshake(cam_spec: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Setup-editor descriptor (plan §5.7).
+# Setup-editor descriptor ().
 # ---------------------------------------------------------------------------
 
 
@@ -768,7 +768,7 @@ from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
 
 class FlirIrSimParams(BaseModel):
-    """View model for :class:`FlirIrSim` params (plan §4.9.3)."""
+    """View model for :class:`FlirIrSim` params ()."""
 
     model_config = ConfigDict(extra="ignore")
 

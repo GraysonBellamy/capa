@@ -1,4 +1,4 @@
-"""GUI smoke tests for the P1 UI.
+"""GUI smoke tests for the CAPA UI.
 
 These exercise the :class:`RunController` and :class:`MainWindow` against
 the same simulated adapters the headless engine tests use. We do *not*
@@ -43,7 +43,7 @@ from capa.experiment.config import (
     SampleInfo,
 )
 from capa.runtime.progress import DeviceInitStatus
-from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress
+from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState
 from capa.ui.state import RunController, RunUiResult, RunUiState
 
 
@@ -146,7 +146,7 @@ async def test_run_controller_run_completes_and_populates_buffers(
         assert buf is not None, f"buffer for {ch_name} not registered"
         assert buf.size > 0, f"buffer for {ch_name} got no samples"
 
-    # Plan §10.1 transitions all visible to the UI.
+    # transitions all visible to the UI.
     assert RunUiState.PREPARING in states
     assert RunUiState.RUNNING in states
     assert RunUiState.FINALIZING in states
@@ -237,10 +237,10 @@ async def test_run_controller_config_load_progress_reaches_ready(
         assert started
         assert progress
         assert finished
-        assert finished[-1].phase is ConfigLoadPhase.READY
+        assert finished[-1].state is ConfigLoadState.READY
         assert ready[-1] is True
         assert controller.hardware_ready is True
-        assert any(snapshot.phase is ConfigLoadPhase.OPENING_DEVICES for snapshot in progress)
+        assert any(snapshot.state is ConfigLoadState.OPENING_DEVICES for snapshot in progress)
         assert any(
             row.name == "heater" and row.status is DeviceInitStatus.READY
             for snapshot in progress

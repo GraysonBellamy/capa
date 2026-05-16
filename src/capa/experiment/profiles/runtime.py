@@ -1,6 +1,6 @@
 """Domain-profile preflight runtime — id → callable check registry.
 
-Plan §5.4.1 / §11. The :class:`~capa.experiment.profiles.base.PreflightCheck`
+The :class:`~capa.experiment.profiles.base.PreflightCheck`
 schema declares *what* should be checked; this module is the registry that
 maps each ``id`` to a concrete callable. The engine resolves the active
 profile, walks its ``preflight_checks``, runs each callable, and collects
@@ -235,7 +235,7 @@ async def _heater_pv_safe(ctx: ProfilePreflightContext) -> Problem | None:
     Default limit is 200 °C — a CAPA reactor at room temperature is
     expected. The limit can be overridden in
     ``profile_metadata['_safe_arm']['max_heater_pv_c']`` for hot-swap or
-    rapid-cycle workflows."""
+    rapid-cycle routines."""
     safe = ctx.profile_metadata.get("_safe_arm", {})
     limit_c: float = float(safe.get("max_heater_pv_c", 200.0))
     sample = await _sample_one(ctx, group_key="capa_group", group_value="heater_pv")

@@ -1,4 +1,4 @@
-"""Slice F2 — :meth:`DocumentCoordinator.build_applied_config` (plan §5.14)."""
+"""Tests for :meth:`DocumentCoordinator.build_applied_config`."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def test_build_applied_config_empty_draft_raises(qtbot: Any) -> None:
 def test_method_tab_buffer_overrides_document_payload(qtbot: Any) -> None:
     """Editing the Method tab without saving must be reflected in
     ``build_applied_config`` — Apply-to-Rig honours the operator's most
-    recent intent (plan §5.6 + §5.14)."""
+    recent intent."""
     setup, method_tab, coord = _make_triple(qtbot)
     setup.load_path(SIM_CAPA_EXP)
 

@@ -79,7 +79,7 @@ _VARIANT_LABELS: dict[str, str] = {
 # Each variant exposes one or two scalar fields beyond ``device``.
 # We render them by hand rather than running build_form on the variant
 # class because the section wants tight control over field ordering,
-# tooltips, and (later phases) field-level catalogues.
+# tooltips, and field-level catalogues.
 _VARIANT_FIELDS: dict[str, tuple[tuple[str, str, type], ...]] = {
     "watlow_parameter": (
         ("parameter", "Parameter", str),

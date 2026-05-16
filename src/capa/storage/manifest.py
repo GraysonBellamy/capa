@@ -1,6 +1,6 @@
 """:class:`BundleManifest` — Pydantic model for ``manifest.json``.
 
-Plan §8.1. The manifest is the bundle's index card: every read tool starts
+The manifest is the bundle's index card: every read tool starts
 here, and every field is required (or explicitly ``None`` with a comment).
 The structure mirrors the example block in the plan exactly.
 
@@ -20,9 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from capa.storage.schema import BUNDLE_SCHEMA_VERSION, BundleSchemaError, migrate
 
 RunStatus = Literal["running", "completed", "aborted", "crashed"]
-"""Plan §8.2.
-
-* ``running``: acquisition active.
+"""* ``running``: acquisition active.
 * ``completed``: method or free-run ended normally.
 * ``aborted``: operator/safety stopped the run.
 * ``crashed``: recovered/finalized after abnormal termination.
@@ -36,9 +34,7 @@ BundleStatus = Literal[
     "sealed",
     "verification_failed",
 ]
-"""Plan §8.2.
-
-* ``open``: files may still be mid-write.
+"""* ``open``: files may still be mid-write.
 * ``finalizing``: sinks closed, two-stage rewrite in progress.
 * ``finalized_unverified``: data is readable, integrity hashes pending.
 * ``sealed``: ``manifest.sha256`` written; safe to copy/archive.
@@ -95,7 +91,7 @@ class CapaBlock(BaseModel):
     engine_version: str | None = None
     """Engine-task-group revision marker. Populated by the engine at run-start
     so a post-mortem can tell "which engine code wrote this bundle" even when
-    the package version is unchanged. Plan §13.1."""
+    the package version is unchanged. """
 
 
 class PythonBlock(BaseModel):
@@ -147,7 +143,7 @@ class DataShapeChannelSamples(BaseModel):
 
 
 class DataShape(BaseModel):
-    """Plan §8.1: maps each on-disk artifact to its layout tag."""
+    """maps each on-disk artifact to its layout tag."""
 
     model_config = ConfigDict(extra="forbid")
     channel_samples: DataShapeChannelSamples | None = None
@@ -170,7 +166,7 @@ class QueueHealthEntry(BaseModel):
 
 
 class IntegrityBlock(BaseModel):
-    """Plan §8.1: post-finalize integrity verdict."""
+    """post-finalize integrity verdict."""
 
     model_config = ConfigDict(extra="forbid")
     status: IntegrityStatus = "unknown"
@@ -179,14 +175,12 @@ class IntegrityBlock(BaseModel):
 
 
 class CameraEntry(BaseModel):
-    """One row in :attr:`BundleManifest.cameras`. Plan §12.
-
-    Captures everything a downstream tool needs to match a camera's frames
+    """One row in :attr:`BundleManifest.cameras`. Captures everything a downstream tool needs to match a camera's frames
     back to the bundle without parsing the container itself: which adapter
     wrote it, where the file lives (in-bundle or via the §12.4 escape
     hatch), the frame-index parquet, the meta-JSON sidecar (IR only), the
     final frame count, and the run-relative ``started_mono_ns_offset``
-    captured at ``start_recording`` (plan §12.5 anchor).
+    captured at ``start_recording`` (anchor).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -204,7 +198,7 @@ class CameraEntry(BaseModel):
     the ``output_path_external`` absolute path below."""
     output_path_external: str | None = None
     """Absolute path when the camera's :attr:`CameraSpec.output_root`
-    overrode the bundle directory (plan §12.4). ``None`` for the common
+    overrode the bundle directory (). ``None`` for the common
     case where the file lives inside the bundle."""
     frames_path: str | None = None
     """Bundle-relative path to ``<name>.frames.parquet``. ``None`` until the
@@ -216,7 +210,7 @@ class CameraEntry(BaseModel):
     frame_count: int = 0
     started_mono_ns_offset: int = 0
     """``RunClock.t_mono_ns()`` captured at :meth:`Camera.start_recording`
-    (plan §12.5)."""
+    ()."""
     on_failure: Literal["warn", "abort_run", "safe_shutdown"] = "warn"
     healthy: bool = True
     error: str | None = None
@@ -230,7 +224,7 @@ class CameraEntry(BaseModel):
 class BundleManifest(BaseModel):
     """Top-level model for ``manifest.json``.
 
-    Every field corresponds to the plan §8.1 example. ``extra="forbid"`` keeps
+    Every field corresponds to the example. ``extra="forbid"`` keeps
     accidental drift out of the canonical surface; sub-models that genuinely
     need extensibility (``SampleBlock``, ``custom``) opt in explicitly.
     """
@@ -271,7 +265,7 @@ class BundleManifest(BaseModel):
     integrity: IntegrityBlock = Field(default_factory=IntegrityBlock)
 
     cameras: tuple[CameraEntry, ...] = Field(default_factory=tuple)
-    """Per-camera summary (plan §12). Populated by the bundle writer at
+    """Per-camera summary (). Populated by the bundle writer at
     arm-time with the spec-derived fields and refreshed at finalize with
     the final frame count + frames.parquet path."""
 
@@ -318,7 +312,7 @@ class BundleManifest(BaseModel):
 
 
 def is_legal_finalize_combination(run_status: RunStatus, bundle_status: BundleStatus) -> bool:
-    """Plan §8.2: ``run_status`` and ``bundle_status`` are deliberately
+    """``run_status`` and ``bundle_status`` are deliberately
     independent (an aborted or crashed run can still seal cleanly), but a
     handful of combinations don't make sense.
 

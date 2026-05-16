@@ -59,7 +59,7 @@ class WatlowSim:
     :class:`watlowlib.streaming.Sample`\\ s are addressed (one row per
     ``(parameter, instance)`` per tick).
 
-    Plan §5.6 lists Watlow as long-format: this sim emits one ``SourceRecord``
+    lists Watlow as long-format: this sim emits one ``SourceRecord``
     per ``(parameter, instance)`` per tick, plus one ``ChannelSample`` per
     declared channel.
     """
@@ -277,7 +277,7 @@ class WatlowSim:
         return make_accepted_result(detail=f"sim ack {cmd.kind} target={cmd.target}", clock=clock)
 
     # Convenience typed methods (parallel to the real adapter's two-tier API,
-    # plan §5.2). Tests may use these instead of going through .command().
+    # ). Tests may use these instead of going through .command().
     async def set_setpoint(
         self,
         value: float,

@@ -1,10 +1,10 @@
 """Real :class:`AlicatAdapter` — wraps an :class:`alicatlib.devices.base.Device`.
 
-Plan §16: "real ``AlicatAdapter``. Capability flags. Device health
+"real ``AlicatAdapter``. Capability flags. Device health
 and health surfacing. Discovery (``capa devices discover``).
 ``capa validate --strict``."
 
-Architecture (plan §5.2 / §5.6 / §7.2):
+Architecture ():
 
 * ``open`` opens the serial transport via :func:`alicatlib.open_device` and runs
   the library's identification + capability probes. The cached
@@ -20,7 +20,7 @@ Architecture (plan §5.2 / §5.6 / §7.2):
 * ``snapshot`` returns a :class:`DeviceSnapshot` with cached identity plus
   live health fields (auto-reconnect counter, last-sample age,
   :class:`DeviceHealth` pill).
-* ``command`` enforces the authorization gate (plan §9) and dispatches
+* ``command`` enforces the authorization gate () and dispatches
   :meth:`Device.setpoint`, :meth:`Device.gas`, :meth:`Device.tare_flow` /
   :meth:`Device.tare_absolute_pressure` / :meth:`Device.tare_gauge_pressure`.
 
@@ -88,7 +88,7 @@ ADAPTER_ID: Final[str] = "alicat"
 class AlicatAdapterParams(BaseModel):
     """Per-device adapter configuration for a real Alicat device.
 
-    Plan §5.4: adapter-specific knobs live under ``DeviceConfig.params`` and are
+    adapter-specific knobs live under ``DeviceConfig.params`` and are
     parsed by the adapter at construction time.
     """
 
@@ -122,7 +122,7 @@ class AlicatAdapterParams(BaseModel):
     next tick."""
 
     overflow: Literal["block", "drop_newest"] = "block"
-    """Recorder overflow policy. ``BLOCK`` matches plan §7.1: producers
+    """Recorder overflow policy. ``BLOCK`` matches producers
     block on a slow durable sink rather than silently drop."""
 
     def to_serial_settings(self) -> SerialSettings:
@@ -186,7 +186,7 @@ class AlicatAdapter:
 
     Both shapes accept an optional ``device_factory`` kwarg as a test seam.
 
-    File layout (Phase 8 cleanup):
+    File layout:
 
     * **Runtime state** — ``__init__``, ``configure_channels``, lifecycle
       (``open``/``close``/``start``/``stop``), ``snapshot``, ``stream``,
@@ -229,7 +229,7 @@ class AlicatAdapter:
             params = AlicatAdapterParams.model_validate(params_kwargs)
         self.name = name
         self.params = params
-        # Capabilities are the union of plan §5.2 default-on flags for an
+        # Capabilities are the union of default-on flags for an
         # Alicat (gas-selectable MFC family) plus the auto-reconnect badge.
         # The actual "is this a controller vs. a meter" gate lives in the
         # library's own DeviceInfo.capabilities — capa's flag set is a UI
@@ -335,7 +335,7 @@ class AlicatAdapter:
     async def snapshot(self) -> DeviceSnapshot:
         """Build a :class:`DeviceSnapshot` from cached identity + live health.
 
-        Plan §13.1: snapshots feed ``status.sqlite`` for diagnostics. This
+        snapshots feed ``status.sqlite`` for diagnostics. This
         method does no I/O so it is safe to call from the engine while the
         stream is in flight.
         """

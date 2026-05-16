@@ -229,7 +229,7 @@ class UvcController:
         ``serial`` and return a controller, or ``None`` if no match.
 
         Selection rules mirror :class:`~capa.devices.camera.base.CameraSpec`
-        (plan §12.1):
+        ():
 
         * exact ``serial`` substring match in the Device's path wins,
         * else ``model_hint`` substring against the Device's friendly name,

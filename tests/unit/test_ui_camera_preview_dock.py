@@ -166,7 +166,7 @@ class TestDockLayout:
 
 class TestEventDrivenSurfaces:
     """Drops counter + sticky borders driven by ``CameraEvent`` (the
-    follow-up to v1's preview-only dock). Covers the full
+    extension of the preview-only dock). Covers the full
     ``pump_warning`` / ``pump_failed`` / ``recording_stopped`` triad."""
 
     def test_pump_warning_increments_drops_counter(self, qtbot: Any) -> None:

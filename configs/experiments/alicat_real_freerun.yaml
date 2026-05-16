@@ -1,4 +1,4 @@
-# Free-run experiment against a real Alicat MFC (P2).
+# Free-run experiment against a real Alicat MFC.
 #
 # Records mass-flow + absolute-pressure + setpoint at 2 Hz into both
 # ``device_records/alicat.parquet`` (wide-row library-native frames) and
@@ -29,7 +29,7 @@ operator:
 sample:
   id: ALICAT-REAL-001
   material: none
-  notes: "P2 real-hardware MFC free run"
+  notes: "Real-hardware MFC free run"
 
 tags:
   - real

@@ -1,7 +1,7 @@
 """``events.sqlite`` — operator notes, segment transitions, alarms, errors,
 device events.
 
-Plan §8 / §13.1. SQLite is transactional and crash-safe — events written are
+SQLite is transactional and crash-safe — events written are
 not lost even on abnormal exit. Used by the engine task group and the
 operator-events dock; any caller can write without dragging in the engine.
 

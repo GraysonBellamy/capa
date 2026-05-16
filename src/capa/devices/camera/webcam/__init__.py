@@ -1,4 +1,4 @@
-"""Visible-camera adapter package — PyAV-driven H.264 → MKV (plan §12.3).
+"""Visible-camera adapter package — PyAV-driven H.264 → MKV ().
 
 Importing this package registers :data:`DESCRIPTOR` into the global
 adapter registry, so plugin discovery + the Setup editor see the

@@ -1,4 +1,4 @@
-"""Unit tests for :class:`capa.devices.nidaq.NIDAQAdapter` (P2).
+"""Unit tests for :class:`capa.devices.nidaq.NIDAQAdapter`.
 
 Drives the real adapter against :class:`nidaqlib.backend.fake.FakeDaqBackend`
 — the library's purpose-built test backend that satisfies the full
@@ -427,12 +427,12 @@ class TestStreamHardwareClocked:
 
 
 # ---------------------------------------------------------------------------
-# Authorization gate (P2: command surface rejects unsupported verbs *after*
+# Authorization gate (command surface rejects unsupported verbs *after*
 # the auth gate)
 # ---------------------------------------------------------------------------
 
 
-class TestCommandsP2:
+class TestCommands:
     async def test_unauthorized_command_refused(self) -> None:
         adapter, _ = _make_adapter()
         await adapter.open()

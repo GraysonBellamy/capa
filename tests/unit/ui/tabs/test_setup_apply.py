@@ -1,4 +1,4 @@
-"""Slice F3 — Apply to Rig flow (plan §5.14).
+"""Apply to Rig flow tests.
 
 Covers:
 
@@ -25,7 +25,7 @@ from PySide6.QtCore import QObject, Signal
 from capa.config import ConfigDocument
 from capa.experiment.config import ExperimentConfig
 from capa.runtime.progress import DeviceInitProgress, DeviceInitStatus
-from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress
+from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState
 from capa.ui.document_coordinator import DocumentCoordinator
 from capa.ui.state import RunUiState
 from capa.ui.tabs.method import MethodTab
@@ -66,7 +66,7 @@ def _make_triple(
 
 
 def _make_progress(
-    phase: ConfigLoadPhase, *, devices: int = 2, message: str = ""
+    state: ConfigLoadState, *, devices: int = 2, message: str = ""
 ) -> ConfigLoadProgress:
     rows = tuple(
         DeviceInitProgress(
@@ -78,7 +78,7 @@ def _make_progress(
         )
         for i in range(devices)
     )
-    return ConfigLoadProgress(phase=phase, message=message, devices=rows)
+    return ConfigLoadProgress(state=state, message=message, devices=rows)
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ def test_apply_succeeded_flips_banner_and_clears_unapplied(qtbot: Any) -> None:
     setup._on_apply_to_rig()
     assert setup._apply_in_flight is True
 
-    controller.config_load_finished.emit(_make_progress(ConfigLoadPhase.READY))
+    controller.config_load_finished.emit(_make_progress(ConfigLoadState.READY))
     assert setup._apply_in_flight is False
     assert setup._draft.unapplied is False
     assert setup._banner_state is _BannerState.APPLIED_OK
@@ -134,7 +134,7 @@ def test_apply_failed_flips_banner_and_preserves_unapplied(qtbot: Any) -> None:
 
     controller.config_load_finished.emit(
         _make_progress(
-            ConfigLoadPhase.FAILED,
+            ConfigLoadState.FAILED,
             message="Device 'heater' failed to open: port not present",
         )
     )
@@ -199,7 +199,7 @@ def test_apply_ok_banner_clears_on_next_edit(qtbot: Any) -> None:
     setup.load_path(SIM_CAPA_EXP)
     setup._draft.unapplied = True
     setup._on_apply_to_rig()
-    controller.config_load_finished.emit(_make_progress(ConfigLoadPhase.READY))
+    controller.config_load_finished.emit(_make_progress(ConfigLoadState.READY))
     assert setup._banner_state is _BannerState.APPLIED_OK
 
     # Simulate an edit. The Setup tab clears the green pill.

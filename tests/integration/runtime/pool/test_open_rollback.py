@@ -5,7 +5,7 @@ Migration doc §4.3 lines 744-756: if any worker fails to start during
 in reverse order before the original exception propagates and the pool
 returns to :attr:`PoolState.CLOSED`.
 
-This is acceptance criterion #4 in plan §6 done-criteria.
+This is acceptance criterion #4 in done-criteria.
 """
 
 from __future__ import annotations

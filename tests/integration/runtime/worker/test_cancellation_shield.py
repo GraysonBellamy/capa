@@ -88,7 +88,7 @@ class TestShieldMechanism:
         4. After waiting > command_delay_s, the adapter's commands_completed
            list contains the command — proving the worker-side coroutine
            ran to completion despite the cancellation.
-        5. The worker loop saw no ``InvalidStateError`` (Phase 6 guarantee:
+        5. The worker loop saw no ``InvalidStateError`` (caller-cancellation guarantee:
            caller cancellation must not leave noise on the runner loop).
 
         This is the exact mechanism that prevents the Watlow ReadResponse
@@ -122,7 +122,7 @@ class TestShieldMechanism:
             # Metrics agree: the worker counted one full command lifecycle.
             assert worker.metrics.commands_total == 1
             assert worker.metrics.commands_failed == 0
-            # Phase 6: caller cancellation must not produce InvalidStateError
+            # Caller cancellation must not produce InvalidStateError
             # on the runner's loop.
             assert not _has_invalid_state_error(loop_errors), loop_errors
         finally:

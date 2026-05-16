@@ -1,4 +1,4 @@
-"""Tests for canonical TOML/YAML writers (plan §5.13)."""
+"""Tests for canonical TOML/YAML writers ()."""
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def test_channel_field_reordered() -> None:
 def test_unknown_top_level_keys_preserved() -> None:
     """Plugin-contributed keys at the top level survive a canonical pass.
 
-    Plan §5.13: canonical writers must not drop unknown keys, so that
+    canonical writers must not drop unknown keys, so that
     plugin-defined extensions don't get silently lost when the
     operator clicks Save.
     """

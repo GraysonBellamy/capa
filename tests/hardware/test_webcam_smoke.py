@@ -1,6 +1,6 @@
-"""Hardware smoke test for the real :class:`WebcamAdapter` (P4 stage B).
+"""Hardware smoke test for the real :class:`WebcamAdapter`.
 
-Plan §15.4 contract for the visible camera path:
+Checks for the visible camera path:
 
 1. Open the V4L2 device named by ``CAPA_TEST_WEBCAM_DEVICE`` and run
    ``run_pump`` for ~5 s.

@@ -41,7 +41,7 @@ OPEN_RETRY_DEADLINE_S: float = 8.0
 problem is not transient and we surface the original error."""
 
 PREVIEW_INTERVAL_NS = 500_000_000
-"""2 Hz preview cadence (plan §10.2; Camera Protocol docstring). At 30 fps the
+"""2 Hz preview cadence (; Camera Protocol docstring). At 30 fps the
 adapter encodes one preview every 15 frames; the encode itself runs in the
 worker thread already used for the H.264 pipeline."""
 

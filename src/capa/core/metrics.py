@@ -1,6 +1,6 @@
 """Queue-depth and writer-lag histograms for in-flight observability.
 
-Plan §7.1 / §13.1. Every queue in the pipeline is instrumented; on finalize,
+Every queue in the pipeline is instrumented; on finalize,
 the per-queue histogram lands in ``manifest.json``\\ ``.queue_health`` so the
 post-run "was this run healthy?" question is a one-glance check.
 

@@ -1,4 +1,4 @@
-"""Unit tests for :class:`capa.devices.sartorius.SartoriusAdapter` (P2).
+"""Unit tests for :class:`capa.devices.sartorius.SartoriusAdapter`.
 
 Drives the real adapter against an in-process ``StubBalance`` that duck-types
 :class:`sartoriuslib.devices.balance.Balance`'s public surface.
@@ -71,7 +71,7 @@ class StubBalance:
         self.zero_calls = 0
         self.close_calls = 0
         self.raise_on_poll: BaseException | None = None
-        # Extended-control surface trackers (P3.5 — manual control panel
+        # Extended-control surface trackers (manual control panel
         # pathway). Each list captures the *kwargs the adapter forwarded* so
         # tests can assert both payload mapping and ``confirm=True`` pass-through.
         self.internal_adjust_calls: list[dict[str, Any]] = []

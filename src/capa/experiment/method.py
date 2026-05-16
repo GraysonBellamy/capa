@@ -1,6 +1,6 @@
 """:class:`Step` types and :class:`Method` (segmented profile).
 
-Plan §5.3. Ships the *schema*; most experiments are a list of Steps, and the
+Ships the *schema*; most experiments are a list of Steps, and the
 schema is the same whether the executor is present or not.
 """
 
@@ -26,7 +26,7 @@ class ChannelRef(BaseModel):
 class EndCondition(BaseModel):
     """Condition that ends a ``wait`` step (or interrupts a long ``hold``).
 
-    Plan §5.3 example uses ``{channel: mass_loss_fraction, op: ">", value: 0.1}``.
+    example uses ``{channel: mass_loss_fraction, op: ">", value: 0.1}``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -143,8 +143,8 @@ class AcquireStep(_StepBase):
 
 
 class SafeShutdownStep(_StepBase):
-    """Reusable cooldown phase. Also invoked by the safety system on
-    ``safe_shutdown`` faults (plan §9)."""
+    """Reusable cooldown step. Also invoked by the safety system on
+    ``safe_shutdown`` faults ()."""
 
     kind: Literal["safe_shutdown"] = "safe_shutdown"
     cool_target: dict[str, float] = Field(default_factory=dict)
@@ -199,7 +199,7 @@ class Method(BaseModel):
         Returns ``None`` when at least one step has no fixed duration (a
         ``hold`` with only an end_condition, a ``wait`` with no time bound,
         a ``prompt`` step that the operator clears manually, etc.). Used by
-        the camera disk-space preflight (plan §12.6) — when the duration is
+        the camera disk-space preflight () — when the duration is
         unknowable, the preflight falls back to a configured default.
         """
         total = 0.0

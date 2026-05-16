@@ -33,7 +33,7 @@ class TestConfigureLogging:
         sink = LogSink(tmp_path)
         try:
             log = configure_logging(bundle_log_sink=sink, console_renderer=False)
-            bind_run_context(run_id="R1", operator_id="abr", procedure_id="P1")
+            bind_run_context(run_id="R1", operator_id="abr", procedure_id="PROC1")
             log.info("hello", count=3)
         finally:
             clear_run_context()
@@ -47,7 +47,7 @@ class TestConfigureLogging:
         assert record["event"] == "hello"
         assert record["run_id"] == "R1"
         assert record["operator_id"] == "abr"
-        assert record["procedure_id"] == "P1"
+        assert record["procedure_id"] == "PROC1"
         assert record["count"] == 3
         assert record["level"] == "INFO"
 

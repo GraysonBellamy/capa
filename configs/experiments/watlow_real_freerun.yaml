@@ -1,4 +1,4 @@
-# Free-run experiment against the real Watlow controller (P0d).
+# Free-run experiment against the real Watlow controller.
 #
 # Records process_value + setpoint at 1 Hz into both
 # ``device_records/watlow.parquet`` (long-format library rows) and
@@ -30,7 +30,7 @@ operator:
 sample:
   id: WATLOW-REAL-001
   material: none
-  notes: "P0d real-hardware free run"
+  notes: "Real-hardware Watlow free run"
 
 tags:
   - real

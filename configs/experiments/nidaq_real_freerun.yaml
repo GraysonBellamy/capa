@@ -1,4 +1,4 @@
-# Free-run experiment against a real NI cDAQ task (P2). Records polled
+# Free-run experiment against a real NI cDAQ task. Records polled
 # DaqReadings into ``device_records/nidaq_polled.parquet`` plus a wide
 # scalars row per declared channel. Run with:
 #
@@ -24,7 +24,7 @@ operator:
 sample:
   id: NIDAQ-REAL-001
   material: none
-  notes: "P2 real-hardware NI-DAQ thermocouple free run"
+  notes: "Real-hardware NI-DAQ thermocouple free run"
 
 tags:
   - real

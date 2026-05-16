@@ -19,9 +19,9 @@ The status bar polls live metrics from the conductor and UI ring buffers at 1 Hz
 | **sat** | Worst current `blocked_since_ms` across worker→conductor bridges | `sat ok` (green) | `blocked Ns` ≥ 25% of `saturation_deadline_s` (yellow) | ≥ 50% of deadline (red) |
 | **loop** | Conductor loop p99 lag (sliding 1024-sample window, ~51 s at 20 Hz) | `< runtime.loop_lag_warn_ms` | `warn–4×warn` (yellow) | `≥ 4×warn` (red) |
 | **q** | Worst `current depth / lifetime max depth` across bridges | `cur` near 0 | `cur` climbing toward `max` | `cur ≈ capacity` |
-| **safety queue** | Placeholder (P3+) | always 0 today | — | — |
+| **safety queue** | Reserved safety monitor queue | always 0 today | — | — |
 | **disk** | Free space on `runs_root` | `> 15%` free | `< 15%` (yellow) | `< 5%` (red) |
-| **cam** | Camera health (P4 placeholder) | `cam n/a` today | — | — |
+| **cam** | Camera health | `cam n/a` when no camera is active | — | — |
 | **op** | Operator id | non-empty | — | — |
 | **bundle** | Path of the active run's bundle | shown when sealed | — | — |
 

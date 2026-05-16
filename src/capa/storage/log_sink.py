@@ -1,6 +1,6 @@
 """``run.log`` — JSON-lines append handle for run-correlated structured logs.
 
-Plan §13.1. The structlog config (root logger, processors, run_id binder)
+The structlog config (root logger, processors, run_id binder)
 is in the logging module; this module owns the bundle-side file. A line-buffered
 text handle is enough — structlog's JSONRenderer produces one self-contained line
 per event, and the engine task group plumbs the run-id context binder around
@@ -59,7 +59,7 @@ class LogSink:
         valid JSON; we add a trailing newline if absent.
 
         Writes after :meth:`close` are silent no-ops: the structlog stdlib
-        handler may emit a final shutdown-phase line after the bundle's
+        handler may emit a final shutdown line after the bundle's
         sinks have closed (engine finalize → close_sinks → engine.run.end
         log line). Surfacing that as an exception just creates noise.
         """

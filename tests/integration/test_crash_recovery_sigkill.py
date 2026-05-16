@@ -11,9 +11,9 @@ Uses ``mp.get_context("spawn")`` so the test runner isn't ``fork()``\\ d —
 forking pytest leaks threads/locks/fds into the child and produces flaky
 behavior. Spawn re-imports the module in a fresh interpreter.
 
-Hardware-day 2026-05-09 followup #5: the prior implementation referenced
-``signal.SIGKILL`` directly, which doesn't exist on Windows; the cross-
-platform ``proc.kill()`` covers both rigs in a single test.
+The prior implementation referenced ``signal.SIGKILL`` directly, which
+doesn't exist on Windows; the cross-platform ``proc.kill()`` covers both
+rigs in a single test.
 """
 
 from __future__ import annotations

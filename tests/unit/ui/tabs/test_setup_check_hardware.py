@@ -1,4 +1,4 @@
-"""Slice F4 — Check Hardware button (plan §4.2, §5.9 layer 5)."""
+"""Check Hardware button tests."""
 
 from __future__ import annotations
 

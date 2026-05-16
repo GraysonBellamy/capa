@@ -1,7 +1,7 @@
 """Tests for the profile preflight runtime — registry categories and
 ``adapters_started``-aware silent-channel handling.
 
-Plan §5.4.1 / P3 follow-up item 4. Static checks read only config; dynamic
+Static checks read only config; dynamic
 checks observe live samples and must run after ``adapter.start()``. The
 silent-channel branches in dynamic checks branch on ``adapters_started``
 so a quiet stream is a warning before the engine has opened producers but

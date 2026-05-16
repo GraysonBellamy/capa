@@ -99,7 +99,7 @@ def plugins_trust(
     already present its hash/version are refreshed. Production mode then
     treats the plugin as trusted on the next run.
 
-    The workflow owner is configurable via lab policy; this command is
+    The approval owner is configurable via lab policy; this command is
     the technical primitive only.
     """
     from capa.core.plugins_lock import PluginEntry  # noqa: PLC0415

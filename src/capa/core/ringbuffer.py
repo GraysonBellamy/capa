@@ -1,6 +1,6 @@
 """Per-channel decimating ring buffer for live UI consumption.
 
-Plan §4 / §7. The acquisition fan-out writes to durable sinks at the native
+The acquisition fan-out writes to durable sinks at the native
 sample rate; a parallel UI consumer maintains a small in-memory ring per
 channel for plot repaint at ~10 Hz. This module is the ring.
 
@@ -30,7 +30,7 @@ plot line shape (vs. random skip-N decimation) and matches the operator's
 intuition that "decimate_to_hz=10" means "no more than ten points per
 second visible."
 
-Drop counters are exposed for the status bar (plan §10.4 "Dropped UI
+Drop counters are exposed for the status bar ("Dropped UI
 samples (rolling 10 s)").
 """
 
@@ -274,7 +274,7 @@ class RingBufferRegistry:
 
     def total_dropped(self) -> int:
         """Sum of dropped samples across every registered buffer. Used by
-        the status bar's "Dropped UI samples" readout (plan §10.4)."""
+        the status bar's "Dropped UI samples" readout ()."""
         return sum(b.total_dropped for b in self._buffers.values())
 
     def total_overflow(self) -> int:

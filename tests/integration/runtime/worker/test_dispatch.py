@@ -2,7 +2,7 @@
 
 Migration doc §4.1 line 591: ``dispatch()`` is permitted in IDLE, ARMED,
 SAMPLING; refused in DRAINING and CLOSED. The state gate runs *on the
-worker loop*, not on the caller side (plan §3.3) — these tests verify
+worker loop*, not on the caller side () — these tests verify
 both the happy paths and the refusal paths.
 
 Cancellation-shield tests live in ``test_cancellation_shield.py``; here we
@@ -122,7 +122,7 @@ class TestDispatchRefusedStates:
     async def test_dispatch_refused_in_draining(
         self, make_runner: Callable[[str], WorkerRunner]
     ) -> None:
-        """The DRAINING gate is on the worker loop (plan §3.3). To force
+        """The DRAINING gate is on the worker loop (). To force
         the race deterministically we slow the disarm's adapter.stop()
         path and submit a dispatch concurrently.
 

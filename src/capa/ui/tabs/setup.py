@@ -31,7 +31,7 @@ from capa.config import ConfigDocument, SaveError
 from capa.config.problems import ConfigProblem
 from capa.core.errors import CapaError
 from capa.experiment.config import ExperimentConfig
-from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress
+from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState
 from capa.ui.tabs.setup_outline import ALL_SECTIONS, SetupOutline
 from capa.ui.tabs.setup_problems import SetupProblems
 from capa.ui.tabs.setup_sections._base import SectionWidget
@@ -153,7 +153,7 @@ class SetupTab(QWidget):
         # Apply-to-Rig state machine: True while an apply is mid-flight
         # (between ``applyRequested`` emit and the controller's
         # ``config_load_finished`` signal). Gates the Apply button so
-        # the operator can't double-click during the open phase.
+        # the operator can't double-click during hardware preparation.
         self._apply_in_flight: bool = False
         # Last apply outcome, used by the banner state machine to keep
         # transient success / failure messages visible until either a
@@ -928,7 +928,7 @@ class SetupTab(QWidget):
         self._refresh_apply_enabled()
 
     def _on_config_load_finished(self, progress: object) -> None:
-        """Listen for the controller's terminal config-load phase.
+        """Listen for the controller's terminal config-load state.
 
         Called for every config load — including File→Open and Apply. We
         only adjust the apply-related state when ``_apply_in_flight`` is
@@ -939,8 +939,8 @@ class SetupTab(QWidget):
             return
         if not isinstance(progress, ConfigLoadProgress):
             return
-        phase = progress.phase
-        if phase is ConfigLoadPhase.READY:
+        state = progress.state
+        if state is ConfigLoadState.READY:
             self._apply_in_flight = False
             self._draft.unapplied = False
             # Summarise: count of device rows that reached READY.
@@ -953,7 +953,7 @@ class SetupTab(QWidget):
             self._apply_outcome = (_BannerState.APPLIED_OK, detail)
             self._banner_fade_timer.start()
             _logger.info("ui.setup.apply_succeeded", devices=ready)
-        elif phase is ConfigLoadPhase.FAILED:
+        elif state is ConfigLoadState.FAILED:
             self._apply_in_flight = False
             self._draft.unapplied = True
             self._apply_outcome = (
@@ -962,7 +962,7 @@ class SetupTab(QWidget):
             )
             _logger.warning("ui.setup.apply_failed", message=progress.message)
         else:
-            # IDLE / interim phases — keep waiting.
+            # IDLE / interim states: keep waiting.
             return
         self._refresh_banner()
         self._refresh_source_label()
@@ -990,7 +990,7 @@ class SetupTab(QWidget):
         return (_BannerState.HIDDEN, "")
 
     def _is_controller_busy(self) -> bool:
-        """``True`` if the run controller is in any non-IDLE phase.
+        """``True`` if the run controller is in any non-IDLE state.
 
         Prefers the cached ``_controller_state`` (updated by the
         ``state_changed`` signal) over the attribute on the controller
@@ -1190,9 +1190,8 @@ class SetupTab(QWidget):
 class _PlaceholderSection(SectionWidget):
     """Stand-in for an outline entry whose live editor hasn't landed yet.
 
-    Used by Slice D1 for Experiment / Procedure / Storage / Safety so
-    operators can confirm navigation works; Slice D2 replaces these in
-    place.
+    Operators can still confirm navigation works even before a full
+    editor exists for a section.
     """
 
     def __init__(self, section_id: str, parent: Any = None) -> None:
@@ -1203,7 +1202,7 @@ class _PlaceholderSection(SectionWidget):
         title.setStyleSheet("font-size: 14pt; font-weight: 600;")
         outer.addWidget(title)
         note = QLabel(
-            "Editor pane lands in Slice D2 — section navigation is wired,"
+            "Editor pane is not available yet; section navigation is wired,"
             " editing is not yet available here.",
             self,
         )

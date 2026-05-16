@@ -1029,7 +1029,7 @@ class Conductor:
     async def _disarm_unconditional(self) -> None:
         """AsyncExitStack callback: disarm pool if we're still holding it.
 
-        Used on early failures before the main drain phase. The
+        Used on early failures before the main drain path. The
         ``_pool_armed`` flag prevents a double-disarm when the success
         path already ran it.
         """

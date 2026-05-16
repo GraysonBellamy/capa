@@ -1,4 +1,4 @@
-# Free-run experiment against a real Sartorius balance (P2).
+# Free-run experiment against a real Sartorius balance.
 #
 # Records mass at 2 Hz into both ``device_records/sartorius.parquet``
 # (single-value-row library frame) and ``scalars.parquet`` (calibrated
@@ -29,7 +29,7 @@ operator:
 sample:
   id: SARTORIUS-REAL-001
   material: none
-  notes: "P2 real-hardware balance free run"
+  notes: "Real-hardware balance free run"
 
 tags:
   - real

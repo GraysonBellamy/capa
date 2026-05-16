@@ -1,4 +1,4 @@
-"""Slice D3 tests — :class:`DocumentCoordinator` Setup ↔ Method sync.
+"""Tests for :class:`DocumentCoordinator` Setup ↔ Method sync.
 
 Covers:
 

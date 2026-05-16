@@ -316,7 +316,7 @@ class TestNIDAQBlockSim:
         await sim.start(make_start_ctx())
         emissions = sim.tick_once()
         records, samples = _split(emissions)
-        # P0a: block adapter does NOT emit per-sample ChannelSamples.
+        # Block adapter does NOT emit per-sample ChannelSamples.
         assert len(samples) == 0
         assert len(records) == 1
         rec = records[0]

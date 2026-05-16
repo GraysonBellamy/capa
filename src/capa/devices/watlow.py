@@ -1,10 +1,10 @@
 """Real :class:`WatlowAdapter` — wraps a :class:`watlowlib.Controller`.
 
-Plan §16: "real :class:`WatlowAdapter` (smallest viable real device);
+"real :class:`WatlowAdapter` (smallest viable real device);
 Watlow ``SourceRecord`` preservation; Watlow parameter-to-channel mapping;
 hardware smoke-test gate."
 
-Architecture (plan §5.2 / §7.2):
+Architecture ():
 
 * ``open`` opens the serial transport via :func:`watlowlib.open_device` and runs
   :meth:`watlowlib.Controller.identify` to capture firmware / part-number
@@ -16,7 +16,7 @@ Architecture (plan §5.2 / §7.2):
   :func:`watlowlib.sinks.sample_to_row`) plus zero or more :class:`ChannelSample`\\
   s mapped from the configured :class:`WatlowParameter` bindings.
 * ``snapshot`` returns a :class:`DeviceSnapshot` from the cached ``DeviceInfo``.
-* ``command`` enforces the authorization gate (plan §9: every device write
+* ``command`` enforces the authorization gate (every device write
   carries ``issued_by`` plus either ``authorization_id`` or ``confirmed_by``)
   and dispatches to :meth:`watlowlib.Controller.set_setpoint` /
   :meth:`watlowlib.Controller.write_parameter`.
@@ -113,7 +113,7 @@ _WATLOW_UNIT_TO_PINT: Final[dict[Unit, str]] = {
 class WatlowAdapterParams(BaseModel):
     """Per-device adapter configuration for a real Watlow controller.
 
-    Plan §5.4: adapter-specific knobs live under ``DeviceConfig.params`` and are
+    adapter-specific knobs live under ``DeviceConfig.params`` and are
     parsed by the adapter at construction time.
     """
 
@@ -272,7 +272,7 @@ class WatlowAdapter:
     :func:`watlowlib.open_device` so unit tests can wire up a
     :class:`watlowlib.transport.fake.FakeTransport`-backed controller.
 
-    File layout (Phase 8 cleanup):
+    File layout:
 
     * **Runtime state** — ``__init__``, ``configure_channels``, lifecycle
       (``open``/``close``/``start``/``stop``), ``snapshot``, ``stream``,
@@ -434,7 +434,7 @@ class WatlowAdapter:
     async def snapshot(self) -> DeviceSnapshot:
         """Build a :class:`DeviceSnapshot` from cached :class:`DeviceInfo`.
 
-        Plan §13.1: snapshots feed ``status.sqlite`` for diagnostics. The
+        snapshots feed ``status.sqlite`` for diagnostics. The
         cached ``DeviceInfo`` is captured at :meth:`open`; this method does no
         I/O so it is safe to call from the engine while the stream is in
         flight.
@@ -561,7 +561,7 @@ class WatlowAdapter:
     async def command(self, cmd: DeviceCommand) -> CommandResult:
         """Issue a generic command. Authorization gate first, then dispatch.
 
-        Plan §9: commands without either ``authorization_id`` (run-arm cover)
+        commands without either ``authorization_id`` (run-arm cover)
         or ``confirmed_by`` (manual UI confirmation) are refused at the
         adapter boundary, regardless of the underlying device's own gates.
         """
@@ -1138,7 +1138,7 @@ async def discover(
 
 
 # ---------------------------------------------------------------------------
-# Setup-editor descriptor (plan §5.7). Lives next to the adapter so the
+# Setup-editor descriptor (). Lives next to the adapter so the
 # descriptor and adapter cannot drift; the bottom-of-file register() call
 # adds this to capa.devices.registry.ADAPTERS at import time.
 # ---------------------------------------------------------------------------

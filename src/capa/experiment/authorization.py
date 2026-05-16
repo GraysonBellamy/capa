@@ -1,6 +1,6 @@
 """Authorization — tracks operator and run-arm authorization for device writes.
 
-Plan §9 / §18 #12: every device write is attributable. ``issued_by`` plus a
+#12: every device write is attributable. ``issued_by`` plus a
 run-arm ``authorization_id`` covers procedure/method-driven commands; manual
 overrides go through :meth:`Authorization.confirm_manual` which adds a
 ``confirmed_by`` operator id stamp.

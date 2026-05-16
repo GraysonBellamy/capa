@@ -1,4 +1,4 @@
-"""Unit tests for :class:`capa.devices.watlow.WatlowAdapter` (P0d).
+"""Unit tests for :class:`capa.devices.watlow.WatlowAdapter`.
 
 We exercise the adapter against an in-process ``StubWatlowController`` that
 duck-types :class:`watlowlib.Controller`'s public surface. The stub yields

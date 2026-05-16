@@ -1,6 +1,6 @@
 """Per-worker heartbeat lifecycle.
 
-Phase 5 of the unified-architecture cleanup wired a
+The worker heartbeat implementation wires a
 :func:`~capa.runtime.heartbeat.heartbeat_task` inside each worker's loop
 so :attr:`WorkerMetrics.loop_lag` has a real producer. These tests pin
 that contract: observations accumulate while the worker is open, and the

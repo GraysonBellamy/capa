@@ -1,6 +1,6 @@
 """Normalized channel-samples sink — ``scalars.in-flight.arrows``.
 
-Plan §8.5 / §5.6. Streams :class:`~capa.devices.records.ChannelSample` rows
+Streams :class:`~capa.devices.records.ChannelSample` rows
 to an in-flight Arrow IPC stream (one record batch per flush, fsync between)
 for crash safety — see ``arrow-ipc-streaming-plan.md``. The finalize stage
 rewrites the IPC stream into a large-row-group Parquet sorted by
@@ -239,7 +239,7 @@ class ChannelSamplesSink:
 
         No-op when the buffer is empty. The underlying :class:`IpcStreamSink`
         fsyncs after every write so a power-loss after this call leaves the
-        last batch on disk (plan §8.5).
+        last batch on disk ().
         """
         if self._closed:
             raise ChannelSamplesSinkError("flush() after close()")

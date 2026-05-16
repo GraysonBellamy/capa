@@ -9,7 +9,7 @@ procedure:
   version: "0.1"
   config:
     auto_acknowledge_prompts: true
-    notes: "Hardware-day variant B: real E85+webcam+balance, sim heater+MFC+NI-DAQ."
+    notes: "Real-hardware mix: real E85+webcam+balance, sim heater+MFC+NI-DAQ."
 
 domain_profile:
   id: capa.profiles.capa_pyrolysis
@@ -42,7 +42,7 @@ operator:
 sample:
   id: REAL-B-001
   material: PMMA
-  notes: "Hardware-day variant B integration"
+  notes: "Mixed-hardware integration"
 
 tags:
   - real

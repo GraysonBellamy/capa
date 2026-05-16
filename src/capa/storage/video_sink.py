@@ -1,6 +1,6 @@
 """Per-camera frame-index sink.
 
-Plan §12.3 / §12.5. One sink instance per camera; writes
+One sink instance per camera; writes
 ``video/<camera_name>.frames.in-flight.arrows`` (Arrow IPC stream — see
 ``arrow-ipc-streaming-plan.md``) while the run is active. The finalize stage
 rewrites it to ``video/<camera_name>.frames.parquet`` with the same
@@ -37,7 +37,7 @@ from capa.devices.camera.base import FrameReceipt
 from capa.storage._ipc import DEFAULT_FLUSH_ROWS_FRAMES, IpcStreamSink
 
 VIDEO_DIRNAME = "video"
-"""Bundle-relative directory for camera artifacts (plan §8 layout)."""
+"""Bundle-relative directory for camera artifacts (layout)."""
 
 INFLIGHT_SUFFIX = ".frames.in-flight.arrows"
 FINAL_SUFFIX = ".frames.parquet"

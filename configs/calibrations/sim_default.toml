@@ -1,7 +1,7 @@
 # Default identity-only calibration set for the simulator rigs.
 #
-# Phase G item 3: ships so the New Setup Wizard's "CAPA pyrolysis
-# simulated" starting point can point at a real file, and so the
+# Ships so the New Setup Wizard's "CAPA pyrolysis simulated" starting
+# point can point at a real file, and so the
 # apply-set diff dialog has a working fixture for tests + manual
 # exploration.
 #

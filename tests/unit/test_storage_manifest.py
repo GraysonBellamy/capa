@@ -96,5 +96,5 @@ class TestFinalizeCombination:
         assert is_legal_finalize_combination("completed", "sealed")
 
     def test_crashed_plus_sealed_legal(self) -> None:
-        # Plan §8.2: crashed runs can still seal.
+        # crashed runs can still seal.
         assert is_legal_finalize_combination("crashed", "sealed")

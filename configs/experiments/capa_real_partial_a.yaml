@@ -9,7 +9,7 @@ procedure:
   version: "0.1"
   config:
     auto_acknowledge_prompts: true
-    notes: "Hardware-day variant A: real Watlow+Alicat+webcam, sim balance+NI-DAQ."
+    notes: "Real-hardware mix: real Watlow+Alicat+webcam, sim balance+NI-DAQ."
 
 domain_profile:
   id: capa.profiles.capa_pyrolysis
@@ -42,7 +42,7 @@ operator:
 sample:
   id: REAL-A-001
   material: PMMA
-  notes: "Hardware-day variant A integration"
+  notes: "Mixed-hardware integration"
 
 tags:
   - real

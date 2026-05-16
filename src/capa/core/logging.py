@@ -1,6 +1,6 @@
 """structlog configuration and run-context binding.
 
-Plan §13.1. Every log line carries a context-bound ``run_id``,
+Every log line carries a context-bound ``run_id``,
 ``procedure_id``, ``step_id`` (when applicable), and ``operator_id``. During a
 run, logs are tee'd to:
 
@@ -35,7 +35,7 @@ from structlog.types import EventDict, Processor
 from capa.storage.log_sink import LogSink
 
 PRE_RUN_LOG_DIR = Path.home() / ".capa" / "logs"
-"""Where pre-run logs (config errors, plugin failures) land. Plan §13.1."""
+"""Where pre-run logs (config errors, plugin failures) land. """
 
 
 def _utc_timestamper(_logger: object, _method_name: str, event_dict: EventDict) -> EventDict:
@@ -69,7 +69,7 @@ class _StructlogJSONLineHandler(logging.Handler):
     """Receive already-rendered JSON strings from structlog and append them
     to the underlying :class:`LogSink`.
 
-    Plan §13.1: we want the bundle's ``run.log`` to be one JSON object per
+    we want the bundle's ``run.log`` to be one JSON object per
     line. structlog's :class:`structlog.stdlib.ProcessorFormatter` will hand
     us the rendered string in :attr:`LogRecord.msg` after the JSONRenderer
     runs.
@@ -203,7 +203,7 @@ def configure_pre_run_logging(*, level: str = "INFO") -> structlog.stdlib.BoundL
     """Configure stdout-only + ``~/.capa/logs/capa-YYYYMMDD.log`` for the
     pre-run path.
 
-    Used by ``capa validate`` and the early phase of ``capa run --headless``
+    Used by ``capa validate`` and the early startup path of ``capa run --headless``
     (config load, plugin lock check) where there's no bundle yet.
     """
     PRE_RUN_LOG_DIR.mkdir(parents=True, exist_ok=True)

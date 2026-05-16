@@ -1,7 +1,7 @@
-"""WebcamAdapter (PyAV) — push-mode encoding + frame-index bookkeeping.
+"""WebcamAdapter (PyAV) push-mode encoding and frame-index bookkeeping.
 
-Plan §12.3 / P4 Stage B. Uses synthetic numpy frames so tests don't depend
-on a real V4L2 device. Pump-mode (live capture) is exercised by the gated
+Uses synthetic numpy frames so tests don't depend on a real V4L2 device.
+Pump-mode (live capture) is exercised by the gated
 hardware tier (``CAPA_HARDWARE_TESTS=1``); not covered here.
 """
 
@@ -367,7 +367,7 @@ class TestDefaults:
 
 
 class TestV4L2IdentityProbe:
-    """Hardware-day §5: ``manifest.json.cameras[*].identity`` was ``None``
+    """``manifest.json.cameras[*].identity`` was ``None``
     for real webcams because sysfs metadata was never read. Probe in
     :meth:`open` so the bundle records the actual hardware identity.
     """
@@ -457,7 +457,7 @@ class TestV4L2IdentityProbe:
 
 
 class TestEncoderFailureGuard:
-    """Hardware-day §6: a single ``avcodec_send_packet() returned 22``
+    """A single ``avcodec_send_packet() returned 22``
     (libx264 EINVAL) at t≈23 s killed the entire camera task and lost
     the recording. The adapter must drop the offending frame, log a
     ``pump_warning`` event, and keep recording.
@@ -536,7 +536,7 @@ async def _snapshot_health(cam: WebcamAdapter) -> Any:
 class TestPushFrameOffLoop:
     """Encode + mux must run in a worker thread so the asyncio loop stays free.
 
-    Hardware-day §5.B regression: the visible webcam pump captured at ~14 fps
+    Regression coverage: the visible webcam pump captured at ~14 fps
     instead of 30 because :code:`frame.reformat(...).to_ndarray()` and the
     libx264 encode were running on the asyncio loop.
     """

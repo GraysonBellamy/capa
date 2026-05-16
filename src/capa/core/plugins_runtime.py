@@ -1,6 +1,6 @@
 """Plugin discovery + runtime trust enforcement.
 
-Plan §11. The lock parser + drift detector live in
+The lock parser + drift detector live in
 :mod:`capa.core.plugins_lock`. This module is the runtime side:
 
 1. **Discovery.** Walk ``importlib.metadata.entry_points(group="capa.procedures")``
@@ -218,7 +218,7 @@ def discover_procedures(
                 # Reading the class attribute here caused the two sides to
                 # diverge in editable installs (class attr stays "0.1.0" while
                 # dist.version is "0.0.1.dev1+gXXXX"), making the trust check
-                # always fail. Hardware-day §5.4 anomaly. The plugin author's
+                # always fail. The plugin author's
                 # declared version is still available via ``cls.version``.
                 version=version,
                 cls=cls,
@@ -269,7 +269,7 @@ def check_procedure_class(cls: type[object]) -> None:
     """Raise :class:`PluginTrustError` if ``cls`` does not satisfy the
     :class:`Procedure` Protocol.
 
-    This is the load-time contract enforcement plan §11 line 951–957
+    This is the load-time contract enforcement –957
     requires. Failures here keep the plugin out of the registry — it never
     appears in the procedure picker."""
     if not isinstance(cls, type):

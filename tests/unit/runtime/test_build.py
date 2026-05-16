@@ -172,7 +172,7 @@ class TestSchemeIsolation:
 
 class TestOutboundCapacityDerivation:
     """:func:`_outbound_capacity_for` derives the per-worker bridge
-    capacity from declared rates. Phase 2 replaces the hardcoded ``64``
+    capacity from declared rates. This replaces the hardcoded ``64``
     floor with the documented ``max(64, ceil(8 * rate))`` formula."""
 
     def test_no_rate_falls_back_to_floor(self) -> None:

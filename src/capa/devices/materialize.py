@@ -246,7 +246,7 @@ def _materialize_cameras(
     """
     # Camera wrapper construction lives in the runtime layer because the
     # wrapper holds runtime-owned ThreadBridges. Importing here is one
-    # carefully-bounded device → runtime edge; the Phase-3 canary forbids
+    # carefully-bounded device → runtime edge; the runtime canary forbids
     # only `capa.runtime.build`, not all of runtime.
     from capa.runtime.camera_adapter import make_camera_adapter  # noqa: PLC0415
 

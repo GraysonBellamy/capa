@@ -1,6 +1,6 @@
 """Bundle schema version and migration registry.
 
-Plan §8.3. ``manifest.json`` carries a ``bundle_schema_version`` integer.
+``manifest.json`` carries a ``bundle_schema_version`` integer.
 Bumping the layout bumps the version; this module's :data:`MIGRATIONS` maps
 ``old_version -> migrate(dict) -> dict`` so old bundles remain first-class.
 

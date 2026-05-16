@@ -2,7 +2,7 @@
 
 Run with: ``uv run python scripts/diagnose_sartorius_discover.py``
 
-The Setup-editor Discover dialog (Phase F) calls
+The Setup-editor Discover dialog calls
 ``capa.devices.sartorius.discover()``, which has five silent-failure
 paths that all look identical from the GUI ("scan succeeded, zero
 rows"). This script touches each layer in order and prints what it
@@ -69,8 +69,7 @@ async def main(explicit_port: str | None = None) -> int:
 
     print("\n[4] probing each port with sartoriuslib.discover_port()")
     print("    sweeping baudrates (capa's wrapper only tries the library default,")
-    print("    which is the Phase G item 3 follow-up — this loop is what the fixed")
-    print("    wrapper will do):")
+    print("    which is broader than the normal wrapper path):")
     from sartoriuslib.errors import SartoriusError  # local import per layer
     from sartoriuslib.transport.base import SerialSettings  # type: ignore[import-not-found]
 

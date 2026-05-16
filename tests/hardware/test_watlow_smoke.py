@@ -1,6 +1,6 @@
-"""Hardware smoke test for the real :class:`WatlowAdapter` (P0d).
+"""Hardware smoke test for the real :class:`WatlowAdapter`.
 
-Plan §15.4 contract for Watlow:
+Checks for Watlow:
 
 1. Open and identify a real PM-class controller.
 2. Read PV; assert sane numeric value.

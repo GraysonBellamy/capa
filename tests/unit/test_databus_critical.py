@@ -1,4 +1,4 @@
-"""P0-4 acceptance: must-not-drop subscribers use ABORT_RUN, not BLOCK.
+"""Must-not-drop subscribers use ABORT_RUN, not BLOCK.
 
 A stuck ``BLOCK`` subscriber would freeze the engine fan-out — and through
 it every producer adapter. The DataBus now rejects ``BLOCK`` at registration

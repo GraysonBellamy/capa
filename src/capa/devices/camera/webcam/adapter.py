@@ -1,4 +1,4 @@
-"""``WebcamAdapter`` — PyAV-driven H.264 → MKV (plan §12.3).
+"""``WebcamAdapter`` — PyAV-driven H.264 → MKV ().
 
 The adapter has a single long-lived input pump
 (:meth:`WebcamAdapter._run_input_loop`) that opens the
@@ -22,9 +22,9 @@ Two consumer paths:
 Unifying the input pump across the recording / between-runs boundary
 removes the DirectShow filter-graph hold-time that previously froze
 the live preview tile for several seconds after every run-stop —
-``av.open`` happens exactly once per pool open, not once per phase.
+``av.open`` happens exactly once per pool open, not once per recording.
 
-MKV container metadata carries the run-start UTC anchor (plan §12.5) so an
+MKV container metadata carries the run-start UTC anchor () so an
 external tool can re-correlate by absolute time without parsing capa's
 manifest.
 """
@@ -94,7 +94,7 @@ _logger = structlog.get_logger("capa.devices.camera.webcam")
 
 
 class WebcamAdapter:
-    """Visible-camera adapter (plan §12.3).
+    """Visible-camera adapter ().
 
     Constructed via :meth:`from_params` so a hardware TOML can declare it::
 
@@ -226,7 +226,7 @@ class WebcamAdapter:
         input_url: str | None = None,
         input_format: str | None = None,
     ) -> WebcamAdapter:
-        """TOML-friendly constructor (plan §16 ``from_params`` convention)."""
+        """TOML-friendly constructor (``from_params`` convention)."""
         return cls(
             spec=spec,
             clock=clock,
@@ -358,8 +358,8 @@ class WebcamAdapter:
             if probed.card_name or probed.serial:
                 # Replace stub identity with the device's own metadata so
                 # ``manifest.json.cameras[*].identity`` reflects the actual
-                # hardware. Hardware-day §5: ``identity`` was ``None`` for a
-                # real Logitech C930e because nothing populated it.
+                # hardware. ``identity`` was previously ``None`` for a real
+                # Logitech C930e because nothing populated it.
                 self._info = CameraInfo(
                     adapter=self._info.adapter,
                     name=self._info.name,
@@ -924,7 +924,7 @@ class WebcamAdapter:
         """Open the output container + stream."""
         assert self._output_path is not None
         container = av.open(str(self._output_path), mode="w", format="matroska")
-        # MKV container metadata anchor (plan §12.5).
+        # MKV container metadata anchor ().
         anchor_utc = self._clock.to_wall_ns(self._clock.t_mono_ns())
         container.metadata["run_started_utc"] = anchor_utc.isoformat()
         container.metadata["camera_name"] = self._spec.name

@@ -26,8 +26,8 @@ from capa.runtime.progress import DeviceInitProgress, DeviceInitStatus
 from capa.ui.theme import COLOR_FAIL, COLOR_IDLE, COLOR_OK, COLOR_RUNNING, COLOR_WARN
 
 
-class ConfigLoadPhase(StrEnum):
-    """UI-facing phase for config load and hardware preparation."""
+class ConfigLoadState(StrEnum):
+    """UI-facing state for config load and hardware preparation."""
 
     IDLE = "idle"
     BUILDING_POOL = "building_pool"
@@ -41,7 +41,7 @@ class ConfigLoadPhase(StrEnum):
 class ConfigLoadProgress:
     """Aggregated progress snapshot consumed by the dialog."""
 
-    phase: ConfigLoadPhase
+    state: ConfigLoadState
     message: str
     path: Path | None = None
     devices: tuple[DeviceInitProgress, ...] = ()
@@ -59,13 +59,13 @@ class ConfigLoadProgress:
         )
 
 
-_PHASE_TEXT: Final[dict[ConfigLoadPhase, str]] = {
-    ConfigLoadPhase.IDLE: "Idle",
-    ConfigLoadPhase.BUILDING_POOL: "Building worker pool",
-    ConfigLoadPhase.CLOSING_PREVIOUS: "Closing previous config",
-    ConfigLoadPhase.OPENING_DEVICES: "Opening devices",
-    ConfigLoadPhase.READY: "Hardware ready",
-    ConfigLoadPhase.FAILED: "Hardware failed",
+_STATE_TEXT: Final[dict[ConfigLoadState, str]] = {
+    ConfigLoadState.IDLE: "Idle",
+    ConfigLoadState.BUILDING_POOL: "Building worker pool",
+    ConfigLoadState.CLOSING_PREVIOUS: "Closing previous config",
+    ConfigLoadState.OPENING_DEVICES: "Opening devices",
+    ConfigLoadState.READY: "Hardware ready",
+    ConfigLoadState.FAILED: "Hardware failed",
 }
 
 _STATUS_COLOR: Final[dict[DeviceInitStatus, QColor]] = {
@@ -106,9 +106,9 @@ class HardwareInitDialog(QDialog):
         self._message.setWordWrap(True)
         layout.addWidget(self._message)
 
-        self._phase = QLabel("Building worker pool", self)
-        self._phase.setStyleSheet(f"color: {COLOR_IDLE.name()};")
-        layout.addWidget(self._phase)
+        self._state_label = QLabel("Building worker pool", self)
+        self._state_label.setStyleSheet(f"color: {COLOR_IDLE.name()};")
+        layout.addWidget(self._state_label)
 
         self._progress = QProgressBar(self)
         self._progress.setTextVisible(True)
@@ -144,7 +144,7 @@ class HardwareInitDialog(QDialog):
 
     def update_progress(self, progress: ConfigLoadProgress) -> None:
         """Refresh the dialog from one aggregated progress snapshot."""
-        self._terminal = progress.phase in (ConfigLoadPhase.READY, ConfigLoadPhase.FAILED)
+        self._terminal = progress.state in (ConfigLoadState.READY, ConfigLoadState.FAILED)
         self._close_btn.setEnabled(self._terminal)
 
         config_name = progress.path.name if progress.path is not None else "config"
@@ -152,16 +152,16 @@ class HardwareInitDialog(QDialog):
             f"Loading {config_name} and connecting devices. Controls unlock when hardware is ready."
         )
 
-        phase_text = _PHASE_TEXT.get(progress.phase, progress.phase.value)
-        self._phase.setText(f"{phase_text}: {progress.message}")
-        if progress.phase is ConfigLoadPhase.FAILED:
-            self._phase.setStyleSheet(f"color: {COLOR_FAIL.name()}; font-weight: bold;")
-        elif progress.phase is ConfigLoadPhase.READY:
-            self._phase.setStyleSheet(f"color: {COLOR_OK.name()}; font-weight: bold;")
-        elif progress.phase is ConfigLoadPhase.OPENING_DEVICES:
-            self._phase.setStyleSheet(f"color: {COLOR_RUNNING.name()};")
+        state_text = _STATE_TEXT.get(progress.state, progress.state.value)
+        self._state_label.setText(f"{state_text}: {progress.message}")
+        if progress.state is ConfigLoadState.FAILED:
+            self._state_label.setStyleSheet(f"color: {COLOR_FAIL.name()}; font-weight: bold;")
+        elif progress.state is ConfigLoadState.READY:
+            self._state_label.setStyleSheet(f"color: {COLOR_OK.name()}; font-weight: bold;")
+        elif progress.state is ConfigLoadState.OPENING_DEVICES:
+            self._state_label.setStyleSheet(f"color: {COLOR_RUNNING.name()};")
         else:
-            self._phase.setStyleSheet(f"color: {COLOR_IDLE.name()};")
+            self._state_label.setStyleSheet(f"color: {COLOR_IDLE.name()};")
 
         if progress.total:
             self._progress.setRange(0, progress.total)
@@ -174,7 +174,7 @@ class HardwareInitDialog(QDialog):
         self._populate_table(progress.devices)
         self._update_failure_details(progress.devices)
 
-        if progress.phase is ConfigLoadPhase.READY and not self._auto_close_scheduled:
+        if progress.state is ConfigLoadState.READY and not self._auto_close_scheduled:
             self._auto_close_scheduled = True
             QTimer.singleShot(650, self.accept)
 
@@ -221,7 +221,7 @@ class HardwareInitDialog(QDialog):
 
 
 __all__ = [
-    "ConfigLoadPhase",
     "ConfigLoadProgress",
+    "ConfigLoadState",
     "HardwareInitDialog",
 ]

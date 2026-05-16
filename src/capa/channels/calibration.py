@@ -1,6 +1,6 @@
 """Calibrations — first-class snapshotted objects, with documented uncertainty.
 
-Plan §5.5. Every variant declares ``input_unit`` and ``output_unit`` (validated
+Every variant declares ``input_unit`` and ``output_unit`` (validated
 against :data:`~capa.core.units.UNIT_REGISTRY`); construction fails when the
 input/output dimensions are inconsistent with the variant's algebra. Every
 variant carries an :class:`UncertaintySpec` (or an explicit ``None`` declaring
@@ -65,7 +65,7 @@ class UncertaintySpec(BaseModel):
 class FitMetadata(BaseModel):
     """Pedigree of a calibration produced by a calibration *procedure*.
 
-    Plan §5.5: a fitted Calibration records reference instrument, serial,
+    a fitted Calibration records reference instrument, serial,
     date, residuals, and the source-procedure id + capa git SHA. This makes
     the curve's origin recoverable without trusting human-written notes.
     """
@@ -282,7 +282,7 @@ class Piecewise(_CalibrationBase):
 class CustomCallable(_CalibrationBase):
     """Reference to an installed callable.
 
-    Plan §5.5: a custom calibration must name an entry point, package version,
+    a custom calibration must name an entry point, package version,
     distribution hash, callable id, serialized parameters, input/output
     dimensions, and test vectors. Anonymous lambdas / unversioned scripts are
     a config error. The active callable metadata is snapshotted into
@@ -343,7 +343,7 @@ the ``kind`` discriminator at deserialization time.
 class CalibrationSet(BaseModel):
     """Collection of calibration curves keyed by channel name.
 
-    Plan §5.5: snapshotted into the bundle at run-start as ``calibration.json``,
+    snapshotted into the bundle at run-start as ``calibration.json``,
     so re-deriving engineering values five years later does not depend on the
     cal table that happens to be active today.
     """

@@ -1,6 +1,6 @@
 """Real :class:`NIDAQAdapter` — wraps a :class:`nidaqlib.tasks.session.DaqSession`.
 
-Plan §16: "real ``NIDAQAdapter``. Capability flags. Device health
+"real ``NIDAQAdapter``. Capability flags. Device health
 and health surfacing. Discovery (``capa devices discover``).
 ``capa validate --strict``."
 
@@ -11,7 +11,7 @@ declaratively: ``task_name``, a list of ``channels`` (dicts that
 optional ``tdms`` driver-side logging, and ``rate_hz`` (the recorder's
 polling cadence in software-timed mode).
 
-Two emission shapes (plan §5.6):
+Two emission shapes ():
 
 * **Polled (software-timed).** ``timing is None`` or ``timing.mode ==
   on_demand``. The adapter drives :func:`nidaqlib.streaming.record_polled`
@@ -27,7 +27,7 @@ Two emission shapes (plan §5.6):
   ``task_started_at + (first_sample_index + k) / sample_rate_hz``. The
   unroll is gated by :attr:`NIDAQAdapterParams.max_samples_per_block_unroll`
   so kHz acquisition cannot accidentally land on this path; the
-  rectangular-block sidecar / TDMS escape (plan §8.7) is future work.
+  rectangular-block sidecar / TDMS escape () is future work.
 
 For tests, an opt-in ``backend`` kwarg is forwarded to
 :func:`nidaqlib.tasks.open_device` so a
@@ -148,7 +148,7 @@ class NIDAQTimingParams(BaseModel):
 class NIDAQAdapterParams(BaseModel):
     """Per-device adapter configuration for an NI-DAQ task.
 
-    Plan §5.4: adapter-specific knobs live under ``DeviceConfig.params`` and are
+    adapter-specific knobs live under ``DeviceConfig.params`` and are
     parsed by the adapter at construction time.
     """
 
@@ -814,8 +814,7 @@ class NIDAQAdapter:
         Converted to capa's run-relative monotonic ns by anchoring to
         :attr:`RunClock.started_utc` — the run anchor captures both UTC
         and monotonic at the same instant, so UTC drift over a single
-        run stays sub-millisecond on a sane host. Plan §6.
-        """
+        run stays sub-millisecond on a sane host."""
         clock = self._state.clock
         assert clock is not None
         rate = block.sample_rate_hz
@@ -954,7 +953,7 @@ async def handshake(params: dict[str, Any]) -> str:
 
     Confirms that every declared physical channel resolves on the local
     NI system. Does NOT open the task — opening allocates NI resources
-    and (for AO tasks) could actuate hardware. Plan §14: "non-disruptive
+    and (for AO tasks) could actuate hardware. "non-disruptive
     read-only handshake."
     """
     parsed = NIDAQAdapterParams.model_validate(params)

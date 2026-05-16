@@ -1,4 +1,4 @@
-"""Slice F5 — :class:`DiscoveryDialog` and Setup wiring (plan §4.2, §4.9)."""
+"""Tests for :class:`DiscoveryDialog` and Setup wiring."""
 
 from __future__ import annotations
 
@@ -186,7 +186,7 @@ def test_dialog_failed_scan_records_status_and_placeholder(qtbot: Any) -> None:
 
 
 def test_dialog_empty_scan_shows_placeholder_row(qtbot: Any) -> None:
-    """Plan §7.2 item 3: empty success is visibly distinct from
+    """Empty success is visibly distinct from
     "still scanning"."""
     dialog = DiscoveryDialog()
     qtbot.addWidget(dialog)
@@ -206,7 +206,7 @@ def test_dialog_empty_scan_shows_placeholder_row(qtbot: Any) -> None:
 
 
 def test_dialog_lists_non_scannable_adapters(qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Plan §7.2 item 3: adapters with ``discoverable=False`` but a
+    """Adapters with ``discoverable=False`` but a
     non-None ``discoverable_reason`` show as disabled rows so operators
     can tell scannable-empty from not-scannable.
 

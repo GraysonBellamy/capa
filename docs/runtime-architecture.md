@@ -273,7 +273,7 @@ Threaded-async systems fail here if the protocol isn't explicit and bounded.
 ```
 Trigger: procedure-complete | external_stop | unrecoverable error | saturation deadline
 
-Phase A: graceful disarm
+Graceful disarm
 1. Conductor stops procedure (procedure task exits)
 2. Conductor calls pool.disarm_all(grace_s=5.0)
 3. For each worker (in parallel):
@@ -285,7 +285,7 @@ Phase A: graceful disarm
 4. Conductor's drain tasks see sentinel → exit
 5. Conductor awaits all disarm futures with grace_s
 
-Phase B: hard-stop + leak detection (if grace expires for any worker)
+Forced stop + leak detection (if grace expires for any worker)
 1. For each worker still in DRAINING:
      a. Capture stack via sys._current_frames()[worker.thread.ident]
      b. Record "worker_hard_stop_attempt" event into bundle (with stack)
@@ -297,7 +297,7 @@ Phase B: hard-stop + leak detection (if grace expires for any worker)
           - Thread persists as daemon; no further action
             (interrupting wedged native state could corrupt vendor SDKs)
 
-Phase C: drain and exit
+Drain and exit
 1. Writer thread inbox stops accepting (Conductor signals it)
 2. Writer thread drains its queue
 3. Writer thread finalizes bundle
@@ -307,9 +307,9 @@ Phase C: drain and exit
 7. WorkerPool remains alive — next run can be started against it
 ```
 
-**Force-cancel never leaves the heater hot.** The procedure executor's `SafeShutdownStep` ([`executor.py`](../src/capa/experiment/executor.py)) still runs *before* Phase A begins; for adapters with hard safety requirements, the adapter's own `stop()` also issues a safe-shutdown command in the worker's loop before signalling stream exit.
+**Force-cancel never leaves the heater hot.** The procedure executor's `SafeShutdownStep` ([`executor.py`](../src/capa/experiment/executor.py)) still runs *before* graceful disarm begins; for adapters with hard safety requirements, the adapter's own `stop()` also issues a safe-shutdown command in the worker's loop before signalling stream exit.
 
-**Phase B is observable.** Any time the engine takes the hard path, the bundle records it with a stack trace. Hard-stop attempts are not silent, and leaked threads are not pretended-away.
+**Forced stop is observable.** Any time the engine takes the hard path, the bundle records it with a stack trace. Hard-stop attempts are not silent, and leaked threads are not pretended-away.
 
 **There is no guaranteed terminate.** Python provides no safe way to interrupt a thread wedged inside a blocking vendor SDK call. The protocol's job is to be observable, not omnipotent. For crash-prone SDKs and safety-critical devices, see §11 (`SubprocessWorker`).
 
@@ -322,7 +322,7 @@ The Conductor enforces an end-to-end durable-output deadline. Per-channel backpr
 1. Log the saturation cause and per-bridge / inbox metrics.
 2. Write a `saturation_deadline` event into the bundle.
 3. Mark the run outcome `crashed_but_sealed`.
-4. Trigger normal Phase A shutdown — workers `disarm()` still runs `adapter.stop()`'s safe-shutdown path, so hardware does not stay in an inconsistent state.
+4. Trigger normal graceful shutdown — workers `disarm()` still runs `adapter.stop()`'s safe-shutdown path, so hardware does not stay in an inconsistent state.
 
 ---
 
@@ -535,7 +535,7 @@ The risk surface is `CustomStep`: plugin authors can register arbitrary handlers
 **Not built.** The `Worker` interface is the abstraction boundary; a future `SubprocessWorker` satisfies it with no other code changes. Flagged for two specific cases:
 
 1. **Crash-prone SDKs.** NI-DAQmx runtime faults and FLIR Spinnaker assertion failures can crash the entire Python process today. With a SubprocessWorker, the crash is contained: the child segfaults; the parent observes process exit and either restarts the child or marks the device failed and continues the run.
-2. **Safety-critical devices.** The heater is the canonical case. `loop.stop()` + `thread.join` (§6.2 Phase B) cannot terminate a thread wedged inside a blocking vendor call. SIGKILL on a child process can.
+2. **Safety-critical devices.** The heater is the canonical case. `loop.stop()` + `thread.join` (§6.2 forced stop) cannot terminate a thread wedged inside a blocking vendor call. SIGKILL on a child process can.
 
 **Costs:** per-emission IPC serialization (~5–10× latency vs in-thread), more memory per worker, more complex shutdown.
 
@@ -701,7 +701,7 @@ All have sensible defaults. The corresponding schema type is
   `adapter_stop_grace_s`, `adapter_close_grace_s`, `stream_cancel_grace_s`,
   `runner_stop_grace_s`) — live on
   [`WorkerShutdownConfig`](../src/capa/runtime/shutdown.py) as code-level
-  per-phase deadlines.
+  per-stage deadlines.
 
 Promote a constant to `RuntimeConfig` only when an operator actually
 needs to change it for a real experiment.

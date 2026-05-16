@@ -48,11 +48,11 @@ What the wrapper deliberately does NOT do:
 * Periodically emit health snapshots. The Camera's
   :meth:`~capa.devices.camera.base.Camera.snapshot` is callable on
   demand (mapped onto :meth:`DeviceAdapter.snapshot`); periodic
-  scraping is a planned follow-up.
+  scraping can be added later.
 * Enforce ``on_failure`` policy. Camera events with
   ``severity="error"`` flow through the standard drain into the bundle;
   :class:`~capa.experiment.safety.SafetyMonitor` integration is a
-  planned follow-up. The Conductor's saturation deadline still catches
+  can be added later. The Conductor's saturation deadline still catches
   a wedged camera the same way it catches a wedged device.
 """
 
@@ -255,7 +255,7 @@ class CameraDeviceAdapter:
         # the :meth:`start_preview` / :meth:`run_preview_pump` surface
         # (FLIR Atlas today). Cameras with a long-lived input pump (webcam)
         # leave this ``None`` — their pump feeds the preview stream
-        # unconditionally across every phase.
+        # unconditionally across every recording state.
         self._idle_preview_task: asyncio.Task[None] | None = None
 
     # ---- DeviceAdapter Protocol surface --------------------------------
@@ -632,7 +632,7 @@ class CameraDeviceAdapter:
     #       done by ``start_recording`` during a run. The adapter
     #       exposes a parallel ``start_preview`` / ``run_preview_pump``
     #       / ``stop_preview`` trio that registers a recorder-free
-    #       streamer for the IDLE phase; the helpers below run that
+    #       streamer for the IDLE state; the helpers below run that
     #       task across CLOSED→IDLE / DRAINING→IDLE and tear it down
     #       at IDLE→ARMED / IDLE→CLOSED so the single-owner SDK stream
     #       is never contended.

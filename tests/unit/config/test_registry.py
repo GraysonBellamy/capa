@@ -1,4 +1,4 @@
-"""Tests for ``capa.devices.registry`` (plan §5.7)."""
+"""Tests for ``capa.devices.registry`` ()."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def test_builtin_adapter_descriptors_registered() -> None:
     """Every adapter under capa.devices.* must register a descriptor.
 
     Regression test against forgetting to add a ``DESCRIPTOR`` when a
-    new adapter ships — plan §11 risk that the editor regresses to
+    new adapter ships — risk that the editor regresses to
     JSON-editing without the registry.
     """
     expected = {
@@ -52,7 +52,7 @@ def test_real_watlow_descriptor_shape() -> None:
 
 
 def test_channel_templates_canonical_set() -> None:
-    """Plan §5.7.1: built-in templates cover the 90% case."""
+    """built-in templates cover the 90% case."""
     template_ids: set[str] = set()
     for d in ADAPTERS.values():
         for t in d.channel_templates:
@@ -94,7 +94,7 @@ def test_unknown_descriptor_returns_none() -> None:
 
 
 def test_adapter_constructors_are_passive() -> None:
-    """Plan §11: Layer-4 resource validation depends on this invariant.
+    """Layer-4 resource validation depends on this invariant.
 
     Each adapter must be constructible without I/O — only then can the
     Setup editor's resource dry-run check conflicts without opening

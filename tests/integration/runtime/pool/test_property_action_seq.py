@@ -1,6 +1,6 @@
 """Property-style stress test for :class:`WorkerPool`.
 
-Plan §5 calls for a Hypothesis state-machine test that randomly mixes
+calls for a Hypothesis state-machine test that randomly mixes
 ``arm`` / ``disarm`` / ``dispatch`` / ``cancel`` actions and asserts:
 
 1. The pool always reaches a quiescent state (every worker in IDLE)

@@ -1,4 +1,4 @@
-"""Tests for ``_DiscriminatedUnionField`` (plan §5.8)."""
+"""Tests for ``_DiscriminatedUnionField`` ()."""
 
 from __future__ import annotations
 

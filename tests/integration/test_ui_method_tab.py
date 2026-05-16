@@ -1,7 +1,7 @@
 """``MethodTab`` integration tests.
 
-Plan §10.1 / P3 follow-up item 1. Drives the tab end-to-end: load a
-fixture method, edit a step, save, reload, assert equality. Uses
+Drives the tab end-to-end: load a fixture method, edit a step, save,
+reload, assert equality. Uses
 ``qtbot`` for widget lifecycle; no real engine or controller is
 involved here — the Method tab owns its own state."""
 

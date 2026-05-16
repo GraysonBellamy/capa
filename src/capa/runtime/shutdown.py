@@ -1,4 +1,4 @@
-"""Shutdown result types and per-phase grace configuration.
+"""Shutdown result types and per-stage grace configuration.
 
 These dataclasses give the in-process runtime a *truthful* shutdown
 surface: every close path returns a structured description of what
@@ -78,11 +78,11 @@ class PoolCloseResult:
 
 @dataclass(frozen=True, slots=True)
 class WorkerShutdownConfig:
-    """Per-phase wall-clock deadlines for worker shutdown.
+    """Per-stage wall-clock deadlines for worker shutdown.
 
     Tests inject shorter values to keep the suite fast. The
     :class:`~capa.ui.shutdown.ShutdownCoordinator` budgets its own
-    phase deadlines on top of these; the worker's deadlines bound the
+    stage deadlines on top of these; the worker's deadlines bound the
     per-adapter work while the coordinator bounds the overall pool
     close.
 

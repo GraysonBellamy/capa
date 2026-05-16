@@ -70,7 +70,7 @@ def build_channel_sample(
 
     Adapters call this once per declared channel per tick (or per derived
     sample) so calibration application is centralized rather than redone in
-    every adapter. Plan §7.2: "calibration application is the only non-trivial
+    every adapter. "calibration application is the only non-trivial
     CPU step in the normalized pipeline; happens before fan-out so all
     consumers see calibrated ``ChannelSample``\\ s."
     """
@@ -98,8 +98,7 @@ def build_channel_sample(
 
 
 # ---------------------------------------------------------------------------
-# Authorization gate — plan §9.
-#
+# Authorization gate — #
 # Every command issued through a real adapter carries ``issued_by`` plus
 # either ``authorization_id`` (run-arm cover) or ``confirmed_by`` (manual UI
 # confirmation). The adapter refuses anything without one of those — a

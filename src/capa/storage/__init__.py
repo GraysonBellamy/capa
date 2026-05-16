@@ -1,6 +1,6 @@
 """Storage layer — the run bundle.
 
-Plan §8. A run produces one directory containing every artifact needed to
+A run produces one directory containing every artifact needed to
 interpret it later. The storage layer provides:
 
 * :class:`~capa.storage.bundle.RunBundleWriter` — opens a run dir, owns sink

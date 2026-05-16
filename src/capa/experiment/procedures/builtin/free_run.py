@@ -1,9 +1,9 @@
 """:class:`FreeRun` — record-only procedure with no method.
 
-Plan §11. The smallest viable procedure that exercises the full engine
+The smallest viable procedure that exercises the full engine
 pipeline. Used for:
 
-* ``capa run --headless freerun.yaml`` — the headless outcome gate.
+* ``capa run --headless freerun.yaml`` — the headless smoke path.
 * Operator "just record what's happening" runs without a structured method.
 * The simulator harness in tests.
 
@@ -55,7 +55,7 @@ class FreeRun(Procedure):
     The protocol-required attributes (``id``, ``name``, ``version``,
     ``config_model``, ``required_capabilities``, ``required_channels``) are
     :class:`ClassVar` so the load-time contract check sees the actual values
-    rather than the dataclass field descriptors. Plan §11 line 951 — the
+    rather than the dataclass field descriptors. — the
     contract is enforced at registration, not at instance construction.
     """
 

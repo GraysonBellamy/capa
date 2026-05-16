@@ -1,9 +1,8 @@
-"""End-to-end CAPA recipe run — the P3 outcome gate.
+"""End-to-end CAPA recipe run.
 
-Plan §16 P3: "First end-to-end recipe-driven cone run; replicates via
-``Batch``; profile metadata captured." For this project the equivalent is
-the CAPA controlled-atmosphere-pyrolysis run, since that's the apparatus
-the project is named after; cone-calorimeter mode is deferred.
+This exercises the CAPA controlled-atmosphere-pyrolysis run against simulated
+hardware and verifies the same operator-facing bundle guarantees expected from
+a recipe-driven run.
 
 This test loads ``configs/experiments/sim_capa_pyrolysis.yaml``, runs it
 through :func:`run_headless` (the conductor stack) against simulated
@@ -67,7 +66,7 @@ async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> N
     # Manifest captures the procedure id and the profile id; the profile's
     # rich metadata is snapshotted into config.toml (the full
     # ExperimentConfig dump) and also into a dedicated profiles/<id>.toml
-    # file (plan §5.4.1).
+    # file ().
     manifest = json.loads((bundle / "manifest.json").read_text())
     assert manifest["procedure"]["id"] == "capa.builtin.recipe_runner"
     assert manifest["domain_profile"]["id"] == "capa.profiles.capa_pyrolysis"
@@ -78,7 +77,7 @@ async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> N
     assert profile_meta["atmosphere"]["mode"] == "inert"
     assert profile_meta["atmosphere"]["purge"]["species"] == "N2"
 
-    # Plan §5.4.1: dedicated per-profile snapshot.
+    # dedicated per-profile snapshot.
     snapshot_path = bundle / "profiles" / "capa_pyrolysis.toml"
     assert snapshot_path.is_file(), "profiles/<id>.toml snapshot missing"
     snapshot = tomllib.loads(snapshot_path.read_text())
@@ -104,7 +103,7 @@ async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> N
     assert any(k == "method.command.issued" for k in kinds)
 
     # Every issued command carries an authorization_id (audit invariant —
-    # plan §18 #12 says every device write is attributable).
+    # #12 says every device write is attributable).
     with sqlite3.connect(events_db) as conn:
         rows = conn.execute(
             "SELECT metadata_json FROM events WHERE kind = 'method.command.issued'"

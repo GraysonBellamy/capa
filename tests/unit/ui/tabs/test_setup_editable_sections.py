@@ -1,4 +1,4 @@
-"""Slice D2 tests — editable sections, debounce validate, Problems navigation.
+"""Editable setup-section tests: forms, validation debounce, and Problems navigation.
 
 Covers:
 

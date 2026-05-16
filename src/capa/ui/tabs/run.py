@@ -103,7 +103,7 @@ class RunTab(QWidget):
         # Re-evaluate the Start button whenever the pool finishes opening
         # (or is torn down) so the operator can't click Start while the
         # pool is still in PoolState.OPENING — which would crash the
-        # conductor's preparation phase with PoolStateError.
+        # conductor's preparation state with PoolStateError.
         self._controller.pool_changed.connect(self._on_pool_changed)
         ready_signal = getattr(self._controller, "hardware_ready_changed", None)
         if ready_signal is not None:

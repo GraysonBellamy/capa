@@ -1,6 +1,6 @@
 """``plugins.lock`` parser and drift detector.
 
-Plan §11: production mode uses a ``plugins.lock`` file containing plugin id,
+production mode uses a ``plugins.lock`` file containing plugin id,
 package name, version, entry point, and distribution hash. Startup refuses an
 installed plugin whose hash/version differs from the lock unless the operator
 explicitly runs ``capa plugins trust ...``. The lock snapshot is copied into

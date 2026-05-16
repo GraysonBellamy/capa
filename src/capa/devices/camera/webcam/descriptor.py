@@ -1,4 +1,4 @@
-"""Setup-editor descriptor (plan §5.7) for :class:`WebcamAdapter`.
+"""Setup-editor descriptor () for :class:`WebcamAdapter`.
 
 ``DESCRIPTOR`` is registered into the global adapter registry as a
 side effect of importing the package ``__init__``; this module just
@@ -15,7 +15,7 @@ from capa.devices.registry import AdapterDescriptor
 
 
 class WebcamParams(BaseModel):
-    """View model for :class:`WebcamAdapter`'s ``params`` dict (plan §4.9.3).
+    """View model for :class:`WebcamAdapter`'s ``params`` dict ().
 
     Mirrors :meth:`WebcamAdapter.__init__`'s keyword arguments. Used by
     the Setup editor's Cameras section to produce a curated auto-form

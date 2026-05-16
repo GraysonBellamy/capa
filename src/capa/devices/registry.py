@@ -1,4 +1,4 @@
-""":class:`AdapterDescriptor` registry — one source of truth (plan §5.7).
+""":class:`AdapterDescriptor` registry — one source of truth ().
 
 Each adapter contributes one curated record. The Setup editor, the
 runtime, and the CLI all read from :data:`ADAPTERS` so that *adding an
@@ -13,7 +13,7 @@ Plugin adapters discovered via the ``capa.adapters`` /
 :func:`load_plugin_descriptors`.
 
 The plan's :class:`ChannelTemplate` ships a few canonical pre-canned
-channels per adapter family (plan §5.7.1) so the Setup tab's "Add
+channels per adapter family () so the Setup tab's "Add
 channel" menu covers the 90% case without operators typing 40 fields.
 """
 
@@ -28,7 +28,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
-# Channel templates (plan §5.7.1).
+# Channel templates ().
 # ---------------------------------------------------------------------------
 
 
@@ -87,7 +87,7 @@ AdapterFamily = Literal[
 class AdapterDescriptor:
     """One curated record per adapter — params model + UI hints + factory.
 
-    Plan §5.7. Lives next to the adapter module so the descriptor and
+    Lives next to the adapter module so the descriptor and
     the adapter cannot drift. The runtime resolves
     :class:`DeviceConfig.adapter` (a module-path string) to an
     :class:`AdapterDescriptor` via :func:`get_descriptor` / :data:`ADAPTERS`.
@@ -147,7 +147,7 @@ class AdapterDescriptor:
     discoverable_reason: str | None = None
     """When :attr:`discoverable` is ``False``, an operator-facing
     one-line explanation surfaced by the DiscoveryDialog as a tooltip on
-    a disabled row (plan §7.2 item 3). ``None`` for adapters that simply
+    a disabled row (item 3). ``None`` for adapters that simply
     have no business in the dialog (every sim adapter); set when the
     adapter *should* be scannable but isn't yet — e.g. Watlow is gated
     on watlowlib shipping ``find_devices()``."""
@@ -233,7 +233,7 @@ _LOADED_DESCRIPTOR_SETS: set[str] = set()
 def load_plugin_descriptors() -> None:
     """Read ``capa.adapters`` / ``capa.cameras`` entry-point groups.
 
-    Plan §11/§12.1. Each entry point's target must be an
+    Each entry point's target must be an
     :class:`AdapterDescriptor` instance (the plugin module exports
     ``DESCRIPTOR``) or a callable that returns one. Failures are logged
     but never raise: a broken plugin must not prevent the app from
@@ -253,7 +253,7 @@ def load_plugin_descriptors() -> None:
             try:
                 target = ep.load()
             except Exception:
-                # Plan §11 risk: a broken plugin degrades to "not visible"
+                # risk: a broken plugin degrades to "not visible"
                 # rather than crashing capa at startup. The Setup editor
                 # will simply not offer the missing adapter.
                 continue

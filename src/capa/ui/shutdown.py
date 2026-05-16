@@ -5,8 +5,8 @@ This module:
 * Funnels every close trigger (window X, File→Quit, Ctrl+Q) through
   :meth:`ShutdownCoordinator.begin_shutdown`, which is **idempotent** —
   repeat calls return the in-flight task.
-* Drives a fixed phase ladder (see :class:`ShutdownPhase`) with per-
-  phase ``asyncio.wait_for`` deadlines so no phase can hang the GUI.
+* Drives a fixed shutdown sequence (see :class:`ShutdownStage`) with
+  per-stage ``asyncio.wait_for`` deadlines so no stage can hang the GUI.
 * Arms a process-wide :class:`threading.Timer` at the start — the hard
   wall-clock fuse. If the asyncio loop wedges past
   :attr:`ShutdownDeadlines.hard_wall_s`, the timer's thread logs
@@ -25,7 +25,7 @@ coordinator's only hard guarantee is parent-process exit. Its
 The hard-wall timer runs on a separate non-asyncio thread because the
 asyncio loop itself may be wedged when the deadline expires. Every
 field the fuse needs is updated as a plain attribute on the coordinator
-before each phase transition; the fuse reads attributes only.
+before each stage transition; the fuse reads attributes only.
 """
 
 from __future__ import annotations
@@ -55,15 +55,15 @@ _logger = structlog.get_logger("capa.ui.shutdown")
 
 
 # ---------------------------------------------------------------------------
-# Phase + deadline + result types
+# Stage + deadline + result types
 # ---------------------------------------------------------------------------
 
 
-class ShutdownPhase(StrEnum):
-    """Phase ladder the coordinator drives top-to-bottom.
+class ShutdownStage(StrEnum):
+    """Shutdown sequence the coordinator drives top-to-bottom.
 
     Declaration order is execution order. The coordinator records the
-    current phase as a plain attribute before entering each one so the
+    current stage as a plain attribute before entering each one so the
     hard-wall timer's snapshot reads a meaningful value even if the
     asyncio loop is wedged.
     """
@@ -83,10 +83,10 @@ class ShutdownPhase(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ShutdownDeadlines:
-    """Per-phase wall-clock budgets.
+    """Per-stage wall-clock budgets.
 
     The hard wall is the absolute upper bound; it must be larger than
-    the sum of the phase deadlines so the timer fires only when a phase
+    the sum of the stage deadlines so the timer fires only when a stage
     itself wedges past its bound.
 
     **Budget Composition:** ``pool_close_s`` must exceed the sum of all
@@ -111,7 +111,7 @@ class ShutdownDeadlines:
 class ShutdownResult:
     """Outcome of one :meth:`ShutdownCoordinator.begin_shutdown` task.
 
-    ``clean`` is true iff the pool closed cleanly AND no phase recorded
+    ``clean`` is true iff the pool closed cleanly AND no stage recorded
     an error. ``hard_exit_required`` is true if the hard-wall timer
     would have fired (only observable in tests; in production the fuse
     has already terminated the process by the time anyone could read
@@ -121,7 +121,7 @@ class ShutdownResult:
     reason: str
     clean: bool
     hard_exit_required: bool
-    final_phase: ShutdownPhase
+    final_stage: ShutdownStage
     active_run_id: str | None
     active_bundle_path: Path | None
     pool_close_result: PoolCloseResult | None
@@ -130,29 +130,29 @@ class ShutdownResult:
 
 
 # ---------------------------------------------------------------------------
-# Status-bar messages per phase
+# Status-bar messages per stage
 # ---------------------------------------------------------------------------
 
 
-_PHASE_STATUS_MESSAGES: dict[ShutdownPhase, str] = {
-    ShutdownPhase.DISABLE_UI: "Shutting down…",
-    ShutdownPhase.ABORT_ACTIVE_RUN: "Stopping run…",
-    ShutdownPhase.WAIT_ACTIVE_RUN: "Stopping run…",
-    ShutdownPhase.CLOSE_POOL: "Closing hardware…",
-    ShutdownPhase.RECOVER_ORPHANS: "Finalizing bundle…",
-    ShutdownPhase.CLOSE_CATALOG: "Closing catalog…",
-    ShutdownPhase.HARD_EXIT: "Shutdown is taking longer than expected; forcing exit if needed…",
-    ShutdownPhase.COMPLETE: "Shutdown complete.",
+_STAGE_STATUS_MESSAGES: dict[ShutdownStage, str] = {
+    ShutdownStage.DISABLE_UI: "Shutting down…",
+    ShutdownStage.ABORT_ACTIVE_RUN: "Stopping run…",
+    ShutdownStage.WAIT_ACTIVE_RUN: "Stopping run…",
+    ShutdownStage.CLOSE_POOL: "Closing hardware…",
+    ShutdownStage.RECOVER_ORPHANS: "Finalizing bundle…",
+    ShutdownStage.CLOSE_CATALOG: "Closing catalog…",
+    ShutdownStage.HARD_EXIT: "Shutdown is taking longer than expected; forcing exit if needed…",
+    ShutdownStage.COMPLETE: "Shutdown complete.",
 }
 
 
-def status_message_for_phase(phase: ShutdownPhase) -> str | None:
-    """Operator-facing message for a phase, or ``None`` if the phase
-    has no status-bar surface. The set of phases with messages is
-    deliberately smaller than the phase enum: internal phases
+def status_message_for_stage(stage: ShutdownStage) -> str | None:
+    """Operator-facing message for a stage, or ``None`` if the stage
+    has no status-bar surface. The set of stages with messages is
+    deliberately smaller than the stage enum: internal stages
     (REQUESTED, CANCEL_LIFECYCLE_TASKS, STOP_UI_DRAINERS) don't carry
     operator-meaningful intent."""
-    return _PHASE_STATUS_MESSAGES.get(phase)
+    return _STAGE_STATUS_MESSAGES.get(stage)
 
 
 # ---------------------------------------------------------------------------
@@ -185,12 +185,12 @@ class _CoordinatorState:
     """Mutable state the hard-wall timer's thread reads.
 
     Every field is a plain attribute set by the asyncio side BEFORE the
-    relevant phase begins; the timer thread reads them without locks
+    relevant stage begins; the timer thread reads them without locks
     (single-writer / single-reader pattern, both via the GIL).
     """
 
     reason: str = ""
-    phase: ShutdownPhase = ShutdownPhase.REQUESTED
+    stage: ShutdownStage = ShutdownStage.REQUESTED
     start_mono: float = 0.0
     active_run_id: str | None = None
     active_bundle_path: Path | None = None
@@ -207,14 +207,14 @@ class ShutdownCoordinator(QObject):
 
     Signals (fire on the qasync loop):
 
-    * :attr:`phase_changed` — emitted on every transition with the new
-      :class:`ShutdownPhase`. The status bar wires to this.
+    * :attr:`stage_changed` — emitted on every transition with the new
+      :class:`ShutdownStage`. The status bar wires to this.
     * :attr:`completed` — emitted once with the final
       :class:`ShutdownResult`. ``MainWindow`` wires this to flip
       ``_shutdown_complete`` and re-trigger :meth:`close`.
     """
 
-    phase_changed = Signal(object)  # ShutdownPhase
+    stage_changed = Signal(object)  # ShutdownStage
     completed = Signal(object)  # ShutdownResult
 
     def __init__(
@@ -240,7 +240,7 @@ class ShutdownCoordinator(QObject):
         # the fuse went off without actually calling ``os._exit``.
         self._hard_exit_fired = False
         # Last observed pool close result; coordinator stashes it
-        # before the close phase exits so the timer snapshot can read
+        # before the close stage exits so the timer snapshot can read
         # the non-joined worker list.
         self._last_pool_close: PoolCloseResult | None = None
         self._collected_errors: list[str] = []
@@ -257,8 +257,8 @@ class ShutdownCoordinator(QObject):
         return self._hard_exit_fired
 
     @property
-    def current_phase(self) -> ShutdownPhase:
-        return self._state.phase
+    def current_stage(self) -> ShutdownStage:
+        return self._state.stage
 
     @property
     def is_in_flight(self) -> bool:
@@ -267,7 +267,7 @@ class ShutdownCoordinator(QObject):
         return self._task is not None and not self._task.done()
 
     def begin_shutdown(self, reason: str) -> asyncio.Task[ShutdownResult] | None:
-        """Drive the phase ladder. Idempotent — repeat calls return the
+        """Drive the shutdown sequence. Idempotent: repeat calls return the
         in-flight task without restarting.
 
         ``reason`` flows into the final :class:`ShutdownResult` and into
@@ -283,7 +283,7 @@ class ShutdownCoordinator(QObject):
             return self._task
         self._state.reason = reason
         self._state.start_mono = self._clock()
-        self._state.phase = ShutdownPhase.REQUESTED
+        self._state.stage = ShutdownStage.REQUESTED
         _logger.info("shutdown.begin", reason=reason)
 
         try:
@@ -292,12 +292,12 @@ class ShutdownCoordinator(QObject):
             # No qasync / asyncio loop. Nothing to drive — synthesize a
             # clean result so the close path can continue. No hard-wall
             # timer needed: there's no async work to wedge.
-            self._state.phase = ShutdownPhase.COMPLETE
+            self._state.stage = ShutdownStage.COMPLETE
             result = ShutdownResult(
                 reason=reason,
                 clean=True,
                 hard_exit_required=False,
-                final_phase=ShutdownPhase.COMPLETE,
+                final_stage=ShutdownStage.COMPLETE,
                 active_run_id=None,
                 active_bundle_path=None,
                 pool_close_result=None,
@@ -326,21 +326,21 @@ class ShutdownCoordinator(QObject):
         return self._task
 
     # ------------------------------------------------------------------
-    # Phase driver
+    # Stage driver
     # ------------------------------------------------------------------
 
     async def _drive(self) -> ShutdownResult:
         try:
-            await self._phase_disable_ui()
-            await self._phase_cancel_lifecycle_tasks()
-            await self._phase_abort_active_run()
-            await self._phase_wait_active_run()
-            await self._phase_close_pool()
-            await self._phase_stop_ui_drainers()
-            await self._phase_recover_orphans()
-            await self._phase_close_catalog()
+            await self._stage_disable_ui()
+            await self._stage_cancel_lifecycle_tasks()
+            await self._stage_abort_active_run()
+            await self._stage_wait_active_run()
+            await self._stage_close_pool()
+            await self._stage_stop_ui_drainers()
+            await self._stage_recover_orphans()
+            await self._stage_close_catalog()
         except BaseException as exc:
-            # The phase methods catch their own exceptions and append to
+            # The stage methods catch their own exceptions and append to
             # _collected_errors. A bare exception here is a coordinator
             # bug; record it but still build a result so the window
             # closes rather than wedging.
@@ -348,33 +348,33 @@ class ShutdownCoordinator(QObject):
             _logger.exception("shutdown.coordinator_crashed")
         return self._finalize()
 
-    def _enter_phase(self, phase: ShutdownPhase) -> None:
-        self._state.phase = phase
+    def _enter_stage(self, stage: ShutdownStage) -> None:
+        self._state.stage = stage
         _logger.info(
-            "shutdown.phase",
-            phase=phase.value,
+            "shutdown.stage",
+            stage=stage.value,
             elapsed_s=self._clock() - self._state.start_mono,
         )
-        msg = _PHASE_STATUS_MESSAGES.get(phase)
+        msg = _STAGE_STATUS_MESSAGES.get(stage)
         if msg is not None:
             try:
-                self.phase_changed.emit(phase)
+                self.stage_changed.emit(stage)
             except Exception:
                 # Signal emit failure must never block shutdown.
-                _logger.debug("shutdown.phase_emit_failed", phase=phase.value)
+                _logger.debug("shutdown.stage_emit_failed", stage=stage.value)
 
-    async def _phase_disable_ui(self) -> None:
-        self._enter_phase(ShutdownPhase.DISABLE_UI)
+    async def _stage_disable_ui(self) -> None:
+        self._enter_stage(ShutdownStage.DISABLE_UI)
         self._controller.enter_shutdown_mode()
         # Capture the run id / bundle path NOW so the hard-wall snapshot
-        # has them even if a later phase wedges before they would be set.
+        # has them even if a later stage wedges before they would be set.
         self._state.active_run_id = self._controller.active_run_id
         self._state.active_bundle_path = self._controller.active_bundle_path
 
-    async def _phase_cancel_lifecycle_tasks(self) -> None:
-        self._enter_phase(ShutdownPhase.CANCEL_LIFECYCLE_TASKS)
+    async def _stage_cancel_lifecycle_tasks(self) -> None:
+        self._enter_stage(ShutdownStage.CANCEL_LIFECYCLE_TASKS)
         # Cancel non-critical entries; critical ones (RUN, POOL_OPEN,
-        # OLD_POOL_CLOSE) are handled by their own phases.
+        # OLD_POOL_CLOSE) are handled by their own stages.
         entries = self._controller.lifecycle.snapshot()
         self._state.pending_lifecycle = tuple(f"{e.kind.value}:{e.name}" for e in entries)
         non_critical = [e for e in entries if not e.critical]
@@ -392,8 +392,8 @@ class ShutdownCoordinator(QObject):
                 )
                 _logger.warning("shutdown.cancel_tasks_timeout")
 
-    async def _phase_abort_active_run(self) -> None:
-        self._enter_phase(ShutdownPhase.ABORT_ACTIVE_RUN)
+    async def _stage_abort_active_run(self) -> None:
+        self._enter_stage(ShutdownStage.ABORT_ACTIVE_RUN)
         if self._controller.is_active:
             _logger.info(
                 "shutdown.abort_requested",
@@ -401,8 +401,8 @@ class ShutdownCoordinator(QObject):
             )
             self._controller.request_abort(mode="immediate")
 
-    async def _phase_wait_active_run(self) -> None:
-        self._enter_phase(ShutdownPhase.WAIT_ACTIVE_RUN)
+    async def _stage_wait_active_run(self) -> None:
+        self._enter_stage(ShutdownStage.WAIT_ACTIVE_RUN)
         if not self._controller.is_active:
             return
         try:
@@ -417,8 +417,8 @@ class ShutdownCoordinator(QObject):
                 active_run_id=self._state.active_run_id,
             )
 
-    async def _phase_close_pool(self) -> None:
-        self._enter_phase(ShutdownPhase.CLOSE_POOL)
+    async def _stage_close_pool(self) -> None:
+        self._enter_stage(ShutdownStage.CLOSE_POOL)
         try:
             result = await asyncio.wait_for(
                 self._controller.aclose_pool(),
@@ -443,8 +443,8 @@ class ShutdownCoordinator(QObject):
                     f"non_joined={self._state.non_joined_workers}"
                 )
 
-    async def _phase_stop_ui_drainers(self) -> None:
-        self._enter_phase(ShutdownPhase.STOP_UI_DRAINERS)
+    async def _stage_stop_ui_drainers(self) -> None:
+        self._enter_stage(ShutdownStage.STOP_UI_DRAINERS)
         # The aclose_pool() path already cancelled UI-side preview
         # drainers and closed the bridges. Any lingering non-critical
         # tasks (drainers that hadn't reached a yield point yet) get
@@ -456,19 +456,19 @@ class ShutdownCoordinator(QObject):
         if leftover:
             await asyncio.gather(*(e.task for e in leftover), return_exceptions=True)
 
-    async def _phase_recover_orphans(self) -> None:
-        self._enter_phase(ShutdownPhase.RECOVER_ORPHANS)
+    async def _stage_recover_orphans(self) -> None:
+        self._enter_stage(ShutdownStage.RECOVER_ORPHANS)
         # The active-bundle checkpoint deletion lives on the session's
         # ``close`` path; if the run finished cleanly inside
         # ``WAIT_ACTIVE_RUN`` the checkpoint is already gone. If the run
         # was killed mid-finalize, the checkpoint persists so the NEXT
         # launch's recovery helper reconciles it. No work to do here in
-        # the in-process design — kept as an explicit phase so the IPC
-        # successor (Stage C) has an obvious extension point.
+        # the in-process design; kept as an explicit stage so the IPC
+        # successor can hook into a clear extension point.
         return
 
-    async def _phase_close_catalog(self) -> None:
-        self._enter_phase(ShutdownPhase.CLOSE_CATALOG)
+    async def _stage_close_catalog(self) -> None:
+        self._enter_stage(ShutdownStage.CLOSE_CATALOG)
         if self._catalog is None:
             return
         try:
@@ -501,14 +501,14 @@ class ShutdownCoordinator(QObject):
             reason=self._state.reason,
             clean=clean,
             hard_exit_required=self._hard_exit_fired,
-            final_phase=ShutdownPhase.COMPLETE if clean else self._state.phase,
+            final_stage=ShutdownStage.COMPLETE if clean else self._state.stage,
             active_run_id=self._state.active_run_id,
             active_bundle_path=self._state.active_bundle_path,
             pool_close_result=self._last_pool_close,
             errors=tuple(self._collected_errors),
             elapsed_s=elapsed,
         )
-        self._state.phase = ShutdownPhase.COMPLETE
+        self._state.stage = ShutdownStage.COMPLETE
         _logger.info(
             "shutdown.complete",
             reason=self._state.reason,
@@ -557,7 +557,7 @@ class ShutdownCoordinator(QObject):
         self._hard_exit_fired = True
         snapshot = {
             "reason": self._state.reason,
-            "phase": self._state.phase.value,
+            "stage": self._state.stage.value,
             "elapsed_s": self._clock() - self._state.start_mono,
             "active_run_id": self._state.active_run_id,
             "active_bundle_path": (
@@ -575,7 +575,7 @@ class ShutdownCoordinator(QObject):
 __all__ = [
     "ShutdownCoordinator",
     "ShutdownDeadlines",
-    "ShutdownPhase",
     "ShutdownResult",
-    "status_message_for_phase",
+    "ShutdownStage",
+    "status_message_for_stage",
 ]

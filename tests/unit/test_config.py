@@ -171,8 +171,8 @@ class TestExperimentConfig:
         assert ec.method is None
 
 
-class TestDeviceConfigPhase2Fields:
-    """Phase 2 cleanup adds ``resource_id`` and ``on_failure`` to
+class TestDeviceConfigRuntimeFields:
+    """Device configs include ``resource_id`` and ``on_failure`` for
     :class:`DeviceConfig`. The defaults must keep existing configs
     valid; explicit values must round-trip through ``model_validate``.
     """

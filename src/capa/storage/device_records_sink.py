@@ -1,11 +1,11 @@
 """Library-native device-record sidecars — ``device_records/<adapter>.parquet``.
 
-Plan §5.6 / §8.9. The device libraries already made careful choices about
+The device libraries already made careful choices about
 their emitted row/block shapes; capa preserves those next to the normalized
 ``scalars.parquet``. One file per adapter family:
 
 ==================== ============================ ====================================
-Adapter id           Native shape                  Plan §8.1 path
+Adapter id           Native shape                  path
 ==================== ============================ ====================================
 ``alicat``           wide_row                      ``device_records/alicat.parquet``
 ``watlow``           long_row                      ``device_records/watlow.parquet``
@@ -21,8 +21,7 @@ locked schema raise :class:`SchemaDriftError`.
 
 ``shape="block"`` records are silently skipped (logged in metadata via
 :meth:`DeviceRecordsSink.skipped_blocks`); the block sidecar / TDMS landing
-path is deferred per plan §8.7.
-"""
+path is deferred per"""
 
 from __future__ import annotations
 
@@ -51,7 +50,7 @@ class SchemaDriftError(DeviceRecordsSinkError):
     """Raised when a per-family writer sees a row whose column schema is
     incompatible with the schema locked at first flush.
 
-    Plan §15.1: schema-stability across runs is unit-tested. Real adapters
+    schema-stability across runs is unit-tested. Real adapters
     that change shape mid-run (firmware reconfiguration) would surface here
     as a hard error rather than corrupting the device-records file.
     """
@@ -373,7 +372,7 @@ class DeviceRecordsSink:
     Routes each record by ``adapter`` to a per-family Parquet writer under
     ``<bundle_root>/device_records/<adapter>.in-flight.parquet``.
     ``shape="block"`` records are skipped (block sidecar landing is deferred
-    to TDMS; see plan §8.7) but counted via :attr:`skipped_blocks`.
+    to TDMS; see ) but counted via :attr:`skipped_blocks`.
     """
 
     __slots__ = ("_closed", "_dirpath", "_flush_rows", "_skipped_blocks", "_writers")

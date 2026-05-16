@@ -1,6 +1,6 @@
 """:class:`ChannelRegistry` — runtime name → ``(adapter, binding, calibration, sinks)`` lookup.
 
-Plan §5.1. Channel names are the stable contract; the registry resolves a name
+Channel names are the stable contract; the registry resolves a name
 to the concrete handles needed to emit/route a sample. The registry is
 *frozen* at run-arm time — later config edits do not change historical meaning.
 

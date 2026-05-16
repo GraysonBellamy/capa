@@ -1,10 +1,10 @@
 """Real :class:`SartoriusAdapter` — wraps a :class:`sartoriuslib.Balance`.
 
-Plan §16: "real ``SartoriusAdapter``. Capability flags. Device
+"real ``SartoriusAdapter``. Capability flags. Device
 health surfacing. Discovery (``capa devices discover``).
 ``capa validate --strict``."
 
-Architecture (plan §5.2 / §5.6 / §7.2):
+Architecture ():
 
 * ``open`` opens the serial transport via :func:`sartoriuslib.open_device` and
   runs :meth:`Balance.identify` to capture model / serial / firmware. The
@@ -20,7 +20,7 @@ Architecture (plan §5.2 / §5.6 / §7.2):
 * ``snapshot`` returns a :class:`DeviceSnapshot` with cached identity plus
   live health fields (auto-reconnect counter, last-sample age,
   :class:`DeviceHealth` pill).
-* ``command`` enforces the authorization gate (plan §9) and dispatches
+* ``command`` enforces the authorization gate () and dispatches
   :meth:`Balance.tare` / :meth:`Balance.zero`.
 """
 
@@ -80,10 +80,10 @@ _log = logging.getLogger(__name__)
 ADAPTER_ID: Final[str] = "sartorius"
 
 COLD_OPEN_RETRY_ATTEMPTS: Final[int] = 3
-"""Total ``_build_balance`` attempts on cold open. Hardware-day §3.4 saw a
-single first-byte race after a fresh USB plug; subsequent attempts succeeded.
+"""Total ``_build_balance`` attempts on cold open. A fresh USB plug can
+race the first byte; subsequent attempts usually succeed.
 Three attempts × the backoff schedule below caps the worst-case open at
-~1.4 s before giving up — acceptable for a startup-phase operation."""
+~1.4 s before giving up — acceptable during startup."""
 
 COLD_OPEN_RETRY_BACKOFF_S: Final[tuple[float, ...]] = (0.2, 0.4, 0.8)
 """Backoff between cold-open attempts. Used positionally — index ``i`` is
@@ -128,7 +128,7 @@ _PROTOCOL_BY_NAME: Final[dict[ProtocolName, ProtocolKind]] = {
 class SartoriusAdapterParams(BaseModel):
     """Per-device adapter configuration for a real Sartorius balance.
 
-    Plan §5.4: adapter-specific knobs live under ``DeviceConfig.params`` and are
+    adapter-specific knobs live under ``DeviceConfig.params`` and are
     parsed by the adapter at construction time.
     """
 
@@ -165,7 +165,7 @@ class SartoriusAdapterParams(BaseModel):
     terminate the stream — the adapter increments its degradation counter."""
 
     overflow: Literal["block", "drop_newest"] = "block"
-    """Recorder overflow policy. ``BLOCK`` matches plan §7.1."""
+    """Recorder overflow policy. ``BLOCK`` matches """
 
     def to_serial_settings(self) -> SerialSettings:
         """Build the :class:`SerialSettings` sartoriuslib expects."""
@@ -670,7 +670,7 @@ class SartoriusAdapter:
     ) -> CommandResult:
         """Persist the runtime menu to EEPROM (xBPI ``0x47``).
 
-        Plan §9 audit: a single ``save_menu`` may persist many prior
+        audit: a single ``save_menu`` may persist many prior
         parameter writes, so the audit trail captures the save as a
         distinct authorized event.
         """
@@ -741,9 +741,9 @@ class SartoriusAdapter:
         """Construct the underlying :class:`Balance`, retrying past the
         cold-open first-byte race.
 
-        Hardware-day §3.4: a fresh USB plug consistently produced
-        ``frame too short: got 1 bytes (min 4)`` on the first identify;
-        every retry succeeded. The retry policy here is bounded — see
+        A fresh USB plug can produce ``frame too short: got 1 bytes (min 4)``
+        on the first identify; retries usually succeed. The retry policy is
+        bounded — see
         :data:`COLD_OPEN_RETRY_ATTEMPTS` and
         :data:`COLD_OPEN_RETRY_BACKOFF_S`. Non-cold-open ``SartoriusError``
         shapes (checksum, timeout, bad-device-id) re-raise immediately.

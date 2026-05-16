@@ -8,7 +8,6 @@ so that:
 * any monotonic offset can be converted back to wall-clock for human review or
   cross-correlation with externally-stamped events.
 
-Plan §6.
 """
 
 from __future__ import annotations

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from capa.core.errors import CapaError
 from capa.experiment.config import ExperimentConfig
 from capa.storage.catalog import RunCatalog
-from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress, HardwareInitDialog
+from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState, HardwareInitDialog
 from capa.ui.docks.camera_preview import CameraPreviewDock
 from capa.ui.docks.diagnostics import DiagnosticsDock
 from capa.ui.docks.events import EventsDock
@@ -39,9 +39,9 @@ from capa.ui.docks.numerics import NumericsDock
 from capa.ui.document_coordinator import DocumentCoordinator
 from capa.ui.shutdown import (
     ShutdownCoordinator,
-    ShutdownPhase,
     ShutdownResult,
-    status_message_for_phase,
+    ShutdownStage,
+    status_message_for_stage,
 )
 from capa.ui.state import RunController, RunUiResult, RunUiState
 from capa.ui.statusbar import CapaStatusBar, OperatorIdProvider
@@ -108,7 +108,7 @@ class MainWindow(QMainWindow):
         )
 
         # Shutdown coordinator. ``catalog`` is passed in so the
-        # coordinator's CLOSE_CATALOG phase can release the SQLite
+        # coordinator's CLOSE_CATALOG stage can release the SQLite
         # handle. Tests inject a coordinator with a no-op hard_exit so
         # the fuse can be asserted without killing pytest.
         self._shutdown_coordinator: ShutdownCoordinator = (
@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
                 parent=self,
             )
         )
-        self._shutdown_coordinator.phase_changed.connect(self._on_shutdown_phase)
+        self._shutdown_coordinator.stage_changed.connect(self._on_shutdown_stage)
         self._shutdown_coordinator.completed.connect(self._on_shutdown_completed)
 
         self._setup_tab = SetupTab(controller=self._controller, parent=self)
@@ -295,7 +295,7 @@ class MainWindow(QMainWindow):
         docks rebuild around the new config. ``SetupTab`` keys off
         ``RunController.config_load_finished`` for completion state, so
         we don't need to surface success/failure ourselves — the
-        existing modal progress dialog covers the in-flight phase.
+        existing modal progress dialog covers the in-flight load.
         """
         if not isinstance(cfg, ExperimentConfig):
             return
@@ -429,16 +429,16 @@ class MainWindow(QMainWindow):
     def _on_config_load_finished(self, progress: object) -> None:
         if isinstance(progress, ConfigLoadProgress):
             self._show_or_update_hardware_dialog(progress)
-            if progress.phase is ConfigLoadPhase.READY:
+            if progress.state is ConfigLoadState.READY:
                 # Auto-clear so the status bar's pills become visible
                 # again after the operator has had time to read the ack.
                 self._status.showMessage("Hardware ready.", 3000)
-            elif progress.phase is ConfigLoadPhase.FAILED:
+            elif progress.state is ConfigLoadState.FAILED:
                 # Failure: give the operator longer to read, but still
                 # auto-clear so the live pills aren't permanently hidden.
                 self._status.showMessage(progress.message, 8000)
             else:
-                # Any other terminal phase still drops us back to the
+                # Any other terminal state still drops us back to the
                 # pills — clear the "Preparing hardware…" message that
                 # was set in _on_config_load_started.
                 self._status.clearMessage()
@@ -535,7 +535,7 @@ class MainWindow(QMainWindow):
             return
         # First close: confirm if a run is in flight, then hand control
         # to the ShutdownCoordinator. The coordinator owns deadlines,
-        # phase ordering, and the hard wall-clock fuse.
+        # stage ordering, and the hard wall-clock fuse.
         if self._controller.is_active:
             answer = QMessageBox.question(
                 self,
@@ -554,20 +554,19 @@ class MainWindow(QMainWindow):
         # signal wires us back into closeEvent via _on_shutdown_completed.
         self._shutdown_coordinator.begin_shutdown("window_close")
 
-    def _on_shutdown_phase(self, phase: object) -> None:
-        """Surface shutdown phases via the status bar.
+    def _on_shutdown_stage(self, stage: object) -> None:
+        """Surface shutdown stages via the status bar.
 
-        Connected to :attr:`ShutdownCoordinator.phase_changed`. The
+        Connected to :attr:`ShutdownCoordinator.stage_changed`. The
         status bar is the operator's signal that the [×] click was
         received and shutdown is making progress.
         """
-        if not isinstance(phase, ShutdownPhase):
+        if not isinstance(stage, ShutdownStage):
             return
-        msg = status_message_for_phase(phase)
+        msg = status_message_for_stage(stage)
         if msg is not None:
-            # Shutdown phases replace each other quickly; the 4 s
-            # timeout matches the other transient status messages so a
-            # late "Phase X complete" doesn't permanently hide the pills.
+            # Shutdown stages replace each other quickly; the 4 s
+            # timeout matches the other transient status messages.
             self._status.showMessage(msg, 4000)
 
     def _on_shutdown_completed(self, result: object) -> None:
@@ -575,7 +574,7 @@ class MainWindow(QMainWindow):
 
         Connected to :attr:`ShutdownCoordinator.completed`. Logging the
         outcome here gives ops one structured event per shutdown attempt
-        without needing to grep the coordinator's per-phase logs.
+        without needing to grep the coordinator's per-stage logs.
 
         After hiding the window we explicitly poke ``QApplication.quit``
         instead of relying on Qt's ``quitOnLastWindowClosed`` heuristic.

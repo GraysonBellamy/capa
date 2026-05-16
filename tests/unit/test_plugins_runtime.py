@@ -115,7 +115,7 @@ def test_discovery_loads_capa_builtins_in_dev_mode() -> None:
 
 
 def test_loaded_procedure_version_uses_dist_not_class_attribute() -> None:
-    """Hardware-day §5.4: the lock-writer used the class attribute
+    """The lock-writer used the class attribute
     ``RecipeRunner.version`` while ``detect_drift`` compared against
     ``dist.version``. Editable installs never matched. ``LoadedProcedure.version``
     must equal the distribution version so the two sides agree.

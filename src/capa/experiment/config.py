@@ -1,7 +1,7 @@
 """:class:`ExperimentConfig` and the nested ``HardwareProfile``, ``StoragePolicy``,
 ``SafetyPolicy``, ``SampleInfo`` models.
 
-Plan §5.4. The full run recipe — everything needed to launch a run. Pydantic-
+The full run recipe — everything needed to launch a run. Pydantic-
 validated, YAML/TOML on disk, snapshotted into the run bundle.
 """
 
@@ -59,7 +59,7 @@ class DeviceConfig(BaseModel):
 class HardwareProfile(BaseModel):
     """Devices + channels for a single rig.
 
-    Plan §4: lives under ``configs/hardware/`` as one TOML per rig setup.
+    lives under ``configs/hardware/`` as one TOML per rig setup.
     Cross-checked against :class:`ExperimentConfig.method` to make sure every
     setpoint target resolves to a real channel.
     """
@@ -70,7 +70,7 @@ class HardwareProfile(BaseModel):
     devices: tuple[DeviceConfig, ...] = Field(default_factory=tuple)
     channels: tuple[ChannelSpec, ...] = Field(default_factory=tuple)
     cameras: tuple[CameraSpec, ...] = Field(default_factory=tuple)
-    """Per-rig camera entries (plan §12). Cameras are peers of devices, not
+    """Per-rig camera entries (). Cameras are peers of devices, not
     a subtype: they own their own output container, emit frame receipts +
     health snapshots rather than ``ChannelSample``\\ s, and are wired into
     the engine task group through a parallel construction pass."""
@@ -122,7 +122,7 @@ class HardwareProfile(BaseModel):
 class ProcedureRef(BaseModel):
     """Reference to a registered procedure plugin.
 
-    Plan §11. The plugin id is matched at startup against ``plugins.lock``;
+    The plugin id is matched at startup against ``plugins.lock``;
     the version constraint follows PEP 440.
     """
 
@@ -156,7 +156,7 @@ class CalibrationSetRef(BaseModel):
     """Pointer to a CalibrationSet on disk.
 
     A snapshot of the resolved set is written into the bundle as
-    ``calibration.json`` (plan §5.5) so the bundle is self-sufficient even
+    ``calibration.json`` () so the bundle is self-sufficient even
     if the on-disk source moves.
     """
 
@@ -174,7 +174,7 @@ class CalibrationSetRef(BaseModel):
 class StoragePolicy(BaseModel):
     """Storage knobs.
 
-    Plan §8.5–§8.7: in-flight flush cadence, final Parquet codec, optional
+    –§8.7: in-flight flush cadence, final Parquet codec, optional
     TDMS pass-through, optional RO-Crate generation. Stores the
     schema; the bundle writer reads it.
 
@@ -234,7 +234,7 @@ class StoragePolicy(BaseModel):
 class SafetyRuleConfig(BaseModel):
     """Declarative safety-rule entry inside :class:`SafetyPolicy`.
 
-    Plan §9: declarative safety rule entry.
+    declarative safety rule entry.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -247,7 +247,7 @@ class SafetyRuleConfig(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     action: str = "warn"
     """One of ``"warn"`` / ``"pause_method"`` / ``"abort_run"`` /
-    ``"safe_shutdown"`` (plan §9)."""
+    ``"safe_shutdown"`` ()."""
 
 
 class SafetyPolicy(BaseModel):
@@ -258,13 +258,13 @@ class SafetyPolicy(BaseModel):
     rules: tuple[SafetyRuleConfig, ...] = Field(default_factory=tuple)
     default_abort: str = "safe_shutdown"
     """What the UI's red button does by default. ``"safe_shutdown"`` runs
-    the cooldown phase; ``"abort_run"`` is immediate cancel."""
+    the cooldown step; ``"abort_run"`` is immediate cancel."""
 
 
 class SampleInfo(BaseModel):
     """Specimen metadata captured at run-start.
 
-    Plan §5.4. The cone-calorimeter domain profile layers
+    The cone-calorimeter domain profile layers
     additional required fields on top of these via its own metadata model.
     """
 
@@ -325,7 +325,7 @@ class RuntimeConfig(BaseModel):
 class ExperimentConfig(BaseModel):
     """The full run recipe.
 
-    Plan §5.4. YAML/TOML on disk; Pydantic-validated; snapshotted into the
+    YAML/TOML on disk; Pydantic-validated; snapshotted into the
     bundle as ``config.toml`` at run-arm.
 
     The :class:`Method` import is local to avoid pulling the method module

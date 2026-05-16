@@ -1,4 +1,4 @@
-"""Tests for the 5-layer validation pipeline (plan §5.9)."""
+"""Tests for the 5-layer validation pipeline ()."""
 
 from __future__ import annotations
 

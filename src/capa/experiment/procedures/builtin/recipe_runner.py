@@ -1,6 +1,6 @@
 """:class:`RecipeRunner` — the standard "walk a Method" procedure.
 
-Plan §11. 90% of standard runs use this. The body is one line: hand the
+90% of standard runs use this. The body is one line: hand the
 method to :class:`~capa.experiment.executor.MethodExecutor` and let the
 executor do the rest. Procedures that need anything custom subclass this or
 write their own.
@@ -34,7 +34,7 @@ PROCEDURE_VERSION = "0.1.0"
 class RecipeRunnerConfig(BaseModel):
     """``config.procedure.config`` shape for :class:`RecipeRunner`.
 
-    Plan §11: every procedure exposes a Pydantic model so the auto-form
+    every procedure exposes a Pydantic model so the auto-form
     generator can build the Run-tab editor without per-plugin Qt code.
     """
 

@@ -1,6 +1,6 @@
 """:class:`Camera` Protocol, :class:`CameraSpec` config, health/info/frame DTOs.
 
-Plan §12. The Protocol is intentionally separate from
+The Protocol is intentionally separate from
 :class:`~capa.devices.adapter.DeviceAdapter`:
 
 * lifecycle is ``open`` / ``close`` / ``start_recording(path)`` /
@@ -35,7 +35,7 @@ from capa.devices.adapter import CommandResult, DeviceCommand
 
 class CameraCapability(Flag):
     """Camera capability flags. Used by the UI to gate widgets and by the
-    engine's preflight to validate against profile requirements (plan §12.1).
+    engine's preflight to validate against profile requirements ().
     """
 
     NONE = 0
@@ -129,7 +129,7 @@ class CameraSpec(BaseModel):
     """Per-camera configuration entry inside
     :class:`~capa.experiment.config.HardwareProfile`.
 
-    Plan §12. ``adapter`` is the importable adapter class — either a built-in
+    ``adapter`` is the importable adapter class — either a built-in
     (``capa.devices.camera.webcam``, ``capa.devices.sim.flir_ir_sim``) or a
     plugin id resolved through the ``capa.cameras`` entry-point group
     (``capa-flir``'s ``flir_ir``). The same dispatch rules as
@@ -161,7 +161,7 @@ class CameraSpec(BaseModel):
     camera whose serial equals this string or :meth:`Camera.open` fails."""
 
     output_root: str | None = None
-    """Optional override for the recorded file location (plan §12.4). When
+    """Optional override for the recorded file location (). When
     set, the file lands at ``<output_root>/<run_id>/video/<name>.<ext>`` and
     the manifest records both the absolute path and a relative reference. When
     ``None`` (default), the file lives inside the bundle directory."""
@@ -170,7 +170,7 @@ class CameraSpec(BaseModel):
     """Policy metadata for future camera safety escalation."""
 
     estimated_bps: int = Field(default=4_000_000, gt=0)
-    """Bytes-per-second estimate used by the disk-space preflight (plan §12.6).
+    """Bytes-per-second estimate used by the disk-space preflight ().
     Defaults to ~4 MB/s — conservative for 30 fps H.264 webcam capture and
     realistic for E85 ``.csq`` at 30 Hz."""
 
@@ -189,7 +189,7 @@ class CameraSpec(BaseModel):
 class CameraInfo(BaseModel):
     """One row returned from :meth:`Camera.discover`.
 
-    Plan §12.1 USB-discovery rules:
+    USB-discovery rules:
 
     * exact-match by ``serial`` wins over ``model_hint``,
     * ``model_hint`` match with multiple candidates logs a warning + picks
@@ -219,7 +219,7 @@ class CameraInfo(BaseModel):
 class CameraHealth(BaseModel):
     """Periodic camera-health snapshot.
 
-    Plan §12.1 / §12.6. Routed to ``status.sqlite`` via the existing snapshot
+    Routed to ``status.sqlite`` via the existing snapshot
     sink path.
     """
 
@@ -243,16 +243,16 @@ class CameraHealth(BaseModel):
     error: str | None = None
     dropped_frames: int = 0
     """Cumulative frames the encoder rejected (e.g. libx264 returned EINVAL
-    on a malformed input) since ``start_recording``. Hardware-day §6: the
-    visible webcam tripped this once at t≈23 s into a recipe and the run
-    was lost; the adapter now drops the bad frame, logs a ``pump_warning``
+    on a malformed input) since ``start_recording``. The visible webcam
+    path once tripped this at t≈23 s into a recipe and lost the run; the
+    adapter now drops the bad frame, logs a ``pump_warning``
     event, and continues recording."""
 
 
 class FrameReceipt(BaseModel):
     """One frame-arrival record. Posted from the SDK / capture thread onto a
     memory object stream; consumed on the engine event loop by the frame-index
-    builder (plan §12.5).
+    builder ().
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -289,7 +289,7 @@ class CameraEvent(BaseModel):
 
 @runtime_checkable
 class Camera(Protocol):
-    """Uniform camera surface (plan §12).
+    """Uniform camera surface ().
 
     Concrete adapters back this with a vendor SDK or container library. The
     Protocol is *runtime_checkable* so the engine's adapter dispatch can
@@ -320,7 +320,7 @@ class Camera(Protocol):
     async def open(self) -> CameraInfo:
         """Establish the connection and return identifying info.
 
-        Selection rules (plan §12.1):
+        Selection rules ():
 
         * if ``self.spec.serial`` is set, require an exact match;
         * else if ``self.spec.model_hint`` is set, prefer a matching model
@@ -358,7 +358,7 @@ class Camera(Protocol):
     def frame_stream(self) -> AsyncIterator[FrameReceipt]:
         """Async iterator of per-frame receipts. Drained by the frame-index
         sink. Bounded queue with ``BLOCK`` policy (frame index is durable;
-        plan §7.1)."""
+        )."""
         ...
 
     def preview_stream(self) -> AsyncIterator[bytes]:

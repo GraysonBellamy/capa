@@ -57,7 +57,7 @@ dependencies = [
 capa = "capa.cli:main"
 
 [project.entry-points."capa.procedures"]
-# Builtin procedures (plan §11). Discovered via importlib.metadata at startup
+# Builtin procedures (). Discovered via importlib.metadata at startup
 # and registered in the trusted ProcedureRegistry. Same machinery is used by
 # third-party plugins.
 "capa.builtin.free_run" = "capa.experiment.procedures.builtin.free_run:FreeRun"
@@ -229,6 +229,6 @@ addopts = ["-q", "--strict-markers", "--strict-config"]
 qt_api = "pyside6"
 markers = [
     "hardware: requires real hardware (skipped unless CAPA_HARDWARE_TESTS=1)",
-    "smoke: thin behavioral baseline re-run after each cleanup phase (see docs/unified-architecture-cleanup-plan.md)",
+    "smoke: thin behavioral baseline re-run after focused cleanup work",
 ]
 

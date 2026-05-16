@@ -1,6 +1,6 @@
 """:class:`Batch` — runs a wrapped procedure N times with cooldown between iterations.
 
-Plan §11 line 964: catches the most-common composition (replicate runs) so
+catches the most-common composition (replicate runs) so
 each researcher does not re-implement it badly.
 
 Each iteration produces its **own bundle** (a fresh

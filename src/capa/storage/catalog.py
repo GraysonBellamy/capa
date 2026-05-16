@@ -1,11 +1,11 @@
 """:class:`RunCatalog` — cross-run SQLite index at ``<runs_root>/runs.sqlite``.
 
-Plan §8.4. Indexes every bundle on disk so the Review tab and CLI can answer
+Indexes every bundle on disk so the Review tab and CLI can answer
 "what runs do we have?" without walking ``runs/`` and parsing every manifest.
 
 The catalog is **not** the source of truth — the bundle is. It's a rebuildable
 index. On startup, any run whose ``ended_utc`` is null is flipped to
-``run_status="crashed"`` (plan §13.3).
+``run_status="crashed"`` ().
 
 Tables:
 
@@ -235,7 +235,7 @@ class RunCatalog:
     # ------------------------------------------------------------------ recovery
 
     def flip_orphans(self) -> list[str]:
-        """Plan §13.3: any row with ``run_status="running"`` at process start
+        """any row with ``run_status="running"`` at process start
         is the corpse of a previous capa instance. Flip it to ``crashed`` so
         the operator sees what happened. Returns the affected run ids.
         """

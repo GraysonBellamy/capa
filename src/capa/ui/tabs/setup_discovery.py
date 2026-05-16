@@ -435,7 +435,7 @@ class DiscoveryDialog(QDialog):
 
     def _register_with_lifecycle(self, task: asyncio.Task[None], *, name: str) -> None:
         """Register ``task`` with the controller's lifecycle registry
-        if one was supplied. Non-critical so the cancel-tasks phase of
+        if one was supplied. Non-critical so the cancel-tasks stage of
         :class:`~capa.ui.shutdown.ShutdownCoordinator` cancels + awaits
         these without blocking shutdown on a slow probe."""
         if self._lifecycle is None:

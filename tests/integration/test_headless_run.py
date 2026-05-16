@@ -1,4 +1,4 @@
-"""End-to-end test for the P0c outcome gate (plan §16):
+"""End-to-end test for a headless free-run:
 
     capa run --headless freerun.yaml writes a completed + sealed bundle
     with full software-environment provenance and catalog entry.
@@ -60,7 +60,7 @@ output_unit = "degC"
 
 def _write_example(tmp_path: Path, *, duration: float = 0.1) -> Path:
     (tmp_path / "experiment.toml").write_text(
-        _FREE_RUN_TOML.format(duration=duration, sample_id="P0C-1"), encoding="utf-8"
+        _FREE_RUN_TOML.format(duration=duration, sample_id="FREE-1"), encoding="utf-8"
     )
     (tmp_path / "hardware.toml").write_text(_HARDWARE_TOML, encoding="utf-8")
     return tmp_path / "experiment.toml"
@@ -104,7 +104,7 @@ def test_p0c_outcome_gate(tmp_path: Path) -> None:
         assert row.bundle_status == "sealed"
         assert row.integrity_status == "ok"
         assert row.operator_id == "abr"
-        assert row.sample_id == "P0C-1"
+        assert row.sample_id == "FREE-1"
 
     # run.log was captured into the bundle.
     log_text = (bundle / "run.log").read_text(encoding="utf-8")

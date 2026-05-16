@@ -1,4 +1,4 @@
-"""Tests for ``capa.config.document.ConfigDocument`` (plan §5.2)."""
+"""Tests for ``capa.config.document.ConfigDocument`` ()."""
 
 from __future__ import annotations
 

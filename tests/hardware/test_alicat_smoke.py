@@ -1,6 +1,6 @@
-"""Hardware smoke test for the real :class:`AlicatAdapter` (P2).
+"""Hardware smoke test for the real :class:`AlicatAdapter`.
 
-Plan §15.4 contract for Alicat:
+Checks for Alicat:
 
 1. Open and identify a real Alicat device.
 2. Run a short engine free-run; assert the bundle has both

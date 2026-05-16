@@ -1,6 +1,6 @@
 """Procedure plugin runtime — Protocol, context, builtin procedures.
 
-Plan §11. Provides the Protocol + ProcedureContext + builtin procedures.
+Provides the Protocol + ProcedureContext + builtin procedures.
 """
 
 from capa.experiment.procedures.base import Procedure, ProcedureContext, ProcedureError

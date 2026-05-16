@@ -1,6 +1,6 @@
 """sha256 over every artifact in a bundle.
 
-Plan §8.2. Catches bit-rot, partial copies, and post-hoc tampering. The
+Catches bit-rot, partial copies, and post-hoc tampering. The
 output file (``manifest.sha256``) follows the standard ``sha256sum`` line
 format::
 

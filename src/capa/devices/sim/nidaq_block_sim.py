@@ -1,6 +1,6 @@
 """Simulated NI-DAQ hardware-clocked block adapter.
 
-Plan §5.6 / §8.7: rectangular ``DaqBlock`` records stay block-shaped — capa
+rectangular ``DaqBlock`` records stay block-shaped — capa
 deliberately does not scalarize kHz data through Python. The ``SourceRecord``
 emitted here therefore carries ``shape="block"`` with a ``block_ref`` and an
 empty ``row``; the block payload itself is held in adapter state for the

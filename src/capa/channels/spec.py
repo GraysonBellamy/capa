@@ -1,6 +1,6 @@
 """ChannelSpec, ChannelKind, SourceBinding (tagged union), AlarmBand.
 
-Plan §5.1. ``ChannelSpec`` is the universal binding unit — UI binds to channels,
+``ChannelSpec`` is the universal binding unit — UI binds to channels,
 sinks key off channels, calibrations attach to channels, plotting groups by
 channels. Devices come and go; channels are the stable contract.
 
@@ -25,7 +25,7 @@ from capa.core.units import UnitStr, units_compatible
 class ChannelKind(StrEnum):
     """High-level role of a channel.
 
-    Plan §5.1. Used by the UI to pick widgets/axes and by safety to gate
+    Used by the UI to pick widgets/axes and by safety to gate
     setpoint-only checks.
     """
 
@@ -58,7 +58,7 @@ class ChannelKind(StrEnum):
 # ---------------------------------------------------------------------------
 # SourceBinding — one variant per library row shape.
 #
-# Plan §5.1 / §5.6: alicatlib emits wide DataFrame rows; watlowlib emits long
+# alicatlib emits wide DataFrame rows; watlowlib emits long
 # rows per (device, parameter, instance); sartoriuslib emits one balance row;
 # nidaqlib polled emits wide rows; nidaqlib hardware-clocked emits rectangular
 # blocks. Each variant below is the *capa-side selector* into one of those
@@ -127,7 +127,7 @@ class NIDAQBlockChannel(_BindingBase):
 
     Hardware-clocked blocks stay rectangular until either the adapter derives
     channel samples at capa's normal 3–60 Hz class or hands the byte path to
-    TDMS for kHz-rate capture (plan §8.7).
+    TDMS for kHz-rate capture ().
     """
 
     source: Literal["nidaq_block_channel"] = "nidaq_block_channel"
@@ -181,7 +181,7 @@ class AlarmAction(StrEnum):
 class AlarmBand(BaseModel):
     """One declarative alarm threshold.
 
-    Plan §9: each rule declares its action; the same fault should always have
+    each rule declares its action; the same fault should always have
     the same response.
     """
 
@@ -226,7 +226,7 @@ def make_identity(unit: str) -> Identity:
 class ChannelSpec(BaseModel):
     """One channel's full configuration.
 
-    Plan §5.1. ``unit`` is the *raw* (pre-calibration) unit on the wire;
+    ``unit`` is the *raw* (pre-calibration) unit on the wire;
     ``derived_unit`` is what the calibration produces. When ``calibration``
     is :class:`~capa.channels.calibration.Identity`, the two must be
     dimensionally compatible (and typically equal). When non-identity, the

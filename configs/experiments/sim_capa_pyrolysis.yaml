@@ -9,7 +9,7 @@ procedure:
   version: "0.1"
   config:
     auto_acknowledge_prompts: true
-    notes: "CAPA P3 smoke: ramp under N2, soak, cool down."
+    notes: "CAPA sim smoke: ramp under N2, soak, cool down."
 
 domain_profile:
   id: capa.profiles.capa_pyrolysis
@@ -47,7 +47,7 @@ operator:
 sample:
   id: SIM-CAPA-001
   material: PMMA
-  notes: "P3 smoke run"
+  notes: "CAPA sim smoke run"
 
 tags:
   - sim

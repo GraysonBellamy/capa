@@ -1,8 +1,8 @@
-"""Caller-cancellation tests for :mod:`capa.runtime.runner` (Phase 6).
+"""Caller-cancellation tests for :mod:`capa.runtime.runner`.
 
 The shielded-dispatch contract (§4.2) says the worker-side coroutine
 must run to completion even when the caller cancels its future. Before
-Phase 6, both runners' ``_bridge`` callbacks called ``out.set_result(...)``
+Both runners' ``_bridge`` callbacks once called ``out.set_result(...)``
 or ``out.set_exception(...)`` unconditionally — when the caller had
 cancelled ``out`` via :func:`asyncio.wrap_future` chaining, the set raised
 ``concurrent.futures.InvalidStateError`` on the runner's loop. The failure
@@ -108,7 +108,7 @@ async def _install_exception_handler(runner: WorkerRunner, handler: _ExceptionRe
 async def test_caller_cancel_does_not_log_invalid_state_error(
     runner_factory: Callable[[], WorkerRunner],
 ) -> None:
-    """The load-bearing Phase 6 assertion: when the caller cancels the
+    """The load-bearing assertion: when the caller cancels the
     asyncio wrapper of a runner-issued future, the underlying
     ``concurrent.futures.Future`` is cancelled by ``wrap_future`` chaining.
     The runner's done-callback must drop the result silently instead of

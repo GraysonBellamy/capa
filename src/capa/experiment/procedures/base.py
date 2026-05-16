@@ -1,9 +1,9 @@
 """:class:`Procedure` Protocol and :class:`ProcedureContext`.
 
-Plan §11. A procedure is a state machine that walks through one run. Plugins
+A procedure is a state machine that walks through one run. Plugins
 register a class implementing :class:`Procedure`; the engine instantiates,
 calls :meth:`Procedure.preflight` (returns a list of :class:`Problem`
-warnings/errors; blocking errors abort the arm phase), then
+warnings/errors; blocking errors abort arming), then
 :meth:`Procedure.run` inside the engine task group.
 
 The context is a small dataclass of references to engine-owned services —
@@ -49,8 +49,7 @@ class ProcedureError(CapaError):
 
 
 # ---------------------------------------------------------------------------
-# Problem — the value preflight returns. Plan §11 line 915.
-# ---------------------------------------------------------------------------
+# Problem — the value preflight returns. # ---------------------------------------------------------------------------
 
 
 ProblemSeverity = Literal["info", "warning", "error"]
@@ -82,8 +81,7 @@ class Problem(BaseModel):
 
 # ---------------------------------------------------------------------------
 # ChannelRequirement — what a procedure declares it needs from the rig.
-# Plan §11 line 913.
-# ---------------------------------------------------------------------------
+# # ---------------------------------------------------------------------------
 
 
 class ChannelRequirement(BaseModel):
@@ -121,7 +119,7 @@ class ProcedureContext:
     """
 
     clock: RunClock
-    """Single monotonic timebase for the run (plan §6)."""
+    """Single monotonic timebase for the run ()."""
 
     config: ExperimentConfig
     """Frozen run recipe. The procedure reads ``config.method``,

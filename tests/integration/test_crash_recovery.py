@@ -1,6 +1,6 @@
 """Crash-recovery integration test (graceful-shutdown shim).
 
-Plan §13.3: a bundle whose engine crashed mid-run leaves
+a bundle whose engine crashed mid-run leaves
 ``*.in-flight.arrows`` files plus an open manifest. ``finalize_in_place``
 walks the directory and produces a sealed bundle marked ``run_status="crashed"``.
 

@@ -1,6 +1,6 @@
 """Pure-function finalize-in-place.
 
-Plan §8.5 / §13.3. Walks a bundle directory and:
+Walks a bundle directory and:
 
 1. Rewrites every ``*.in-flight.arrows`` (Arrow IPC stream) to its final
    ``.parquet`` form with large row groups, sorted by ``t_mono_ns`` where
@@ -73,7 +73,7 @@ from capa.storage.video_sink import (
 )
 
 FINAL_ROW_GROUP_ROWS = 262_144
-"""Plan §8.5: 256k rows per row group in the finalized files. Tuned for
+"""256k rows per row group in the finalized files. Tuned for
 DuckDB / Polars / Arrow scan throughput. Module-level so tests can drop it
 to exercise the rewrite on small synthetic runs."""
 
@@ -101,8 +101,7 @@ class FinalizeResult:
 
 
 # ---------------------------------------------------------------------------
-# In-flight rewrite — the IPC-stream → final-parquet stage of plan §8.5.
-# ---------------------------------------------------------------------------
+# In-flight rewrite — the IPC-stream → final-parquet stage of # ---------------------------------------------------------------------------
 
 
 def _rewrite_inflight_to_parquet(in_flight: Path, final: Path) -> bool:
@@ -160,7 +159,7 @@ def _scan_inflight_pairs(bundle_root: Path) -> list[tuple[Path, Path]]:
             final = dr_dir / f"{adapter}{FINAL_SUFFIX}"
             pairs.append((path, final))
 
-    # Per-camera frame-index parquets (plan §12.5). One in-flight file per
+    # Per-camera frame-index parquets (). One in-flight file per
     # camera that actually emitted frames; cameras that opened but never
     # recorded leave nothing on disk.
     video_dir = bundle_root / VIDEO_DIRNAME
@@ -236,9 +235,8 @@ def _refresh_cameras_block(
     ``frames_path`` and ``meta_path``, both of which stay ``None``.
 
     ``identity_overrides`` (camera name → identity dict) overrides
-    ``model`` / ``serial`` from a live-probed source. Hardware-day
-    2026-05-09 PM finding #2 — the seed entries read static
-    ``CameraSpec.model_hint`` / ``serial`` at arm-time, before
+    ``model`` / ``serial`` from a live-probed source. Seed entries read
+    static ``CameraSpec.model_hint`` / ``serial`` at arm-time, before
     :meth:`Camera.open` runs the V4L2 / vendor probe. Finalize-time
     overrides plumb the live values through.
     """
@@ -320,19 +318,18 @@ def finalize_in_place(
     Args:
         bundle_root: directory containing ``manifest.json``.
         run_status: ``"completed" | "aborted" | "crashed"`` — the scientific
-            outcome. Plan §13.3: a crashed bundle still seals as a sealed
+            outcome. a crashed bundle still seals as a sealed
             artifact with ``run_status="crashed"``.
         exit_reason: human-readable detail when ``run_status`` is non-normal.
             Recorded in the manifest ``exit_reason`` field.
         inferred_ended_utc: when ``True``, mark in the manifest's ``custom``
-            block that ``ended_utc`` was reconstructed (plan §13.3). Used by
+            block that ``ended_utc`` was reconstructed (). Used by
             crash-recovery callers when the engine never wrote a clean
             ``ended_utc``.
         ended_utc: explicit end timestamp. ``None`` (default) means "use
             now-UTC unless the manifest already records one."
         queue_health: per-collector histogram dict produced by
-            :meth:`MetricsRegistry.snapshot_for_manifest`. Plan §7.1 / §13.1
-            — folded into ``manifest.queue_health`` if provided.
+            :meth:`MetricsRegistry.snapshot_for_manifest`. — folded into ``manifest.queue_health`` if provided.
 
     Returns:
         A :class:`FinalizeResult` describing what changed.
@@ -433,7 +430,7 @@ def finalize_in_place(
         }
 
     # Stage 3: optimistic seal — write the *target* manifest first so its
-    # bytes are what manifest.sha256 records. Plan §8.2 has manifest.sha256
+    # bytes are what manifest.sha256 records. has manifest.sha256
     # cover every artifact including manifest.json; the chicken-and-egg
     # resolves cleanly if we lock the manifest's final form before hashing.
     update["bundle_status"] = "sealed"

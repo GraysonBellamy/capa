@@ -1,7 +1,5 @@
 """Camera Protocol + FlirIrSim fixture.
 
-Plan §12.1 / P4 Stage A:
-
 * :class:`CameraSpec` validation (``kind`` enforcement, name uniqueness in
   ``HardwareProfile``).
 * :class:`FlirIrSim` lifecycle (open → start_recording → pump → stop → close).

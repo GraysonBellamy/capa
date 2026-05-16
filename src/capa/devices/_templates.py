@@ -1,4 +1,4 @@
-"""Built-in :class:`ChannelTemplate` instances (plan §5.7.1).
+"""Built-in :class:`ChannelTemplate` instances ().
 
 Templates are shared between real and sim adapters when their
 :class:`SourceBinding` shape is identical — a Watlow heater PV is the
@@ -61,7 +61,7 @@ def _nidaq_reading_binding(task: str, field: str) -> Callable[[str], dict[str, o
 
 
 # ---------------------------------------------------------------------------
-# Plan §5.7.1 — canonical templates.
+# — canonical templates.
 # ---------------------------------------------------------------------------
 
 

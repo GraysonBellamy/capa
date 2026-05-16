@@ -1,6 +1,6 @@
 """:class:`DomainProfile` Protocol.
 
-Plan §5.4.1: domain profiles are optional schema/preflight bundles layered on
+domain profiles are optional schema/preflight bundles layered on
 top of the generic engine. Each profile declares the metadata it requires,
 the channel groups that must be present, and a list of preflight checks to
 run before arming a run. Ships the Protocol + the cone-calorimeter
@@ -51,8 +51,7 @@ class PreflightCheck(BaseModel):
 @runtime_checkable
 class DomainProfile(Protocol):
     """A domain profile contributes required metadata, channel groups, and
-    preflight checks. Plan §5.4.1.
-    """
+    preflight checks."""
 
     id: str
     """e.g. ``"capa.profiles.cone_calorimeter"``."""

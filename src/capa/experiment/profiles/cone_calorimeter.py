@@ -1,6 +1,6 @@
 """Cone-calorimeter domain profile (ASTM E1354 / ISO 5660-style measurements).
 
-Plan §5.4.1. This is the first production profile. It does not make capa a
+This is the first production profile. It does not make capa a
 standards-certification tool; it ensures the run bundle captures the metadata
 a researcher or later analyzer needs to interpret a cone run.
 
@@ -87,7 +87,7 @@ class MethodSetup(BaseModel):
 class AnalyzerCalibration(BaseModel):
     """Gas-analyzer calibration record.
 
-    Plan §5.4.1: calibration gases, analyzer serials, zero/span events.
+    calibration gases, analyzer serials, zero/span events.
     Recorded so an analyzer five years later can re-derive heat-release
     inputs without trusting human notes.
     """
@@ -106,7 +106,7 @@ class AnalyzerCalibration(BaseModel):
 class GasAnalysis(BaseModel):
     """Gas-analyzer subsystem metadata.
 
-    Plan §5.4.1 / §6: analyzer delay/response is *not* clock sync; it is a
+    analyzer delay/response is *not* clock sync; it is a
     measurement-model field that belongs in the bundle even though capa
     doesn't perform full analysis.
     """

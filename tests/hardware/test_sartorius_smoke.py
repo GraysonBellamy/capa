@@ -1,6 +1,6 @@
-"""Hardware smoke test for the real :class:`SartoriusAdapter` (P2).
+"""Hardware smoke test for the real :class:`SartoriusAdapter`.
 
-Plan §15.4 contract for Sartorius:
+Checks for Sartorius:
 
 1. Open and identify a real balance.
 2. Read mass from an empty pan; assert the numeric is ≈ 0 ± noise.

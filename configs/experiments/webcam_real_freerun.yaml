@@ -1,4 +1,4 @@
-# Free-run experiment against an external USB webcam (P4 stage B).
+# Free-run experiment against an external USB webcam.
 #
 # Records H.264 → MKV plus a per-frame parquet sidecar in ``video/``. The
 # bundle's manifest captures the camera identity (adapter, model, serial
@@ -28,7 +28,7 @@ operator:
 sample:
   id: WEBCAM-REAL-001
   material: none
-  notes: "P4-B real-hardware visible-camera free run"
+  notes: "Real-hardware visible-camera free run"
 
 tags:
   - real

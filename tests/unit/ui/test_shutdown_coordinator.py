@@ -1,6 +1,6 @@
 """Tests for :class:`ShutdownCoordinator`.
 
-These tests exercise the coordinator's phase ladder, idempotency,
+These tests exercise the coordinator's shutdown sequence, idempotency,
 deadline-driven escalation, and the hard wall-clock fuse. The hard fuse
 is asserted via an injected ``hard_exit`` callable so the test process
 isn't killed by ``os._exit``.
@@ -25,9 +25,9 @@ from capa.ui.lifecycle import LifecycleKind
 from capa.ui.shutdown import (
     ShutdownCoordinator,
     ShutdownDeadlines,
-    ShutdownPhase,
     ShutdownResult,
-    status_message_for_phase,
+    ShutdownStage,
+    status_message_for_stage,
 )
 from capa.ui.state import RunController
 
@@ -57,7 +57,7 @@ async def test_idle_shutdown_completes_cleanly(tmp_path: Path) -> None:
     assert isinstance(result, ShutdownResult)
     assert result.clean is True
     assert result.hard_exit_required is False
-    assert result.final_phase is ShutdownPhase.COMPLETE
+    assert result.final_stage is ShutdownStage.COMPLETE
     assert result.errors == ()
     assert result.pool_close_result is None  # no pool was ever bound
     # Controller is now in shutdown mode and refuses new work.
@@ -77,21 +77,21 @@ async def test_begin_shutdown_is_idempotent(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_phase_changed_signal_fires_per_meaningful_phase(tmp_path: Path) -> None:
+async def test_stage_changed_signal_fires_per_meaningful_stage(tmp_path: Path) -> None:
     controller = RunController(runs_root=tmp_path)
     coord, _ = _make_coordinator(controller)
-    seen: list[ShutdownPhase] = []
-    coord.phase_changed.connect(seen.append)
+    seen: list[ShutdownStage] = []
+    coord.stage_changed.connect(seen.append)
     await coord.begin_shutdown("test")
-    # We expect at least the DISABLE_UI through CLOSE_CATALOG phases to
-    # have fired. Internal phases (REQUESTED, CANCEL_LIFECYCLE_TASKS,
+    # We expect at least the DISABLE_UI through CLOSE_CATALOG stages to
+    # have fired. Internal stages (REQUESTED, CANCEL_LIFECYCLE_TASKS,
     # STOP_UI_DRAINERS) intentionally don't emit operator messages, but
-    # the signal still fires for every phase the coordinator enters.
-    assert ShutdownPhase.DISABLE_UI in seen
-    assert ShutdownPhase.ABORT_ACTIVE_RUN in seen
-    assert ShutdownPhase.WAIT_ACTIVE_RUN in seen
-    assert ShutdownPhase.CLOSE_POOL in seen
-    assert ShutdownPhase.CLOSE_CATALOG in seen
+    # the signal still fires for every stage the coordinator enters.
+    assert ShutdownStage.DISABLE_UI in seen
+    assert ShutdownStage.ABORT_ACTIVE_RUN in seen
+    assert ShutdownStage.WAIT_ACTIVE_RUN in seen
+    assert ShutdownStage.CLOSE_POOL in seen
+    assert ShutdownStage.CLOSE_CATALOG in seen
 
 
 @pytest.mark.anyio
@@ -105,17 +105,17 @@ async def test_completed_signal_emits_result(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_hard_wall_fuse_fires_when_phase_wedges(tmp_path: Path) -> None:
-    """A phase that never completes triggers the hard wall-clock fuse.
+async def test_hard_wall_fuse_fires_when_stage_wedges(tmp_path: Path) -> None:
+    """A stage that never completes triggers the hard wall-clock fuse.
 
     We inject a pool-close shim that awaits forever so the CLOSE_POOL
-    phase wedges. With ``hard_wall_s`` shorter than the phase's own
-    timeout, the threading.Timer is the one that exits the wait — by
+    stage wedges. With ``hard_wall_s`` shorter than the stage's own
+    timeout, the threading.Timer is the one that exits the wait: by
     calling the injected ``hard_exit`` and latching ``hard_exit_fired``.
     """
     controller = RunController(runs_root=tmp_path)
 
-    # Patch the controller's aclose_pool to hang forever so SOME phase
+    # Patch the controller's aclose_pool to hang forever so a stage
     # provides a wedge target. ``await_active_run`` is already a no-op
     # for an idle controller; ``aclose_pool`` returns immediately because
     # no pool is bound — so we monkeypatch it to a never-completing
@@ -155,9 +155,9 @@ async def test_hard_wall_fuse_fires_when_phase_wedges(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_pool_close_timeout_is_recorded_as_error(tmp_path: Path) -> None:
-    """When the pool-close phase hits its own deadline (not the hard
+    """When the pool-close stage hits its own deadline (not the hard
     wall), the coordinator records the timeout as an error and continues
-    to the next phase rather than wedging."""
+    to the next stage rather than wedging."""
     controller = RunController(runs_root=tmp_path)
 
     async def _hang() -> None:
@@ -185,7 +185,7 @@ async def test_pool_close_timeout_is_recorded_as_error(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_non_critical_lifecycle_tasks_are_cancelled(tmp_path: Path) -> None:
-    """The CANCEL_LIFECYCLE_TASKS phase cancels non-critical entries
+    """The CANCEL_LIFECYCLE_TASKS stage cancels non-critical entries
     (preview drainers, state-poll, manual-command tasks) and awaits
     their exit with a short budget."""
     controller = RunController(runs_root=tmp_path)
@@ -212,12 +212,12 @@ async def test_non_critical_lifecycle_tasks_are_cancelled(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
-async def test_critical_lifecycle_tasks_are_not_cancelled_in_cancel_phase(
+async def test_critical_lifecycle_tasks_are_not_cancelled_in_cancel_stage(
     tmp_path: Path,
 ) -> None:
     """Critical entries (RUN, POOL_OPEN, OLD_POOL_CLOSE) must NOT be
-    cancelled by the cancel-lifecycle phase — they're handled by their
-    own phases. This test makes sure we don't accidentally cancel a
+    cancelled by the cancel-lifecycle stage; they're handled by their
+    own stages. This test makes sure we don't accidentally cancel a
     run-in-flight in cancel_lifecycle_tasks."""
     controller = RunController(runs_root=tmp_path)
 
@@ -233,9 +233,9 @@ async def test_critical_lifecycle_tasks_are_not_cancelled_in_cancel_phase(
 
     coord, _ = _make_coordinator(controller)
     await coord.begin_shutdown("critical-preserved")
-    # The cancel-lifecycle phase MUST NOT have cancelled the critical
-    # task. (It may still be running — the coordinator's WAIT_ACTIVE_RUN
-    # phase only awaits controller._task, not arbitrarily-registered
+    # The cancel-lifecycle stage MUST NOT have cancelled the critical
+    # task. (It may still be running; the coordinator's WAIT_ACTIVE_RUN
+    # stage only awaits controller._task, not arbitrarily-registered
     # critical entries.)
     assert not task.cancelled()
     # Let the task finish naturally so the test loop cleans up.
@@ -256,23 +256,23 @@ async def test_shutdown_disables_controller_ui_actions(tmp_path: Path) -> None:
         controller.start(config=None)  # type: ignore[arg-type]
 
 
-def test_status_message_for_phase_covers_user_facing_phases() -> None:
-    """Helper accessor returns a string for the phases the status bar
-    should display, and None for internal-only phases."""
-    assert status_message_for_phase(ShutdownPhase.CLOSE_POOL) is not None
-    assert status_message_for_phase(ShutdownPhase.WAIT_ACTIVE_RUN) is not None
-    # Phases without operator-meaningful intent: REQUESTED, CANCEL_LIFECYCLE_TASKS,
-    # STOP_UI_DRAINERS — no message expected.
-    assert status_message_for_phase(ShutdownPhase.REQUESTED) is None
-    assert status_message_for_phase(ShutdownPhase.CANCEL_LIFECYCLE_TASKS) is None
-    assert status_message_for_phase(ShutdownPhase.STOP_UI_DRAINERS) is None
+def test_status_message_for_stage_covers_user_facing_stages() -> None:
+    """Helper accessor returns a string for the stages the status bar
+    should display, and None for internal-only stages."""
+    assert status_message_for_stage(ShutdownStage.CLOSE_POOL) is not None
+    assert status_message_for_stage(ShutdownStage.WAIT_ACTIVE_RUN) is not None
+    # Stages without operator-meaningful intent: REQUESTED, CANCEL_LIFECYCLE_TASKS,
+    # STOP_UI_DRAINERS; no message expected.
+    assert status_message_for_stage(ShutdownStage.REQUESTED) is None
+    assert status_message_for_stage(ShutdownStage.CANCEL_LIFECYCLE_TASKS) is None
+    assert status_message_for_stage(ShutdownStage.STOP_UI_DRAINERS) is None
 
 
 def test_no_in_flight_before_begin(tmp_path: Path) -> None:
     controller = RunController(runs_root=tmp_path)
     coord, _ = _make_coordinator(controller)
     assert coord.is_in_flight is False
-    assert coord.current_phase is ShutdownPhase.REQUESTED
+    assert coord.current_stage is ShutdownStage.REQUESTED
 
 
 @pytest.mark.anyio

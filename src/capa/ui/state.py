@@ -56,7 +56,7 @@ from capa.runtime.session import RealRunSession
 from capa.runtime.shutdown import PoolCloseResult
 from capa.runtime.state import ConductorState
 from capa.storage.catalog import RunCatalog
-from capa.ui.config_progress import ConfigLoadPhase, ConfigLoadProgress
+from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState
 from capa.ui.lifecycle import LifecycleKind, LifecycleRegistry
 
 if TYPE_CHECKING:
@@ -73,7 +73,7 @@ for legacy/test paths that build a bridge without a config in scope.
 slow UI subscriber."""
 
 ABORT_GRACE_S: Final[float] = 5.0
-"""Fallback maximum time the conductor's disarm phase will wait for
+"""Fallback maximum time the conductor's disarm stage will wait for
 workers to finish their stream tasks. The active value comes from
 :attr:`RuntimeConfig.shutdown_grace_s` via :meth:`ConductorConfig.from_runtime`."""
 
@@ -272,7 +272,7 @@ class RunController(QObject):
         self._ui_state: RunUiState = RunUiState.IDLE
         self._state_poll_task: asyncio.Task[None] | None = None
         self._hardware_ready: bool = False
-        self._config_load_phase: ConfigLoadPhase = ConfigLoadPhase.IDLE
+        self._config_load_state: ConfigLoadState = ConfigLoadState.IDLE
         self._config_load_path: Path | None = None
         self._config_load_rows: dict[str, DeviceInitProgress] = {}
         # Latched abort request from before the conductor exists.
@@ -282,7 +282,7 @@ class RunController(QObject):
         # constructing the conductor and forwards a ``conductor.stop()``.
         self._pending_abort_reason: str | None = None
         # Hard gate set by the ShutdownCoordinator before it starts its
-        # phase ladder. While true, ``start()``, ``set_active_config()``,
+        # shutdown sequence. While true, ``start()``, ``set_active_config()``,
         # and ``request_abort()`` refuse new lifecycle-creating work so
         # the coordinator can drain the registry without a slot creating
         # fresh tasks behind its back.
@@ -342,8 +342,8 @@ class RunController(QObject):
         return self._hardware_ready or (pool is not None and pool.state is PoolState.OPEN)
 
     @property
-    def config_load_phase(self) -> ConfigLoadPhase:
-        return self._config_load_phase
+    def config_load_state(self) -> ConfigLoadState:
+        return self._config_load_state
 
     @property
     def conductor(self) -> Conductor | None:
@@ -359,7 +359,7 @@ class RunController(QObject):
     def lifecycle(self) -> LifecycleRegistry:
         """Live registry of lifecycle tasks. The
         :class:`~capa.ui.shutdown.ShutdownCoordinator` snapshots this in
-        its CANCEL_LIFECYCLE_TASKS phase."""
+        its CANCEL_LIFECYCLE_TASKS stage."""
         return self._lifecycle
 
     @property
@@ -390,7 +390,7 @@ class RunController(QObject):
         """Flip ``_shutdown_requested`` so subsequent ``start()`` /
         ``set_active_config()`` / ``request_abort()`` calls are gated.
         Idempotent. Called by the :class:`ShutdownCoordinator` at the
-        DISABLE_UI phase."""
+        DISABLE_UI stage."""
         self._shutdown_requested = True
 
     # ------------------------------------------------------------------ config lifecycle
@@ -416,12 +416,12 @@ class RunController(QObject):
 
     def _progress_snapshot(
         self,
-        phase: ConfigLoadPhase,
+        state: ConfigLoadState,
         message: str,
     ) -> ConfigLoadProgress:
-        self._config_load_phase = phase
+        self._config_load_state = state
         return ConfigLoadProgress(
-            phase=phase,
+            state=state,
             message=message,
             path=self._config_load_path,
             devices=tuple(self._config_load_rows.values()),
@@ -429,10 +429,10 @@ class RunController(QObject):
 
     def _emit_config_progress(
         self,
-        phase: ConfigLoadPhase,
+        state: ConfigLoadState,
         message: str,
     ) -> ConfigLoadProgress:
-        progress = self._progress_snapshot(phase, message)
+        progress = self._progress_snapshot(state, message)
         self.config_load_progress.emit(progress)
         return progress
 
@@ -440,7 +440,7 @@ class RunController(QObject):
         self._config_load_rows[row.name] = row
         self.config_load_progress.emit(
             self._progress_snapshot(
-                self._config_load_phase,
+                self._config_load_state,
                 row.detail or row.status.value.replace("_", " "),
             )
         )
@@ -457,7 +457,7 @@ class RunController(QObject):
         :meth:`WorkerPool.open` on the qasync loop as a registered
         lifecycle task. The old pool (if any) is closed via a separate
         registered :attr:`LifecycleKind.OLD_POOL_CLOSE` task so the
-        shutdown coordinator can see both lifecycle phases independently.
+        shutdown coordinator can see both lifecycle tasks independently.
 
         The new pool is published via :attr:`pool_changed` once
         :meth:`WorkerPool.open` resolves, so manual cards know not to
@@ -477,7 +477,7 @@ class RunController(QObject):
         self._manual_client = None
         self.config_load_started.emit(
             self._progress_snapshot(
-                ConfigLoadPhase.BUILDING_POOL,
+                ConfigLoadState.BUILDING_POOL,
                 "Building worker pool",
             )
         )
@@ -504,7 +504,7 @@ class RunController(QObject):
             self._hardware_ready = old_ready
             self.hardware_ready_changed.emit(self.hardware_ready)
             failed = self._progress_snapshot(
-                ConfigLoadPhase.FAILED,
+                ConfigLoadState.FAILED,
                 f"Worker pool build failed: {exc}",
             )
             self.config_load_finished.emit(failed)
@@ -516,7 +516,7 @@ class RunController(QObject):
         self._manual_client = None
         self._config_load_rows = self._pending_progress_rows(new_pool)
         self._emit_config_progress(
-            ConfigLoadPhase.OPENING_DEVICES,
+            ConfigLoadState.OPENING_DEVICES,
             "Opening devices",
         )
 
@@ -592,17 +592,17 @@ class RunController(QObject):
     ) -> None:
         # 1. Await the old-pool close task if any. We don't share
         #    teardown with the close task itself — that's its own
-        #    registered lifecycle entry — but we MUST wait for it to
+        #    registered lifecycle entry, but we MUST wait for it to
         #    finish before the new pool touches a shared serial bus.
         if old_close_task is not None:
             self._emit_config_progress(
-                ConfigLoadPhase.CLOSING_PREVIOUS,
+                ConfigLoadState.CLOSING_PREVIOUS,
                 "Closing previous hardware",
             )
             with contextlib.suppress(asyncio.CancelledError):
                 await old_close_task
             self._emit_config_progress(
-                ConfigLoadPhase.OPENING_DEVICES,
+                ConfigLoadState.OPENING_DEVICES,
                 "Opening devices",
             )
 
@@ -635,7 +635,7 @@ class RunController(QObject):
             self._set_hardware_ready(False)
             self.pool_changed.emit(None)
             failed = self._progress_snapshot(
-                ConfigLoadPhase.FAILED,
+                ConfigLoadState.FAILED,
                 f"Device initialization failed: {exc}",
             )
             self.config_load_finished.emit(failed)
@@ -669,7 +669,7 @@ class RunController(QObject):
         self.pool_changed.emit(new_pool)
         self._set_hardware_ready(True)
         ready = self._progress_snapshot(
-            ConfigLoadPhase.READY,
+            ConfigLoadState.READY,
             "All devices initialized",
         )
         self.config_load_finished.emit(ready)
@@ -943,7 +943,7 @@ class RunController(QObject):
 
         # State-polling task surfaces conductor transitions as Qt signals.
         # Non-critical lifecycle entry: the coordinator cancels it during
-        # the CANCEL_LIFECYCLE_TASKS phase rather than waiting.
+        # the CANCEL_LIFECYCLE_TASKS stage rather than waiting.
         self._set_ui_state(RunUiState.PREPARING)
         self._state_poll_task = asyncio.create_task(
             self._poll_conductor_state(conductor),

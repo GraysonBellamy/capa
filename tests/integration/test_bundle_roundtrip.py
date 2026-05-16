@@ -1,6 +1,6 @@
 """End-to-end synthetic-run round-trip.
 
-Drives :class:`RunBundleWriter` from the P0a sim adapters, finalizes, then
+Drives :class:`RunBundleWriter` from the simulated adapters, finalizes, then
 reads everything back and asserts the bundle is sealed, integrity-clean,
 and the data round-trips losslessly.
 """
@@ -234,7 +234,7 @@ def sealed_bundle(tmp_path: Path) -> Path:
 
 class TestBundleStructure:
     def test_required_files_present(self, sealed_bundle: Path) -> None:
-        # Every plan-§8 path that P0b owns.
+        # Core bundle artifacts.
         assert (sealed_bundle / "manifest.json").is_file()
         assert (sealed_bundle / "manifest.sha256").is_file()
         assert (sealed_bundle / "config.toml").is_file()
@@ -278,7 +278,7 @@ class TestManifest:
         assert manifest.data_shape.channel_samples.path == "scalars.parquet"
         adapters = {r.adapter for r in manifest.data_shape.device_records}
         assert adapters == {"alicat", "nidaq_polled", "sartorius", "watlow"}
-        # Layout tags match plan §8.9.
+        # Layout tags match
         layouts = {r.adapter: r.layout for r in manifest.data_shape.device_records}
         assert layouts["watlow"] == "long_row"
         assert layouts["sartorius"] == "single_value_row"
@@ -390,7 +390,7 @@ class TestConfigSnapshot:
 
 
 class TestEquipmentToml:
-    """Hardware-day §10: ``equipment.toml`` was previously a stub with
+    """``equipment.toml`` was previously a stub with
     only configured ``name`` + ``adapter``. Live adapters must inject
     their probed identity at finalize time so the bundle records the
     actual physical hardware used (Watlow part number, firmware, …)."""
@@ -421,8 +421,8 @@ class TestEquipmentToml:
         assert "equipment.toml" in digest_text
 
     def test_cameras_section_includes_probed_identity(self, sealed_bundle: Path) -> None:
-        """Hardware-day 2026-05-09 PM finding #2: ``[[cameras]]`` must appear
-        alongside ``[[devices]]`` so V4L2 / vendor camera identity reaches
+        """``[[cameras]]`` must appear alongside ``[[devices]]`` so V4L2 /
+        vendor camera identity reaches
         the bundle artefact.
         """
         with open(sealed_bundle / "equipment.toml", "rb") as fp:

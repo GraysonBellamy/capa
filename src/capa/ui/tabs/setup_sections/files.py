@@ -49,7 +49,7 @@ class FilesSection(SectionWidget):
     Emits :attr:`valuesChanged` whenever the operator changes a mode or
     path; the Setup tab uses that to mark the draft dirty. Method-ref
     changes additionally fire :attr:`methodRefChanged` so the
-    :class:`DocumentCoordinator` (Slice D3) can re-sync the Method tab.
+    :class:`DocumentCoordinator` can re-sync the Method tab.
     """
 
     methodRefChanged = Signal()  # noqa: N815 — Qt signal naming convention

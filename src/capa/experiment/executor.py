@@ -1,6 +1,6 @@
 """:class:`MethodExecutor` — reusable segmented-profile walker.
 
-Plan §5.3 / §11. The executor is a *service*, not an abstract class. The
+The executor is a *service*, not an abstract class. The
 builtin :class:`~capa.experiment.procedures.builtin.recipe_runner.RecipeRunner`
 is a one-line wrapper that calls :meth:`run_to_completion`; custom procedures
 can call :meth:`advance_until` / :meth:`run_segment` and interleave their own
@@ -73,7 +73,7 @@ class MethodExecutorError(CapaError):
 
 
 # ---------------------------------------------------------------------------
-# Tunables. Plan §15 — these belong as named constants so a perf regression
+# Tunables. — these belong as named constants so a perf regression
 # test can pin behaviour.
 # ---------------------------------------------------------------------------
 
@@ -376,7 +376,7 @@ class MethodExecutor:
         through :class:`Authorization`, and dispatch it via the procedure
         context's :attr:`CommandDispatcher`.
 
-        Plan §18 #12: every device write is attributable. The command's
+        #12: every device write is attributable. The command's
         ``issued_by`` / ``authorization_id`` come from the run-arm
         :class:`Authorization`.
 

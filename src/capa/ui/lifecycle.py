@@ -20,7 +20,7 @@ coordinator treats differently:
   pool open can't race shutdown into a half-opened state.
 * :attr:`LifecycleKind.PREVIEW_DRAIN`, :attr:`LifecycleKind.STATE_POLL`,
   :attr:`LifecycleKind.MANUAL_COMMAND` — *non-critical*. The coordinator
-  cancels them and moves on; the awaits don't block the phase ladder.
+  cancels them and moves on; the awaits don't block the shutdown sequence.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ _logger = structlog.get_logger("capa.ui.lifecycle")
 class LifecycleKind(StrEnum):
     """Lifecycle-task category. Shapes the coordinator's drain order.
 
-    The coordinator's cancel-lifecycle phase iterates entries in
+    The coordinator's cancel-lifecycle stage iterates entries in
     enum-declaration order — kinds listed first are cancelled first so
     e.g. manual commands stop dispatching before the run task is asked
     to exit.

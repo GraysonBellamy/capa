@@ -1,4 +1,4 @@
-"""Unit tests for :class:`capa.devices.alicat.AlicatAdapter` (P2).
+"""Unit tests for :class:`capa.devices.alicat.AlicatAdapter`.
 
 Drives the real adapter against an in-process ``StubAlicatDevice`` that
 duck-types :class:`alicatlib.devices.base.Device`'s public surface. The stub

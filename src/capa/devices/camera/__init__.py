@@ -1,4 +1,4 @@
-"""Camera subsystem (plan §12).
+"""Camera subsystem ().
 
 A :class:`Camera` is a peer of :class:`~capa.devices.adapter.DeviceAdapter` —
 not a subtype. The shape is different:
@@ -14,7 +14,7 @@ capa core ships the Protocol, the visible :class:`~capa.devices.camera.webcam.We
 and an in-process IR sim fixture under ``capa.devices.sim.flir_ir_sim``. The
 real FLIR IR adapter ships in the separate ``capa-flir`` package, registered
 through the ``capa.cameras`` entry-point group — capa core remains FLIR-free
-(plan §12.1, §12.2).
+(, §12.2).
 """
 
 from __future__ import annotations

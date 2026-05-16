@@ -1,6 +1,6 @@
 """Named backpressure policies and a :class:`BoundedQueue` that enforces them.
 
-Plan §7.1: every queue in the pipeline declares one of three policies, and
+every queue in the pipeline declares one of three policies, and
 sinks that violate their policy are a bug, not a configuration choice. Plan
 §13 gives the same rule a procedural framing — durable storage never silently
 loses data; UI never blocks acquisition; safety has its own queue.
@@ -22,10 +22,7 @@ from capa.core.errors import BackpressureAbortError
 
 
 class BackpressurePolicy(Enum):
-    """How a queue behaves when it reaches capacity.
-
-    Plan §7.1.
-    """
+    """How a queue behaves when it reaches capacity."""
 
     BLOCK = "block"
     """Producer waits for space, indefinitely. Use only on bounded internal

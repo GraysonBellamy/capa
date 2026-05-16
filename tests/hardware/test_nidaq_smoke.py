@@ -1,7 +1,6 @@
-"""Hardware smoke test for the real :class:`NIDAQAdapter` (P2, Windows rig).
+"""Hardware smoke test for the real :class:`NIDAQAdapter` on the Windows rig.
 
-Closes the §3.5 acceptance gap on the Windows hardware day. Plan §15.4
-contract for NI-DAQ:
+Checks for NI-DAQ on the Windows rig:
 
 1. ``discover()`` returns at least one NI device on the local system.
 2. ``handshake()`` validates declared physical channels against the
@@ -139,7 +138,7 @@ class TestRealNIDAQ:
     async def test_open_stream_emits_readings(self) -> None:
         """``stream_until_stopped`` handles the inner-async-with cleanup so
         the test doesn't have to reach into ``_stop_requested`` /
-        ``aclose()`` itself. Hardware-day 2026-05-09 followup #6."""
+        ``aclose()`` itself."""
         clock = RunClock.now()
         adapter = NIDAQAdapter(
             name="cdaq1",
@@ -167,7 +166,7 @@ class TestRealNIDAQ:
             for cs in samples:
                 assert isinstance(cs.value, float)
             # Identity probe ran during open() — the manifest collector reads
-            # this attribute, so verifying it here catches followup #3 regressions.
+            # this attribute, so verifying it here catches identity regressions.
             info = adapter.device_info
             assert info is not None, "device_info should be populated against real NI hardware"
             assert info.physical_module is not None
@@ -224,7 +223,7 @@ class TestRealNIDAQEngineRun:
         assert records.num_rows >= 5  # 5 Hz × 5 s minus startup ≈ 15
         scalars = pq.read_table(bundle / "scalars.parquet")
         assert scalars.num_rows >= 10  # two channels × 5 ticks
-        # Manifest device identity should now be populated (followup #3).
+        # Manifest device identity should now be populated.
         manifest = json.loads((bundle / "manifest.json").read_text())
         identity = manifest["devices"][0].get("identity")
         assert identity, "manifest.json.devices[0].identity should be populated"

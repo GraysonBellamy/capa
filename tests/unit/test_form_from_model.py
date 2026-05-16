@@ -1,6 +1,6 @@
 """Tests for the Pydantic auto-form generator.
 
-Plan §10.5 / P3 follow-up item 2. Each test uses a small synthetic
+Each test uses a small synthetic
 model so the test surface stays tight; the round-trip test exercises
 the real :class:`CapaPyrolysisMetadata` to ensure the generator handles
 the recursive case the production callers will throw at it."""

@@ -1,6 +1,6 @@
 """Library-native :class:`SourceRecord` plus the normalized :class:`ChannelSample`.
 
-Plan §5.6: the device libraries already made careful choices about their emitted
+the device libraries already made careful choices about their emitted
 row/block shapes. Capa preserves those (``device_records/*.parquet`` in the
 bundle) and *also* derives a normalized scientific channel stream
 (``scalars.parquet``). The two objects below are what adapters emit per poll.
@@ -42,7 +42,6 @@ class SourceRecord(BaseModel):
     ``row`` is empty and ``block_ref`` points at the rectangular sidecar
     (TDMS or in-bundle Parquet block file).
 
-    Plan §5.6.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -105,7 +104,6 @@ class ChannelSample(BaseModel):
     via the :class:`~capa.channels.spec.SourceBinding` declared on each
     :class:`~capa.channels.spec.ChannelSpec`.
 
-    Plan §5.6.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -177,7 +175,7 @@ class DeviceEvent(BaseModel):
 
 
 DeviceHealth = Literal["ok", "degraded", "down"]
-"""Per-adapter health pill, surfaced in the UI status bar (plan §10.4) and
+"""Per-adapter health pill, surfaced in the UI status bar () and
 recorded into ``status.sqlite``.
 
 ``ok`` is the success path; ``degraded`` covers transient retries / late

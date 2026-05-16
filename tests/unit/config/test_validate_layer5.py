@@ -265,7 +265,7 @@ async def test_layer5_camera_handshake_success(
 ) -> None:
     """A camera adapter with ``handshake_available=True`` runs through
     the Layer 5 path and surfaces an info-severity ``live.handshake_ok``
-    problem under the ``cameras`` section. Plan §7.2 item 1."""
+    problem under the ``cameras`` section. item 1."""
     from capa.config.validate import _layer5_live_async
 
     cam = _StubCameraSpec(

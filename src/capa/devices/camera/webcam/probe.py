@@ -186,7 +186,7 @@ async def discover_cameras() -> list[dict[str, Any]]:
     * **Windows** — uses ``duvc_ctl.list_devices()`` when the wheel is
       installed. Returns one row per visible DirectShow camera.
     * **macOS / unsupported** — returns ``[]``. AVFoundation
-      enumeration is a follow-up; for now operators add macOS cameras
+      enumeration can be added later; for now operators add macOS cameras
       by hand.
     """
     platform = sys.platform
@@ -268,7 +268,7 @@ def _match_camera_row(
     model_hint: str | None,
     serial: str | None,
 ) -> dict[str, Any] | None:
-    """Apply the plan §12.1 selector rules to a discover result list.
+    """Apply the selector rules to a discover result list.
 
     Returns the chosen row or ``None`` when no unique match exists.
     """
@@ -301,7 +301,7 @@ async def handshake(cam_spec: dict[str, Any]) -> str:
     camera. We use the cheaper "the camera shows up in discovery"
     check instead — sufficient to catch the common wiring failure
     (cable yanked, device path renumbered) without paying the
-    capture-pin cost. Plan §7.2 item 1.
+    capture-pin cost. item 1.
     """
     rows = await discover_cameras()
     if not rows:

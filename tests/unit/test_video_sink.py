@@ -1,6 +1,6 @@
 """FramesSink + RunBundleWriter cameras-block + finalize rewrite.
 
-Plan §12.3 / §12.5 / P4 Stage C. Validates that:
+Validates that:
 
 * :class:`FramesSink` writes a per-camera in-flight Arrow IPC stream with
   the locked schema and the right column types.
@@ -226,7 +226,7 @@ class TestFinalizeRewrites:
         assert not inflight.exists()
         table = pq.read_table(final)
         assert table.num_rows == 7
-        # Sorted by t_mono_ns post-rewrite (plan §8.5).
+        # Sorted by t_mono_ns post-rewrite ().
         ts = table.column("t_mono_ns").to_pylist()
         assert ts == sorted(ts)
 

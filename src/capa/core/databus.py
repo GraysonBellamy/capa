@@ -1,6 +1,6 @@
 """In-process pub/sub for :class:`DeviceEmission`.
 
-Plan §3, §7. The engine fan-out reads from per-adapter producer tasks and
+, §7. The engine fan-out reads from per-adapter producer tasks and
 publishes onto the :class:`DataBus`; the safety monitor, the UI ring
 buffers, and procedure subscribers all consume from it. The durable sinks do
 *not* go through here — the engine fan-out forwards to the bundle writer
