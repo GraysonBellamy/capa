@@ -1,7 +1,7 @@
 """Simulated Alicat adapter — wide-row ``Sample``\\ s.
 
 Mirrors :class:`alicatlib.streaming.Sample` shape via
-:func:`alicatlib.sinks.base.sample_to_row`. One ``DataFrame`` per poll, with
+:func:`alicatlib.sample_to_row`. One ``Reading`` per poll, with
 firmware-dependent measurement fields (``Mass_Flow``, ``Abs_Press``,
 ``Mass_Flow_Setpt``, ``Mix_Gas``, …).
 """
@@ -14,13 +14,17 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
 import anyio
-from alicatlib.devices.data_frame import (
-    DataFrame,
+from alicatlib import (
+    Reading,
+    sample_to_row,
+)
+from alicatlib import (
+    Sample as AlicatSample,
+)
+from alicatlib.devices.reading import (
     DataFrameFormat,
     DataFrameFormatFlavor,
 )
-from alicatlib.sinks.base import sample_to_row
-from alicatlib.streaming import Sample as AlicatSample
 
 from capa.channels.spec import AlicatFrameField, ChannelSpec
 from capa.core.clock import RunClock
@@ -62,7 +66,7 @@ class AlicatSim:
     """Simulated Alicat MFC/MFM adapter.
 
     ``signals`` is keyed by underscored field names (the keys
-    :class:`alicatlib.devices.data_frame.DataFrame.as_dict` exposes —
+    :meth:`alicatlib.Reading.as_dict` exposes —
     ``"Mass_Flow"``, ``"Abs_Press"``, etc.).
     """
 
@@ -172,24 +176,24 @@ class AlicatSim:
         for field_name, signal in self.signals.items():
             values[field_name] = float(signal(t_now_s))
 
-        frame = DataFrame(
+        reading = Reading(
             unit_id=self.unit_id,
-            format=_EMPTY_FORMAT,
+            reading_format=_EMPTY_FORMAT,
             values=MappingProxyType(values),
             values_by_statistic=MappingProxyType({}),
             status=frozenset(),
             received_at=received_at,
-            monotonic_ns=t_mono_ns,
+            t_mono_ns=t_mono_ns,
         )
         sample = AlicatSample(
             device=self.name,
             unit_id=self.unit_id,
-            monotonic_ns=t_mono_ns,
+            t_mono_ns=t_mono_ns,
+            t_utc=midpoint_at,
             requested_at=requested_at,
             received_at=received_at,
-            midpoint_at=midpoint_at,
             latency_s=latency_s,
-            frame=frame,
+            reading=reading,
         )
         row = sample_to_row(sample)
         self._seq += 1

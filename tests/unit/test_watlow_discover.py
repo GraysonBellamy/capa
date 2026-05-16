@@ -36,7 +36,13 @@ class _StubInfo:
         self.family = MagicMock(value=family)
 
 
-class _StubFindResult:
+class _StubDiscoveryResult:
+    """Duck-types :class:`watlowlib.DiscoveryResult` for tests.
+
+    Under the unified API, the field carrying identity is ``device_info``
+    (renamed from ``info``); there is also a required ``elapsed_s``.
+    """
+
     def __init__(
         self,
         *,
@@ -45,16 +51,18 @@ class _StubFindResult:
         baudrate: int,
         protocol: ProtocolKind,
         ok: bool,
-        info: _StubInfo | None = None,
+        device_info: _StubInfo | None = None,
         error: object | None = None,
+        elapsed_s: float = 0.0,
     ) -> None:
         self.port = port
         self.address = address
         self.baudrate = baudrate
         self.protocol = protocol
         self.ok = ok
-        self.info = info
+        self.device_info = device_info
         self.error = error
+        self.elapsed_s = elapsed_s
 
 
 @pytest.mark.anyio
@@ -63,23 +71,23 @@ async def test_watlow_discover_yields_rows_per_responsive_probe(
 ) -> None:
     """Each ``ok=True`` probe with an ``info`` becomes a row."""
 
-    async def fake_find_devices(**_kwargs: Any) -> list[_StubFindResult]:
+    async def fake_find_devices(**_kwargs: Any) -> list[_StubDiscoveryResult]:
         return [
-            _StubFindResult(
+            _StubDiscoveryResult(
                 port="COM6",
                 address=1,
                 baudrate=38400,
                 protocol=ProtocolKind.MODBUS_RTU,
                 ok=True,
-                info=_StubInfo(part_number="PM3R1CA"),
+                device_info=_StubInfo(part_number="PM3R1CA"),
             ),
-            _StubFindResult(
+            _StubDiscoveryResult(
                 port="COM6",
                 address=1,
                 baudrate=19200,
                 protocol=ProtocolKind.MODBUS_RTU,
                 ok=False,
-                info=None,
+                device_info=None,
             ),
         ]
 
@@ -115,31 +123,31 @@ async def test_watlow_discover_dedups_one_physical_controller(
     that as two devices and the dedup here collapses it.
     """
 
-    async def fake_find_devices(**_kwargs: Any) -> list[_StubFindResult]:
+    async def fake_find_devices(**_kwargs: Any) -> list[_StubDiscoveryResult]:
         return [
-            _StubFindResult(
+            _StubDiscoveryResult(
                 port="COM6",
                 address=1,
                 baudrate=38400,
                 protocol=ProtocolKind.STDBUS,
                 ok=True,
-                info=_StubInfo(),
+                device_info=_StubInfo(),
             ),
-            _StubFindResult(
+            _StubDiscoveryResult(
                 port="COM6",
                 address=1,
                 baudrate=38400,
                 protocol=ProtocolKind.MODBUS_RTU,
                 ok=True,
-                info=_StubInfo(),
+                device_info=_StubInfo(),
             ),
-            _StubFindResult(
+            _StubDiscoveryResult(
                 port="COM6",
                 address=1,
                 baudrate=9600,
                 protocol=ProtocolKind.STDBUS,
                 ok=True,
-                info=_StubInfo(),
+                device_info=_StubInfo(),
             ),
         ]
 
@@ -161,7 +169,7 @@ async def test_watlow_discover_returns_empty_when_no_ports(
     """An empty ``ports`` list short-circuits without hitting the library."""
     called: list[bool] = []
 
-    async def fake_find_devices(**_kwargs: Any) -> list[_StubFindResult]:
+    async def fake_find_devices(**_kwargs: Any) -> list[_StubDiscoveryResult]:
         called.append(True)
         return []
 
@@ -180,7 +188,7 @@ async def test_watlow_discover_swallows_library_errors(
     than propagating — the Setup Discover dialog renders ``no devices``
     instead of crashing."""
 
-    async def boom(**_kwargs: Any) -> list[_StubFindResult]:
+    async def boom(**_kwargs: Any) -> list[_StubDiscoveryResult]:
         raise watlowlib.WatlowConfigurationError("bad config")
 
     monkeypatch.setattr(watlowlib, "find_devices", boom)
@@ -197,16 +205,16 @@ async def test_watlow_discover_forwards_baudrate_sweep(
     successful baud is reflected in the returned row."""
     seen_kwargs: dict[str, Any] = {}
 
-    async def fake_find_devices(**kwargs: Any) -> list[_StubFindResult]:
+    async def fake_find_devices(**kwargs: Any) -> list[_StubDiscoveryResult]:
         seen_kwargs.update(kwargs)
         return [
-            _StubFindResult(
+            _StubDiscoveryResult(
                 port="COM6",
                 address=1,
                 baudrate=9600,
                 protocol=ProtocolKind.STDBUS,
                 ok=True,
-                info=_StubInfo(),
+                device_info=_StubInfo(),
             ),
         ]
 

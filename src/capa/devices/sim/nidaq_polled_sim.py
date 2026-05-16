@@ -1,7 +1,7 @@
 """Simulated NI-DAQ polled adapter — wide-row :class:`DaqReading` per tick.
 
-Mirrors :func:`nidaqlib.sinks.base.reading_to_row`; one row per poll with one
-column per channel and a parallel ``<channel>_unit`` column.
+Mirrors :func:`nidaqlib.reading_to_row`; one row per poll with one column
+per channel and a parallel ``<channel>_unit`` column.
 """
 
 from __future__ import annotations
@@ -12,8 +12,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
 import anyio
-from nidaqlib.sinks.base import reading_to_row
-from nidaqlib.tasks.models import DaqReading
+from nidaqlib import DaqReading, reading_to_row
 
 from capa.channels.spec import ChannelSpec, NIDAQReadingField
 from capa.core.clock import RunClock
@@ -164,8 +163,8 @@ class NIDAQPolledSim:
             units=MappingProxyType(units),
             requested_at=requested_at,
             received_at=received_at,
-            midpoint_at=midpoint_at,
-            monotonic_ns=t_mono_ns,
+            t_utc=midpoint_at,
+            t_mono_ns=t_mono_ns,
             latency_s=latency_s,
         )
         row = reading_to_row(reading)

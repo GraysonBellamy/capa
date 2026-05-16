@@ -32,7 +32,6 @@ from capa.devices.records import (
 )
 from capa.devices.sartorius import (
     ADAPTER_ID,
-    COLD_OPEN_RETRY_ATTEMPTS,
     SartoriusAdapter,
     SartoriusAdapterParams,
 )
@@ -94,6 +93,20 @@ class StubBalance:
         info.protocol = ProtocolKind.XBPI
         info.software = "fw1"
         self.info = info
+        # The adapter reads ``balance.session.recoverable_error_count`` for
+        # health derivation under the unified API.
+        session = MagicMock()
+        session.recoverable_error_count = 0
+        self.session = session
+
+    async def snapshot(self) -> Any:
+        # The adapter calls ``balance.snapshot()`` for identity+health.
+        snap = MagicMock()
+        snap.recoverable_error_count = self.session.recoverable_error_count
+        snap.family = self.info.family
+        snap.protocol = MagicMock()
+        snap.protocol.value = "xBPI"
+        return snap
 
     async def poll(self) -> Reading:
         self.poll_calls += 1
@@ -545,24 +558,24 @@ class TestStreamLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# Cold-open retry (hardware-day §3.4)
+# Cold-open behavior — under the unified API
 # ---------------------------------------------------------------------------
 
 
-class TestColdOpenRetry:
-    """``_build_balance`` must absorb the well-known ``frame too short``
-    cold-open race after a fresh USB plug, but never retry past genuinely
-    fatal ``SartoriusError`` shapes (checksum, timeout, bad device id)."""
+class TestColdOpen:
+    """Under the unified API, ``sartoriuslib.open_device`` swallows the
+    well-known cold-open first-byte race internally (frame underrun /
+    0-byte read) with a bounded retry. The adapter no longer carries a
+    retry loop: a single ``open_device`` call either succeeds or surfaces
+    the post-retry error as an :class:`AdapterError`."""
 
-    async def test_retries_past_frame_too_short(self) -> None:
+    async def test_open_calls_balance_factory_exactly_once(self) -> None:
         stub = StubBalance(value=1.5)
         attempts = 0
 
         async def factory() -> Any:
             nonlocal attempts
             attempts += 1
-            if attempts == 1:
-                raise SartoriusError("frame too short: got 1 bytes (min 4)")
             return stub
 
         adapter = SartoriusAdapter(
@@ -572,35 +585,15 @@ class TestColdOpenRetry:
         )
         await adapter.open()
         try:
-            assert attempts == 2
-            assert adapter._cold_open_retry_count == 1
+            assert attempts == 1
             assert adapter.device_info is stub.info
         finally:
             await adapter.close()
 
-    async def test_retries_past_got_zero_bytes(self) -> None:
-        stub = StubBalance(value=1.5)
-        attempts = 0
-
-        async def factory() -> Any:
-            nonlocal attempts
-            attempts += 1
-            if attempts == 1:
-                raise SartoriusError("read failed: got 0 bytes")
-            return stub
-
-        adapter = SartoriusAdapter(
-            name="balance",
-            port="fake://stub",
-            balance_factory=factory,
-        )
-        await adapter.open()
-        try:
-            assert attempts == 2
-        finally:
-            await adapter.close()
-
-    async def test_non_cold_open_error_raises_immediately(self) -> None:
+    async def test_open_failure_surfaces_as_adapter_error(self) -> None:
+        """A ``SartoriusError`` from ``open_device`` (post the lib's own
+        internal retry) must surface as an :class:`AdapterError` — no
+        adapter-side retry loop swallows it."""
         attempts = 0
 
         async def factory() -> Any:
@@ -615,23 +608,4 @@ class TestColdOpenRetry:
         )
         with pytest.raises(AdapterError, match="checksum mismatch"):
             await adapter.open()
-        assert attempts == 1  # no retry
-        assert adapter._cold_open_retry_count == 0
-
-    async def test_exhausted_retries_raise_last_cold_open_error(self) -> None:
-        attempts = 0
-
-        async def factory() -> Any:
-            nonlocal attempts
-            attempts += 1
-            raise SartoriusError(f"frame too short: attempt {attempts}")
-
-        adapter = SartoriusAdapter(
-            name="balance",
-            port="fake://stub",
-            balance_factory=factory,
-        )
-        with pytest.raises(AdapterError, match="frame too short"):
-            await adapter.open()
-        assert attempts == COLD_OPEN_RETRY_ATTEMPTS
-        assert adapter._cold_open_retry_count == COLD_OPEN_RETRY_ATTEMPTS
+        assert attempts == 1  # no adapter-side retry

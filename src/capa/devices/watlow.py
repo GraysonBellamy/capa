@@ -36,15 +36,20 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 import structlog
 import watlowlib
 from pydantic import BaseModel, ConfigDict, Field
-from watlowlib.devices.controller import Controller
-from watlowlib.devices.models import DeviceInfo, Reading
-from watlowlib.errors import WatlowError
-from watlowlib.protocol.base import ProtocolKind
-from watlowlib.registry.units import Unit
-from watlowlib.sinks.base import sample_to_row
-from watlowlib.streaming import OverflowPolicy, Sample
+from watlowlib import (
+    Controller,
+    DeviceInfo,
+    OverflowPolicy,
+    ProtocolKind,
+    Reading,
+    Sample,
+    Unit,
+    WatlowError,
+    sample_to_row,
+)
 from watlowlib.streaming.recorder import record as watlow_record
 from watlowlib.transport.base import ByteSize, Parity, SerialSettings, StopBits
+from watlowlib.units import to_pint
 
 from capa.channels.spec import ChannelSpec, WatlowParameter
 from capa.core.clock import RunClock
@@ -69,6 +74,7 @@ from capa.devices.adapter import (
 from capa.devices.records import (
     DeviceEmission,
     DeviceEvent,
+    DeviceHealth,
     DeviceSnapshot,
     SourceRecord,
 )
@@ -89,19 +95,6 @@ _PROTOCOL_BY_NAME: Final[dict[ProtocolName, ProtocolKind]] = {
     "stdbus": ProtocolKind.STDBUS,
     "modbus_rtu": ProtocolKind.MODBUS_RTU,
     "auto": ProtocolKind.AUTO,
-}
-
-
-# watlowlib 0.4.0 tags per-sample wire units from the operator-asserted
-# ``assert_wire_temperature_unit=`` (see :attr:`WatlowAdapterParams.wire_temperature_unit`).
-# When no assertion is configured, ``Sample.unit`` is ``None`` for temperature
-# parameters — the library refuses to guess after the 17050 firmware bug. The
-# mapping below converts the asserted unit into the pint string the channel
-# spec uses, so the drift-check can compare apples to apples.
-_WATLOW_UNIT_TO_PINT: Final[dict[Unit, str]] = {
-    Unit.CELSIUS: "degC",
-    Unit.FAHRENHEIT: "degF",
-    Unit.PERCENT: "percent",
 }
 
 
@@ -385,7 +378,6 @@ class WatlowAdapter:
             return
         try:
             self._controller = await self._build_controller()
-            await self._enter_controller(self._controller)
             if self.params.identify_on_open:
                 self._device_info = await self._controller.identify(
                     query_configured_protocol=True,
@@ -432,12 +424,13 @@ class WatlowAdapter:
         self._state.request_stop()
 
     async def snapshot(self) -> DeviceSnapshot:
-        """Build a :class:`DeviceSnapshot` from cached :class:`DeviceInfo`.
+        """Build a :class:`DeviceSnapshot` from the library snapshot + live health.
 
-        snapshots feed ``status.sqlite`` for diagnostics. The
-        cached ``DeviceInfo`` is captured at :meth:`open`; this method does no
-        I/O so it is safe to call from the engine while the stream is in
-        flight.
+        Reads ``controller.snapshot()`` (I/O-free) for cached identity,
+        family, capabilities, and the session counters, and projects
+        into capa's emission shape. Health derives from the shared
+        :meth:`AdapterRuntimeState.compute_health` for parity with the
+        other real adapters.
         """
         clock = self._state.clock or RunClock.now()
         return DeviceSnapshot(
@@ -445,9 +438,21 @@ class WatlowAdapter:
             device=self.name,
             t_mono_ns=clock.t_mono_ns(),
             t_utc=datetime.now(UTC),
-            health="ok" if self._state.lifecycle.state in ("open", "running") else "down",
-            fields=self._snapshot_fields(),
+            health=self._compute_health(clock=clock),
+            fields=await self._snapshot_fields(),
         )
+
+    def _compute_health(self, *, clock: RunClock) -> DeviceHealth:
+        """Derive the operator-facing health pill.
+
+        Mirrors the session's ``recoverable_error_count`` (kept dormant
+        in watlowlib today — no transient class is wired) into the
+        runtime state so the shared
+        :meth:`AdapterRuntimeState.compute_health` logic still applies.
+        """
+        if self._controller is not None:
+            self._state.recoverable_error_count = self._controller.session.recoverable_error_count
+        return self._state.compute_health(clock=clock, rate_hz=self.params.rate_hz)
 
     # ------------------------------------------------------------------ stream
 
@@ -492,8 +497,8 @@ class WatlowAdapter:
                 overflow=OverflowPolicy.BLOCK,
                 buffer_size=64,
                 auto_reconnect=self.params.auto_reconnect,
-            ) as batches:
-                async for batch in batches:
+            ) as recording:
+                async for batch in recording.stream:
                     if self._state.stop_requested:
                         break
                     # Watlow is the one adapter whose ``poll_many`` returns
@@ -533,18 +538,22 @@ class WatlowAdapter:
         """Return a compact silence-state view for tests and future policy work."""
         return self._state.watchdog(device=self.name, rate_hz=self.params.rate_hz)
 
-    def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
+    async def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
+        lib_snap = await self._controller.snapshot() if self._controller is not None else None
         info = self._device_info
+        recoverable = lib_snap.recoverable_error_count if lib_snap is not None else 0
         out: dict[str, float | int | str | bool | None] = {
             "address": self.params.address,
             "protocol": self.params.protocol,
             "channel_count": len(self._channels),
             "state": self._state.lifecycle.state,
             "display_unit": self._display_unit.value if self._display_unit is not None else None,
+            "recoverable_errors": recoverable,
         }
+        if lib_snap is not None and lib_snap.family is not None:
+            out["family"] = lib_snap.family.value
         if info is not None:
             out["part_number"] = info.part_number.raw or None
-            out["family"] = info.family.value
             out["hardware_id"] = info.hardware_id
             out["firmware_id"] = info.firmware_id
             out["serial_number"] = info.serial_number
@@ -837,21 +846,11 @@ class WatlowAdapter:
             assert_wire_temperature_unit=self.params.wire_temperature_unit,
         )
 
-    async def _enter_controller(self, controller: Controller) -> None:
-        """Enter the controller's async-context-manager.
-
-        :func:`watlowlib.open_device` returns an *unopened* controller (except
-        under ``protocol=AUTO``, which opens the transport during detection
-        and skips the second open in :meth:`Controller.__aenter__`). We always
-        call ``__aenter__`` so the lifecycle is uniform.
-        """
-        await controller.__aenter__()
-
     async def _safe_close_controller(self) -> None:
         if self._controller is None:
             return
         try:
-            await self._controller.__aexit__(None, None, None)
+            await self._controller.close()
         except WatlowError:
             # Cleanup path: don't mask whatever the original failure was.
             return
@@ -872,9 +871,9 @@ class WatlowAdapter:
         clock = self._state.clock
         assert clock is not None
         row = sample_to_row(sample)
-        # Translate the library's monotonic_ns (host clock) into a run-relative
-        # offset so it joins cleanly with ChannelSample.t_mono_ns.
-        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
+        # Translate the library's monotonic timestamp (host clock) into a
+        # run-relative offset so it joins cleanly with ChannelSample.t_mono_ns.
+        t_mono_ns = sample.t_mono_ns - clock.started_mono_ns
         self._state.seq += 1
         return SourceRecord(
             record_id=make_record_id(ADAPTER_ID, self.name, self._state.seq),
@@ -882,7 +881,7 @@ class WatlowAdapter:
             device=self.name,
             shape="long_row",
             t_mono_ns=t_mono_ns,
-            t_utc=sample.midpoint_at,
+            t_utc=sample.t_utc,
             row=row,
             metadata={"parameter_id": sample.parameter_id, "tick_first": tick_first},
         )
@@ -932,7 +931,7 @@ class WatlowAdapter:
             # the row is still preserved in device_records, but no
             # ChannelSample is emitted.
             return []
-        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
+        t_mono_ns = sample.t_mono_ns - clock.started_mono_ns
         emissions: list[DeviceEmission] = []
         for spec in self._channels:
             binding = spec.source
@@ -974,7 +973,7 @@ class WatlowAdapter:
         """
         if not isinstance(sample.unit, Unit):
             return False
-        pint_unit = _WATLOW_UNIT_TO_PINT.get(sample.unit)
+        pint_unit = to_pint(sample.unit)
         if pint_unit is None:
             return False
         # A dimensional mismatch (g vs degC) and a scale mismatch (degC vs
@@ -990,7 +989,7 @@ class WatlowAdapter:
         """Build the :class:`DeviceEvent` for a wire/declared unit mismatch."""
         wire_unit = sample.unit
         assert isinstance(wire_unit, Unit)  # _unit_mismatch guards this
-        wire_str = _WATLOW_UNIT_TO_PINT[wire_unit]
+        wire_str = to_pint(wire_unit) or wire_unit.value
         return DeviceEvent(
             adapter=ADAPTER_ID,
             device=self.name,
@@ -1035,9 +1034,11 @@ async def handshake(params: dict[str, Any]) -> str:
             serial_settings=parsed.to_serial_settings(),
             assert_wire_temperature_unit=parsed.wire_temperature_unit,
         )
-        async with controller as ctrl:
-            info = await ctrl.identify(query_configured_protocol=True)
-            display_unit = await ctrl.read_comms_unit_label()
+        try:
+            info = await controller.identify(query_configured_protocol=True)
+            display_unit = await controller.read_comms_unit_label()
+        finally:
+            await controller.close()
     except WatlowError as exc:
         raise AdapterError(f"watlow handshake failed at {parsed.port}: {exc}") from exc
     unit_str = display_unit.value if display_unit is not None else "?"
@@ -1112,22 +1113,22 @@ async def discover(
     # likely production config. Collapsing here keeps the Discover dialog
     # readable when a bus answers at multiple bauds or protocols.
     rows: list[dict[str, Any]] = []
-    seen_devices: set[tuple[str, int]] = set()
+    seen_devices: set[tuple[str, str | int | None]] = set()
     for result in results:
-        if not result.ok or result.info is None:
+        if not result.ok or result.device_info is None:
             continue
         device_key = (result.port, result.address)
         if device_key in seen_devices:
             continue
         seen_devices.add(device_key)
-        info = result.info
+        info = result.device_info
         rows.append(
             {
                 "adapter": ADAPTER_ID,
                 "port": result.port,
                 "address": result.address,
                 "baudrate": result.baudrate,
-                "protocol": result.protocol.value,
+                "protocol": result.protocol.value if result.protocol is not None else None,
                 "model": info.part_number.raw or None,
                 "firmware": str(info.firmware_id),
                 "hardware": str(info.hardware_id),

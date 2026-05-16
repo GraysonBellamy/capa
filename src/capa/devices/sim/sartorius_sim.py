@@ -14,11 +14,16 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
 import anyio
-from sartoriuslib.devices.models import Reading
-from sartoriuslib.protocol.base import ProtocolKind
-from sartoriuslib.registry.units import Sign, Unit
-from sartoriuslib.sinks.base import sample_to_row
-from sartoriuslib.streaming import Sample as SartoriusSample
+from sartoriuslib import (
+    ProtocolKind,
+    Reading,
+    Sign,
+    Unit,
+    sample_to_row,
+)
+from sartoriuslib import (
+    Sample as SartoriusSample,
+)
 
 from capa.channels.spec import ChannelSpec, SartoriusReading
 from capa.core.clock import RunClock
@@ -189,8 +194,8 @@ class SartoriusSim:
             reading=reading,
             requested_at=requested_at,
             received_at=received_at,
-            midpoint_at=midpoint_at,
-            monotonic_ns=t_mono_ns,
+            t_utc=midpoint_at,
+            t_mono_ns=t_mono_ns,
             latency_s=latency_s,
             protocol=self.protocol,
         )

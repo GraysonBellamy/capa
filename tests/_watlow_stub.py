@@ -93,6 +93,32 @@ class StubWatlowController:
     async def __aexit__(self, *args: Any) -> None:
         self.aexited = True
 
+    async def close(self) -> None:
+        """Mirror of :meth:`watlowlib.Controller.close` (unified API)."""
+        self.aexited = True
+
+    @property
+    def session(self) -> Any:
+        """The adapter reads ``controller.session.recoverable_error_count``."""
+        if not hasattr(self, "_session_proxy"):
+            from unittest.mock import MagicMock
+
+            session = MagicMock()
+            session.recoverable_error_count = 0
+            self._session_proxy = session
+        return self._session_proxy
+
+    async def snapshot(self, *, name: str | None = None) -> Any:
+        """Mirror of :meth:`Controller.snapshot` — no I/O, derived from info."""
+        from unittest.mock import MagicMock
+
+        del name
+        snap = MagicMock()
+        snap.recoverable_error_count = self.session.recoverable_error_count
+        snap.family = self.info.family
+        snap.capabilities = self.info.capabilities
+        return snap
+
     async def identify(
         self, *, query_configured_protocol: bool = False, **_kwargs: Any
     ) -> DeviceInfo:
@@ -129,10 +155,11 @@ class StubWatlowController:
                         instance=inst,
                         value=value,
                         unit=resolve_unit(spec.unit_kind, self.display_unit),
-                        monotonic_ns=mono,
+                        t_mono_ns=mono,
+                        t_utc=now,
+                        t_midpoint_mono_ns=None,
                         requested_at=now,
                         received_at=now,
-                        midpoint_at=now,
                         latency_s=0.001,
                         raw=b"",
                     )

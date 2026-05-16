@@ -4,15 +4,15 @@ requires-python = "==3.13.*"
 
 [[package]]
 name = "alicatlib"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/20/a6f4b4f10b109b974669e720bfd2bcd517890ffff91a123817d000f1d3ef/alicatlib-0.2.0.tar.gz", hash = "sha256:b08ef88447aadee295b4b1e65b0e1076ca0cf97fa8262be0d06e9f79227dc123", size = 466454, upload-time = "2026-05-10T16:49:54.19Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/1c/a04d8f008169817ec4452b74a6cccb6c01abde285d54f171c90170de0fc8/alicatlib-0.3.0.tar.gz", hash = "sha256:83bd313d2ad60bf0c86da51897384d5ef50d83da8bb004471ef35ccd9111946c", size = 480503, upload-time = "2026-05-15T23:55:32.898Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/99/13dda30ff12df4f2166eb36d887976d90b3d558d7d79c2b6a72fcf088cf3/alicatlib-0.2.0-py3-none-any.whl", hash = "sha256:ff6b78c33c7758da819f95e788f79545455459bc825d59e4f307a43a148d9f0c", size = 286669, upload-time = "2026-05-10T16:49:52.214Z" },
+    { url = "https://files.pythonhosted.org/packages/35/44/159214cb9f7d9cf6701d6a76eaa25ddf48abe178c0373254df148e36645d/alicatlib-0.3.0-py3-none-any.whl", hash = "sha256:cdcb8c5fdd0b9222f84abd0c87674e9b04b155cb8352ddf87e27cff5ca486b1b", size = 293900, upload-time = "2026-05-15T23:55:30.983Z" },
 ]
 
 [[package]]
@@ -163,14 +163,14 @@ flir = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alicatlib", specifier = ">=0.2.0,<0.3" },
+    { name = "alicatlib", specifier = ">=0.3.0,<0.4" },
     { name = "anyio", specifier = ">=4.6" },
     { name = "anyio", extras = ["trio"], marker = "extra == 'dev'", specifier = ">=4.6" },
     { name = "av", specifier = ">=13" },
     { name = "capa-flir", marker = "extra == 'flir'", editable = "../capa-flir" },
     { name = "duvc-ctl", marker = "sys_platform == 'win32'", path = "vendor/duvc_ctl-2.1.0rc1-cp313-cp313-win_amd64.whl" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
-    { name = "nidaqlib", specifier = ">=0.2.0,<0.3" },
+    { name = "nidaqlib", specifier = ">=0.3.0,<0.4" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pillow", specifier = ">=10" },
     { name = "pint", specifier = ">=0.24" },
@@ -185,11 +185,11 @@ requires-dist = [
     { name = "qasync", specifier = ">=0.27" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
-    { name = "sartoriuslib", specifier = ">=0.3.1,<0.4" },
+    { name = "sartoriuslib", specifier = ">=0.4.0,<0.5" },
     { name = "structlog", specifier = ">=24.4" },
     { name = "tomli-w", specifier = ">=1.0" },
     { name = "typer", specifier = ">=0.12" },
-    { name = "watlowlib", specifier = ">=0.5.0,<0.6" },
+    { name = "watlowlib", specifier = ">=0.6.0,<0.7" },
 ]
 provides-extras = ["dev", "flir"]
 
@@ -464,16 +464,16 @@ wheels = [
 
 [[package]]
 name = "nidaqlib"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "nidaqmx" },
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/4a/8ecaaa152fda3119707d68420089da6612d04f00727671723370efed73a1/nidaqlib-0.2.0.tar.gz", hash = "sha256:5fa0ba1526c5da1aef4fcb54145c8d425ad127d01e168d4466804c3424bee377", size = 184057, upload-time = "2026-05-10T16:23:09.693Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c4/6c/4158bfccc51b4bf2be78f16e3aff0c0a2acb36814ce6a81dcce88a557353/nidaqlib-0.3.0.tar.gz", hash = "sha256:a2f7ed1602c61d5f1e865d255eb2103a5c2c8f226862e3e929456052b53f9994", size = 194803, upload-time = "2026-05-16T01:00:20.294Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/f9/c7776701fcb3a0a7150f820dea0983f5ad525aae21159bb6b9ddb374785a/nidaqlib-0.2.0-py3-none-any.whl", hash = "sha256:dfa5aaeb7900c68f60f992084defef6eb70005ef8caa7c492c7ecbe4c02723bf", size = 126061, upload-time = "2026-05-10T16:23:07.95Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/ca/776f77a56509fed424f7a44d5b8f370588d0c693778e99321b0479d9e78b/nidaqlib-0.3.0-py3-none-any.whl", hash = "sha256:8b8b7bc33b6106f782dc1dbab812cc2a74cb4812611da76c08140e10f11950ad", size = 132798, upload-time = "2026-05-16T01:00:18.053Z" },
 ]
 
 [[package]]
@@ -911,15 +911,15 @@ wheels = [
 
 [[package]]
 name = "sartoriuslib"
-version = "0.3.1"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/c0/356cd378894021c4e17d491b5876dbca75eb93f4fc4d96cf8df816a04762/sartoriuslib-0.3.1.tar.gz", hash = "sha256:2da8b02c85b1584efb631ec31e0591bc61685aac58f6cd4e682f3110ffee3900", size = 402072, upload-time = "2026-05-14T22:59:52.852Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c2/2a/3daeb306ba99f9c1eec1d57199db115b1c1167f1d9207407398dbdaa29aa/sartoriuslib-0.4.1.tar.gz", hash = "sha256:b2804c9d1e2b326c645af40cf8e3d0095b311d12dbe209eb6be30a3831b2034b", size = 416396, upload-time = "2026-05-16T00:40:24.394Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d4/21/772fb78b16bb7ad3b2614a6153059960b5d1aa56343948420d5daf480554/sartoriuslib-0.3.1-py3-none-any.whl", hash = "sha256:4a69e4679a2f166346007c9f04801f6b4d8d5346937cb40b0e1c61937d741da0", size = 224359, upload-time = "2026-05-14T22:59:51.094Z" },
+    { url = "https://files.pythonhosted.org/packages/53/78/a368eac14730c82e8c669e8db75ba4b4808cbf049bfcb0869b0226867c93/sartoriuslib-0.4.1-py3-none-any.whl", hash = "sha256:2712f52568dedf1969c3799eb84a8c081026ce805ec64ff4d793f8b193fd1541", size = 233983, upload-time = "2026-05-16T00:40:22.635Z" },
 ]
 
 [[package]]
@@ -1064,14 +1064,14 @@ wheels = [
 
 [[package]]
 name = "watlowlib"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anymodbus" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cf/8d/788f9552a86c794a7bfe845b0a5f0ffd2e6e1ea327d15b54b9329bb385c9/watlowlib-0.5.0.tar.gz", hash = "sha256:2d3b68c68b8569b9007f16bc0352d1c7355557fe4bc23b19f96a6dddb715fbb5", size = 369626, upload-time = "2026-05-14T22:46:13.71Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/2d/f9a5d6ebb967ab2c3e5ff5280f8510c3b298690b483065e09db5d812a3f0/watlowlib-0.6.0.tar.gz", hash = "sha256:601bd7f15e42034c4a16377ee7653f302399eb7a647a07e6916a79ef311f0960", size = 381209, upload-time = "2026-05-15T23:51:01.543Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/77/0bc60b5ffdff1b0434e3b1b01b24c75cd1ef0b43a9ee617192ba5bb9275f/watlowlib-0.5.0-py3-none-any.whl", hash = "sha256:e70f1ffd0714c8bd4ae396a595a816a73e4242106c82683886c09b9e038538f9", size = 324261, upload-time = "2026-05-14T22:46:11.822Z" },
+    { url = "https://files.pythonhosted.org/packages/22/38/6b79e2df5d1808e5ad574ecfd116e3f3b17e45807dccbbb2c3ba7574c741/watlowlib-0.6.0-py3-none-any.whl", hash = "sha256:714b95d40494e652f30103b90b0a3548c28b87eb7cde7446bee43229b981a12a", size = 332352, upload-time = "2026-05-15T23:50:59.727Z" },
 ]

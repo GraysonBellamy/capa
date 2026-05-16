@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from watlowlib import PARAMETERS, Unit
@@ -111,6 +112,28 @@ class StubWatlowController:
     async def __aexit__(self, *args: Any) -> None:
         self.aexited = True
 
+    async def close(self) -> None:
+        """Mirror of :meth:`watlowlib.Controller.close` for the new unified API."""
+        self.aexited = True
+
+    @property
+    def session(self) -> Any:
+        """The adapter reads ``controller.session.recoverable_error_count``."""
+        if not hasattr(self, "_session_proxy"):
+            session = MagicMock()
+            session.recoverable_error_count = 0
+            self._session_proxy = session
+        return self._session_proxy
+
+    async def snapshot(self, *, name: str | None = None) -> Any:
+        """Mirror of :meth:`Controller.snapshot` — no I/O, derived from info."""
+        del name
+        snap = MagicMock()
+        snap.recoverable_error_count = self.session.recoverable_error_count
+        snap.family = self.info.family
+        snap.capabilities = self.info.capabilities
+        return snap
+
     async def identify(
         self, *, query_configured_protocol: bool = False, **_kwargs: Any
     ) -> DeviceInfo:
@@ -147,10 +170,11 @@ class StubWatlowController:
                         instance=inst,
                         value=value,
                         unit=resolve_unit(spec.unit_kind, self.display_unit),
-                        monotonic_ns=mono,
+                        t_mono_ns=mono,
+                        t_utc=now,
+                        t_midpoint_mono_ns=None,
                         requested_at=now,
                         received_at=now,
-                        midpoint_at=now,
                         latency_s=0.001,
                         raw=b"",
                     )
@@ -391,10 +415,12 @@ class TestConstruction:
 
 class TestLifecycle:
     async def test_open_runs_identify_and_caches_info(self) -> None:
+        # Under the unified API, ``open_device`` returns an *opened*
+        # controller — the adapter no longer calls ``__aenter__`` itself.
+        # Close goes through ``Controller.close()``.
         adapter, stub = _make_adapter()
         await adapter.open()
         try:
-            assert stub.aentered is True
             assert stub.identify_calls == 1
             assert adapter.device_info is not None
             assert adapter.device_info.part_number.raw == "PM3C1AJ-AAAAAAA"
@@ -461,7 +487,7 @@ class TestStreaming:
         for r in records:
             assert r.adapter == ADAPTER_ID
             assert r.shape == "long_row"
-            # watlowlib.sample_to_row schema
+            # watlowlib.sample_to_row schema (unified API)
             assert {
                 "device",
                 "address",
@@ -473,7 +499,8 @@ class TestStreaming:
                 "unit",
                 "requested_at",
                 "received_at",
-                "midpoint_at",
+                "t_mono_ns",
+                "t_utc",
                 "latency_s",
             } <= set(r.row.keys())
 

@@ -35,14 +35,16 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import alicatlib
+from alicatlib import (
+    AlicatError,
+    OverflowPolicy,
+    PollSourceAdapter,
+    sample_to_row,
+)
 from alicatlib.devices.base import Device as AlicatDevice
 from alicatlib.devices.flow_controller import FlowController
 from alicatlib.devices.models import DeviceInfo, StpNtpMode, TimeUnit, TotalizerId
 from alicatlib.devices.pressure_controller import PressureController
-from alicatlib.errors import AlicatError
-from alicatlib.manager import DeviceResult
-from alicatlib.sinks.base import sample_to_row
-from alicatlib.streaming import OverflowPolicy
 from alicatlib.streaming.recorder import record as alicat_record
 from alicatlib.transport.base import SerialSettings
 from pydantic import BaseModel, ConfigDict, Field
@@ -131,35 +133,6 @@ class AlicatAdapterParams(BaseModel):
 
     def overflow_policy(self) -> OverflowPolicy:
         return OverflowPolicy.BLOCK if self.overflow == "block" else OverflowPolicy.DROP_NEWEST
-
-
-# ---------------------------------------------------------------------------
-# Single-device PollSource — adapts one Device to the recorder's shape.
-# ---------------------------------------------------------------------------
-
-
-class _SingleDevicePollSource:
-    """Wrap one :class:`AlicatDevice` as the recorder's
-    :class:`alicatlib.streaming.recorder.PollSource`.
-
-    The recorder expects a ``Mapping[str, DeviceResult[DataFrame]]`` per tick.
-    A real adapter handles exactly one device, so we hand it a single-entry
-    mapping keyed by the adapter's name.
-    """
-
-    __slots__ = ("_device", "_name")
-
-    def __init__(self, name: str, device: AlicatDevice) -> None:
-        self._name = name
-        self._device = device
-
-    async def poll(self, names: Any = None) -> Mapping[str, DeviceResult[Any]]:
-        del names  # single-device, name filter is a no-op
-        try:
-            frame = await self._device.poll()
-        except AlicatError as exc:
-            return {self._name: DeviceResult(value=None, error=exc)}
-        return {self._name: DeviceResult(value=frame, error=None)}
 
 
 # ---------------------------------------------------------------------------
@@ -333,11 +306,10 @@ class AlicatAdapter:
         self._state.request_stop()
 
     async def snapshot(self) -> DeviceSnapshot:
-        """Build a :class:`DeviceSnapshot` from cached identity + live health.
+        """Build a :class:`DeviceSnapshot` from the library snapshot + live health.
 
-        snapshots feed ``status.sqlite`` for diagnostics. This
-        method does no I/O so it is safe to call from the engine while the
-        stream is in flight.
+        Reads ``device.snapshot()`` (I/O-free) for cached identity and
+        the session counters, and projects into capa's emission shape.
         """
         clock = self._state.clock or RunClock.now()
         return DeviceSnapshot(
@@ -346,7 +318,7 @@ class AlicatAdapter:
             t_mono_ns=clock.t_mono_ns(),
             t_utc=datetime.now(UTC),
             health=self._compute_health(clock=clock),
-            fields=self._snapshot_fields(),
+            fields=await self._snapshot_fields(),
         )
 
     # ------------------------------------------------------------------ stream
@@ -355,7 +327,7 @@ class AlicatAdapter:
         """Yield :class:`DeviceEmission`\\ s while sampling is active.
 
         Drives :func:`alicatlib.streaming.record` against a single-device
-        :class:`_SingleDevicePollSource`. Every successful poll yields one
+        :class:`alicatlib.PollSourceAdapter`. Every successful poll yields one
         :class:`SourceRecord` plus one :class:`ChannelSample` per matching
         :class:`AlicatFrameField` binding. Errored ticks (transient comm
         failures under ``auto_reconnect=True``) increment the degradation
@@ -378,7 +350,7 @@ class AlicatAdapter:
         self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
         yield snap
 
-        source = _SingleDevicePollSource(self.name, self._device)
+        source = PollSourceAdapter(self.name, self._device)
 
         try:
             async with alicat_record(
@@ -386,16 +358,14 @@ class AlicatAdapter:
                 rate_hz=self.params.rate_hz,
                 overflow=self.params.overflow_policy(),
                 buffer_size=64,
-            ) as batches:
-                async for batch in batches:
+            ) as recording:
+                async for batch in recording.stream:
                     if self._state.stop_requested:
                         break
                     sample = batch.get(self.name)
                     if sample is None:
-                        # Errored tick — already logged at WARN by the recorder.
-                        # Bump the degradation counter so the next snapshot
-                        # surfaces it; under auto_reconnect we keep going.
-                        self._state.recoverable_error_count += 1
+                        # Errored tick — recorder already logged at WARN and
+                        # bumped ``device.session.recoverable_error_count``.
                         if not self.params.auto_reconnect:
                             raise AdapterError(
                                 f"alicat {self.name!r} poll failed and auto_reconnect is disabled",
@@ -426,21 +396,28 @@ class AlicatAdapter:
     def _compute_health(self, *, clock: RunClock) -> DeviceHealth:
         """Derive the :class:`DeviceHealth` pill from adapter state.
 
+        Mirrors the session's ``recoverable_error_count`` into the runtime
+        state so the shared
+        :meth:`AdapterRuntimeState.compute_health` logic still applies.
         ``down`` if the lifecycle reports closed.
-        ``degraded`` when auto-reconnect retries have fired since the last
-        snapshot, *or* the last sample is older than 3× the polling period.
+        ``degraded`` when streaming-mode idle-window transients have fired,
+        *or* the last sample is older than 3× the polling period.
         ``ok`` otherwise.
         """
+        if self._device is not None:
+            self._state.recoverable_error_count = self._device.session.recoverable_error_count
         return self._state.compute_health(clock=clock, rate_hz=self.params.rate_hz)
 
-    def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
+    async def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
+        lib_snap = await self._device.snapshot() if self._device is not None else None
         info = self._device_info
+        recoverable = lib_snap.recoverable_error_count if lib_snap is not None else 0
         out: dict[str, float | int | str | bool | None] = {
             "unit_id": self.params.unit_id,
             "rate_hz": self.params.rate_hz,
             "channel_count": len(self._channels),
             "state": self._state.lifecycle.state,
-            "recoverable_errors": self._state.recoverable_error_count,
+            "recoverable_errors": recoverable,
         }
         if info is not None:
             out["model"] = info.model
@@ -945,7 +922,7 @@ class AlicatAdapter:
     def _record_for(self, sample: Any) -> SourceRecord:
         """Convert an alicatlib :class:`Sample` into a wide-row :class:`SourceRecord`.
 
-        Uses the library's own :func:`alicatlib.sinks.sample_to_row` helper so
+        Uses the library's own :func:`alicatlib.sample_to_row` helper so
         the row schema matches what an offline ``alicatlib`` recorder would
         produce — important for ``device_records/alicat.parquet`` parity
         across sim and real bundles.
@@ -953,9 +930,9 @@ class AlicatAdapter:
         clock = self._state.clock
         assert clock is not None
         row = sample_to_row(sample)
-        # Translate the library's monotonic_ns (host clock) into a run-relative
-        # offset so it joins cleanly with ChannelSample.t_mono_ns.
-        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
+        # Translate the library's monotonic timestamp (host clock) into a
+        # run-relative offset so it joins cleanly with ChannelSample.t_mono_ns.
+        t_mono_ns = sample.t_mono_ns - clock.started_mono_ns
         self._state.seq += 1
         return SourceRecord(
             record_id=make_record_id(ADAPTER_ID, self.name, self._state.seq),
@@ -963,7 +940,7 @@ class AlicatAdapter:
             device=self.name,
             shape="wide_row",
             t_mono_ns=t_mono_ns,
-            t_utc=sample.midpoint_at,
+            t_utc=sample.t_utc,
             row=row,
             metadata={"unit_id": sample.unit_id},
         )
@@ -972,8 +949,8 @@ class AlicatAdapter:
         """Map ``sample`` against the configured :class:`AlicatFrameField` bindings."""
         clock = self._state.clock
         assert clock is not None
-        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
-        values = sample.frame.as_dict()
+        t_mono_ns = sample.t_mono_ns - clock.started_mono_ns
+        values = sample.reading.as_dict()
         emissions: list[DeviceEmission] = []
         for spec in self._channels:
             binding = spec.source
@@ -1054,18 +1031,18 @@ async def discover(
     )
     out: list[dict[str, Any]] = []
     for r in results:
-        if not r.ok or r.info is None:
+        if not r.ok or r.device_info is None:
             continue
         out.append(
             {
                 "adapter": ADAPTER_ID,
                 "port": r.port,
-                "unit_id": r.unit_id,
+                "unit_id": r.address,
                 "baudrate": r.baudrate,
-                "model": r.info.model,
-                "serial": r.info.serial,
-                "firmware": str(r.info.firmware),
-                "kind": r.info.kind.value,
+                "model": r.device_info.model,
+                "serial": r.device_info.serial,
+                "firmware": str(r.device_info.firmware),
+                "kind": r.device_info.kind.value,
             }
         )
     return out

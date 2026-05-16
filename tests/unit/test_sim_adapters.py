@@ -77,7 +77,7 @@ class TestWatlowSim:
         assert len(records) == 2
         assert len(samples) == 2
         for r in records:
-            # watlowlib.sample_to_row layout
+            # watlowlib.sample_to_row layout (unified API)
             assert {
                 "device",
                 "address",
@@ -89,7 +89,8 @@ class TestWatlowSim:
                 "unit",
                 "requested_at",
                 "received_at",
-                "midpoint_at",
+                "t_mono_ns",
+                "t_utc",
                 "latency_s",
             } <= set(r.row.keys())
             assert r.shape == "long_row"

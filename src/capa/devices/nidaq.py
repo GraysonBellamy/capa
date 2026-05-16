@@ -38,20 +38,31 @@ a fully pre-built :class:`DaqSession` for tests that need finer control.
 
 from __future__ import annotations
 
-import re
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
+from nidaqlib import (
+    AcquisitionMode,
+    DaqBlock,
+    DaqReading,
+    DaqSession,
+    NIDaqDiscoveryResult,
+    NIDaqError,
+    OverflowPolicy,
+    TaskSpec,
+    Timing,
+    block_to_rows,
+    find_devices,
+    reading_to_row,
+    record_polled,
+)
+from nidaqlib import (
+    open_device as nidaq_open_device,
+)
 from nidaqlib.channels.base import ChannelSpec as NidaqChannelSpec
-from nidaqlib.errors import NIDaqError
-from nidaqlib.streaming import OverflowPolicy, record_polled
 from nidaqlib.streaming.block import ErrorPolicy as NidaqErrorPolicy
-from nidaqlib.tasks import open_device as nidaq_open_device
-from nidaqlib.tasks.models import DaqBlock, DaqReading
-from nidaqlib.tasks.session import DaqSession
-from nidaqlib.tasks.spec import AcquisitionMode, TaskSpec, Timing
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from capa.channels.spec import ChannelSpec, NIDAQBlockChannel, NIDAQReadingField
@@ -87,19 +98,15 @@ if TYPE_CHECKING:
 ADAPTER_ID_POLLED: Final[str] = "nidaq_polled"
 ADAPTER_ID_BLOCK: Final[str] = "nidaq_block"
 
-_MODULE_SUFFIX_RE: Final[re.Pattern[str]] = re.compile(r"Mod\d+$")
-"""Strips ``ModN`` from a cDAQ module name to derive the chassis name
-(``cDAQ1Mod1`` → ``cDAQ1``). Only used inside :meth:`NIDAQAdapter._probe_device_info`."""
-
 
 @dataclass(frozen=True, slots=True)
 class NIDAQDeviceInfo:
     """Identity record for an NI device backing a :class:`NIDAQAdapter`.
 
     Populated lazily during :meth:`NIDAQAdapter.open` by enumerating the local
-    NI system via :func:`nidaqlib.system.discovery.list_devices` and matching
-    the first declared ``physical_channel`` against the returned device names.
-    Field names align with the manifest writer's identity fields so the
+    NI system via :func:`nidaqlib.find_devices` and matching the first declared
+    ``physical_channel`` against the returned :class:`NIDaqDiscoveryResult`
+    rows. Field names align with the manifest writer's identity fields so the
     ``manifest.json.devices[*].identity`` block surfaces them automatically.
     """
 
@@ -534,8 +541,8 @@ class NIDAQAdapter:
                 error_policy=error_policy,
                 overflow=self.params.overflow_policy(),
                 buffer_size=64,
-            ) as (rx, _summary):
-                async for payload in rx:
+            ) as recording:
+                async for payload in recording.stream:
                     if self._state.stop_requested:
                         break
                     # ``record_polled`` against a single ``DaqSession`` yields
@@ -546,9 +553,10 @@ class NIDAQAdapter:
                         # Defensive: shouldn't happen with a session source.
                         continue
                     if payload.error is not None:
-                        self._state.recoverable_error_count += 1
                         # Native row preserves the error fields — emit it
                         # so the device-records sink keeps the diagnostic.
+                        # The session's recoverable_error_count is bumped by
+                        # the recorder under ErrorPolicy.RETURN.
                         yield self._record_for_reading(payload)
                         continue
                     record = self._record_for_reading(payload)
@@ -596,12 +604,13 @@ class NIDAQAdapter:
                 error_policy=error_policy,
                 overflow=overflow,
                 buffer_size=16,
-            ) as (rx, _summary):
-                async for block in rx:
+            ) as recording:
+                async for block in recording.stream:
                     if self._state.stop_requested:
                         break
                     if block.error is not None:
-                        self._state.recoverable_error_count += 1
+                        # The session's recoverable_error_count is bumped by
+                        # the recorder under ErrorPolicy.RETURN.
                         if not self.params.auto_reconnect:
                             raise AdapterError(
                                 f"nidaq {self.name!r} block error: {block.error}",
@@ -665,68 +674,41 @@ class NIDAQAdapter:
 
     def _probe_device_info(self) -> NIDAQDeviceInfo | None:
         """Best-effort identity lookup by matching the first declared
-        ``physical_channel`` against ``nidaqlib.system.discovery.list_devices``.
+        ``physical_channel`` against :func:`nidaqlib.find_devices`.
 
-        Returns ``None`` (and never raises) when ``nidaqmx`` isn't installed,
-        the runtime is missing, no NI hardware is present, or the channel
-        prefix can't be resolved — manifest identity stays empty in those
-        cases, which matches pre-fix behaviour. Tests using ``FakeDaqBackend``
-        legitimately land here and should not be perturbed.
+        Returns ``None`` (and never raises) when no NI hardware is present
+        or the channel prefix can't be resolved. ``find_devices`` itself
+        never raises — driver/runtime failures surface as ``ok=False``
+        rows, which we filter out.
         """
-        try:
-            from nidaqlib.system.discovery import list_devices  # noqa: PLC0415
-        except ImportError:
-            return None
-        try:
-            devices = list_devices()
-        except Exception:
-            # Catch broad — nidaqmx raises a non-``NIDaqError`` ``DaqNotFoundError``
-            # when the runtime is missing; the discovery hook does the same.
-            return None
-        if not devices:
-            return None
-
         first_channel = self.params.channels[0].physical_channel if self.params.channels else ""
         if not first_channel or "/" not in first_channel:
             return None
         module_name = first_channel.split("/", 1)[0]
 
-        by_name = {d.name: d for d in devices}
-        module = by_name.get(module_name)
-        if module is None:
-            return None
-
-        # Chassis name is the module name with the trailing ``ModN`` stripped
-        # (cDAQ convention). Single-board cards have no such suffix and
-        # therefore no chassis.
-        candidate_chassis = _MODULE_SUFFIX_RE.sub("", module_name)
-        chassis_name: str | None = (
-            candidate_chassis
-            if candidate_chassis != module_name and candidate_chassis in by_name
-            else None
-        )
-
-        serial_raw = getattr(module, "serial_number", None)
-        return NIDAQDeviceInfo(
-            product_type=getattr(module, "product_type", None),
-            serial_number=str(serial_raw) if serial_raw not in (None, "", 0) else None,
-            physical_module=module_name,
-            chassis=chassis_name,
-        )
+        rows = [r for r in find_devices() if r.ok and isinstance(r, NIDaqDiscoveryResult)]
+        for row in rows:
+            if row.port != module_name:
+                continue
+            return NIDAQDeviceInfo(
+                product_type=row.product_type,
+                serial_number=row.serial_number or None,
+                physical_module=row.physical_module or module_name,
+                chassis=row.chassis,
+            )
+        return None
 
     def _record_for_reading(self, reading: DaqReading) -> SourceRecord:
         """Convert a :class:`DaqReading` into a wide-row :class:`SourceRecord`.
 
-        Uses :func:`nidaqlib.sinks.reading_to_row` so the row schema matches
-        what an offline ``nidaqlib`` recorder would produce — important for
+        Uses :func:`nidaqlib.reading_to_row` so the row schema matches what
+        an offline ``nidaqlib`` recorder would produce — important for
         ``device_records/nidaq_polled.parquet`` parity with sim bundles.
         """
-        from nidaqlib.sinks.base import reading_to_row  # noqa: PLC0415
-
         clock = self._state.clock
         assert clock is not None
         row = reading_to_row(reading)
-        t_mono_ns = reading.monotonic_ns - clock.started_mono_ns
+        t_mono_ns = reading.t_mono_ns - clock.started_mono_ns
         self._state.seq += 1
         adapter_id = self.params.adapter_id()
         return SourceRecord(
@@ -735,7 +717,7 @@ class NIDAQAdapter:
             device=self.name,
             shape="wide_row",
             t_mono_ns=t_mono_ns,
-            t_utc=reading.midpoint_at,
+            t_utc=reading.t_utc,
             row=row,
             metadata={"task": reading.task or self.params.task_name},
         )
@@ -781,7 +763,7 @@ class NIDAQAdapter:
         clock = self._state.clock
         assert clock is not None
         self._state.seq += 1
-        t_mono_ns = block.monotonic_ns - clock.started_mono_ns
+        t_mono_ns = block.t_mono_ns - clock.started_mono_ns
         row: dict[str, float | int | str | bool | None] = {
             "block_index": block.block_index,
             "first_sample_index": block.first_sample_index,
@@ -807,21 +789,13 @@ class NIDAQAdapter:
     def _channel_samples_for_block(self, block: DaqBlock, record_id: str) -> Iterator[Any]:
         """Unroll one rectangular block into per-(channel, sample) :class:`ChannelSample`\\ s.
 
-        Per the :class:`DaqBlock` contract::
-
-            t_utc[k] = block.task_started_at + (block.first_sample_index + k) / block.sample_rate_hz
-
-        Converted to capa's run-relative monotonic ns by anchoring to
-        :attr:`RunClock.started_utc` — the run anchor captures both UTC
-        and monotonic at the same instant, so UTC drift over a single
-        run stays sub-millisecond on a sane host."""
+        Uses :func:`nidaqlib.block_to_rows` for the per-sample fan-out —
+        the library reconstructs each sample's monotonic timestamp from
+        ``block.t_mono_ns + k * block.block_period_ns``. capa subtracts
+        ``RunClock.started_mono_ns`` to land in the run-relative frame.
+        """
         clock = self._state.clock
         assert clock is not None
-        rate = block.sample_rate_hz
-        if rate is None or rate <= 0:
-            return  # Cannot reconstruct timestamps without a rate.
-        run_started_utc = clock.started_utc
-        n_samples = block.samples_per_channel
 
         bindings: dict[str, ChannelSpec] = {}
         task_name = block.task or self.params.task_name
@@ -832,33 +806,28 @@ class NIDAQAdapter:
                 continue
             bindings[binding.channel] = spec
 
-        # Anchor in ns up-front so per-sample arithmetic stays in integer space
-        # at the last step; otherwise the float multiplication
-        # ``t_relative_s * 1e9`` rounds 1 ULP either way of an integer ns
-        # boundary and the resulting ``int(...)`` truncation can wobble ±1.
-        anchor_offset_s = (block.task_started_at - run_started_utc).total_seconds()
-        for channel_idx, channel_name in enumerate(block.channels):
+        if not bindings:
+            return
+
+        for row in block_to_rows(block):
+            channel_name = cast("str", row["channel"])
             bound_spec = bindings.get(channel_name)
             if bound_spec is None:
                 continue
-            for k in range(n_samples):
-                absolute_index = block.first_sample_index + k
-                t_relative_s = anchor_offset_s + absolute_index / rate
-                t_mono_ns = round(t_relative_s * 1e9)
-                raw_value = float(block.data[channel_idx, k])
-                yield build_channel_sample(
-                    spec=bound_spec,
-                    raw_value=raw_value,
-                    t_mono_ns=t_mono_ns,
-                    source_record_id=record_id,
-                    source_field=channel_name,
-                )
+            row_t_mono = cast("int", row["t_mono_ns"])
+            yield build_channel_sample(
+                spec=bound_spec,
+                raw_value=float(cast("float", row["value"])),
+                t_mono_ns=row_t_mono - clock.started_mono_ns,
+                source_record_id=record_id,
+                source_field=channel_name,
+            )
 
     def _channel_samples_for(self, reading: DaqReading, record_id: str) -> list[DeviceEmission]:
         """Map ``reading`` against the configured :class:`NIDAQReadingField` bindings."""
         clock = self._state.clock
         assert clock is not None
-        t_mono_ns = reading.monotonic_ns - clock.started_mono_ns
+        t_mono_ns = reading.t_mono_ns - clock.started_mono_ns
         emissions: list[DeviceEmission] = []
         values: Mapping[str, float | int | bool] = reading.values
         task_name = reading.task or self.params.task_name
@@ -901,13 +870,14 @@ class NIDAQAdapter:
         Like :meth:`watchdog_state`, this inlines the mode-aware
         ``_expected_period_ns()`` rather than going through
         :meth:`AdapterRuntimeState.compute_health` (which assumes
-        ``1/rate_hz``).
+        ``1/rate_hz``). Reads the recoverable-error counter directly
+        from the session — the recorder owns it now.
         """
         if self._state.lifecycle.state == "closed":
             return "down"
         if self._state.lifecycle.state == "open":
             return "ok"
-        if self._state.recoverable_error_count > 0:
+        if self._session is not None and self._session.recoverable_error_count > 0:
             return "degraded"
         age_ns = self._state.last_sample.age_ns(now_t_mono_ns=clock.t_mono_ns())
         if age_ns is not None:
@@ -923,7 +893,9 @@ class NIDAQAdapter:
             "channel_count_declared": len(self.params.channels),
             "channel_count_bound": len(self._channels),
             "state": self._state.lifecycle.state,
-            "recoverable_errors": self._state.recoverable_error_count,
+            "recoverable_errors": (
+                self._session.recoverable_error_count if self._session is not None else 0
+            ),
             "block_mode": self.params.is_block_mode(),
         }
         if self._task_spec is not None:
@@ -957,25 +929,27 @@ async def handshake(params: dict[str, Any]) -> str:
     read-only handshake."
     """
     parsed = NIDAQAdapterParams.model_validate(params)
-    try:
-        from nidaqlib.system.discovery import list_devices  # noqa: PLC0415
-    except ImportError as exc:
-        raise AdapterError(f"nidaq handshake: nidaqmx not installed: {exc}") from exc
 
-    try:
-        devices = list_devices()
-    except NIDaqError as exc:
-        raise AdapterError(f"nidaq handshake: {exc}") from exc
+    rows = find_devices()
+    failures = [r for r in rows if not r.ok]
+    if failures and not any(r.ok for r in rows):
+        # Driver/runtime failure surfaces as a single ok=False row.
+        err = failures[0].error
+        raise AdapterError(f"nidaq handshake: {err}")
+
+    healthy = [r for r in rows if r.ok and r.device_info is not None]
 
     # Build a flat set of all known physical-channel names across the system.
     known: set[str] = set()
-    for d in devices:
-        known.update(d.ai_physical_channels)
-        known.update(d.ao_physical_channels)
-        known.update(d.di_lines)
-        known.update(d.do_lines)
-        known.update(d.ci_physical_channels)
-        known.update(d.co_physical_channels)
+    for r in healthy:
+        info = r.device_info
+        assert info is not None
+        known.update(info.ai_physical_channels)
+        known.update(info.ao_physical_channels)
+        known.update(info.di_lines)
+        known.update(info.do_lines)
+        known.update(info.ci_physical_channels)
+        known.update(info.co_physical_channels)
 
     missing: list[str] = []
     for ch in parsed.channels:
@@ -993,7 +967,12 @@ async def handshake(params: dict[str, Any]) -> str:
         )
 
     device_summary = (
-        ", ".join(f"{d.name}={d.product_type or '?'}" for d in devices) or "(no devices)"
+        ", ".join(
+            f"{r.device_info.name}={r.device_info.product_type or '?'}"
+            for r in healthy
+            if r.device_info is not None
+        )
+        or "(no devices)"
     )
     return (
         f"nidaq task={parsed.task_name} channels={len(parsed.channels)} "
@@ -1009,38 +988,28 @@ async def handshake(params: dict[str, Any]) -> str:
 async def discover() -> list[dict[str, Any]]:
     """Enumerate NI devices visible on the local system.
 
-    Wraps :func:`nidaqlib.system.discovery.list_devices`. One row per
-    physical NI device, with channel inventories listed inline. Returns
-    an empty list when ``nidaqmx`` is not installed, the NI runtime is
-    missing, or no NI hardware is present — the function is safe to call
-    on a workstation with none of those.
+    Wraps :func:`nidaqlib.find_devices`. One row per physical NI device,
+    with channel inventories listed inline. Driver/runtime failures
+    surface as ``ok=False`` rows from the lib; this hook filters them out
+    (the function is meant to be safe to call from an idle CLI).
     """
-    try:
-        from nidaqlib.system.discovery import list_devices  # noqa: PLC0415
-    except ImportError:
-        return []
-    try:
-        devices = list_devices()
-    except (NIDaqError, Exception):
-        # nidaqmx itself raises ``DaqNotFoundError`` (not subclassed from
-        # ``NIDaqError``) when the NI runtime is missing. Catch anything —
-        # ``discover`` is meant to be safe to call from an idle CLI.
-        return []
-
     out: list[dict[str, Any]] = []
-    for d in devices:
+    for r in find_devices():
+        if not r.ok or r.device_info is None:
+            continue
+        info = r.device_info
         out.append(
             {
                 "adapter": "nidaq",
-                "device": d.name,
-                "product_type": d.product_type,
-                "serial": d.serial_number,
-                "ai_channels": list(d.ai_physical_channels),
-                "ao_channels": list(d.ao_physical_channels),
-                "di_lines": list(d.di_lines),
-                "do_lines": list(d.do_lines),
-                "ci_channels": list(d.ci_physical_channels),
-                "co_channels": list(d.co_physical_channels),
+                "device": info.name,
+                "product_type": info.product_type,
+                "serial": info.serial_number,
+                "ai_channels": list(info.ai_physical_channels),
+                "ao_channels": list(info.ao_physical_channels),
+                "di_lines": list(info.di_lines),
+                "do_lines": list(info.do_lines),
+                "ci_channels": list(info.ci_physical_channels),
+                "co_channels": list(info.co_physical_channels),
             }
         )
     return out

@@ -28,22 +28,27 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Literal
 
-import anyio
 import sartoriuslib
 from pydantic import BaseModel, ConfigDict, Field
-from sartoriuslib.devices.balance import Balance
-from sartoriuslib.devices.models import CalRecord, DeviceInfo, Reading
-from sartoriuslib.errors import SartoriusError
-from sartoriuslib.manager import DeviceResult
-from sartoriuslib.protocol.base import ProtocolKind
-from sartoriuslib.sinks.base import sample_to_row
-from sartoriuslib.streaming import OverflowPolicy
+from sartoriuslib import (
+    Balance,
+    CalRecord,
+    DeviceInfo,
+    DiscoverySummary,
+    OverflowPolicy,
+    PollSourceAdapter,
+    ProtocolKind,
+    Reading,
+    SartoriusError,
+    sample_to_row,
+    summarize_discovery,
+)
 from sartoriuslib.streaming.recorder import record as sartorius_record
-from sartoriuslib.transport.base import SerialSettings
+from sartoriuslib.transport import SerialSettings
 
 from capa.channels.spec import ChannelSpec, SartoriusReading
 from capa.core.clock import RunClock
@@ -78,35 +83,6 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 ADAPTER_ID: Final[str] = "sartorius"
-
-COLD_OPEN_RETRY_ATTEMPTS: Final[int] = 3
-"""Total ``_build_balance`` attempts on cold open. A fresh USB plug can
-race the first byte; subsequent attempts usually succeed.
-Three attempts × the backoff schedule below caps the worst-case open at
-~1.4 s before giving up — acceptable during startup."""
-
-COLD_OPEN_RETRY_BACKOFF_S: Final[tuple[float, ...]] = (0.2, 0.4, 0.8)
-"""Backoff between cold-open attempts. Used positionally — index ``i`` is
-the sleep BEFORE attempt ``i+1`` (so attempt 1 has no preceding sleep)."""
-
-_COLD_OPEN_RACE_MARKERS: Final[tuple[str, ...]] = (
-    "frame too short",
-    "got 0 bytes",
-)
-"""Substrings that identify the well-known cold-open race in
-``sartoriuslib``. Other ``SartoriusError`` shapes (checksum, timeout, bad
-device id) re-raise immediately without retry — they're not transient."""
-
-
-def _is_cold_open_race(exc: SartoriusError) -> bool:
-    """True iff ``exc``'s message matches a known transient cold-open race.
-
-    String matching is brittle; a future :class:`sartoriuslib.errors`
-    shape with a typed ``FrameTooShortError`` would replace this. Until
-    then, the substring set above is the contract with upstream.
-    """
-    msg = str(exc).lower()
-    return any(marker in msg for marker in _COLD_OPEN_RACE_MARKERS)
 
 
 ProtocolName = Literal["xbpi", "sbi", "auto"]
@@ -179,36 +155,6 @@ class SartoriusAdapterParams(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Single-device PollSource — adapts one Balance to the recorder's shape.
-# ---------------------------------------------------------------------------
-
-
-class _SingleDevicePollSource:
-    """Wrap one :class:`Balance` as the recorder's
-    :class:`sartoriuslib.streaming.recorder.PollSource`.
-
-    The recorder expects a ``Mapping[str, DeviceResult[Reading]]`` per tick.
-    Errors land in the mapping with ``value=None`` and ``error`` set; the
-    recorder builds a :class:`Sample` with ``reading=None`` from that, which
-    the adapter treats as a missed tick.
-    """
-
-    __slots__ = ("_balance", "_name")
-
-    def __init__(self, name: str, balance: Balance) -> None:
-        self._name = name
-        self._balance = balance
-
-    async def poll(self, names: Any = None) -> Mapping[str, DeviceResult[Reading]]:
-        del names  # single-device, name filter is a no-op
-        try:
-            reading = await self._balance.poll()
-        except SartoriusError as exc:
-            return {self._name: DeviceResult(value=None, error=exc)}
-        return {self._name: DeviceResult(value=reading, error=None)}
-
-
-# ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
 
@@ -237,7 +183,6 @@ class SartoriusAdapter:
         "_balance",
         "_balance_factory",
         "_channels",
-        "_cold_open_retry_count",
         "_device_info",
         "_interval_max_ms",
         "_interval_min_ms",
@@ -284,7 +229,6 @@ class SartoriusAdapter:
         self._device_info: DeviceInfo | None = None
         self._channels: list[ChannelSpec] = []
         self._state = AdapterRuntimeState()
-        self._cold_open_retry_count = 0
         self._last_monotonic_ns: int | None = None
         self._interval_min_ms: float = math.inf
         self._interval_max_ms: float = 0.0
@@ -354,7 +298,13 @@ class SartoriusAdapter:
         self._state.request_stop()
 
     async def snapshot(self) -> DeviceSnapshot:
-        """Build a :class:`DeviceSnapshot` from cached identity + live health."""
+        """Build a :class:`DeviceSnapshot` from the library snapshot + live health.
+
+        Reads ``balance.snapshot()`` for identity / session counters
+        (I/O-free) and projects into capa's emission shape. Capa-only
+        fields (protocol, rate, channel-binding count, wire-spacing
+        jitter) are added on top.
+        """
         clock = self._state.clock or RunClock.now()
         return DeviceSnapshot(
             adapter=ADAPTER_ID,
@@ -362,7 +312,7 @@ class SartoriusAdapter:
             t_mono_ns=clock.t_mono_ns(),
             t_utc=datetime.now(UTC),
             health=self._compute_health(clock=clock),
-            fields=self._snapshot_fields(),
+            fields=await self._snapshot_fields(),
         )
 
     # ------------------------------------------------------------------ stream
@@ -371,7 +321,7 @@ class SartoriusAdapter:
         """Yield :class:`DeviceEmission`\\ s while sampling is active.
 
         Drives :func:`sartoriuslib.streaming.record` against a single-device
-        :class:`_SingleDevicePollSource`. Successful polls yield one
+        :class:`sartoriuslib.PollSourceAdapter`. Successful polls yield one
         :class:`SourceRecord` plus one :class:`ChannelSample` per matching
         :class:`SartoriusReading` binding. Errored polls (sartoriuslib's
         recorder still produces a :class:`Sample` with ``reading=None``)
@@ -394,7 +344,7 @@ class SartoriusAdapter:
         self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
         yield snap
 
-        source = _SingleDevicePollSource(self.name, self._balance)
+        source = PollSourceAdapter(self.name, self._balance)
 
         try:
             async with sartorius_record(
@@ -402,18 +352,17 @@ class SartoriusAdapter:
                 rate_hz=self.params.rate_hz,
                 overflow=self.params.overflow_policy(),
                 buffer_size=64,
-            ) as batches:
-                async for batch in batches:
+            ) as recording:
+                async for batch in recording.stream:
                     if self._state.stop_requested:
                         break
                     sample = batch.get(self.name)
                     if sample is None:
                         # Source returned no row at all — recorder oddity;
                         # treat as missed tick.
-                        self._state.recoverable_error_count += 1
                         continue
                     # Track wire-midpoint spacing so we can diagnose jitter.
-                    cur_mono = sample.monotonic_ns
+                    cur_mono = sample.t_mono_ns
                     if self._last_monotonic_ns is not None:
                         dt_ms = (cur_mono - self._last_monotonic_ns) / 1e6
                         if dt_ms < self._interval_min_ms:
@@ -430,8 +379,8 @@ class SartoriusAdapter:
                     if sample.reading is None:
                         # Error sample — native row is preserved (with
                         # error_type / error_message), but no calibrated
-                        # ChannelSample can be derived.
-                        self._state.recoverable_error_count += 1
+                        # ChannelSample can be derived. The session's
+                        # recoverable_error_count tracks the transient.
                         if not self.params.auto_reconnect:
                             err = sample.error
                             raise AdapterError(
@@ -738,33 +687,13 @@ class SartoriusAdapter:
     # ------------------------------------------------------------------ helpers
 
     async def _build_balance(self) -> Balance:
-        """Construct the underlying :class:`Balance`, retrying past the
-        cold-open first-byte race.
+        """Construct the underlying :class:`Balance`.
 
-        A fresh USB plug can produce ``frame too short: got 1 bytes (min 4)``
-        on the first identify; retries usually succeed. The retry policy is
-        bounded — see
-        :data:`COLD_OPEN_RETRY_ATTEMPTS` and
-        :data:`COLD_OPEN_RETRY_BACKOFF_S`. Non-cold-open ``SartoriusError``
-        shapes (checksum, timeout, bad-device-id) re-raise immediately.
-        """
-        last_exc: SartoriusError | None = None
-        for attempt in range(COLD_OPEN_RETRY_ATTEMPTS):
-            try:
-                return await self._build_balance_once()
-            except SartoriusError as exc:
-                if not _is_cold_open_race(exc):
-                    raise
-                last_exc = exc
-                self._cold_open_retry_count += 1
-                if attempt + 1 < COLD_OPEN_RETRY_ATTEMPTS:
-                    await anyio.sleep(COLD_OPEN_RETRY_BACKOFF_S[attempt])
-        assert last_exc is not None
-        raise last_exc
-
-    async def _build_balance_once(self) -> Balance:
-        """One open attempt — the test seam path or the real
-        :func:`sartoriuslib.open_device` call.
+        ``sartoriuslib.open_device`` internally swallows the well-known
+        cold-open first-byte race (frame underrun / 0-byte read) with a
+        bounded retry; capa does not need a retry loop here. Post-open
+        transients surface as :class:`SartoriusTransientTransportError`
+        and are handled by the stream loop, not by re-opening.
         """
         if self._balance_factory is not None:
             return await self._balance_factory()
@@ -795,7 +724,7 @@ class SartoriusAdapter:
         clock = self._state.clock
         assert clock is not None
         row = sample_to_row(sample)
-        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
+        t_mono_ns = sample.t_mono_ns - clock.started_mono_ns
         self._state.seq += 1
         protocol_str = sample.protocol.value if sample.protocol is not None else None
         return SourceRecord(
@@ -804,7 +733,7 @@ class SartoriusAdapter:
             device=self.name,
             shape="single_value_row",
             t_mono_ns=t_mono_ns,
-            t_utc=sample.midpoint_at,
+            t_utc=sample.t_utc,
             row=row,
             metadata={"protocol": protocol_str} if protocol_str is not None else {},
         )
@@ -816,7 +745,7 @@ class SartoriusAdapter:
         reading = sample.reading
         if reading is None:
             return []
-        t_mono_ns = sample.monotonic_ns - clock.started_mono_ns
+        t_mono_ns = sample.t_mono_ns - clock.started_mono_ns
         emissions: list[DeviceEmission] = []
         for spec in self._channels:
             binding = spec.source
@@ -864,20 +793,30 @@ class SartoriusAdapter:
         return self._state.watchdog(device=self.name, rate_hz=self.params.rate_hz)
 
     def _compute_health(self, *, clock: RunClock) -> DeviceHealth:
-        """Derive the :class:`DeviceHealth` pill from adapter state."""
+        """Derive the :class:`DeviceHealth` pill from adapter state.
+
+        Mirrors the session's ``recoverable_error_count`` into the runtime
+        state so the shared :meth:`AdapterRuntimeState.compute_health`
+        logic still applies. The session is the sole writer; we only
+        copy the value through here for the health pill.
+        """
+        if self._balance is not None:
+            self._state.recoverable_error_count = self._balance.session.recoverable_error_count
         return self._state.compute_health(clock=clock, rate_hz=self.params.rate_hz)
 
-    def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
+    async def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
+        lib_snap = await self._balance.snapshot() if self._balance is not None else None
         info = self._device_info
         interval_min = (
             None if math.isinf(self._interval_min_ms) else round(self._interval_min_ms, 2)
         )
+        recoverable = lib_snap.recoverable_error_count if lib_snap is not None else 0
         out: dict[str, float | int | str | bool | None] = {
             "protocol": self.params.protocol,
             "rate_hz": self.params.rate_hz,
             "channel_count": len(self._channels),
             "state": self._state.lifecycle.state,
-            "recoverable_errors": self._state.recoverable_error_count,
+            "recoverable_errors": recoverable,
             "wire_interval_min_ms": interval_min,
             "wire_interval_max_ms": round(self._interval_max_ms, 2)
             if self._interval_max_ms
@@ -894,11 +833,14 @@ class SartoriusAdapter:
                 expected_ms,
                 self._interval_narrow_count,
             )
+        if lib_snap is not None:
+            if lib_snap.family is not None:
+                out["family"] = lib_snap.family.value
+            out["lib_protocol"] = lib_snap.protocol.value
         if info is not None:
             out["model"] = info.model
             out["serial"] = info.serial
             out["manufacturer"] = info.manufacturer
-            out["family"] = info.family.value
             out["software"] = info.software
             if info.firmware is not None:
                 out["firmware"] = str(info.firmware)
@@ -950,17 +892,12 @@ async def discover(
 ) -> list[dict[str, Any]]:
     """Probe local serial ports for Sartorius balances, sweeping baudrates.
 
-    Thin wrapper over :func:`sartoriuslib.find_devices` (shipped in
-    sartoriuslib 0.3.1). For each port the library sweeps the
-    requested baudrates (defaults to
-    :data:`sartoriuslib.DEFAULT_DISCOVERY_BAUDRATES` —
-    ``(9600, 19200, 38400, 57600, 115200)``) and returns the first
-    baud that resolves a wire protocol. The probe is read-only.
-
-    Returns one dict per port that responded with a recognised
-    protocol. The library's discover only resolves the wire protocol
-    (xBPI vs SBI); use ``capa validate --strict`` after wiring the
-    device into a config to get model / serial / firmware.
+    Thin wrapper over :func:`sartoriuslib.find_devices`. Under the
+    unified API ``find_devices`` returns one
+    :class:`SartoriusDiscoveryResult` per (port × baudrate) probe;
+    capa folds the per-probe rows into per-port summaries via
+    :func:`sartoriuslib.summarize_discovery` so the operator sees
+    one row per port that responded.
     """
     if ports is not None and not ports:
         return []
@@ -974,17 +911,18 @@ async def discover(
     except SartoriusError:
         return []
 
+    summaries: list[DiscoverySummary] = summarize_discovery(results)
     out: list[dict[str, Any]] = []
-    for result in results:
-        if not result.ok or result.protocol is None:
+    for summary in summaries:
+        if not summary.ok or summary.protocol is None:
             continue
         out.append(
             {
                 "adapter": ADAPTER_ID,
-                "port": result.port,
-                "protocol": result.protocol.value,
-                "baudrate": result.baudrate,
-                "autoprint_active": result.autoprint_active,
+                "port": summary.port,
+                "protocol": summary.protocol.value,
+                "baudrate": summary.baudrate,
+                "autoprint_active": summary.autoprint_active,
             }
         )
     return out

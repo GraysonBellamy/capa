@@ -1,9 +1,9 @@
 """Sartorius module-level ``discover()``.
 
-Verifies the in-repo wrapper around :func:`sartoriuslib.find_devices`
-(shipped in sartoriuslib 0.3.1). The library sweeps baudrates per
-port, first-hit-wins, and emits one :class:`FindResult` per port with
-an explicit ``ok`` flag.
+Verifies the in-repo wrapper around :func:`sartoriuslib.find_devices`.
+Under the unified API the library returns one :class:`SartoriusDiscoveryResult`
+per probe (port × baudrate); capa folds these into per-port summaries via
+:func:`sartoriuslib.summarize_discovery` before emitting rows.
 """
 
 from __future__ import annotations
@@ -12,28 +12,34 @@ from typing import Any
 
 import pytest
 import sartoriuslib
-from sartoriuslib.protocol.base import ProtocolKind
+from sartoriuslib import ProtocolKind, SartoriusDiscoveryResult
 
 from capa.devices import sartorius
 
 
-class _StubFindResult:
-    def __init__(
-        self,
-        *,
-        port: str,
-        baudrate: int,
-        protocol: ProtocolKind | None,
-        ok: bool,
-        autoprint_active: bool = False,
-        error: Exception | None = None,
-    ) -> None:
-        self.port = port
-        self.baudrate = baudrate
-        self.protocol = protocol
-        self.ok = ok
-        self.autoprint_active = autoprint_active
-        self.error = error
+def _probe(
+    *,
+    port: str,
+    baudrate: int,
+    protocol: ProtocolKind | None,
+    ok: bool,
+    autoprint_active: bool = False,
+    error: Exception | None = None,
+) -> SartoriusDiscoveryResult:
+    return SartoriusDiscoveryResult(
+        ok=ok,
+        port=port,
+        address=None,
+        baudrate=baudrate,
+        protocol=protocol,
+        device_info=None,
+        error=error,
+        elapsed_s=0.0,
+        parity="O",
+        stopbits=1,
+        autoprint_active=autoprint_active,
+        pending_lines=(),
+    )
 
 
 @pytest.mark.anyio
@@ -43,20 +49,10 @@ async def test_sartorius_discover_yields_row_per_successful_port(
     """Each ``ok=True`` port becomes one row carrying the resolved baud
     and protocol."""
 
-    async def fake_find_devices(**_kwargs: Any) -> list[_StubFindResult]:
+    async def fake_find_devices(**_kwargs: Any) -> list[SartoriusDiscoveryResult]:
         return [
-            _StubFindResult(
-                port="COM3",
-                baudrate=19200,
-                protocol=ProtocolKind.XBPI,
-                ok=True,
-            ),
-            _StubFindResult(
-                port="COM4",
-                baudrate=115200,
-                protocol=None,
-                ok=False,
-            ),
+            _probe(port="COM3", baudrate=19200, protocol=ProtocolKind.XBPI, ok=True),
+            _probe(port="COM4", baudrate=115200, protocol=None, ok=False),
         ]
 
     monkeypatch.setattr(sartoriuslib, "find_devices", fake_find_devices)
@@ -78,10 +74,10 @@ async def test_sartorius_discover_forwards_baudrate_sweep(
     """Explicit ``baudrates`` are forwarded to ``find_devices``."""
     seen_kwargs: dict[str, Any] = {}
 
-    async def fake_find_devices(**kwargs: Any) -> list[_StubFindResult]:
+    async def fake_find_devices(**kwargs: Any) -> list[SartoriusDiscoveryResult]:
         seen_kwargs.update(kwargs)
         return [
-            _StubFindResult(
+            _probe(
                 port="COM3",
                 baudrate=38400,
                 protocol=ProtocolKind.SBI,
@@ -106,7 +102,7 @@ async def test_sartorius_discover_returns_empty_when_no_ports(
     """An empty ``ports`` list short-circuits without hitting the library."""
     called: list[bool] = []
 
-    async def fake_find_devices(**_kwargs: Any) -> list[_StubFindResult]:
+    async def fake_find_devices(**_kwargs: Any) -> list[SartoriusDiscoveryResult]:
         called.append(True)
         return []
 
@@ -124,7 +120,7 @@ async def test_sartorius_discover_swallows_library_errors(
     """A ``SartoriusError`` from ``find_devices`` returns an empty list
     rather than propagating."""
 
-    async def boom(**_kwargs: Any) -> list[_StubFindResult]:
+    async def boom(**_kwargs: Any) -> list[SartoriusDiscoveryResult]:
         raise sartoriuslib.SartoriusConfigurationError("bad config")
 
     monkeypatch.setattr(sartoriuslib, "find_devices", boom)

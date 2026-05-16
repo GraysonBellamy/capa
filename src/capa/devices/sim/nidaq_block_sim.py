@@ -18,12 +18,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
 import anyio
 import numpy as np
-from nidaqlib.tasks.models import DaqBlock
+from nidaqlib import DaqBlock
 
 from capa.channels.spec import ChannelSpec
 from capa.core.clock import RunClock
@@ -87,7 +88,7 @@ class NIDAQBlockSim:
     _seq: int = 0
     _block_index: int = 0
     _first_sample_index: int = 0
-    _task_started_at_utc: object | None = None
+    _task_started_at_utc: datetime | None = None
     _blocks: list[DaqBlock] = field(default_factory=list)
     """In-memory log of emitted blocks. The block sidecar reads from this
     when finalizing the bundle; tests inspect it directly."""
@@ -155,12 +156,13 @@ class NIDAQBlockSim:
 
     def tick_once(self) -> list[DeviceEmission]:
         """Emit one rectangular block."""
-        if self._clock is None:
+        if self._clock is None or self._task_started_at_utc is None:
             raise AdapterError("nidaq_block_sim.tick_once() requires start() first")
         clock = self._clock
+        task_started_at = self._task_started_at_utc
         if not self.signals:
             raise AdapterError(f"nidaq_block_sim {self.name!r}: at least one signal is required")
-        t_mono_ns, _req, _rec, midpoint_at, _t_utc, _lat = synth_timing(clock)
+        _emit_mono_ns, _req, _rec, midpoint_at, _t_utc, _lat = synth_timing(clock)
 
         channels = tuple(self.signals.keys())
         n_channels = len(channels)
@@ -180,6 +182,15 @@ class NIDAQBlockSim:
 
         units = {ch: self.units.get(ch) for ch in channels}
 
+        block_period_ns = int(1e9 / self.sample_rate_hz)
+        # block.t_mono_ns is the absolute time.monotonic_ns() of sample 0.
+        # Lock it to the task-start anchor so per-sample reconstruction
+        # (block.t_mono_ns + k * block_period_ns) lands on a uniform grid
+        # across blocks — matching what NI's hardware-clocked path produces.
+        block_t_mono_ns = clock.started_mono_ns + self._first_sample_index * block_period_ns
+        block_t_utc = task_started_at + timedelta(
+            seconds=self._first_sample_index / self.sample_rate_hz
+        )
         block = DaqBlock(
             device=self.name,
             task=self.task,
@@ -188,11 +199,12 @@ class NIDAQBlockSim:
             block_index=self._block_index,
             first_sample_index=self._first_sample_index,
             samples_per_channel=self.block_size,
-            sample_rate_hz=self.sample_rate_hz,
-            dt_s=1.0 / self.sample_rate_hz,
-            task_started_at=self._task_started_at_utc,  # type: ignore[arg-type]
-            t0=midpoint_at,
-            monotonic_ns=t_mono_ns,
+            block_period_ns=block_period_ns,
+            task_started_at=task_started_at,
+            t0=block_t_utc,
+            t_mono_ns=block_t_mono_ns,
+            t_utc=block_t_utc,
+            t_midpoint_mono_ns=block_t_mono_ns + (self.block_size * block_period_ns) // 2,
             read_started_at=midpoint_at,
             read_finished_at=midpoint_at,
             elapsed_s=self.block_period_s,
@@ -210,8 +222,8 @@ class NIDAQBlockSim:
             adapter=ADAPTER_ID,
             device=self.name,
             shape="block",
-            t_mono_ns=t_mono_ns,
-            t_utc=midpoint_at,
+            t_mono_ns=block_t_mono_ns - clock.started_mono_ns,
+            t_utc=block_t_utc,
             row={},
             block_ref=block_ref,
             metadata={

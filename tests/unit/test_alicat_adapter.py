@@ -16,12 +16,12 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from alicatlib.devices.data_frame import (
-    DataFrame,
+from alicatlib import Reading
+from alicatlib.devices.flow_controller import FlowController
+from alicatlib.devices.reading import (
     DataFrameFormat,
     DataFrameFormatFlavor,
 )
-from alicatlib.devices.flow_controller import FlowController
 
 from capa.channels.calibration import Identity
 from capa.channels.spec import (
@@ -105,20 +105,20 @@ class StubAlicatDevice:
         self.hold_valves_closed_calls: list[dict[str, Any]] = []
         self.cancel_valve_hold_calls = 0
 
-    async def poll(self) -> DataFrame:
+    async def poll(self) -> Reading:
         self.poll_calls += 1
         if self.raise_on_poll is not None:
             exc = self.raise_on_poll
             self.raise_on_poll = None
             raise exc
-        return DataFrame(
+        return Reading(
             unit_id="A",
-            format=_EMPTY_FORMAT,
+            reading_format=_EMPTY_FORMAT,
             values=MappingProxyType(dict(self._values)),
             values_by_statistic=MappingProxyType({}),
             status=frozenset(),
             received_at=datetime.now(UTC),
-            monotonic_ns=time.monotonic_ns(),
+            t_mono_ns=time.monotonic_ns(),
         )
 
     async def setpoint(self, value: float | None = None, unit: Any = None) -> Any:
@@ -213,6 +213,26 @@ class StubAlicatDevice:
     async def gas_list(self) -> Any:
         self.gas_list_calls += 1
         return {1: "Air", 2: "N2"}
+
+    @property
+    def session(self) -> Any:
+        """Mirrors :attr:`alicatlib.devices.base.Device.session` for tests.
+
+        The adapter reads ``device.session.recoverable_error_count`` for
+        health derivation under the unified API.
+        """
+        if not hasattr(self, "_session_proxy"):
+            session = MagicMock()
+            session.recoverable_error_count = 0
+            self._session_proxy = session
+        return self._session_proxy
+
+    async def snapshot(self) -> Any:
+        """Mirror of :meth:`Device.snapshot` — no I/O, derived from info."""
+        snap = MagicMock()
+        snap.recoverable_error_count = self.session.recoverable_error_count
+        snap.unit_id = self._values_unit_id if hasattr(self, "_values_unit_id") else "A"
+        return snap
 
     async def close(self) -> None:
         self.close_calls += 1

@@ -13,11 +13,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, cast
 
 import anyio
-from watlowlib.errors import WatlowValidationError
-from watlowlib.protocol.base import ProtocolKind
-from watlowlib.registry.units import Unit, coerce_unit
-from watlowlib.sinks.base import sample_to_row
-from watlowlib.streaming import Sample as WatlowSample
+from watlowlib import (
+    ProtocolKind,
+    Unit,
+    WatlowValidationError,
+    sample_to_row,
+)
+from watlowlib import (
+    Sample as WatlowSample,
+)
+from watlowlib.registry.units import coerce_unit
 
 from capa.channels.spec import ChannelSpec, WatlowParameter
 from capa.core.clock import RunClock
@@ -229,10 +234,11 @@ class WatlowSim:
                 instance=instance,
                 value=value,
                 unit=unit,
-                monotonic_ns=t_mono_ns,
+                t_mono_ns=t_mono_ns,
+                t_utc=midpoint_at,
+                t_midpoint_mono_ns=None,
                 requested_at=requested_at,
                 received_at=received_at,
-                midpoint_at=midpoint_at,
                 latency_s=latency_s,
                 raw=b"",
             )

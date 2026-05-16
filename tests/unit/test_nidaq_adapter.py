@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from nidaqlib import DeviceInfo, NIDaqDiscoveryResult
 from nidaqlib.backend.fake import FakeDaqBackend
 
 from capa.channels.calibration import Identity
@@ -347,22 +348,33 @@ class TestStreamHardwareClocked:
 
     async def test_timestamps_monotonic_with_exact_period(self) -> None:
         rate = 200.0
-        adapter, _ = _make_block_adapter(sample_rate_hz=rate, samples_per_channel=8, n_blocks=2)
+        spc = 8
+        adapter, _ = _make_block_adapter(sample_rate_hz=rate, samples_per_channel=spc, n_blocks=2)
         await adapter.open()
         try:
             await adapter.start(make_start_ctx())
             emissions = await _drain(adapter, max_records=2)
         finally:
             await adapter.close()
-        _, samples, _ = _split(emissions)
-        # Group samples by channel, in emission order.
-        ai0 = [s for s in samples if s.channel == "ai0_volts"]
-        ai1 = [s for s in samples if s.channel == "ai1_volts"]
-        assert len(ai0) >= 2 and len(ai1) >= 2
+        records, samples, _ = _split(emissions)
         expected_step_ns = int(1e9 / rate)
-        for series in (ai0, ai1):
-            diffs = [series[i + 1].t_mono_ns - series[i].t_mono_ns for i in range(len(series) - 1)]
-            assert all(d == expected_step_ns for d in diffs), diffs
+        # Intra-block: samples reconstruct off ``block.t_mono_ns`` with exact
+        # ``block_period_ns`` strides. Inter-block timing reflects real read
+        # jitter (the lib captures t_mono_ns at read-start), so we group by
+        # source record before checking strides.
+        for r in records[:2]:
+            ai0 = [
+                s for s in samples if s.source_record_id == r.record_id and s.channel == "ai0_volts"
+            ]
+            ai1 = [
+                s for s in samples if s.source_record_id == r.record_id and s.channel == "ai1_volts"
+            ]
+            assert len(ai0) == spc and len(ai1) == spc
+            for series in (ai0, ai1):
+                diffs = [
+                    series[i + 1].t_mono_ns - series[i].t_mono_ns for i in range(len(series) - 1)
+                ]
+                assert all(d == expected_step_ns for d in diffs), diffs
 
     async def test_source_record_id_back_pointers(self) -> None:
         adapter, _ = _make_block_adapter(samples_per_channel=3, n_blocks=2)
@@ -510,17 +522,45 @@ class TestWatchdog:
 
 class TestDeviceInfoProbe:
     """``device_info`` is populated by matching channel module against
-    ``nidaqlib.system.discovery.list_devices``. Tests stub the discovery
-    function so they don't touch ``nidaqmx``."""
+    :func:`nidaqlib.find_devices`. Tests stub the discovery function so
+    they don't touch ``nidaqmx``."""
+
+    @staticmethod
+    def _make_row(
+        port: str,
+        product_type: str,
+        serial: str | None,
+        *,
+        chassis: str | None = None,
+    ) -> NIDaqDiscoveryResult:
+        info = DeviceInfo(
+            name=port,
+            product_type=product_type,
+            serial_number=serial,
+            ai_physical_channels=(),
+            ao_physical_channels=(),
+            di_lines=(),
+            do_lines=(),
+            ci_physical_channels=(),
+            co_physical_channels=(),
+        )
+        return NIDaqDiscoveryResult(
+            ok=True,
+            port=port,
+            device_info=info,
+            product_type=product_type,
+            serial_number=serial,
+            chassis=chassis,
+            physical_module=port,
+            elapsed_s=0.0,
+        )
 
     async def test_device_info_none_when_discovery_returns_empty(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # FakeDaqBackend doesn't go through the real ``list_devices``; with
-        # nothing returned the probe must yield None and not raise.
-        import nidaqlib.system.discovery as discovery
-
-        monkeypatch.setattr(discovery, "list_devices", lambda: [])
+        # FakeDaqBackend doesn't go through real discovery; with an empty
+        # list the probe must yield None and not raise.
+        monkeypatch.setattr("capa.devices.nidaq.find_devices", lambda: [])
         adapter, _ = _make_adapter()
         await adapter.open()
         try:
@@ -531,63 +571,33 @@ class TestDeviceInfoProbe:
     async def test_device_info_populated_from_module_match(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A channel ``Dev1/ai0`` matches a ``Dev1`` device row → identity wired."""
-        import nidaqlib.system.discovery as discovery
-
-        class _FakeDevice:
-            def __init__(self, name: str, product_type: str, serial: int | str | None) -> None:
-                self.name = name
-                self.product_type = product_type
-                self.serial_number = serial
-                self.ai_physical_channels: tuple[str, ...] = ()
-                self.ao_physical_channels: tuple[str, ...] = ()
-                self.di_lines: tuple[str, ...] = ()
-                self.do_lines: tuple[str, ...] = ()
-                self.ci_physical_channels: tuple[str, ...] = ()
-                self.co_physical_channels: tuple[str, ...] = ()
-
+        """A channel ``Dev1/ai0`` matches a ``Dev1`` row → identity wired."""
         # Single-board device (no chassis).
-        monkeypatch.setattr(
-            discovery,
-            "list_devices",
-            lambda: [_FakeDevice("Dev1", "PCIe-6320", 12345678)],
-        )
+        rows = [self._make_row("Dev1", "PCIe-6320", "12345678")]
+        monkeypatch.setattr("capa.devices.nidaq.find_devices", lambda: rows)
         adapter, _ = _make_adapter()
         await adapter.open()
         try:
             info = adapter.device_info
             assert info is not None
             assert info.product_type == "PCIe-6320"
-            assert info.serial_number == "12345678"  # int coerced to str
+            assert info.serial_number == "12345678"
             assert info.physical_module == "Dev1"
             assert info.chassis is None
         finally:
             await adapter.close()
 
     async def test_device_info_resolves_cdaq_chassis(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """``cDAQ1Mod1/ai0`` → module = ``cDAQ1Mod1``, chassis = ``cDAQ1`` when both exist."""
-        import nidaqlib.system.discovery as discovery
+        """``cDAQ1Mod1/ai0`` → module = ``cDAQ1Mod1``, chassis = ``cDAQ1``.
 
-        class _FakeDevice:
-            def __init__(self, name: str, product_type: str, serial: int | None) -> None:
-                self.name = name
-                self.product_type = product_type
-                self.serial_number = serial
-                self.ai_physical_channels: tuple[str, ...] = ()
-                self.ao_physical_channels: tuple[str, ...] = ()
-                self.di_lines: tuple[str, ...] = ()
-                self.do_lines: tuple[str, ...] = ()
-                self.ci_physical_channels: tuple[str, ...] = ()
-                self.co_physical_channels: tuple[str, ...] = ()
-
-        monkeypatch.setattr(
-            discovery,
-            "list_devices",
-            lambda: [
-                _FakeDevice("cDAQ1", "cDAQ-9171", 31195776),
-                _FakeDevice("cDAQ1Mod1", "NI 9214", 26994925),
-            ],
-        )
+        Under the unified API, ``find_devices`` populates ``chassis`` on
+        :class:`NIDaqDiscoveryResult` directly (the lib resolves it).
+        """
+        rows = [
+            self._make_row("cDAQ1", "cDAQ-9171", "31195776"),
+            self._make_row("cDAQ1Mod1", "NI 9214", "26994925", chassis="cDAQ1"),
+        ]
+        monkeypatch.setattr("capa.devices.nidaq.find_devices", lambda: rows)
 
         backend = FakeDaqBackend(read_block_default_shape=(2, 1))
         adapter = NIDAQAdapter(
@@ -668,20 +678,8 @@ class TestDeviceInfoProbe:
             await adapter.close()
 
     async def test_device_info_cleared_on_close(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import nidaqlib.system.discovery as discovery
-
-        class _FakeDevice:
-            name = "Dev1"
-            product_type = "PCIe-6320"
-            serial_number = 1
-            ai_physical_channels: tuple[str, ...] = ()
-            ao_physical_channels: tuple[str, ...] = ()
-            di_lines: tuple[str, ...] = ()
-            do_lines: tuple[str, ...] = ()
-            ci_physical_channels: tuple[str, ...] = ()
-            co_physical_channels: tuple[str, ...] = ()
-
-        monkeypatch.setattr(discovery, "list_devices", lambda: [_FakeDevice()])
+        rows = [TestDeviceInfoProbe._make_row("Dev1", "PCIe-6320", "1")]
+        monkeypatch.setattr("capa.devices.nidaq.find_devices", lambda: rows)
         adapter, _ = _make_adapter()
         await adapter.open()
         assert adapter.device_info is not None
