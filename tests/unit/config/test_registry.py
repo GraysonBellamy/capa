@@ -67,6 +67,29 @@ def test_channel_templates_canonical_set() -> None:
     assert expected.issubset(template_ids)
 
 
+def test_nidaq_thermocouple_template_defaults_match_nidaq_units() -> None:
+    """NIDAQ_THERMOCOUPLE must default to degC to match NIDAQThermocoupleConfig.
+
+    The NI-side ``NIDAQThermocoupleConfig.units`` defaults to ``"DEG_C"``, so
+    a capa channel created from this template against the typical TC rig must
+    label its samples ``degC`` — otherwise the run records a DEG_C reading
+    against a K unit (silent ~273° offset for any downstream consumer that
+    trusts the capa unit).
+    """
+    from capa.devices._templates import NIDAQ_THERMOCOUPLE
+    from capa.devices.nidaq_channels import NIDAQThermocoupleConfig
+
+    assert NIDAQ_THERMOCOUPLE.default_unit == "degC"
+    assert NIDAQ_THERMOCOUPLE.default_derived_unit == "degC"
+    assert NIDAQ_THERMOCOUPLE.default_calibration == {
+        "kind": "identity",
+        "input_unit": "degC",
+        "output_unit": "degC",
+    }
+    # NI-side default that the template must agree with.
+    assert NIDAQThermocoupleConfig.model_fields["units"].default == "DEG_C"
+
+
 def test_channel_template_source_factory_produces_valid_binding() -> None:
     d = get_descriptor("capa.devices.watlow")
     assert d is not None

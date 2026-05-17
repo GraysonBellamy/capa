@@ -251,6 +251,148 @@ def _layer2_referential(config: Any, document: ConfigDocument) -> list[ConfigPro
                     source_file=document.hardware_path,
                 )
             )
+
+    problems.extend(_layer2_nidaq_join(hardware, document))
+    return problems
+
+
+def _layer2_nidaq_join(hardware: Any, document: ConfigDocument) -> list[ConfigProblem]:
+    """Validate the NI-DAQ join between ``devices.params.channels`` and
+    top-level ``[[channels]]``.
+
+    Two checks, both previously silent:
+
+    * ``channels.binding_field_unresolved`` — an ``NIDAQReadingField`` /
+      ``NIDAQBlockChannel`` binding names a ``(device, task, field)`` that
+      doesn't resolve against any declared NI channel. At runtime the
+      adapter ``continue``\\ s past the missing field and the capa channel
+      silently emits nothing.
+    * ``devices.nidaq.duplicate_channel_name`` — two NI channel rows
+      within the same task share a display name. ``DaqReading.values`` is
+      a dict keyed by display name; duplicates make the second row
+      shadow the first non-deterministically.
+    """
+    from capa.devices.nidaq_join import (  # noqa: PLC0415
+        declared_channels_from_config,
+        nidaq_task_keys_from_config,
+    )
+
+    problems: list[ConfigProblem] = []
+    declared = declared_channels_from_config(hardware)
+    task_keys = nidaq_task_keys_from_config(hardware)
+    if not declared and not task_keys:
+        return problems
+
+    declared_by_key: dict[tuple[str, str, str], list[int]] = {}
+    fields_by_device_task: dict[tuple[str, str], list[str]] = {}
+    for i, d in enumerate(declared):
+        key = (d.device_name, d.task_name, d.field_name)
+        declared_by_key.setdefault(key, []).append(i)
+        fields_by_device_task.setdefault((d.device_name, d.task_name), []).append(d.field_name)
+
+    # ----- duplicate NI display names within a task -----
+    seen_duplicates: set[tuple[str, str, str]] = set()
+    for key, indices in declared_by_key.items():
+        if len(indices) < 2 or key in seen_duplicates:
+            continue
+        seen_duplicates.add(key)
+        device_name, task_name, field_name = key
+        problems.append(
+            ConfigProblem(
+                severity="error",
+                code="devices.nidaq.duplicate_channel_name",
+                message=(
+                    f"device {device_name!r} task {task_name!r}: NI channel name "
+                    f"{field_name!r} is declared {len(indices)} times — display names must be "
+                    "unique within a task (DaqReading.values is keyed by name)"
+                ),
+                section="devices",
+                path=("devices", device_name, "params", "channels"),
+                source_file=document.hardware_path,
+            )
+        )
+
+    # ----- bindings that don't resolve to any declared NI channel -----
+    nidaq_bind_kinds = ("nidaq_reading_field", "nidaq_block_channel")
+    for idx, ch in enumerate(hardware.channels):
+        binding = ch.source
+        binding_src = getattr(binding, "source", None)
+        if binding_src not in nidaq_bind_kinds:
+            continue
+        device_name = getattr(binding, "device", None)
+        task_name = getattr(binding, "task", None)
+        field_attr = "field" if binding_src == "nidaq_reading_field" else "channel"
+        field_name = getattr(binding, field_attr, None)
+        if not (
+            isinstance(device_name, str)
+            and isinstance(task_name, str)
+            and isinstance(field_name, str)
+        ):
+            continue
+        if (device_name, task_name, field_name) in declared_by_key:
+            continue
+        # If the device exists but isn't NI, the family-mismatch check above
+        # already flagged it — don't double-emit.
+        task_key = (device_name, task_name)
+        known_fields = fields_by_device_task.get(task_key)
+        if known_fields is None and task_key in task_keys:
+            known_fields = []
+        if known_fields is None:
+            # No NI task with this (device, task) at all. Could mean a
+            # mistyped task name, or the device just hasn't been declared
+            # as an NI device. Family mismatch covers the latter; for the
+            # former, surface the available tasks on the device.
+            available_tasks = sorted(
+                {t for (d, t) in fields_by_device_task if d == device_name}
+                | {t for (d, t) in task_keys if d == device_name}
+            )
+            if not available_tasks:
+                continue
+            problems.append(
+                ConfigProblem(
+                    severity="error",
+                    code="channels.binding_field_unresolved",
+                    message=(
+                        f"channel {ch.name!r} binds to {device_name!r}.{task_name!r} but "
+                        f"that task isn't declared on the device. Available tasks: "
+                        f"{available_tasks!r}"
+                    ),
+                    section="channels",
+                    path=("channels", idx, "source", "task"),
+                    source_file=document.hardware_path,
+                )
+            )
+            continue
+        if not known_fields:
+            problems.append(
+                ConfigProblem(
+                    severity="error",
+                    code="channels.binding_field_unresolved",
+                    message=(
+                        f"channel {ch.name!r} reads from NI field {field_name!r} on "
+                        f"{device_name!r}.{task_name!r}, but that task has no NI fields "
+                        "declared"
+                    ),
+                    section="channels",
+                    path=("channels", idx, "source", field_attr),
+                    source_file=document.hardware_path,
+                )
+            )
+            continue
+        problems.append(
+            ConfigProblem(
+                severity="error",
+                code="channels.binding_field_unresolved",
+                message=(
+                    f"channel {ch.name!r} reads from NI field {field_name!r} on "
+                    f"{device_name!r}.{task_name!r}, but that field isn't declared. "
+                    f"Available fields: {sorted(set(known_fields))!r}"
+                ),
+                section="channels",
+                path=("channels", idx, "source", field_attr),
+                source_file=document.hardware_path,
+            )
+        )
     return problems
 
 

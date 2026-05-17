@@ -72,6 +72,22 @@ def _help_from_field(field: FieldInfo) -> str | None:
     return None
 
 
+def _capa_widget_from_field(field: FieldInfo) -> str | None:
+    """Read ``Field(json_schema_extra={"capa_widget": "nidaq_channels"})``.
+
+    Lets a Pydantic field opt into a hardware-specific widget (with
+    affordances the generic factory can't supply) without breaking the
+    factory's default dispatch for every other field. Returns ``None``
+    when the field doesn't request a specialised widget.
+    """
+    extra = getattr(field, "json_schema_extra", None)
+    if isinstance(extra, dict):
+        widget_id = extra.get("capa_widget")
+        if isinstance(widget_id, str) and widget_id:
+            return widget_id
+    return None
+
+
 def _path_mode_from_field(field: FieldInfo) -> typing.Literal["file", "dir"]:
     """Read ``Field(json_schema_extra={"capa_path_mode": "dir"})``.
 

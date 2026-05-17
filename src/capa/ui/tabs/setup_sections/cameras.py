@@ -21,7 +21,6 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtWidgets import (
-    QAbstractScrollArea,
     QComboBox,
     QFormLayout,
     QHBoxLayout,
@@ -44,7 +43,11 @@ from capa.devices.registry import (
 )
 from capa.ui.forms import build_form
 from capa.ui.tabs.setup_sections._base import SectionWidget
-from capa.ui.tabs.setup_sections._models import horizontal_header, unique_name
+from capa.ui.tabs.setup_sections._models import (
+    fit_table_height,
+    horizontal_header,
+    unique_name,
+)
 
 if TYPE_CHECKING:
     from capa.ui.forms.from_model import ModelForm
@@ -222,12 +225,6 @@ class CamerasSection(SectionWidget):
         self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
-        # Size the table to its row count so the detail editor stays
-        # generous; cap so a long camera list doesn't push detail off
-        # the visible page.
-        self._table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
-        self._table.setMinimumHeight(120)
-        self._table.setMaximumHeight(500)
         header = self._table.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -235,6 +232,11 @@ class CamerasSection(SectionWidget):
         selection_model = self._table.selectionModel()
         if selection_model is not None:
             selection_model.selectionChanged.connect(self._on_row_changed)
+        # Fit to row count — CAPA rigs run a small handful of cameras.
+        self._model.rowsInserted.connect(lambda *_: self._update_table_height())
+        self._model.rowsRemoved.connect(lambda *_: self._update_table_height())
+        self._model.modelReset.connect(self._update_table_height)
+        self._update_table_height()
         table_layout.addWidget(self._table)
         splitter.addWidget(table_region)
 
@@ -332,6 +334,9 @@ class CamerasSection(SectionWidget):
 
     def payload(self) -> dict[str, object]:
         return {"cameras": self._model.cameras()}
+
+    def _update_table_height(self) -> None:
+        fit_table_height(self._table)
 
     # -- slots --------------------------------------------------------------
 

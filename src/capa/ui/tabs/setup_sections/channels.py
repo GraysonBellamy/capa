@@ -22,7 +22,6 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtWidgets import (
-    QAbstractScrollArea,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -54,7 +53,11 @@ from capa.devices.registry import (
 )
 from capa.ui.forms.widgets._nested import _DiscriminatedUnionField
 from capa.ui.tabs.setup_sections._base import SectionWidget
-from capa.ui.tabs.setup_sections._models import horizontal_header, unique_name
+from capa.ui.tabs.setup_sections._models import (
+    fit_table_height,
+    horizontal_header,
+    unique_name,
+)
 
 if TYPE_CHECKING:
     from capa.devices.registry import ChannelTemplate
@@ -126,24 +129,33 @@ _VARIANT_LABELS: dict[str, str] = {
 # We render them by hand rather than running build_form on the variant
 # class because the section wants tight control over field ordering,
 # tooltips, and field-level catalogues.
-_VARIANT_FIELDS: dict[str, tuple[tuple[str, str, type], ...]] = {
+#
+# ``choices_key`` (when not ``None``) names a provider on
+# :class:`_SourceBindingEditor` that returns the list of valid completions
+# for the field — the renderer swaps the plain QLineEdit for an editable
+# QComboBox populated from that list. For NI-DAQ ``task`` / ``field`` the
+# provider returns the declared NI channel taxonomy for the selected
+# device (see :func:`capa.devices.nidaq_join.declared_channels_from_payload`),
+# so the operator picks from the rig's real inventory instead of typing
+# a string that has to match exactly.
+_VARIANT_FIELDS: dict[str, tuple[tuple[str, str, type, str | None], ...]] = {
     "watlow_parameter": (
-        ("parameter", "Parameter", str),
-        ("instance", "Instance", int),
+        ("parameter", "Parameter", str, None),
+        ("instance", "Instance", int, None),
     ),
-    "alicat_frame_field": (("field", "Field", str),),
-    "sartorius_reading": (("field", "Field", str),),
+    "alicat_frame_field": (("field", "Field", str, None),),
+    "sartorius_reading": (("field", "Field", str, None),),
     "nidaq_reading_field": (
-        ("task", "Task", str),
-        ("field", "Field", str),
+        ("task", "Task", str, "nidaq_tasks"),
+        ("field", "Field", str, "nidaq_fields"),
     ),
     "nidaq_block_channel": (
-        ("task", "Task", str),
-        ("channel", "Channel", str),
+        ("task", "Task", str, "nidaq_tasks"),
+        ("channel", "Channel", str, "nidaq_fields"),
     ),
     "derived": (
-        ("expression", "Expression", str),
-        ("inputs", "Inputs (comma-separated)", str),
+        ("expression", "Expression", str, None),
+        ("inputs", "Inputs (comma-separated)", str, None),
     ),
 }
 
@@ -164,6 +176,13 @@ class ChannelTableModel(QAbstractTableModel):
     def __init__(self) -> None:
         super().__init__()
         self._rows: list[dict[str, Any]] = []
+        # Row index → tooltip text for the "reads from" cell. Driven by
+        # the section-level live validator (Step 4.4 of the NI-DAQ UX work):
+        # an NI binding whose ``(device, task, field)`` doesn't resolve
+        # against any declared NI channel paints the cell red and surfaces
+        # the available alternatives in the tooltip. Cleared and re-set
+        # whenever the section sees a draft / channel mutation.
+        self._row_issues: dict[int, str] = {}
 
     def channels(self) -> list[dict[str, Any]]:
         return [dict(row) for row in self._rows]
@@ -226,21 +245,48 @@ class ChannelTableModel(QAbstractTableModel):
     def data(  # type: ignore[override]
         self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> object:
-        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+        if not index.isValid():
             return None
         row = index.row()
         rec = self._rows[row] if 0 <= row < len(self._rows) else None
         if rec is None:
             return None
         key = self.COLUMN_KEYS[index.column()]
-        if key == "device":
-            source = rec.get("source") or {}
-            return str(source.get("device", "—")) if isinstance(source, dict) else "—"
-        if key == "binding":
-            source = rec.get("source") or {}
-            return str(source.get("source", "—")) if isinstance(source, dict) else "—"
-        value = rec.get(key, "")
-        return str(value) if value is not None else ""
+        if role == Qt.ItemDataRole.DisplayRole:
+            if key == "device":
+                source = rec.get("source") or {}
+                return str(source.get("device", "—")) if isinstance(source, dict) else "—"
+            if key == "binding":
+                source = rec.get("source") or {}
+                return str(source.get("source", "—")) if isinstance(source, dict) else "—"
+            value = rec.get(key, "")
+            return str(value) if value is not None else ""
+        # Row-issue surfacing — paint the "reads from" column for any row
+        # whose NI binding doesn't resolve against the declared NI inventory.
+        # Background + tooltip combined make the issue noticeable without
+        # depending on a theme that respects QPalette::Highlight.
+        if key == "binding" and row in self._row_issues:
+            from PySide6.QtGui import QBrush, QColor  # noqa: PLC0415
+
+            if role == Qt.ItemDataRole.BackgroundRole:
+                return QBrush(QColor("#3a1a1a"))  # readable on dark + light themes
+            if role == Qt.ItemDataRole.ToolTipRole:
+                return self._row_issues[row]
+        return None
+
+    def set_row_issues(self, issues: dict[int, str]) -> None:
+        """Update the per-row validation messages used to paint the
+        "reads from" cell. Issues map row indices to the tooltip text.
+        Does not emit ``channelsChanged`` — issue state isn't part of the
+        payload; only ``dataChanged`` fires so the table repaints.
+        """
+        if self._row_issues == issues:
+            return
+        self._row_issues = dict(issues)
+        if self._rows:
+            top_left = self.index(0, 0)
+            bottom_right = self.index(len(self._rows) - 1, len(self.HEADERS) - 1)
+            self.dataChanged.emit(top_left, bottom_right)
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +329,39 @@ def _channel_from_template(
     return record
 
 
+# NI temperature-unit names (TemperatureUnits enum members) → capa unit string.
+# Used by the "FROM DECLARED NI INPUTS" Add-menu entries so a channel
+# created against a real NI thermocouple row carries the right unit
+# label automatically — closing the ``K``-vs-``degC`` mismatch
+# the generic NIDAQ_THERMOCOUPLE template used to ship with.
+_NI_TEMP_UNITS_TO_CAPA: dict[str, str] = {
+    "DEG_C": "degC",
+    "DEG_F": "degF",
+    "K": "K",
+    "DEG_R": "degR",
+}
+
+
+def _nidaq_unit_kind_calibration(
+    nidaq_kind: str, nidaq_units: str | None
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Translate an NI channel row's (kind, units) into the capa channel's
+    (unit, kind, calibration) triple. Returns identity calibration when the
+    unit is known so the channel passes ChannelSpec's dimensional check.
+
+    Unknown kinds fall back to ``analog_in`` with no unit; the operator
+    can refine after creation. This keeps the menu entry useful even
+    for digital lines / counters where we haven't picked a default kind.
+    """
+    if nidaq_kind == "thermocouple":
+        unit = _NI_TEMP_UNITS_TO_CAPA.get(nidaq_units or "", "degC")
+        return unit, "tc", {"kind": "identity", "input_unit": unit, "output_unit": unit}
+    if nidaq_kind == "ai_voltage":
+        unit = nidaq_units or "V"
+        return unit, "analog_in", {"kind": "identity", "input_unit": unit, "output_unit": unit}
+    return "", "analog_in", None
+
+
 def _blank_channel(existing_names: list[str]) -> dict[str, Any]:
     return {
         "name": unique_name(existing_names, "channel"),
@@ -310,6 +389,13 @@ class _SourceBindingEditor(QWidget):
         self._kind: str | None = None
         self._current: dict[str, Any] = {}
         self._variant_fields: dict[str, QWidget] = {}
+        # Declared NI channels (from DeclaredNIDAQChannel) covering every NI
+        # device in the current draft. Used by the variant-field renderer
+        # to populate combo choices for nidaq_reading_field / nidaq_block_channel
+        # so the operator picks from real inventory instead of free-typing.
+        # Stored as a tuple of (device, task, field) so the section's
+        # callers don't have to depend on the dataclass type.
+        self._nidaq_declared: tuple[tuple[str, str, str], ...] = ()
 
         form = QFormLayout(self)
         form.setContentsMargins(0, 0, 0, 0)
@@ -334,14 +420,23 @@ class _SourceBindingEditor(QWidget):
         *,
         devices: list[dict[str, Any]],
         kind: str | None,
+        nidaq_declared: tuple[tuple[str, str, str], ...] = (),
     ) -> None:
         """Refresh the device list and channel-kind ordering hint.
 
         Called whenever the operator switches rows or edits the kind.
         Keeps the current selection if still valid.
+
+        ``nidaq_declared`` is the tuple of ``(device, task, field)`` triples
+        produced by :func:`capa.devices.nidaq_join.declared_channels_from_payload`
+        — feeds the task / field combos for NI-DAQ binding variants so the
+        operator picks from declared inventory instead of free-typing.
+        Pass an empty tuple to keep free-text behaviour (e.g. for tests
+        that don't construct the helper).
         """
         self._devices = devices
         self._kind = kind
+        self._nidaq_declared = nidaq_declared
         self._repopulate_combos()
 
     def value(self) -> dict[str, Any]:
@@ -446,12 +541,30 @@ class _SourceBindingEditor(QWidget):
         if not isinstance(variant, str):
             return
         spec = _VARIANT_FIELDS.get(variant, ())
-        for field_name, label, dtype in spec:
+        for field_name, label, dtype, choices_key in spec:
             widget: QWidget
             current_val = self._current.get(field_name)
-            if dtype is int:
+            choices = self._choices_for(choices_key)
+            if choices is not None:
+                # Editable combo so offline operators can still type a
+                # name the discovery cache doesn't know about — and so
+                # configs that load on machines without the NI driver
+                # don't lose their bindings.
+                combo = QComboBox(self)
+                combo.setEditable(True)
+                combo.addItems(choices)
+                if current_val is not None and current_val not in choices:
+                    combo.addItem(str(current_val))
+                if current_val is not None:
+                    combo.setCurrentText(str(current_val))
+                else:
+                    combo.setCurrentText("")
+                combo.currentTextChanged.connect(self._on_inner_changed)
+                widget = combo
+            elif dtype is int:
                 line = QLineEdit(str(current_val) if current_val is not None else "1")
                 line.setPlaceholderText("integer")
+                line.textChanged.connect(self._on_inner_changed)
                 widget = line
             else:
                 line = QLineEdit("")
@@ -459,11 +572,49 @@ class _SourceBindingEditor(QWidget):
                     line.setText(", ".join(str(p) for p in current_val))
                 elif current_val is not None:
                     line.setText(str(current_val))
+                line.textChanged.connect(self._on_inner_changed)
                 widget = line
-            if isinstance(widget, QLineEdit):
-                widget.textChanged.connect(self._on_inner_changed)
             self._fields_layout.addRow(label + ":", widget)
             self._variant_fields[field_name] = widget
+
+    def _choices_for(self, key: str | None) -> list[str] | None:
+        """Return completion choices for a variant field, or ``None`` for
+        free-text fields. Filters NI-channel-aware providers by the
+        currently-selected device so the combo reflects what's reachable
+        from this binding.
+        """
+        if key is None or not self._nidaq_declared:
+            return None
+        device_name = self._device_combo.currentData()
+        if not isinstance(device_name, str) or not device_name:
+            # Without a selected device we can't sensibly filter — show
+            # every declared task/field across all NI devices. Edge case
+            # in practice; the device combo defaults to the first NI device.
+            if key == "nidaq_tasks":
+                return sorted({task for (_d, task, _f) in self._nidaq_declared})
+            if key == "nidaq_fields":
+                return sorted({field for (_d, _t, field) in self._nidaq_declared})
+            return None
+        if key == "nidaq_tasks":
+            return sorted({task for (dev, task, _f) in self._nidaq_declared if dev == device_name})
+        if key == "nidaq_fields":
+            # Field choices depend on the currently-selected task as well —
+            # otherwise NI rigs with multiple tasks per chassis would show
+            # cross-task fields that don't actually resolve. Falls back to
+            # the device-wide list when no task is yet picked.
+            current_task = self._current.get("task")
+            if isinstance(current_task, str) and current_task:
+                return sorted(
+                    {
+                        field
+                        for (dev, task, field) in self._nidaq_declared
+                        if dev == device_name and task == current_task
+                    }
+                )
+            return sorted(
+                {field for (dev, _t, field) in self._nidaq_declared if dev == device_name}
+            )
+        return None
 
     def _on_device_changed(self) -> None:
         if self._suppress:
@@ -486,6 +637,14 @@ class _SourceBindingEditor(QWidget):
     def _on_inner_changed(self, _text: str) -> None:
         if self._suppress:
             return
+        sender = self.sender()
+        self._current = self.value()
+        if sender is self._variant_fields.get("task"):
+            self._suppress = True
+            try:
+                self._rebuild_variant_fields()
+            finally:
+                self._suppress = False
         self.valueChanged.emit()
 
 
@@ -517,6 +676,19 @@ class ChannelsSection(SectionWidget):
         title.setStyleSheet("font-size: 14pt; font-weight: 600;")
         outer.addWidget(title)
 
+        # Two-layer model explainer: the operator-facing description of
+        # what a "channel" is in this section vs. an "NI cDAQ input" in
+        # the Devices section. Keeps the join's first-class status visible
+        # without forcing the operator to read the glossary.
+        hint = QLabel(
+            "Capa channels are the named signals recorded into your run. For NI-DAQ, "
+            "each one reads from a row in the device's DAQ inputs table.",
+            self,
+        )
+        hint.setStyleSheet("color: #888; font-size: 9pt; padding-bottom: 4px;")
+        hint.setWordWrap(True)
+        outer.addWidget(hint)
+
         splitter = QSplitter(Qt.Orientation.Vertical, self)
 
         # -- Table region.
@@ -547,12 +719,6 @@ class ChannelsSection(SectionWidget):
         self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
-        # Grow the table viewport to fit its rows (capped) so configs with
-        # only a few channels don't waste space, and the splitter pane
-        # below stays usable when there are many.
-        self._table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
-        self._table.setMinimumHeight(120)
-        self._table.setMaximumHeight(500)
         header = self._table.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -560,6 +726,13 @@ class ChannelsSection(SectionWidget):
         selection_model = self._table.selectionModel()
         if selection_model is not None:
             selection_model.selectionChanged.connect(self._on_row_changed)
+        # Grow the table to fit its rows up to a typical rig's channel
+        # count (~15). Past that, the scrollbar comes back so a pathological
+        # config doesn't dominate the section.
+        self._model.rowsInserted.connect(lambda *_: self._update_table_height())
+        self._model.rowsRemoved.connect(lambda *_: self._update_table_height())
+        self._model.modelReset.connect(self._update_table_height)
+        self._update_table_height()
         table_layout.addWidget(self._table)
         splitter.addWidget(table_region)
 
@@ -701,10 +874,8 @@ class ChannelsSection(SectionWidget):
 
         detail_layout.addStretch(1)
         splitter.addWidget(self._detail)
-        # Table region claims its sizeHint (driven by AdjustToContents on
-        # the QTableView); detail collects the remaining space. Replaces
-        # the previous fixed [220, 400] which pinned the table small
-        # regardless of how many channels were defined.
+        # Table region claims its fixed size (driven by ``fit_table_height``);
+        # detail collects the remaining space.
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         outer.addWidget(splitter, stretch=1)
@@ -736,16 +907,86 @@ class ChannelsSection(SectionWidget):
         # Repopulate the add menu in case the device list changed (new
         # adapter family unlocks new templates).
         self._rebuild_add_menu()
+        # NI binding live validation depends on the declared NI inventory
+        # in the draft — recompute now so the table paints unresolved
+        # rows red even before the operator touches a cell.
+        self._refresh_row_issues()
 
     def payload(self) -> dict[str, object]:
         return {"channels": self._model.channels()}
+
+    def _update_table_height(self) -> None:
+        fit_table_height(self._table, max_rows=15)
 
     # -- slots: table -------------------------------------------------------
 
     def _on_rows_changed(self) -> None:
         if self._suppress:
             return
+        self._refresh_row_issues()
         self.valuesChanged.emit()
+
+    def _refresh_row_issues(self) -> None:
+        """Recompute the per-row validation issues that paint NI bindings red.
+
+        Mirrors the save-time check in :func:`_layer2_nidaq_join` but runs
+        on every model mutation so the operator sees the problem immediately
+        — the Problems panel still re-validates on the 200 ms debounce, but
+        the table-cell paint is the fast-feedback channel.
+        """
+        declared = self._current_nidaq_declared()
+        task_keys = self._current_nidaq_task_keys()
+        if not declared and not task_keys:
+            self._model.set_row_issues({})
+            return
+        declared_keys = set(declared)
+        by_device_task: dict[tuple[str, str], list[str]] = {}
+        for dev, task, field in declared:
+            by_device_task.setdefault((dev, task), []).append(field)
+        issues: dict[int, str] = {}
+        for idx, row in enumerate(self._model.channels()):
+            source = row.get("source")
+            if not isinstance(source, dict):
+                continue
+            kind = source.get("source")
+            if kind not in ("nidaq_reading_field", "nidaq_block_channel"):
+                continue
+            device = source.get("device")
+            task = source.get("task")
+            field = source.get("field") if kind == "nidaq_reading_field" else source.get("channel")
+            if not (
+                isinstance(device, str)
+                and isinstance(task, str)
+                and isinstance(field, str)
+                and device
+                and task
+                and field
+            ):
+                # Incomplete edit — let Layer-1 / Layer-2 surface this when
+                # the operator commits; don't paint mid-edit.
+                continue
+            if (device, task, field) in declared_keys:
+                continue
+            available = sorted(set(by_device_task.get((device, task), [])))
+            if available:
+                issues[idx] = (
+                    f"Field {field!r} not declared on {device}.{task}. Available: {available}"
+                )
+            elif (device, task) in task_keys:
+                issues[idx] = f"No NI fields are declared on {device}.{task}."
+            else:
+                tasks_on_device = sorted(
+                    {t for (d, t) in by_device_task if d == device}
+                    | {t for (d, t) in task_keys if d == device}
+                )
+                if tasks_on_device:
+                    issues[idx] = (
+                        f"Task {task!r} not declared on device {device!r}. "
+                        f"Available tasks: {tasks_on_device}"
+                    )
+                else:
+                    issues[idx] = f"Device {device!r} has no NI channels declared in the draft."
+        self._model.set_row_issues(issues)
 
     def _on_duplicate(self) -> None:
         if self._current_row < 0:
@@ -796,6 +1037,7 @@ class ChannelsSection(SectionWidget):
                 self._source_editor.set_context(
                     devices=self._current_devices(),
                     kind=kind,
+                    nidaq_declared=self._current_nidaq_declared(),
                 )
                 source = channel.get("source") or {}
                 if isinstance(source, dict):
@@ -898,6 +1140,32 @@ class ChannelsSection(SectionWidget):
             return [dict(d) for d in devs if isinstance(d, dict)]
         return []
 
+    def _current_nidaq_declared(self) -> tuple[tuple[str, str, str], ...]:
+        """Walk the current draft and collect declared NI channels as the
+        flat ``(device, task, field)`` tuples the binding-editor combo
+        provider expects. Returns an empty tuple when no NI device is
+        declared, when params are malformed, or when the draft itself
+        isn't loaded yet.
+        """
+        if self._draft is None:
+            return ()
+        from capa.devices.nidaq_join import (  # noqa: PLC0415
+            declared_channels_from_payload,
+        )
+
+        declared = declared_channels_from_payload(self._draft.document.hardware_payload)
+        return tuple((d.device_name, d.task_name, d.field_name) for d in declared)
+
+    def _current_nidaq_task_keys(self) -> set[tuple[str, str]]:
+        """Return declared NI ``(device, task)`` keys in the current draft."""
+        if self._draft is None:
+            return set()
+        from capa.devices.nidaq_join import (  # noqa: PLC0415
+            nidaq_task_keys_from_payload,
+        )
+
+        return nidaq_task_keys_from_payload(self._draft.document.hardware_payload)
+
     def _mutate_current(self, mutator: Callable[[dict[str, Any]], None]) -> None:
         if self._suppress or self._current_row < 0:
             return
@@ -959,6 +1227,7 @@ class ChannelsSection(SectionWidget):
             self._source_editor.set_context(
                 devices=self._current_devices(),
                 kind=kind_value if isinstance(kind_value, str) else None,
+                nidaq_declared=self._current_nidaq_declared(),
             )
             self._source_editor.set_value(channel.get("source") or {})
 
@@ -1029,6 +1298,14 @@ class ChannelsSection(SectionWidget):
 
     def _rebuild_add_menu(self) -> None:
         self._add_menu.clear()
+
+        # NI-aware entries first — one menu item per declared NI channel
+        # in the current draft. These are the highest-leverage Add path
+        # because they wire the binding directly to a known NI input
+        # row, so the operator never has to type a field name. Empty
+        # when no NI device has channels declared yet.
+        self._append_declared_nidaq_entries()
+
         # Collect all templates from currently-loaded descriptors, grouped
         # by adapter family so the menu is readable.
         templates_by_family: dict[str, list[ChannelTemplate]] = {}
@@ -1053,6 +1330,66 @@ class ChannelsSection(SectionWidget):
         # Blank channel escape hatch.
         blank = self._add_menu.addAction("Blank channel")
         blank.triggered.connect(self._on_add_blank)
+
+    def _append_declared_nidaq_entries(self) -> None:
+        """Add one menu entry per declared NI channel in the draft.
+
+        Units, kind, and calibration come from the NI row's declared
+        ``units`` — closing the latent ``K``/``degC`` mismatch in the
+        generic ``NIDAQ_THERMOCOUPLE`` template for any new channel
+        added through this menu (the template fix in Step 1 covers the
+        generic add; this is the hardware-aware version).
+        """
+        if self._draft is None:
+            return
+        from capa.devices.nidaq_join import (  # noqa: PLC0415
+            declared_channels_from_payload,
+        )
+
+        declared = declared_channels_from_payload(self._draft.document.hardware_payload)
+        if not declared:
+            return
+        header = self._add_menu.addAction("FROM DECLARED NI INPUTS")
+        header.setEnabled(False)
+        for d in declared:
+            label = f"capa channel from {d.device_name}.{d.field_name} ({d.physical_channel})"
+            action = self._add_menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, decl=d: self._on_add_from_declared_nidaq(decl)
+            )
+        self._add_menu.addSeparator()
+
+    def _on_add_from_declared_nidaq(self, decl: Any) -> None:
+        """Insert a capa channel pre-bound to a declared NI input.
+
+        Units / kind / calibration are derived from the NI row's
+        ``units``: thermocouple kinds with ``DEG_C`` produce a
+        ``unit="degC"`` ``kind="tc"`` channel with identity-degC
+        calibration. Falls back to a blank-unit ``analog_in`` row for
+        kinds we don't have a strong default for so the operator at
+        least gets a working binding.
+        """
+        existing = [c.get("name", "") for c in self._model.channels()]
+        unit, kind, calibration = _nidaq_unit_kind_calibration(decl.kind, decl.units)
+        record: dict[str, Any] = {
+            "name": unique_name(existing, decl.field_name),
+            "kind": kind,
+            "unit": unit,
+            "source": {
+                "source": "nidaq_reading_field",
+                "device": decl.device_name,
+                "task": decl.task_name,
+                "field": decl.field_name,
+            },
+        }
+        if unit:
+            record["derived_unit"] = unit
+        if calibration is not None:
+            record["calibration"] = calibration
+        if kind == "tc":
+            record["plot_group"] = "temperatures"
+        new_row = self._model.add_channel(record)
+        self._table.selectRow(new_row)
 
     def _select_default_device(self, binding_source: str | None) -> str | None:
         """Pick a device whose descriptor advertises ``binding_source``.

@@ -325,6 +325,15 @@ class ModelForm(QWidget):
         """
         return self._field_group.get(field_name)
 
+    def field_widget(self, field_name: str) -> FieldWidget | None:
+        """Return the rendered widget for ``field_name`` when present.
+
+        Setup sections occasionally need to pass surrounding row context
+        into a specialised field widget. Keeping this as a tiny accessor
+        avoids reaching into ``_fields`` from section code.
+        """
+        return self._fields.get(field_name)
+
     # ---------------------------------------------------------------- internals
 
     def _add_field(

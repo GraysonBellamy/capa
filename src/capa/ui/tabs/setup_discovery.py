@@ -232,6 +232,13 @@ class DiscoveryDialog(QDialog):
     ``"cameras"``); second is the spec-shaped payload the Setup tab
     merges into ``hardware.devices`` / ``hardware.cameras``."""
 
+    nidaqScanCompleted = Signal(list)  # noqa: N815 — Qt signal naming convention
+    """Emitted after every NI-DAQ scan reports back with the full list of
+    discovery rows (NI device dicts including the per-kind channel
+    inventories). The :class:`SetupTab` consumes this to keep its
+    ``nidaq_inventory()`` cache fresh without each form widget having to
+    call ``nidaq.discover()`` itself."""
+
     def __init__(
         self,
         *,
@@ -542,6 +549,12 @@ class DiscoveryDialog(QDialog):
                 )
             for row in row_list:
                 self.add_row(descriptor, row)
+            # NI scans contribute to the SetupTab inventory cache. The
+            # empty-result case still fires — operators expect Rescan to
+            # clear the cache when the NI driver is uninstalled or every
+            # device is unplugged.
+            if descriptor.family == "nidaq":
+                self.nidaqScanCompleted.emit(row_list)
         self._refresh_header()
 
     # ---------------------------------------------------------------- internal

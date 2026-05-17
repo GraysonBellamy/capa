@@ -27,6 +27,7 @@ from capa.ui.forms.widgets._collection import (
     _StrTupleField,
 )
 from capa.ui.forms.widgets._helpers import (
+    _capa_widget_from_field,
     _decimals_for_field,
     _humanize,
     _is_optional,
@@ -83,6 +84,17 @@ def _build_inner(
     parent: QWidget | None,
     field_name: str | None = None,
 ) -> FieldWidget:
+    # Opt-in hardware-specific widgets (capa_widget=…) take priority over
+    # generic origin/args probes so that fields needing affordances the
+    # generic factory can't supply (inventory pickers, collision check,
+    # kind-aware detail panes) can short-circuit the dispatcher cleanly
+    # without touching the default behaviour for any other field.
+    widget_id = _capa_widget_from_field(field)
+    if widget_id == "nidaq_channels":
+        from capa.ui.forms.widgets._nidaq_channels import NIDAQChannelsField  # noqa: PLC0415
+
+        return NIDAQChannelsField(parent=parent)
+
     # Discriminated unions take priority over generic origin/args probes:
     # ``Annotated[A | B, Field(discriminator=...)]`` would otherwise fall
     # through to the JSON fallback.

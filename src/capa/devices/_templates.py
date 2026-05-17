@@ -118,9 +118,9 @@ NIDAQ_THERMOCOUPLE = ChannelTemplate(
     label="Thermocouple from NI-DAQ task",
     kind="tc",
     source_factory=_nidaq_reading_binding("default_task", "TC_1"),
-    default_unit="K",
-    default_derived_unit="K",
-    default_calibration={"kind": "identity", "input_unit": "K", "output_unit": "K"},
+    default_unit="degC",
+    default_derived_unit="degC",
+    default_calibration={"kind": "identity", "input_unit": "degC", "output_unit": "degC"},
     capa_group=None,
     plot_group="temperatures",
 )

@@ -18,7 +18,6 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtWidgets import (
-    QAbstractScrollArea,
     QComboBox,
     QFormLayout,
     QHBoxLayout,
@@ -37,7 +36,11 @@ from PySide6.QtWidgets import (
 from capa.devices.registry import ADAPTERS, AdapterDescriptor, ensure_adapters_loaded
 from capa.ui.forms import build_form
 from capa.ui.tabs.setup_sections._base import SectionWidget
-from capa.ui.tabs.setup_sections._models import horizontal_header, unique_name
+from capa.ui.tabs.setup_sections._models import (
+    fit_table_height,
+    horizontal_header,
+    unique_name,
+)
 
 if TYPE_CHECKING:
     from capa.ui.forms.from_model import ModelForm
@@ -245,12 +248,6 @@ class DevicesSection(SectionWidget):
         self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
-        # Size the table to its row count (capped) so the splitter's
-        # detail pane stays generous and we never show an inner scrollbar
-        # while the section pane still has free vertical space.
-        self._table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
-        self._table.setMinimumHeight(120)
-        self._table.setMaximumHeight(500)
         header = self._table.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -258,6 +255,12 @@ class DevicesSection(SectionWidget):
         selection_model = self._table.selectionModel()
         if selection_model is not None:
             selection_model.selectionChanged.connect(self._on_row_changed)
+        # Grow the table to fit every device row — CAPA rigs run a handful
+        # of devices, so we never need an inner scrollbar.
+        self._model.rowsInserted.connect(lambda *_: self._update_table_height())
+        self._model.rowsRemoved.connect(lambda *_: self._update_table_height())
+        self._model.modelReset.connect(self._update_table_height)
+        self._update_table_height()
         table_layout.addWidget(self._table)
         splitter.addWidget(table_region)
 
@@ -313,7 +316,7 @@ class DevicesSection(SectionWidget):
 
         self._detail_layout = detail_layout
         splitter.addWidget(self._detail_container)
-        # Table region uses its sizeHint (driven by AdjustToContents);
+        # Table region uses its fixed size (driven by ``fit_table_height``);
         # detail collects any leftover height.
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -346,6 +349,9 @@ class DevicesSection(SectionWidget):
 
     def payload(self) -> dict[str, object]:
         return {"devices": self._model.devices()}
+
+    def _update_table_height(self) -> None:
+        fit_table_height(self._table)
 
     # -- slots --------------------------------------------------------------
 
@@ -397,6 +403,7 @@ class DevicesSection(SectionWidget):
         if device is None:
             return
         device["name"] = text.strip()
+        self._configure_nidaq_channels_widget(device)
         self._model.update_device(self._current_row, device)
 
     def _on_adapter_changed(self, _idx: int) -> None:
@@ -422,6 +429,7 @@ class DevicesSection(SectionWidget):
         if device is None:
             return
         device["params"] = self._params_form.values()
+        self._configure_nidaq_channels_widget(device)
         self._model.update_device(self._current_row, device)
 
     def _on_test_connection(self) -> None:
@@ -555,6 +563,7 @@ class DevicesSection(SectionWidget):
             if isinstance(params, dict):
                 with contextlib.suppress(Exception):
                     self._params_form.set_values(params)
+            self._configure_nidaq_channels_widget(device)
             self._params_form.valuesChanged.connect(self._on_params_changed)
             layout.addWidget(self._params_form)
             self._params_host.show()
@@ -570,6 +579,32 @@ class DevicesSection(SectionWidget):
             placeholder.setStyleSheet("color: #888;")
             layout.addWidget(placeholder)
             self._params_host.show()
+
+    def _configure_nidaq_channels_widget(self, device: dict[str, Any]) -> None:
+        """Give the specialised NI input editor its owning device/task.
+
+        ``NIDAQChannelsField`` only edits ``params.channels``, but its
+        cross-section requests need the full join key. The Devices section
+        owns the row context, so it passes that context down after building
+        or updating the params form.
+        """
+        if self._params_form is None:
+            return
+        field_widget = self._params_form.field_widget("channels")
+        if field_widget is None:
+            return
+        from capa.ui.forms.widgets._nidaq_channels import (  # noqa: PLC0415
+            NIDAQChannelsField,
+        )
+
+        if not isinstance(field_widget, NIDAQChannelsField):
+            return
+        params = device.get("params") if isinstance(device.get("params"), dict) else {}
+        task_name = params.get("task_name") if isinstance(params, dict) else None
+        field_widget.set_join_context(
+            device_name=str(device.get("name") or ""),
+            task_name=task_name if isinstance(task_name, str) else "",
+        )
 
 
 __all__ = ["DeviceTableModel", "DevicesSection"]

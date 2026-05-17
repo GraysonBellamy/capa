@@ -166,7 +166,10 @@ class NIDAQAdapterParams(BaseModel):
     on emitted :class:`DaqReading`\\ s, and as the join key in
     :class:`NIDAQReadingField.task` / :class:`NIDAQBlockChannel.task`."""
 
-    channels: tuple[NIDAQChannelConfig, ...]
+    channels: tuple[NIDAQChannelConfig, ...] = Field(
+        title="NI cDAQ inputs",
+        json_schema_extra={"capa_widget": "nidaq_channels"},
+    )
     """Per-channel typed config. Each entry's ``kind`` discriminator
     (``"thermocouple"`` / ``"ai_voltage"`` / pass-through for others) selects
     the validating model from

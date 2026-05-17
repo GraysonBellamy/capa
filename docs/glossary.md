@@ -41,6 +41,22 @@ family: `watlow_parameter`, `alicat_frame_field`, `sartorius_reading`,
 `nidaq_reading_field`, `nidaq_block_channel`, or `derived` (computed
 from other channels).
 
+## NI cDAQ inputs vs capa channels
+
+NI-DAQ has its own two-layer model that mirrors the device / channel
+split everywhere else in capa, but more visibly. **NI cDAQ inputs** are
+physical-layer rows in the NI device's params (which `cDAQ1Mod1/ai0`
+pin, what thermocouple type, what NI ADC mode); they configure the NI
+task that produces sample readings. **Capa channels** are the stable
+scientific identifiers — `TC_sample_top`, with units, plot group,
+calibration — that show up in `scalars.parquet` and on the plot. One
+NI cDAQ input can feed multiple capa channels (one raw, one calibrated),
+and a capa channel can switch its source between NI and another device
+without changing its name. Edit NI inputs from the Devices section's
+"NI cDAQ inputs" table; edit capa channels from the Channels section.
+The join is by name: the capa channel's `field` must equal an NI input's
+display name on the same `(device, task)`.
+
 ## Free run
 
 A run with no method loaded. Recording starts when you press Start in

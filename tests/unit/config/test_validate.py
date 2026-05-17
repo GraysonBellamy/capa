@@ -155,6 +155,94 @@ def test_layer2_binding_family_check_passes_for_matching_adapter(
 
 
 # ---------------------------------------------------------------------------
+# Layer 2 — NI-DAQ join (declared NI channel ↔ capa channel binding).
+# ---------------------------------------------------------------------------
+
+
+def test_layer2_nidaq_join_passes_on_correct_real_config(configs_dir: Path) -> None:
+    """The reference real-NI fixture has a coherent join; no new errors."""
+    doc = ConfigDocument.load(configs_dir / "experiments" / "nidaq_real_freerun.yaml")
+    problems = validate(doc)
+    new_codes = {
+        "channels.binding_field_unresolved",
+        "devices.nidaq.duplicate_channel_name",
+    }
+    assert {p.code for p in problems} & new_codes == set()
+
+
+def test_layer2_nidaq_join_flags_typoed_field(configs_dir: Path) -> None:
+    """Mistyped binding field surfaces as binding_field_unresolved with the
+    available fields list — the silent-runtime-skip failure mode is now
+    a config-load error.
+    """
+    doc = ConfigDocument.load(configs_dir / "experiments" / "nidaq_real_freerun.yaml")
+    # Typo the first channel's binding field: TC_top_1 → TC_top_X.
+    channel = doc.hardware_payload["channels"][0]
+    channel["source"]["field"] = "TC_top_X"
+    problems = validate(doc)
+    unresolved = [p for p in problems if p.code == "channels.binding_field_unresolved"]
+    assert len(unresolved) == 1
+    assert unresolved[0].section == "channels"
+    assert unresolved[0].path[:2] == ("channels", 0)
+    assert "TC_top_1" in unresolved[0].message  # available fields surfaced
+
+
+def test_layer2_nidaq_join_flags_typoed_task(configs_dir: Path) -> None:
+    """A mistyped task name surfaces a binding_field_unresolved against the
+    task, with the available task list in the message.
+    """
+    doc = ConfigDocument.load(configs_dir / "experiments" / "nidaq_real_freerun.yaml")
+    channel = doc.hardware_payload["channels"][0]
+    channel["source"]["task"] = "wrong_task_name"
+    problems = validate(doc)
+    unresolved = [p for p in problems if p.code == "channels.binding_field_unresolved"]
+    assert len(unresolved) >= 1
+    assert any("default_task" in p.message for p in unresolved)
+
+
+def test_layer2_nidaq_join_flags_empty_declared_task(configs_dir: Path) -> None:
+    """A channel bound to an NI task with no declared inputs is a clean
+    Layer-2 problem, not a silent opt-out or later materialization crash.
+    """
+    doc = ConfigDocument.load(configs_dir / "experiments" / "nidaq_real_freerun.yaml")
+    device = doc.hardware_payload["devices"][0]
+    device["params"]["channels"] = []
+    problems = validate(doc)
+    unresolved = [p for p in problems if p.code == "channels.binding_field_unresolved"]
+    assert unresolved
+    assert any("no NI fields" in p.message for p in unresolved)
+
+
+def test_layer2_nidaq_join_flags_duplicate_ni_channel_names(configs_dir: Path) -> None:
+    """Two NI channel rows sharing a display name within the same task is an
+    error — DaqReading.values is dict-keyed by display name and the second
+    row would non-deterministically shadow the first.
+    """
+    doc = ConfigDocument.load(configs_dir / "experiments" / "nidaq_real_freerun.yaml")
+    # Rename the second channel to collide with the first.
+    device = doc.hardware_payload["devices"][0]
+    device["params"]["channels"][1]["name"] = device["params"]["channels"][0]["name"]
+    problems = validate(doc)
+    duplicates = [p for p in problems if p.code == "devices.nidaq.duplicate_channel_name"]
+    assert len(duplicates) == 1
+    assert duplicates[0].section == "devices"
+
+
+def test_layer2_nidaq_join_is_silent_for_sim_configs(configs_dir: Path) -> None:
+    """The sim adapter family ("sim") doesn't go through the NI channels
+    array, so the join validator must not falsely flag sim bindings.
+    """
+    doc = ConfigDocument.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+    problems = validate(doc)
+    join_problems = [
+        p
+        for p in problems
+        if p.code in {"channels.binding_field_unresolved", "devices.nidaq.duplicate_channel_name"}
+    ]
+    assert join_problems == []
+
+
+# ---------------------------------------------------------------------------
 # Live checks gated.
 # ---------------------------------------------------------------------------
 

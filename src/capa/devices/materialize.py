@@ -38,6 +38,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
+from pydantic import ValidationError
 
 from capa.config.problems import ConfigProblem
 from capa.core.errors import CapaError
@@ -193,7 +194,7 @@ def _materialize_devices(
                 adapter = from_params(name=dev.name, **dev.params)
             else:
                 adapter = factory(name=dev.name, **dev.params)
-        except TypeError as exc:
+        except (TypeError, ValidationError) as exc:
             problems.append(
                 ConfigProblem(
                     severity="error",

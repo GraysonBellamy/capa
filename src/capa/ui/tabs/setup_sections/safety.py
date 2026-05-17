@@ -24,7 +24,6 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtWidgets import (
-    QAbstractScrollArea,
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
@@ -40,7 +39,7 @@ from PySide6.QtWidgets import (
 from capa.experiment.config import SafetyRuleConfig
 from capa.ui.forms import build_form
 from capa.ui.tabs.setup_sections._base import SectionWidget
-from capa.ui.tabs.setup_sections._models import horizontal_header
+from capa.ui.tabs.setup_sections._models import fit_table_height, horizontal_header
 
 if TYPE_CHECKING:
     from capa.ui.forms.from_model import ModelForm
@@ -206,11 +205,6 @@ class SafetySection(SectionWidget):
         self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
-        # Size to row count (capped) so the rules table doesn't hold an
-        # internal scrollbar while the section pane still has slack.
-        self._table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
-        self._table.setMinimumHeight(120)
-        self._table.setMaximumHeight(500)
         header = self._table.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -218,6 +212,12 @@ class SafetySection(SectionWidget):
         selection_model = self._table.selectionModel()
         if selection_model is not None:
             selection_model.selectionChanged.connect(self._on_row_changed)
+        # Fit to row count, cap at 15 so a pathological rule list still
+        # leaves room for the detail editor below.
+        self._model.rowsInserted.connect(lambda *_: self._update_table_height())
+        self._model.rowsRemoved.connect(lambda *_: self._update_table_height())
+        self._model.modelReset.connect(self._update_table_height)
+        self._update_table_height()
         table_layout.addWidget(self._table)
         splitter.addWidget(table_region)
 
@@ -270,6 +270,9 @@ class SafetySection(SectionWidget):
                 "default_abort": self._default_abort_edit.text().strip() or "safe_shutdown",
             }
         }
+
+    def _update_table_height(self) -> None:
+        fit_table_height(self._table, max_rows=15)
 
     # -- slots --------------------------------------------------------------
 

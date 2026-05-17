@@ -95,6 +95,12 @@ class SetupTab(QWidget):
     settle. The :class:`DocumentCoordinator` consumes this to swap the
     Method tab's loaded method."""
 
+    nidaqInventoryChanged = Signal()  # noqa: N815 — Qt signal naming convention
+    """Fires when the cached NI-DAQ inventory is refreshed (after a Scan
+    completes, or an explicit ``rescan_nidaq_inventory()``). Section widgets
+    listening for this re-populate any NI-channel-aware combos / menus.
+    The current inventory is read via :meth:`nidaq_inventory`."""
+
     applyRequested = Signal(object, object)  # noqa: N815 — Qt signal naming convention
     """``(ExperimentConfig, Path | None)`` — fires when the operator
     clicks Apply & Connect on a valid draft. :class:`MainWindow` consumes
@@ -139,6 +145,42 @@ class SetupTab(QWidget):
         # drives the CHECKING strip. The actual coroutine is scheduled
         # against the qasync loop in :meth:`_on_check_hardware`.
         self._check_in_flight: bool = False
+        # Cache of the most recent NI-DAQ inventory (one dict per
+        # physical NI device, shape returned by ``capa.devices.nidaq.discover``).
+        # Populated by the Discovery dialog after each successful NI scan
+        # and by :meth:`rescan_nidaq_inventory`. Section widgets that
+        # surface "Add from inventory" menus read this via
+        # :meth:`nidaq_inventory` instead of calling ``nidaq.discover()``
+        # themselves — form widgets should be pure UI; discovery is I/O.
+        self._last_nidaq_inventory: dict[str, dict[str, Any]] = {}
+        # Async task handle for an in-flight ``rescan_nidaq_inventory``
+        # call. Tracked so re-entrant rescans cancel the previous run
+        # before starting a new one, matching the DiscoveryDialog's
+        # rescan behaviour.
+        self._nidaq_rescan_task: Any | None = None
+        # Install the inventory provider hook for NIDAQChannelsField
+        # instances built later by the Devices section's auto-form. The
+        # widget itself reads through the hook lazily when the operator
+        # opens "Add from inventory", so installing here — once per
+        # SetupTab — gives every present and future widget a coherent
+        # view of the cache without threading an accessor through the
+        # form-building chain.
+        from capa.ui.forms.widgets._nidaq_channels import (  # noqa: PLC0415
+            set_nidaq_bound_names_provider,
+            set_nidaq_bound_provider,
+            set_nidaq_cross_section_handlers,
+            set_nidaq_inventory_provider,
+            set_nidaq_rescan_handler,
+        )
+
+        set_nidaq_inventory_provider(self.nidaq_inventory)
+        set_nidaq_bound_provider(self._collect_bound_nidaq_triples)
+        set_nidaq_bound_names_provider(self._nidaq_bound_channel_names)
+        set_nidaq_cross_section_handlers(
+            create_capa_channels=self._on_create_capa_channels_for_unbound,
+            delete_with_bindings=self._on_delete_nidaq_with_bindings,
+        )
+        set_nidaq_rescan_handler(self.rescan_nidaq_inventory)
 
         # 200 ms debounce — every operator edit
         # restarts the timer; when it fires we re-run the validation
@@ -563,7 +605,13 @@ class SetupTab(QWidget):
         )
         dialog = DiscoveryDialog(existing_names=existing, lifecycle=lifecycle, parent=self)
         dialog.entryAdded.connect(self._on_discovered_entry_added)
+        dialog.nidaqScanCompleted.connect(self._on_nidaq_scan_completed)
         dialog.show()
+
+    def _on_nidaq_scan_completed(self, rows: object) -> None:
+        """Refresh the cached NI inventory from a Discovery-dialog scan."""
+        if isinstance(rows, list):
+            self.update_nidaq_inventory(rows)
 
     def _existing_device_names(self) -> set[str]:
         devices = self._draft.document.hardware_payload.get("devices", [])
@@ -606,6 +654,323 @@ class SetupTab(QWidget):
         self._refresh_section("overview")
         self._refresh_outline_markers()
         self._refresh_source_label()
+        self._refresh_connection_strip()
+        self._refresh_apply_enabled()
+        self._validate_timer.start()
+
+    # ----- NI-DAQ inventory cache ---------------------------------------
+
+    def nidaq_inventory(self) -> dict[str, dict[str, Any]]:
+        """Return the cached NI-DAQ inventory, keyed by physical device name.
+
+        Each value is the dict produced by :func:`capa.devices.nidaq.discover`
+        for that device — ``adapter``, ``device``, ``product_type``, ``serial``,
+        and the per-kind channel lists (``ai_channels``, ``ao_channels``,
+        ``di_lines``, ``do_lines``, ``ci_channels``, ``co_channels``).
+        Returns an empty dict before any scan completes, or on a machine
+        with no NI driver — callers must handle the empty case (typically
+        with an "Add blank" or "Rescan now…" fallback in the UI).
+
+        Returns a defensive copy: callers cannot mutate the internal cache
+        through the returned mapping. The lists inside (``ai_channels`` etc.)
+        are independent copies for the same reason.
+        """
+        return {
+            name: {k: (list(v) if isinstance(v, list) else v) for k, v in info.items()}
+            for name, info in self._last_nidaq_inventory.items()
+        }
+
+    def update_nidaq_inventory(self, rows: list[dict[str, Any]]) -> None:
+        """Replace the cached NI inventory with the given rows.
+
+        Each row is one dict in the shape returned by
+        :func:`capa.devices.nidaq.discover` (``device``, ``product_type``,
+        the per-kind channel lists). Rows missing a ``device`` key or
+        with a non-string device name are dropped silently — the call
+        sites that produce these (discovery hook, sim factories) keep the
+        shape, but defensive filtering protects against future drift.
+
+        Emits :attr:`nidaqInventoryChanged` so subscribed sections refresh.
+        """
+        next_inventory: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            device = row.get("device")
+            if not isinstance(device, str) or not device:
+                continue
+            next_inventory[device] = dict(row)
+        self._last_nidaq_inventory = next_inventory
+        self.nidaqInventoryChanged.emit()
+
+    def rescan_nidaq_inventory(self) -> None:
+        """Trigger a fresh ``nidaq.discover()`` call against local hardware.
+
+        Schedules the discovery hook on the qasync event loop and updates
+        the cache when it completes. Cancels any in-flight rescan first
+        so back-to-back clicks don't race. Silent (no UI feedback beyond
+        the eventual ``nidaqInventoryChanged`` emission); the call site
+        decides whether to show a spinner.
+        """
+        import asyncio  # noqa: PLC0415
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop — happens in unit tests that exercise the
+            # API surface without a qasync loop. Leave the cache as-is;
+            # the caller can populate via ``update_nidaq_inventory``.
+            return
+        prev = self._nidaq_rescan_task
+        if prev is not None and not prev.done():
+            prev.cancel()
+        self._nidaq_rescan_task = loop.create_task(
+            self._run_nidaq_rescan(), name="setup.rescan_nidaq"
+        )
+
+    async def _run_nidaq_rescan(self) -> None:
+        """Coroutine body for :meth:`rescan_nidaq_inventory`."""
+        import asyncio  # noqa: PLC0415
+
+        from capa.devices.nidaq import discover as nidaq_discover  # noqa: PLC0415
+
+        try:
+            rows = await nidaq_discover()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Discovery hooks already trap driver-level failures; a hard
+            # exception here means the NI library itself isn't importable.
+            # Leave the cache empty so the UI's "no inventory" path fires.
+            self.update_nidaq_inventory([])
+            return
+        self.update_nidaq_inventory(rows)
+
+    # ----- NI ↔ capa join orchestration ---------------------------------
+
+    def _collect_bound_nidaq_triples(self) -> set[tuple[str, str, str]]:
+        """Return ``(device, task, field)`` triples bound by any capa channel.
+
+        Reads the current draft. Used by NIDAQChannelsField's bound-fields
+        provider hook so the widget can light up the unbound banner and
+        gate the delete-propagation prompt against fresh state.
+        """
+        channels = self._draft.document.hardware_payload.get("channels", [])
+        triples: set[tuple[str, str, str]] = set()
+        if not isinstance(channels, list):
+            return triples
+        for ch in channels:
+            if not isinstance(ch, dict):
+                continue
+            source = ch.get("source")
+            if not isinstance(source, dict):
+                continue
+            kind = source.get("source")
+            if kind not in ("nidaq_reading_field", "nidaq_block_channel"):
+                continue
+            device = source.get("device")
+            task = source.get("task")
+            field = source.get("field") if kind == "nidaq_reading_field" else source.get("channel")
+            if isinstance(device, str) and isinstance(task, str) and isinstance(field, str):
+                triples.add((device, task, field))
+        return triples
+
+    def _nidaq_bound_channel_names(self, device: str, task: str, field: str) -> set[str]:
+        """Return capa channel names referencing one NI join triple."""
+        channels = self._draft.document.hardware_payload.get("channels", [])
+        names: set[str] = set()
+        if not isinstance(channels, list):
+            return names
+        for ch in channels:
+            if not isinstance(ch, dict):
+                continue
+            source = ch.get("source")
+            if not isinstance(source, dict):
+                continue
+            kind = source.get("source")
+            if kind not in ("nidaq_reading_field", "nidaq_block_channel"):
+                continue
+            source_field = (
+                source.get("field") if kind == "nidaq_reading_field" else source.get("channel")
+            )
+            if (
+                source.get("device") == device
+                and source.get("task") == task
+                and source_field == field
+            ):
+                name = ch.get("name")
+                if isinstance(name, str) and name:
+                    names.add(name)
+        return names
+
+    def _on_create_capa_channels_for_unbound(
+        self, _widget: Any, unbound: list[dict[str, Any]]
+    ) -> None:
+        """Create one capa channel per unbound NI input.
+
+        Walks the draft's NI devices, matches each unbound entry by
+        ``field_name``, and synthesises a ``[[channels]]`` row with
+        units derived from the NI row (so DEG_C produces a degC capa
+        channel — closing the §2.4 unit-mismatch path for this flow
+        too). Routes the mutation through :meth:`_apply_payload` so
+        dirty state, validation, and undo stay coherent.
+        """
+        if not unbound:
+            return
+        from capa.devices.nidaq_join import (  # noqa: PLC0415
+            declared_channels_from_payload,
+        )
+        from capa.ui.tabs.setup_sections.channels import (  # noqa: PLC0415
+            _nidaq_unit_kind_calibration,
+        )
+
+        declared = declared_channels_from_payload(self._draft.document.hardware_payload)
+        by_key: dict[tuple[str, str, str], Any] = {
+            (d.device_name, d.task_name, d.field_name): d for d in declared
+        }
+        by_field_physical: dict[tuple[str, str], list[Any]] = {}
+        for d in declared:
+            by_field_physical.setdefault((d.field_name, d.physical_channel), []).append(d)
+        existing_channels = list(self._draft.document.hardware_payload.get("channels", []))
+        existing_names = {
+            str(ch.get("name", "")) for ch in existing_channels if isinstance(ch, dict)
+        }
+        new_rows: list[dict[str, Any]] = []
+        for entry in unbound:
+            field_name = entry.get("field_name")
+            if not isinstance(field_name, str):
+                continue
+            device_name = entry.get("device_name")
+            task_name = entry.get("task_name")
+            decl = None
+            if isinstance(device_name, str) and isinstance(task_name, str):
+                decl = by_key.get((device_name, task_name, field_name))
+            if decl is None:
+                physical = entry.get("physical_channel")
+                if isinstance(physical, str):
+                    candidates = by_field_physical.get((field_name, physical), [])
+                    if len(candidates) == 1:
+                        decl = candidates[0]
+            if decl is None:
+                continue
+            if (
+                decl.device_name,
+                decl.task_name,
+                decl.field_name,
+            ) in self._collect_bound_nidaq_triples():
+                continue
+            unit, kind, calibration = _nidaq_unit_kind_calibration(decl.kind, decl.units)
+            base_name = decl.field_name
+            name = base_name
+            suffix = 1
+            while name in existing_names:
+                suffix += 1
+                name = f"{base_name}_{suffix}"
+            existing_names.add(name)
+            record: dict[str, Any] = {
+                "name": name,
+                "kind": kind,
+                "unit": unit,
+                "source": {
+                    "source": "nidaq_reading_field",
+                    "device": decl.device_name,
+                    "task": decl.task_name,
+                    "field": decl.field_name,
+                },
+            }
+            if unit:
+                record["derived_unit"] = unit
+            if calibration is not None:
+                record["calibration"] = calibration
+            if kind == "tc":
+                record["plot_group"] = "temperatures"
+            new_rows.append(record)
+        if not new_rows:
+            return
+        updated_channels = existing_channels + new_rows
+        self._apply_payload("channels", {"channels": updated_channels})
+        self._draft.mark_dirty("channels")
+        self._refresh_section("channels")
+        self._refresh_section("overview")
+        self._refresh_outline_markers()
+        self._refresh_connection_strip()
+        self._refresh_apply_enabled()
+        self._validate_timer.start()
+
+    def _on_delete_nidaq_with_bindings(
+        self,
+        _widget: Any,
+        device: str,
+        task: str,
+        field: str,
+        bound_capa_names: list[str],
+    ) -> None:
+        """Prompt the operator before removing an NI input row that's bound.
+
+        Three outcomes — Yes (remove input + bound capa channels), Just
+        input (remove only the NI row; let Layer-2 surface the broken
+        binding on the next validate), or Cancel (no-op).
+        """
+        if not bound_capa_names:
+            bound_capa_names = sorted(self._nidaq_bound_channel_names(device, task, field))
+        if bound_capa_names:
+            message = (
+                f"This NI input is read by {len(bound_capa_names)} capa channel(s):\n"
+                f"  {', '.join(bound_capa_names)}\n\n"
+                "Also remove those capa channels?"
+            )
+        else:
+            message = (
+                f"This NI input is referenced by a capa channel on "
+                f"{device}.{task}.{field}. Also remove the capa channel?"
+            )
+        button = QMessageBox.question(
+            self,
+            "Remove NI input",
+            message,
+            buttons=(
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Cancel
+            ),
+            defaultButton=QMessageBox.StandardButton.Cancel,
+        )
+        if button == QMessageBox.StandardButton.Cancel:
+            return
+        # Remove the NI row from devices.params.channels.
+        devices = list(self._draft.document.hardware_payload.get("devices", []))
+        for dev in devices:
+            if not isinstance(dev, dict) or dev.get("name") != device:
+                continue
+            params = dev.get("params")
+            if not isinstance(params, dict):
+                continue
+            channels = params.get("channels")
+            if not isinstance(channels, list):
+                continue
+            params["channels"] = [
+                c
+                for c in channels
+                if not (
+                    isinstance(c, dict) and (c.get("name") or c.get("physical_channel")) == field
+                )
+            ]
+        self._apply_payload("devices", {"devices": devices})
+        self._draft.mark_dirty("devices")
+        # If "Yes" (also remove bound capa channels), do the second write.
+        if button == QMessageBox.StandardButton.Yes and bound_capa_names:
+            existing = list(self._draft.document.hardware_payload.get("channels", []))
+            updated = [
+                ch
+                for ch in existing
+                if not (isinstance(ch, dict) and ch.get("name") in bound_capa_names)
+            ]
+            self._apply_payload("channels", {"channels": updated})
+            self._draft.mark_dirty("channels")
+            self._refresh_section("channels")
+        self._refresh_section("devices")
+        self._refresh_section("overview")
+        self._refresh_outline_markers()
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self._validate_timer.start()
