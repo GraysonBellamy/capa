@@ -154,3 +154,114 @@ def test_capa_profile_compose_preserves_unmanaged_capa_group(qtbot: Any) -> None
     composed = section._compose_channels_with_mappings()
     exotic = next(c for c in composed if c["name"] == "exotic")
     assert exotic["metadata"]["capa_group"] == "exotic_plugin_group"
+
+
+# ---------------------------------------------------------------------------
+# Tune-artifact autofill (Phase 3 W7)
+# ---------------------------------------------------------------------------
+
+
+def _make_artifact(*, points: list[tuple[float, float]]):
+    """Construct an artifact with the given (target, setpoint) pairs."""
+    from datetime import UTC, datetime
+
+    from capa.calibration.tune_artifact import (
+        HeatFluxTuneArtifact,
+        HeatFluxTunePoint,
+    )
+
+    return HeatFluxTuneArtifact(
+        id="capa_flux_test",
+        rig="sim_rig",
+        heater_device="heater",
+        heater_setpoint_channel="heater.setpoint",
+        heater_pv_channel="heater.pv",
+        flux_channel="heat_flux_gauge",
+        geometry="40 mm below heater",
+        accepted_at=datetime.now(UTC),
+        procedure_id="capa.builtin.heat_flux_tune",
+        procedure_version="0.1.0",
+        points=tuple(
+            HeatFluxTunePoint(
+                target_flux_kw_m2=t,
+                heater_setpoint_c=sp,
+                measured_flux_mean_kw_m2=t,
+                measured_flux_std_kw_m2=0.02,
+                measured_flux_slope_kw_m2_per_min=0.005,
+                heater_pv_mean_c=sp,
+                soak_s=300.0,
+                accepted=True,
+                accept_reason="algorithm_converged",
+            )
+            for t, sp in points
+        ),
+    )
+
+
+def test_apply_artifact_in_bracket_writes_setpoint_and_ref(qtbot: Any) -> None:
+    """Applying an artifact that brackets the current target writes both
+    ``heater_setpoint_c`` (linearly interpolated) and
+    ``flux_calibration_ref`` (the artifact id) back into the form."""
+    section, _ = _make_section(qtbot)
+    section._heater_form.set_values({"target_heat_flux_kw_m2": 50.0})
+    artifact = _make_artifact(points=[(25.0, 450.0), (75.0, 750.0)])
+
+    section._apply_artifact(artifact)
+
+    values = section._heater_form.values()
+    assert values["heater_setpoint_c"] == 600.0  # interp at midpoint
+    assert values["flux_calibration_ref"] == "capa_flux_test"
+    assert "applied capa_flux_test" in section._tune_status_label.text()
+
+
+def test_apply_artifact_out_of_bracket_leaves_form_alone(qtbot: Any, monkeypatch: Any) -> None:
+    """Out-of-bracket targets show a warning and leave the form untouched."""
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    section, _ = _make_section(qtbot)
+    section._heater_form.set_values(
+        {"target_heat_flux_kw_m2": 100.0, "heater_setpoint_c": 600.0, "flux_calibration_ref": ""}
+    )
+    artifact = _make_artifact(points=[(25.0, 450.0), (75.0, 700.0)])
+
+    section._apply_artifact(artifact)
+
+    values = section._heater_form.values()
+    # Setpoint left at its operator-supplied value.
+    assert values["heater_setpoint_c"] == 600.0
+    assert values["flux_calibration_ref"] == ""
+    assert "does not bracket" in section._tune_status_label.text()
+
+
+def test_apply_artifact_no_target_prompts_operator(qtbot: Any, monkeypatch: Any) -> None:
+    """Applying with target ≤ 0 is a no-op with an informational toast."""
+    from PySide6.QtWidgets import QMessageBox
+
+    called: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: called.append(args))
+    section, _ = _make_section(qtbot)
+    section._heater_form.set_values({"target_heat_flux_kw_m2": 0.0})
+    artifact = _make_artifact(points=[(25.0, 450.0), (75.0, 700.0)])
+
+    section._apply_artifact(artifact)
+
+    assert called, "expected an informational message when target is 0"
+
+
+def test_clear_tune_ref_clears_ref_only(qtbot: Any) -> None:
+    section, _ = _make_section(qtbot)
+    section._heater_form.set_values(
+        {
+            "target_heat_flux_kw_m2": 50.0,
+            "heater_setpoint_c": 600.0,
+            "flux_calibration_ref": "capa_flux_test",
+        }
+    )
+
+    section._on_clear_tune_ref_clicked()
+
+    values = section._heater_form.values()
+    assert values["flux_calibration_ref"] == ""
+    # Setpoint untouched.
+    assert values["heater_setpoint_c"] == 600.0

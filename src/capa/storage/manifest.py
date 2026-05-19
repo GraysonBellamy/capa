@@ -46,6 +46,24 @@ IntegrityStatus = Literal["unknown", "ok", "mismatch", "partial"]
 
 
 # ---------------------------------------------------------------------------
+# Recording-plan literals
+# ---------------------------------------------------------------------------
+# Re-declared locally (not imported from :mod:`capa.runtime.recording`) so the
+# storage layer stays runtime-independent — a bundle reader doesn't need to
+# import the runtime to parse a manifest.
+
+RecordingPolicyMode = Literal["procedure_default", "record_all"]
+"""Mirrors :data:`capa.runtime.recording.PolicyMode`."""
+
+RecordingPlanSource = Literal["procedure_default", "operator_override"]
+"""Mirrors :data:`capa.runtime.recording.PlanSource`."""
+
+SuppressedReason = Literal["recording_policy"]
+"""Mirrors :data:`capa.runtime.recording.SuppressedReason`. Extend the
+union when a future reason (e.g. ``"device_failed"``) is added."""
+
+
+# ---------------------------------------------------------------------------
 # Sub-models
 # ---------------------------------------------------------------------------
 
@@ -214,6 +232,42 @@ class CameraEntry(BaseModel):
     on_failure: Literal["warn", "abort_run", "safe_shutdown"] = "warn"
     healthy: bool = True
     error: str | None = None
+    recorded: bool = True
+    """Whether this camera actually wrote frames during the run. ``False``
+    when the resolved recording plan excluded it — no
+    ``video/{name}.*`` file exists in the bundle. Defaulted ``True`` so
+    bundles from before this field was added still validate."""
+    suppressed_reason: SuppressedReason | None = None
+    """Why :attr:`recorded` is ``False``. ``None`` when ``recorded=True``."""
+
+
+class RecordingBlock(BaseModel):
+    """Per-run recording-plan snapshot.
+
+    Mirrors :class:`~capa.runtime.recording.ResolvedRecordingPlan` 1:1
+    so a bundle reader doesn't need to import runtime code to parse it.
+    Written into the manifest once the conductor resolves the plan at
+    arm time; immutable for the run thereafter.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    policy: RecordingPolicyMode
+    """The operator-facing policy enum that produced this plan (snapshot
+    of :attr:`RunOptions.recording_policy.mode`). Audit trail for *why*
+    the plan looks the way it does."""
+    source: RecordingPlanSource
+    """How the plan was materialised — ``procedure_default`` from
+    :meth:`Procedure.plan_capture` (or the full-rig fall-through);
+    ``operator_override`` when the operator chose ``record_all``."""
+    channel_mode: Literal["all", "only"]
+    recorded_channels: tuple[str, ...] = Field(default_factory=tuple)
+    camera_mode: Literal["all", "none"]
+    recorded_cameras: tuple[str, ...] = Field(default_factory=tuple)
+    native_device_records: Literal["all"] = "all"
+    """``SourceRecord`` filtering is deferred to v2; declared explicitly
+    so a reader doesn't have to infer why a
+    ``device_records/<adapter>.parquet`` exists in a narrowed bundle."""
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +322,12 @@ class BundleManifest(BaseModel):
     """Per-camera summary (). Populated by the bundle writer at
     arm-time with the spec-derived fields and refreshed at finalize with
     the final frame count + frames.parquet path."""
+
+    recording: RecordingBlock | None = None
+    """Per-run recording-plan snapshot. ``None`` for bundles written
+    before this field was added (Pydantic defaults backfill the gap on
+    load); production bundles always populate after the conductor
+    resolves the plan at arm time."""
 
     custom: dict[str, Any] = Field(default_factory=dict)
     """Free-form bag for procedure/profile-specific summary metadata. Sinks

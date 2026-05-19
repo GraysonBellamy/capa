@@ -415,6 +415,15 @@ PREFLIGHT_CHECKS: tuple[PreflightCheck, ...] = (
         blocking=False,
     ),
     PreflightCheck(
+        id="capa.flux_calibration_freshness",
+        description=(
+            "When HeaterProgram.target_heat_flux_kw_m2 is declared, a "
+            "flux_calibration_ref is set, and any on-disk tune artifact "
+            "it points to is within the lab-policy recency window (default 7 days)."
+        ),
+        blocking=False,
+    ),
+    PreflightCheck(
         id="capa.balance_stability",
         description=(
             "When a mass channel is declared, it reports stable for >=5s prior to arming."

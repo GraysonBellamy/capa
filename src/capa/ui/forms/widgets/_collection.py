@@ -80,6 +80,87 @@ class _StrTupleField(FieldWidget):
                 self._list.addItem(item)
 
 
+class _FloatTupleField(FieldWidget):
+    """``tuple[float, ...]`` / ``list[float]`` editor — one spinbox per item.
+
+    Mirrors :class:`_StrTupleField` but with a :class:`QDoubleSpinBox`
+    per row so operators don't have to type JSON list syntax. The
+    previous behaviour (route to :class:`_JsonFallbackField`) made it
+    too easy to submit a bare scalar — typing ``20`` instead of
+    ``[20]`` — and have Pydantic reject the value with an opaque
+    tuple-type error.
+    """
+
+    def __init__(
+        self,
+        *,
+        decimals: int = 3,
+        unit: str | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._decimals = decimals
+        self._unit = unit
+        self._spins: list[QDoubleSpinBox] = []
+        self._rows_layout = QVBoxLayout()
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addLayout(self._rows_layout)
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        self._add = QPushButton("Add", self)
+        self._remove = QPushButton("Remove last", self)
+        buttons.addWidget(self._add)
+        buttons.addWidget(self._remove)
+        outer.addLayout(buttons)
+        self._add.clicked.connect(self._on_add_clicked)
+        self._remove.clicked.connect(self._on_remove)
+
+    def _on_add_clicked(self) -> None:
+        self._append_row(0.0)
+        self.valueChanged.emit()
+
+    def _append_row(self, value: float) -> None:
+        row_widget = QWidget(self)
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        spin = QDoubleSpinBox(row_widget)
+        spin.setDecimals(self._decimals)
+        spin.setRange(-1e12, 1e12)
+        if self._unit:
+            spin.setSuffix(f" {self._unit}")
+        spin.setValue(float(value))
+        row_layout.addWidget(spin)
+        self._rows_layout.addWidget(row_widget)
+        self._spins.append(spin)
+        spin.valueChanged.connect(self.valueChanged)
+
+    def _on_remove(self) -> None:
+        if not self._spins:
+            return
+        spin = self._spins.pop()
+        widget = spin.parentWidget()
+        if widget is not None:
+            widget.deleteLater()
+        self.valueChanged.emit()
+
+    def value(self) -> list[float]:
+        return [float(spin.value()) for spin in self._spins]
+
+    def set_value(self, v: Any) -> None:
+        for spin in self._spins:
+            widget = spin.parentWidget()
+            if widget is not None:
+                widget.deleteLater()
+        self._spins.clear()
+        for entry in v or ():
+            try:
+                self._append_row(float(entry))
+            except (TypeError, ValueError):
+                continue
+
+
 class _DictStrFloatField(FieldWidget):
     """``dict[str, float]`` editor — supports ``SafeShutdownStep.cool_target``.
 

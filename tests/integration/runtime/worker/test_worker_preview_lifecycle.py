@@ -29,6 +29,7 @@ from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.runtime.bridge import BridgePolicy, ThreadBridge
 from capa.runtime.camera_adapter import make_camera_adapter
 from capa.runtime.preview import PreviewFrame
+from capa.runtime.recording import ResolvedRecordingPlan
 from capa.runtime.runcontext import RunContext
 from capa.runtime.runner import ThreadedRunner
 from capa.runtime.worker import Worker
@@ -68,6 +69,11 @@ def _ctx(bundle_root: Path, *, run_id: str = "test-run") -> RunContext:
         clock=RunClock.now(),
         writer=FakeWriterRef(),
         bundle=_PathBundleRef(bundle_root),
+        recording_plan=ResolvedRecordingPlan(
+            channel_mode="all",
+            camera_mode="all",
+            source="procedure_default",
+        ),
     )
 
 

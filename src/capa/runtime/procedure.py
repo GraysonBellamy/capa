@@ -37,11 +37,17 @@ import anyio
 import structlog
 
 from capa.experiment.procedures.base import (
+    OperatorCommand,
     ProcedureContext,
     ProcedureError,
 )
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import (
+        MemoryObjectReceiveStream,
+        MemoryObjectSendStream,
+    )
+
     from capa.channels.registry import ChannelRegistry
     from capa.core.databus import DataBus
     from capa.devices.adapter import DeviceAdapter
@@ -50,6 +56,7 @@ if TYPE_CHECKING:
     from capa.experiment.executor import MethodExecutor
     from capa.experiment.procedures.base import Problem, Procedure
     from capa.runtime.dispatch import CommandDispatcher
+    from capa.runtime.emissions import ProcedureUiSink
     from capa.runtime.runcontext import RunContext
     from capa.storage.bundle import RunBundleWriter
 
@@ -83,6 +90,13 @@ class ProcedureRunner:
     :param method_executor: Optional. Procedures that walk a method (recipe
         runner, etc.) get the executor preconstructed against the same
         context.
+    :param ui_sink: Optional UI-only telemetry sink — when wired, the
+        procedure can publish :class:`~capa.runtime.emissions.ProcedureTick`
+        payloads through ``ctx.ui_sink.publish(tick)`` and they land
+        on the UI bridge without touching the writer or the data bus.
+        ``None`` for headless / test paths; the conductor's
+        :meth:`~capa.runtime.conductor.Conductor.procedure_ui_sink`
+        is the production source.
     """
 
     __slots__ = (
@@ -95,9 +109,12 @@ class ProcedureRunner:
         "_external_stop",
         "_logger",
         "_method_executor",
+        "_op_cmd_recv",
+        "_op_cmd_send",
         "_proc_ctx",
         "_procedure",
         "_stop_signal",
+        "_ui_sink",
     )
 
     def __init__(
@@ -112,6 +129,7 @@ class ProcedureRunner:
         bundle_writer: RunBundleWriter,
         method_executor: MethodExecutor | None = None,
         stop_signal: asyncio.Event | None = None,
+        ui_sink: ProcedureUiSink | None = None,
     ) -> None:
         self._procedure = procedure
         self._config = config
@@ -131,9 +149,29 @@ class ProcedureRunner:
         self._bundle_writer = bundle_writer
         self._method_executor = method_executor
         self._proc_ctx: ProcedureContext | None = None
+        # Operator-command stream — paired send/receive channel, created
+        # lazily in :meth:`_build_proc_ctx` on the conductor loop so the
+        # streams are loop-local. The UI side calls
+        # :meth:`send_operator_command` to push messages onto the send
+        # end; the procedure consumes the receive end via
+        # ``ctx.operator_commands``.
+        self._op_cmd_send: MemoryObjectSendStream[OperatorCommand] | None = None
+        self._op_cmd_recv: MemoryObjectReceiveStream[OperatorCommand] | None = None
+        # UI-only telemetry sink — wired by the conductor so the
+        # procedure can publish ProcedureTicks without learning about
+        # the bridge. ``None`` for headless / test paths; the procedure
+        # must null-check before calling .publish().
+        self._ui_sink: ProcedureUiSink | None = ui_sink
         self._logger = structlog.get_logger("capa.runtime.procedure").bind(
             procedure=getattr(procedure, "id", "<unknown>"),
         )
+
+    @property
+    def procedure(self) -> Procedure:
+        """The wrapped procedure plugin instance. Read by the conductor
+        at arm time to invoke :meth:`Procedure.plan_capture` for the
+        run's recording-plan resolution."""
+        return self._procedure
 
     async def preflight(self, ctx: RunContext, bus: DataBus) -> None:
         """Conductor preflight hook.
@@ -225,6 +263,29 @@ class ProcedureRunner:
         except asyncio.CancelledError:
             raise
 
+    def send_operator_command(self, cmd: OperatorCommand) -> bool:
+        """Push one operator command onto the procedure's inbound stream.
+
+        Returns ``True`` if the command was queued, ``False`` if the
+        stream is unwired (procedure hasn't been built yet or the
+        runner predates the command-stream feature for this run). The
+        UI side calls this from its loop; the procedure consumer runs
+        on the conductor loop and picks the command up via
+        ``ctx.operator_commands``.
+
+        Non-blocking. A buffer-full condition (deeply unusual — the
+        consumer is a tight async loop) is treated as a drop and
+        logged; the UI should not freeze on operator-command delivery.
+        """
+        if self._op_cmd_send is None:
+            return False
+        try:
+            self._op_cmd_send.send_nowait(cmd)
+        except (anyio.WouldBlock, anyio.BrokenResourceError, anyio.ClosedResourceError) as exc:
+            self._logger.warning("operator_command.drop", kind=cmd.kind, error=str(exc))
+            return False
+        return True
+
     def _build_proc_ctx(self, ctx: RunContext, bus: DataBus) -> ProcedureContext:
         # The external_stop event must be loop-local — anyio.Event is bound
         # to whatever loop creates it. _build_proc_ctx runs on the
@@ -232,6 +293,16 @@ class ProcedureRunner:
         # procedure (also on the conductor loop) to await on.
         if self._external_stop is None:
             self._external_stop = anyio.Event()
+        # Operator-command stream is loop-local for the same reason. The
+        # buffer size of 8 is generous for a human-driven UI — operator
+        # clicks come at human speed but a pause→resume burst could
+        # arrive while the consumer is parked on a databus message.
+        if self._op_cmd_send is None or self._op_cmd_recv is None:
+            send_stream, recv_stream = anyio.create_memory_object_stream[OperatorCommand](
+                max_buffer_size=8
+            )
+            self._op_cmd_send = send_stream
+            self._op_cmd_recv = recv_stream
         return ProcedureContext(
             clock=ctx.clock,
             config=self._config,
@@ -245,6 +316,8 @@ class ProcedureRunner:
             authorization=self._authorization,
             method_executor=self._method_executor,
             metadata={},
+            operator_commands=self._op_cmd_recv,
+            ui_sink=self._ui_sink,
         )
 
 

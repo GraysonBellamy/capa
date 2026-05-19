@@ -38,7 +38,18 @@ from capa.devices.adapter import (
 )
 from capa.devices.camera.base import FrameReceipt
 from capa.devices.records import DeviceEmission, DeviceSnapshot
+from capa.runtime.recording import ResolvedRecordingPlan
 from capa.runtime.runcontext import BundleRef, RunContext, WriterRef
+
+
+def _all_pass_recording_plan() -> ResolvedRecordingPlan:
+    """Record-everything plan for tests that don't exercise the filter."""
+    return ResolvedRecordingPlan(
+        channel_mode="all",
+        camera_mode="all",
+        source="procedure_default",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Writer / bundle stubs (satisfy WriterRef / BundleRef protocols).
@@ -129,6 +140,7 @@ def make_run_context(
     writer: FakeWriterRef | None = None,
     bundle: FakeBundleRef | None = None,
     clock: RunClock | None = None,
+    recording_plan: ResolvedRecordingPlan | None = None,
 ) -> RunContext:
     """Build a :class:`RunContext` against test fakes."""
     return RunContext(
@@ -136,6 +148,7 @@ def make_run_context(
         clock=clock or RunClock.now(),
         writer=writer or FakeWriterRef(),
         bundle=bundle or FakeBundleRef(),
+        recording_plan=recording_plan or _all_pass_recording_plan(),
     )
 
 

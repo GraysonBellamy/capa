@@ -151,3 +151,162 @@ async def test_heater_pv_silent_blocks_after_adapters_started() -> None:
     assert problem.code == "capa.heater_pv_silent"
     assert problem.severity == "error"
     assert problem.blocking is True
+
+
+# ---------------------------------------------------------------------------
+# flux_calibration_freshness — Phase 3 preflight gate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_flux_calibration_freshness_no_target_passes() -> None:
+    """A run that doesn't declare a flux target has nothing to verify."""
+    from capa.experiment.profiles.runtime import _flux_calibration_freshness
+
+    ctx = _ctx(adapters_started=False)
+    ctx.profile_metadata = {"heater_program": {}}
+
+    assert await _flux_calibration_freshness(ctx) is None
+
+
+@pytest.mark.anyio
+async def test_flux_calibration_freshness_target_but_empty_ref_warns() -> None:
+    """Target declared, no ref → non-blocking warning prompting a tune."""
+    from capa.experiment.profiles.runtime import _flux_calibration_freshness
+
+    ctx = _ctx(adapters_started=False)
+    ctx.profile_metadata = {
+        "heater_program": {"target_heat_flux_kw_m2": 50.0, "flux_calibration_ref": ""}
+    }
+
+    problem = await _flux_calibration_freshness(ctx)
+    assert problem is not None
+    assert problem.code == "capa.flux_calibration_missing"
+    assert problem.severity == "warning"
+    assert problem.blocking is False
+
+
+@pytest.mark.anyio
+async def test_flux_calibration_freshness_freeform_ref_passes() -> None:
+    """A ref that doesn't resolve to an on-disk artifact is treated as
+    operator free-form (lab notebook entry) — pass."""
+    from capa.experiment.profiles.runtime import _flux_calibration_freshness
+
+    ctx = _ctx(adapters_started=False)
+    ctx.profile_metadata = {
+        "heater_program": {
+            "target_heat_flux_kw_m2": 50.0,
+            "flux_calibration_ref": "lab notebook 2026-05-17 p.43",
+        },
+        "_flux_calibration_dir": "configs/calibrations/flux",
+    }
+
+    assert await _flux_calibration_freshness(ctx) is None
+
+
+@pytest.mark.anyio
+async def test_flux_calibration_freshness_fresh_artifact_passes(tmp_path) -> None:
+    """An on-disk artifact within the recency window passes."""
+    from datetime import UTC, datetime, timedelta
+
+    from capa.calibration.tune_artifact import (
+        HeatFluxTuneArtifact,
+        HeatFluxTunePoint,
+        save_artifact,
+    )
+    from capa.experiment.profiles.runtime import _flux_calibration_freshness
+
+    artifact = HeatFluxTuneArtifact(
+        id="capa_flux_fresh",
+        rig="test_rig",
+        heater_device="heater",
+        heater_setpoint_channel="heater.setpoint",
+        heater_pv_channel="heater.pv",
+        flux_channel="heat_flux_gauge",
+        geometry="40 mm below heater",
+        accepted_at=datetime.now(UTC) - timedelta(days=1),
+        procedure_id="capa.builtin.heat_flux_tune",
+        procedure_version="0.1.0",
+        points=(
+            HeatFluxTunePoint(
+                target_flux_kw_m2=50.0,
+                heater_setpoint_c=650.0,
+                measured_flux_mean_kw_m2=50.1,
+                measured_flux_std_kw_m2=0.02,
+                measured_flux_slope_kw_m2_per_min=0.005,
+                heater_pv_mean_c=649.8,
+                soak_s=400.0,
+                accepted=True,
+                accept_reason="algorithm_converged",
+            ),
+        ),
+    )
+    save_artifact(artifact, tmp_path)
+
+    ctx = _ctx(adapters_started=False)
+    ctx.profile_metadata = {
+        "heater_program": {
+            "target_heat_flux_kw_m2": 50.0,
+            "flux_calibration_ref": "capa_flux_fresh",
+        },
+        "_flux_calibration_dir": str(tmp_path),
+    }
+
+    assert await _flux_calibration_freshness(ctx) is None
+
+
+@pytest.mark.anyio
+async def test_flux_calibration_freshness_stale_artifact_warns(tmp_path) -> None:
+    """An on-disk artifact older than the recency window warns (non-blocking)."""
+    from datetime import UTC, datetime, timedelta
+
+    from capa.calibration.tune_artifact import (
+        HeatFluxTuneArtifact,
+        HeatFluxTunePoint,
+        save_artifact,
+    )
+    from capa.experiment.profiles.runtime import _flux_calibration_freshness
+
+    artifact = HeatFluxTuneArtifact(
+        id="capa_flux_stale",
+        rig="test_rig",
+        heater_device="heater",
+        heater_setpoint_channel="heater.setpoint",
+        heater_pv_channel="heater.pv",
+        flux_channel="heat_flux_gauge",
+        geometry="40 mm below heater",
+        accepted_at=datetime.now(UTC) - timedelta(days=21),
+        procedure_id="capa.builtin.heat_flux_tune",
+        procedure_version="0.1.0",
+        points=(
+            HeatFluxTunePoint(
+                target_flux_kw_m2=50.0,
+                heater_setpoint_c=650.0,
+                measured_flux_mean_kw_m2=50.1,
+                measured_flux_std_kw_m2=0.02,
+                measured_flux_slope_kw_m2_per_min=0.005,
+                heater_pv_mean_c=649.8,
+                soak_s=400.0,
+                accepted=True,
+                accept_reason="algorithm_converged",
+            ),
+        ),
+    )
+    save_artifact(artifact, tmp_path)
+
+    ctx = _ctx(adapters_started=False)
+    ctx.profile_metadata = {
+        "heater_program": {
+            "target_heat_flux_kw_m2": 50.0,
+            "flux_calibration_ref": "capa_flux_stale",
+        },
+        "_flux_calibration_dir": str(tmp_path),
+        "_flux_calibration_window_days": 7,
+    }
+
+    problem = await _flux_calibration_freshness(ctx)
+    assert problem is not None
+    assert problem.code == "capa.flux_calibration_stale"
+    assert problem.severity == "warning"
+    assert problem.blocking is False
+    assert problem.metadata["age_days"] >= 14

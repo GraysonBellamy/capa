@@ -63,6 +63,7 @@ from capa.storage.manifest import (
     DomainProfileBlock,
     OperatorBlock,
     ProcedureBlock,
+    RecordingBlock,
     RunStatus,
     SampleBlock,
 )
@@ -350,6 +351,59 @@ class RunBundleWriter:
             metadata=metadata,
         )
 
+    # ------------------------------------------------------------------ recording plan
+
+    def update_recording_plan(
+        self,
+        *,
+        policy_mode: str,
+        plan: Any,
+    ) -> None:
+        """Rewrite ``manifest.json`` with the resolved recording plan.
+
+        Called by the conductor after :meth:`Procedure.plan_capture` runs
+        and before workers arm. Re-reads the manifest from disk, applies
+        the new ``recording`` block, and updates each ``cameras`` entry's
+        ``recorded`` / ``suppressed_reason`` fields against the plan.
+
+        ``plan`` is typed as :class:`Any` to avoid an import of
+        :class:`~capa.runtime.recording.ResolvedRecordingPlan` at this
+        layer — the storage module stays runtime-independent. The plan
+        must expose ``channel_mode``, ``recorded_channels``,
+        ``camera_mode``, ``recorded_cameras``, ``source``,
+        ``native_device_records``, and ``allows_camera(name)``.
+
+        Idempotent: calling twice with the same plan is a no-op rewrite.
+        Reading the manifest fresh each call avoids state drift if
+        another writer (the finalize path) edited it in between.
+        """
+        if not self._opened:
+            raise BundleWriterError("update_recording_plan() requires open()")
+        manifest_path = self._bundle_path / "manifest.json"
+        manifest = BundleManifest.read(manifest_path)
+        recording = RecordingBlock(
+            policy=policy_mode,  # type: ignore[arg-type]
+            source=plan.source,
+            channel_mode=plan.channel_mode,
+            recorded_channels=plan.recorded_channels,
+            camera_mode=plan.camera_mode,
+            recorded_cameras=plan.recorded_cameras,
+            native_device_records=plan.native_device_records,
+        )
+        updated_cameras = tuple(
+            entry.model_copy(
+                update={
+                    "recorded": plan.allows_camera(entry.name),
+                    "suppressed_reason": (
+                        None if plan.allows_camera(entry.name) else "recording_policy"
+                    ),
+                }
+            )
+            for entry in manifest.cameras
+        )
+        manifest = manifest.model_copy(update={"recording": recording, "cameras": updated_cameras})
+        manifest.write(manifest_path)
+
     # ------------------------------------------------------------------ finalize / close
 
     def close_sinks(self) -> None:
@@ -489,12 +543,15 @@ class RunBundleWriter:
 # ---------------------------------------------------------------------------
 
 
-def _seed_camera_entry(spec: CameraSpec) -> CameraEntry:
+def _seed_camera_entry(spec: CameraSpec, *, recorded: bool = True) -> CameraEntry:
     """Build a :class:`CameraEntry` from a :class:`CameraSpec` at arm-time.
 
     Counts and frames-path are filled in at finalize; the seed entry only
     captures spec-derived fields so a reader catching the bundle mid-run
-    sees what the operator declared.
+    sees what the operator declared. ``recorded=False`` marks the entry
+    as suppressed-by-policy — paired with the manifest's ``recording``
+    block, it tells the reader "no video file landed for this camera and
+    that's the intended outcome, not a failure."
     """
     ext = ".csq" if spec.kind == "ir" else ".mkv"
     if spec.output_root is not None:
@@ -513,6 +570,8 @@ def _seed_camera_entry(spec: CameraSpec) -> CameraEntry:
         output_path=bundle_rel,
         output_path_external=external,
         on_failure=spec.on_failure,
+        recorded=recorded,
+        suppressed_reason=None if recorded else "recording_policy",
     )
 
 

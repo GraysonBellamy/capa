@@ -8,7 +8,7 @@ validated, YAML/TOML on disk, snapshotted into the run bundle.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -318,6 +318,54 @@ class RuntimeConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Per-run options (recording policy)
+# ---------------------------------------------------------------------------
+
+
+RecordingPolicyMode = Literal["procedure_default", "record_all"]
+"""How :class:`RecordingPolicy` resolves into a
+:class:`~capa.runtime.recording.ResolvedRecordingPlan`.
+
+* ``procedure_default`` (default): consult
+  :meth:`~capa.experiment.procedures.base.Procedure.plan_capture`.
+  Procedures that don't override get full-rig recording.
+* ``record_all``: ignore ``plan_capture``; record every channel and
+  camera the hardware profile declares. The Run-tab override checkbox
+  sets this for diagnostic sessions.
+"""
+
+
+class RecordingPolicy(BaseModel):
+    """Operator intent for what should be recorded.
+
+    Lives on :class:`RunOptions` so it's per-run, not per-experiment
+    recipe. Default leaves the choice to the procedure. Lives in this
+    module (not :mod:`capa.runtime.recording`) so :class:`ExperimentConfig`
+    can carry it without dragging the whole runtime package into the
+    import graph of every config consumer.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    mode: RecordingPolicyMode = "procedure_default"
+
+
+class RunOptions(BaseModel):
+    """Per-run knobs separate from the saved experiment recipe.
+
+    Attached to :class:`ExperimentConfig` as ``run_options``. The Run
+    tab mutates this on the operator's behalf before arm; the recording
+    policy is snapshotted into the bundle manifest as the audit trail.
+    Defaulted so loaded recipes that don't declare it get the
+    procedure-default policy.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    recording_policy: RecordingPolicy = Field(default_factory=RecordingPolicy)
+
+
+# ---------------------------------------------------------------------------
 # ExperimentConfig — the top-level run recipe.
 # ---------------------------------------------------------------------------
 
@@ -360,6 +408,12 @@ class ExperimentConfig(BaseModel):
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     operator: OperatorRef
     sample: SampleInfo
+    run_options: RunOptions = Field(default_factory=RunOptions)
+    """Per-run knobs (recording policy, etc.) that are not part of the
+    saved experiment recipe. The Run tab mutates this on the operator's
+    behalf before arm; the policy is snapshotted into the bundle
+    manifest. Defaulted so loaded recipes that don't declare it get the
+    procedure-default policy."""
     tags: tuple[str, ...] = Field(default_factory=tuple)
     custom: dict[str, Any] = Field(default_factory=dict)
 

@@ -360,6 +360,14 @@ class CameraDeviceAdapter:
         here so every :class:`FrameReceipt`'s ``t_mono_ns`` is relative
         to the new run's :class:`RunClock` origin.
 
+        When ``ctx.recording_enabled`` is ``False`` (the resolved
+        :class:`~capa.runtime.recording.ResolvedRecordingPlan` excluded
+        this camera), the adapter does NOT call ``start_recording`` — no
+        ``video/{name}.csq`` lands in the bundle. The IDLE preview
+        source is left running so the tile keeps producing frames for
+        the operator's monitor; :meth:`stream` short-circuits and
+        :meth:`stop` is a no-op for the suppressed case.
+
         :param ctx: The per-run :class:`AdapterStartContext`. Carries the
             authoritative clock, the run id, and the bundle root used to
             compute the recording's output path.
@@ -371,13 +379,19 @@ class CameraDeviceAdapter:
             raise RuntimeError(
                 f"CameraDeviceAdapter[{self._spec.name!r}]: start() called while already recording"
             )
+        self._clock_proxy.rebind(ctx.clock)
+        self._run_id = ctx.run_id
+        if not ctx.recording_enabled:
+            # Leave the IDLE preview source running on its own surface;
+            # we never open an output file. ``self._recording`` stays
+            # False so :meth:`stream` and :meth:`stop` both treat this
+            # camera as not-recording for the rest of the run.
+            return
         # Tear down the IDLE preview source BEFORE start_recording so the
         # camera's single-owner stream (FLIR Atlas) isn't contended at
         # ``ACS_Stream_start``. No-op for cameras without the surface
         # (webcam's input pump owns its preview frames across both phases).
         await self._stop_idle_preview_source()
-        self._clock_proxy.rebind(ctx.clock)
-        self._run_id = ctx.run_id
         output_path = self._resolve_output_path(ctx)
         await self._camera.start_recording(output_path)
         self._recording = True
@@ -439,6 +453,12 @@ class CameraDeviceAdapter:
           coordinator finally-pushes the sentinel; this iterator returns.
         """
         if not self._recording:
+            if self._run_id is not None:
+                # start() ran but suppressed by the recording plan — the
+                # worker still spawns a stream task for this adapter, so
+                # we must yield nothing and return cleanly. The worker's
+                # ``_stream_task`` sees iterator exhaustion and exits.
+                return
             raise RuntimeError(
                 f"CameraDeviceAdapter[{self._spec.name!r}]: stream() called while not recording"
             )

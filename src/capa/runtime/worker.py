@@ -749,6 +749,12 @@ class Worker:
         :class:`~capa.devices.adapter.AdapterStartContext` shape. The
         context is constructed once per arm from the worker's current
         :class:`RunContext`.
+
+        For camera adapters, ``recording_enabled`` is computed from the
+        run context's resolved recording plan; the adapter skips opening
+        its output file when ``False``. Non-camera adapters get the
+        default ``True`` — their channel-level filtering happens at the
+        conductor's dispatch gate, not at the adapter.
         """
         assert self._run_context is not None
         bundle_root = self._run_context.bundle.root
@@ -758,10 +764,14 @@ class Worker:
             # ``ctx.bundle_root`` expect a real :class:`Path`, so absorb
             # the coercion here once instead of at every reader.
             bundle_root = Path(str(bundle_root))
+        recording_enabled = True
+        if isinstance(adapter, CameraDeviceAdapter):
+            recording_enabled = self._run_context.recording_plan.allows_camera(adapter.name)
         ctx = AdapterStartContext(
             clock=self._run_context.clock,
             run_id=self._run_context.run_id,
             bundle_root=bundle_root,
+            recording_enabled=recording_enabled,
         )
         await adapter.start(ctx)
 

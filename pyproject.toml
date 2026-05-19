@@ -63,6 +63,7 @@ capa = "capa.cli:main"
 "capa.builtin.free_run" = "capa.experiment.procedures.builtin.free_run:FreeRun"
 "capa.builtin.recipe_runner" = "capa.experiment.procedures.builtin.recipe_runner:RecipeRunner"
 "capa.builtin.batch" = "capa.experiment.procedures.builtin.batch:Batch"
+"capa.builtin.heat_flux_tune" = "capa.experiment.procedures.builtin.heat_flux_tune:HeatFluxTune"
 
 [project.entry-points."capa.profiles"]
 # Domain profiles. CAPA (controlled atmosphere pyrolysis) is the default

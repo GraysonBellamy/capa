@@ -17,10 +17,11 @@ method-bearing procedures.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
 import anyio
+import anyio.abc
 import structlog
 from pydantic import BaseModel, ConfigDict
 
@@ -36,6 +37,8 @@ from capa.storage.bundle import RunBundleWriter
 if TYPE_CHECKING:
     from capa.experiment.executor import MethodExecutor
     from capa.runtime.dispatch import CommandDispatcher
+    from capa.runtime.emissions import ProcedureUiSink
+    from capa.runtime.recording import ResolvedRecordingPlan
 
 
 class ProcedureError(CapaError):
@@ -104,6 +107,43 @@ class ChannelRequirement(BaseModel):
 
     min_count: int = 1
     """How many channels must satisfy the requirement."""
+
+
+# ---------------------------------------------------------------------------
+# OperatorCommand — UI-issued mid-run control message.
+# ---------------------------------------------------------------------------
+
+
+OperatorCommandKind = Literal["pause", "resume", "accept_current"]
+"""Inbound UI commands a long-running procedure can react to.
+
+* ``pause`` / ``resume`` — freeze the iteration loop without changing
+  commanded setpoints; the procedure keeps subscribing to live samples
+  so the operator can inspect a stable state.
+* ``accept_current`` — force the current iteration to terminate with
+  whatever the most recent rolling-window statistics are. Procedures
+  that emit per-target results (e.g.
+  :class:`~capa.experiment.procedures.builtin.heat_flux_tune.HeatFluxTune`)
+  mark the resulting point with ``accept_reason="operator_override"``.
+
+``abort`` is intentionally **not** in this list: a UI abort is
+delivered through the existing ``external_stop`` event, which every
+procedure already polls.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorCommand:
+    """One inbound operator command.
+
+    The procedure consumes these from
+    :attr:`ProcedureContext.operator_commands` (if wired). Cheap and
+    cancellable — the consumer task closes its end of the stream on
+    cancellation and the UI side sees an exception on next send.
+    """
+
+    kind: OperatorCommandKind
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +219,28 @@ class ProcedureContext:
     """Optional procedure-private scratchpad. Not snapshotted into the bundle
     — for cross-step state during a single run."""
 
+    operator_commands: anyio.abc.ObjectReceiveStream[OperatorCommand] | None = None
+    """Inbound UI control stream. ``None`` when no UI is attached (CLI
+    headless, test harness) — procedures that consume this MUST check for
+    ``None`` before subscribing. The conductor/runner creates a paired
+    send/receive stream and stores the receive end here; the UI calls
+    into the runner to push commands."""
+
+    ui_sink: ProcedureUiSink | None = None
+    """Outbound UI-only telemetry sink. ``None`` when no UI is attached
+    (CLI headless, tests) — procedures that emit
+    :class:`~capa.runtime.emissions.ProcedureTick`\\ s MUST null-check
+    before publishing.
+
+    The conductor's :meth:`~capa.runtime.conductor.Conductor.procedure_ui_sink`
+    wraps the same UI bridge that carries device emissions. Ticks
+    short-circuit through :meth:`~capa.runtime.conductor.Conductor._publish_ui`
+    — they never hit the writer or the data bus, by design: ticks are
+    pure operator-facing mirror, not durable artifacts. Use
+    :meth:`ProcedureContext.bundle_writer.write_event` for events that
+    should land in the bundle (e.g. heat-flux tune's per-iteration audit
+    events)."""
+
 
 # ---------------------------------------------------------------------------
 # Procedure protocol — full §11 contract.
@@ -216,6 +278,22 @@ class Procedure(Protocol):
     required_channels: ClassVar[tuple[ChannelRequirement, ...]]
     """Channels (by name or by kind) the procedure must have access to."""
 
+    uses_method: ClassVar[bool]
+    """Whether this procedure consumes ``ExperimentConfig.method``.
+
+    ``True`` for procedures that walk a :class:`Method` via
+    :class:`MethodExecutor` (the standard :class:`RecipeRunner`); ``False``
+    for self-driving procedures that ignore or reject methods
+    (:class:`FreeRun`, :class:`HeatFluxTune`). The UI reads this to
+    decide whether the Method tab is meaningful for the currently
+    selected procedure — when ``False``, the tab is disabled so the
+    operator doesn't waste time editing steps that will never run.
+
+    Defaults to ``True`` via :func:`procedure_uses_method` for plugins
+    that don't declare it, matching the pre-existing always-visible
+    behaviour.
+    """
+
     async def preflight(self, ctx: ProcedureContext) -> list[Problem]:
         """Return a list of preflight :class:`Problem` records.
 
@@ -239,12 +317,47 @@ class Procedure(Protocol):
         """
         ...
 
+    def plan_capture(self, default_plan: ResolvedRecordingPlan) -> ResolvedRecordingPlan | None:
+        """Return a narrower :class:`ResolvedRecordingPlan`, or ``None`` to
+        inherit the default (record everything declared in the hardware
+        profile).
+
+        Optional — procedures that don't implement this get full-rig
+        recording, preserving today's behaviour. Calibration / self-driving
+        procedures override to declare exactly what they need: e.g.
+        :class:`~capa.experiment.procedures.builtin.heat_flux_tune.HeatFluxTune`
+        returns a plan with three channels and no cameras.
+
+        Called once at arm time on the conductor loop, before
+        :class:`~capa.runtime.runcontext.RunContext` is frozen and before
+        any adapter's :meth:`start` is invoked. The procedure has not yet
+        received its :class:`ProcedureContext`, so this method must
+        derive its return value from the procedure's own ``cfg`` fields
+        (not from channel-name string constants — see the proposal's
+        rename-resilience requirement).
+        """
+        ...
+
+
+def procedure_uses_method(cls: type[object]) -> bool:
+    """Look up ``cls.uses_method`` with a safe default.
+
+    Returns ``True`` for any class that does not declare ``uses_method``,
+    preserving today's always-visible Method-tab behaviour for plugins
+    written before this attribute was added to the Protocol.
+    """
+    value = getattr(cls, "uses_method", True)
+    return bool(value)
+
 
 __all__ = [
     "ChannelRequirement",
+    "OperatorCommand",
+    "OperatorCommandKind",
     "Problem",
     "ProblemSeverity",
     "Procedure",
     "ProcedureContext",
     "ProcedureError",
+    "procedure_uses_method",
 ]

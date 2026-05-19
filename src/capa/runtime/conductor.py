@@ -44,7 +44,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future
 from contextlib import AsyncExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
@@ -54,11 +54,12 @@ import structlog
 
 from capa.core.databus import DataBus
 from capa.devices.camera.base import CameraEvent, FrameReceipt
-from capa.experiment.config import RuntimeConfig
+from capa.devices.records import ChannelSample
 from capa.runtime.bridge import ThreadBridge
-from capa.runtime.emissions import WorkerEmission
+from capa.runtime.emissions import ProcedureTick, ProcedureUiSink, WorkerEmission
 from capa.runtime.errors import ConductorStateError, PoolStateError
 from capa.runtime.heartbeat import LoopLagMetric, heartbeat_task
+from capa.runtime.recording import ResolvedRecordingPlan, resolve_recording_plan
 from capa.runtime.saturation import (
     DEFAULT_POLL_PERIOD_S,
     DEFAULT_SATURATION_DEADLINE_S,
@@ -71,6 +72,7 @@ from capa.runtime.state import ConductorState, conductor_edge_legal
 if TYPE_CHECKING:
     from capa.devices.adapter import CommandResult, DeviceCommand
     from capa.devices.records import DeviceEmission
+    from capa.experiment.config import ExperimentConfig, RuntimeConfig
     from capa.runtime.pool import WorkerPool
     from capa.runtime.runcontext import RunContext, WriterRef
 
@@ -133,6 +135,13 @@ class RunSession(Protocol):
     def bundle_path(self) -> Path | None:
         """Filesystem path of the bundle, or ``None`` if the session hasn't
         materialized a bundle yet (e.g. in-memory test session)."""
+        ...
+
+    @property
+    def config(self) -> ExperimentConfig:
+        """The frozen run recipe. Read by the conductor at arm time for
+        recording-plan resolution (``config.run_options.recording_policy``
+        and ``config.hardware``). Valid pre- and post-:meth:`open`."""
         ...
 
     @property
@@ -340,6 +349,7 @@ class Conductor:
         "_pool",
         "_pool_armed",
         "_pre_completion_callback",
+        "_recording_plan",
         "_result_future",
         "_run_context",
         "_runner",
@@ -400,6 +410,7 @@ class Conductor:
         self._ended_mono_ns = 0
         self._databus: DataBus | None = None
         self._run_context: RunContext | None = None
+        self._recording_plan: ResolvedRecordingPlan | None = None
         self._bridges: dict[str, ThreadBridge[WorkerEmission]] = {}
         self._drain_count_observed = 0
         # UI bridge — optional Conductor → UI thread channel. Attached by
@@ -628,6 +639,24 @@ class Conductor:
             )
         self._ui_bridge = bridge
 
+    def procedure_ui_sink(self) -> ProcedureUiSink:
+        """Return a UI-only sink procedures can publish
+        :class:`~capa.runtime.emissions.ProcedureTick` payloads through.
+
+        Wraps :meth:`_publish_ui` so the procedure layer stays bridge-
+        agnostic: a tick goes to the UI mirror with no writer write,
+        no data-bus publish. Safe to call before :meth:`start` —
+        no-op when no UI bridge is attached (headless run); the sink
+        becomes live the moment :meth:`attach_ui_bridge` runs.
+
+        The returned sink captures ``self`` and is intended to be
+        invoked from the conductor loop (where the procedure runs).
+        Calling from a different loop is undefined; the underlying
+        bridge's ``put_nowait`` is thread-safe but the cross-thread
+        timestamp ordering would be unreliable.
+        """
+        return _ConductorProcedureUiSink(conductor=self)
+
     # ------------------------------------------------------------------ thread body
 
     def _thread_main(self) -> None:
@@ -696,6 +725,30 @@ class Conductor:
                         self._runner = self._runner_factory(self._session, ctx)
                     else:
                         self._runner = NoOpRunner()
+
+                # 1c. Resolve the recording plan. Runner exists; RunContext
+                # is not yet handed to workers. The procedure's plan_capture
+                # (if it has one) and the operator's run-options policy
+                # collapse into the final plan, which is the source of
+                # truth for both the camera-adapter suppression flag and
+                # the conductor's dispatch gate.
+                resolved_plan = self._resolve_recording_plan(default_plan=ctx.recording_plan)
+                ctx = replace(ctx, recording_plan=resolved_plan)
+                self._run_context = ctx
+                self._recording_plan = resolved_plan
+
+                # 1d. Snapshot the plan into the bundle manifest. Best-
+                # effort: test sessions may not implement this hook.
+                update_plan = getattr(self._session, "update_recording_plan", None)
+                if update_plan is not None:
+                    try:
+                        update_plan(resolved_plan)
+                    except BaseException as exc:
+                        _logger.warning(
+                            "conductor.recording_plan_snapshot_failed",
+                            error=str(exc),
+                            error_type=type(exc).__name__,
+                        )
 
                 # 2. Arm all workers with the same RunContext.
                 await self._pool.arm_all(ctx)
@@ -885,6 +938,31 @@ class Conductor:
             if self._completion_event is not None and not self._completion_event.is_set():
                 self._completion_event.set()
 
+    def _resolve_recording_plan(
+        self, *, default_plan: ResolvedRecordingPlan
+    ) -> ResolvedRecordingPlan:
+        """Resolve the per-run recording plan.
+
+        Only the procedure-wrapping runner (``ProcedureRunner``) exposes
+        a ``procedure`` attribute; ``NoOpRunner`` and engine tests don't,
+        so they fall through to the default full-rig plan via
+        :func:`resolve_recording_plan`'s ``procedure=None`` branch.
+
+        Returns ``default_plan`` unchanged when the session doesn't carry
+        an :class:`ExperimentConfig` (test sessions that pre-date the
+        plan-resolution path). Production :class:`RealRunSession` always
+        exposes one.
+        """
+        config = getattr(self._session, "config", None)
+        if config is None:
+            return default_plan
+        procedure = getattr(self._runner, "procedure", None)
+        return resolve_recording_plan(
+            hardware=config.hardware,
+            procedure=procedure,
+            policy=config.run_options.recording_policy,
+        )
+
     async def _dispatch_emission(
         self,
         emission: WorkerEmission,
@@ -899,11 +977,41 @@ class Conductor:
         their own writer methods and skip the procedure-side databus —
         nothing on the bus would subscribe to a frame receipt, so the
         databus carries only :class:`SourceRecord` / :class:`ChannelSample`.
+
+        The resolved :class:`~capa.runtime.recording.ResolvedRecordingPlan`
+        gates writer calls for :class:`ChannelSample` and
+        :class:`FrameReceipt`. Three invariants enforced here:
+
+        1. **DataBus is never filtered.** Procedure subscribers, the
+           safety monitor, and :class:`MethodExecutor` all read live
+           samples from the bus. Suppressing disk recording must not
+           weaken safety.
+        2. **UI mirror is never filtered.** Live plots and preview tiles
+           paint regardless of what's recorded.
+        3. **SourceRecord is not filtered in v1.** Adapter-native records
+           bundle multiple channels' data in their row dict; column
+           projection is invasive and the storage savings are small
+           (tens of MB max). The manifest declares
+           ``native_device_records="all"`` to make this explicit.
+        4. **CameraEvent is not filtered.** Camera errors / status
+           messages are tiny and diagnostically useful even when the
+           camera's video is suppressed.
         """
+        plan = self._recording_plan
+        if isinstance(emission, ProcedureTick):
+            # UI-only mirror: ticks never reach the writer or the data
+            # bus by design. Soft-fail on bridge errors — losing a UI
+            # frame must not crash the run.
+            self._publish_ui(emission)
+            return
         if isinstance(emission, FrameReceipt):
-            await writer.record_frame(emission)
-            # FrameReceipt does not go on the bus (no procedure subscribers)
-            # but DOES go to the UI so preview/numerics/events can react.
+            # The camera adapter never opened its output file when
+            # suppressed, so a FrameReceipt for a suppressed camera
+            # would be impossible in normal operation. Belt-and-braces
+            # — still publish to the UI so a misrouted frame is at
+            # least visible.
+            if plan is None or plan.allows_camera(emission.name):
+                await writer.record_frame(emission)
             self._publish_ui(emission)
             return
         if isinstance(emission, CameraEvent):
@@ -919,8 +1027,16 @@ class Conductor:
             self._publish_ui(emission)
             return
         # Durable side first — losing an emission off-disk is worse than
-        # losing it off the bus.
-        await writer.submit(emission)
+        # losing it off the bus. Channel samples are gated; SourceRecord
+        # always passes through (invariant 3).
+        if (
+            isinstance(emission, ChannelSample)
+            and plan is not None
+            and not plan.allows_channel(emission.channel)
+        ):
+            pass
+        else:
+            await writer.submit(emission)
         await bus.publish(emission)
         # UI mirror last — DROP_OLDEST under load. `publish_nowait` on the
         # UI side because the UI loop cannot honor blocking subscriber
@@ -1132,6 +1248,23 @@ class Conductor:
             return True
         self._thread.join(timeout=timeout)
         return not self._thread.is_alive()
+
+
+@dataclass(frozen=True, slots=True)
+class _ConductorProcedureUiSink:
+    """Tiny adapter satisfying :class:`ProcedureUiSink` against a
+    :class:`Conductor`. Captures the conductor instance and forwards
+    :class:`ProcedureTick`\\ s to :meth:`Conductor._publish_ui`.
+
+    The conductor's existing soft-fail discipline applies — a closed
+    bridge or a put failure is logged but never raised, so a UI
+    disconnect mid-run cannot crash the procedure.
+    """
+
+    conductor: Conductor
+
+    def publish(self, tick: ProcedureTick) -> None:
+        self.conductor._publish_ui(tick)
 
 
 __all__ = [

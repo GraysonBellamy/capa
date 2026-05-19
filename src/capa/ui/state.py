@@ -46,7 +46,7 @@ from capa.runtime.conductor import (
     RunResult,
 )
 from capa.runtime.dispatch import ManualClient, PoolDispatcher
-from capa.runtime.emissions import WorkerEmission
+from capa.runtime.emissions import ProcedureTick, WorkerEmission
 from capa.runtime.lifecycle import PoolState
 from capa.runtime.outcomes import read_bundle_status, run_status_for_outcome
 from capa.runtime.pool import WorkerPool
@@ -226,6 +226,11 @@ class RunController(QObject):
     preview_received = Signal(str, bytes)
     """``(camera_name, jpeg_bytes)`` — emitted by per-camera preview
     drain tasks at the adapter's throttled cadence."""
+    procedure_tick_received = Signal(object)
+    """``ProcedureTick`` — emitted whenever a long-running procedure
+    publishes a live-numerics tick onto the UI sink. Procedure-id-
+    filtered on the consumer side (each dock subscribes and ignores
+    ticks from other procedures)."""
     run_finished = Signal(object)
     manual_event = Signal(object)
     """``DeviceEvent`` — synthesized by manual-control cards on each
@@ -267,6 +272,13 @@ class RunController(QObject):
         self._active_config: ExperimentConfig | None = None
         self._conductor: Conductor | None = None
         self._task: asyncio.Task[None] | None = None
+        # Set by the conductor's runner_factory when a run is launched;
+        # cleared at run-completion cleanup. Exposed to the UI through
+        # :meth:`send_operator_command` and :attr:`active_procedure_id`
+        # so per-procedure docks (e.g. HeatFluxTuneDock) can push
+        # operator commands and visibility-gate on the active procedure.
+        self._active_procedure_runner: Any = None
+        self._active_run_config: ExperimentConfig | None = None
         self._buffers: RingBufferRegistry = RingBufferRegistry()
         self._last_result: RunUiResult | None = None
         self._ui_state: RunUiState = RunUiState.IDLE
@@ -736,6 +748,44 @@ class RunController(QObject):
         """Surface a manual-command :class:`DeviceEvent` to the events dock."""
         self.manual_event.emit(event)
 
+    # ------------------------------------------------------------------ operator commands
+
+    @property
+    def active_procedure_id(self) -> str | None:
+        """Procedure id of the currently-armed/running run, or ``None``.
+
+        Read off the most recently launched :class:`ExperimentConfig`.
+        Stays populated through SEALED so a finishing-summary modal can
+        still introspect what just ran; cleared when the controller is
+        torn down.
+        """
+        config = getattr(self, "_active_run_config", None)
+        if config is None:
+            return None
+        procedure = getattr(config, "procedure", None)
+        return getattr(procedure, "id", None) if procedure is not None else None
+
+    def send_operator_command(self, cmd: OperatorCommand) -> bool:
+        """Forward an operator command to the active procedure runner.
+
+        Returns ``True`` when the command was queued. Returns ``False``
+        when no run is active, the runner doesn't support the
+        command stream (older procedures), or the runner's send buffer
+        rejected the command (would-block / closed).
+
+        UI buttons should treat ``False`` as a transient — flash the
+        status briefly and let the next click retry. The command stream
+        is intentionally non-blocking so a wedged consumer cannot freeze
+        the UI thread.
+        """
+        runner = getattr(self, "_active_procedure_runner", None)
+        if runner is None:
+            return False
+        send = getattr(runner, "send_operator_command", None)
+        if send is None:
+            return False
+        return bool(send(cmd))
+
     # ------------------------------------------------------------------ control
 
     def start(self, config: ExperimentConfig) -> None:
@@ -892,10 +942,16 @@ class RunController(QObject):
                 )
 
             stop_signal: asyncio.Event | None = None
+            ui_sink: Any = None
             if _conductor_holder:
                 stop_signal = _conductor_holder[0].completion_event
+                # Wire the UI-only telemetry sink so procedures emitting
+                # ProcedureTicks (heat-flux tune's live numerics) reach
+                # the dock through the existing UI bridge. The sink is
+                # a no-op if no UI bridge is attached (headless tests).
+                ui_sink = _conductor_holder[0].procedure_ui_sink()
 
-            return ProcedureRunner(
+            runner = ProcedureRunner(
                 procedure=procedure,
                 config=config,
                 channel_registry=channel_registry,
@@ -905,7 +961,15 @@ class RunController(QObject):
                 bundle_writer=s.bundle_writer,
                 method_executor=method_executor,
                 stop_signal=stop_signal,
+                ui_sink=ui_sink,
             )
+            # Stash the runner + the launched config so the UI's operator
+            # command surface (Pause / Accept Current / etc.) can route to
+            # this run. Cleared in :meth:`_run` cleanup so a stale runner
+            # can't accept commands after the conductor has shut down.
+            self._active_procedure_runner = runner
+            self._active_run_config = config
+            return runner
 
         # Conductor knobs come from the user-facing RuntimeConfig.
         # ``ABORT_GRACE_S`` is retained as a UI-side fallback constant
@@ -979,6 +1043,12 @@ class RunController(QObject):
                     await self._state_poll_task
                 self._state_poll_task = None
             self._conductor = None
+            # Release the runner + config back-refs so a stale operator
+            # command after the run can't reach a torn-down procedure.
+            # ``active_procedure_id`` returning ``None`` is the dock's
+            # hide-trigger.
+            self._active_procedure_runner = None
+            self._active_run_config = None
             # Final state transition: read the conductor's terminal state
             # one more time and translate (FAILED bypasses SEALED).
             self._set_ui_state(_conductor_state_to_ui(conductor.state))
@@ -1015,6 +1085,9 @@ class RunController(QObject):
         * :class:`ChannelSample` → ring buffer (plots + numerics dock).
         * :class:`DeviceEvent` → :attr:`event_received` signal (events dock).
         * :class:`CameraEvent` → :attr:`camera_event_received` (preview dock).
+        * :class:`ProcedureTick` → :attr:`procedure_tick_received` (per-
+          procedure live-numerics docks; the dock filters by
+          ``procedure_id``).
         * :class:`FrameReceipt` → dropped at the UI boundary; frame
           receipts are a durable-only artifact (parquet frame index).
           Preview JPEGs travel a parallel channel: per-camera
@@ -1030,6 +1103,12 @@ class RunController(QObject):
             return
         if isinstance(emission, CameraEvent):
             self.camera_event_received.emit(emission)
+            return
+        if isinstance(emission, ProcedureTick):
+            # Procedure-side live-numerics tick. Docks filter by
+            # ``tick.procedure_id`` on receipt — the controller does
+            # not know about specific procedures.
+            self.procedure_tick_received.emit(emission)
             return
         if isinstance(emission, FrameReceipt):
             # Frame receipts are durable-only at the UI boundary —

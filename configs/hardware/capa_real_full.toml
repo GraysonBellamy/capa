@@ -93,6 +93,29 @@ units = "DEG_C"
 adc_timing_mode = "HIGH_RESOLUTION"
 auto_zero_mode = "ONCE"
 
+# Schmidt-Boelter heat-flux gauge — low-level millivolt analog input on
+# the NI 9214 (which is what we actually use; the 9214 supports both
+# thermocouple and low-level voltage AI on the same module). Wire-side
+# is volts; the channel calibration below converts to kW/m^2.
+#
+# IMPORTANT: any "CAPA HFG" named scale in NI MAX must be removed
+# (or set to identity) on this physical channel. The software-side
+# LinearTwoPoint calibration in the [[channels]] block below is the
+# authoritative V → kW/m^2 mapping; a driver-side scale would silently
+# double-apply and the keep_raw audit becomes meaningless.
+[[devices.params.channels]]
+kind = "ai_voltage"
+physical_channel = "cDAQ1Mod1/ai14"
+name = "AI_HFG"
+# Gauge sensitivity: ~7.77 mV per 100 kW/m^2 (cert slope 12867.29 kW/m^2
+# per V). Range gives ~2.5x headroom past a 100 kW/m^2 target before
+# the AI saturates at the NI 9214's low-level voltage rail.
+min_val = -0.001
+max_val = 0.020
+terminal_config = "DIFF"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "ONCE"
+
 # --- Real visible camera ---
 [[cameras]]
 name = "visible_cam0"
@@ -229,6 +252,64 @@ field = "TC_top_2"
 kind = "identity"
 input_unit = "degC"
 output_unit = "degC"
+
+# --- Heat-flux gauge (Schmidt-Boelter; raw V → calibrated kW/m^2) ---
+#
+# Used by the `capa.builtin.heat_flux_tune` procedure to drive the heater
+# setpoint to a target radiant heat flux at the specimen plane. Required
+# only for tune runs; specimen runs do not depend on the gauge being
+# present. keep_raw=true so the wire-side volts land in the bundle for
+# instrument-side audit.
+#
+# The NI 9214 returns volts; the linear-two-point below applies the
+# rig's gauge-cert linear fit F = 12867.29134 * V - 0.064771278 by
+# encoding the function at V=0 and V=0.010 V (matching the gauge cert).
+# Equivalent to the named NI MAX scale "CAPA HFG" — that scale must
+# NOT be applied on this physical channel (see [[devices.params.channels]]
+# block above for AI_HFG).
+[[channels]]
+name = "heat_flux_gauge"
+kind = "analog_in"
+unit = "V"
+derived_unit = "kW/m^2"
+keep_raw = true
+plot_group = "heat_flux"
+[channels.metadata]
+capa_group = "heat_flux_gauge"
+gauge_type = "Schmidt-Boelter"
+position = "40 mm below heater, centerline"
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "AI_HFG"
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "V"
+output_unit = "kW/m^2"
+# Encodes F = 12867.29134 V - 0.064771278 (rig gauge cert):
+#   V = 0.000 V  ->  F = -0.064771278 kW/m^2
+#   V = 0.010 V  ->  F = 128.6081421  kW/m^2
+ref_low_raw = 0.0
+ref_low_value = -0.064771278
+ref_high_raw = 0.010
+ref_high_value = 128.6081421
+[channels.calibration.uncertainty]
+kind = "relative"
+value = 0.03
+coverage_factor = 2.0
+method = "manufacturer cert + reference comparison"
+# TODO(rig): replace with the cert's stated uncertainty if it differs
+# from the 3% k=2 placeholder.
+[channels.calibration.fit_metadata]
+reference_instrument = "Medtherm Corporation 32-10SB-18-20608"
+reference_serial = "232041"
+# fitted_at is a deliberate Unix-epoch placeholder — the actual cert
+# date isn't at hand. TODO(rig): replace with the real cert-issue date
+# (any ISO-8601 datetime; the value drives no automated behaviour but
+# is part of the bundle's calibration pedigree).
+fitted_at = 1970-01-01T00:00:00Z
+notes = "linear fit: slope 12867.29134 kW/m^2/V, intercept -0.064771278 kW/m^2 (named NI MAX scale 'CAPA HFG'); applied software-side, not via the driver scale. fitted_at is a placeholder; replace with the actual cert date when available."
 
 # --- Mass (Sartorius) ---
 

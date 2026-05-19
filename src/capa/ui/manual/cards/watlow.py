@@ -24,20 +24,32 @@ from __future__ import annotations
 from typing import Final
 
 import structlog
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
 from capa.devices.adapter import Capability
 from capa.devices.watlow import WatlowStateSnapshot
 from capa.experiment.config import DeviceConfig
+from capa.experiment.procedures.builtin.heat_flux_tune import (
+    PROCEDURE_ID as HEAT_FLUX_TUNE_ID,
+)
+from capa.experiment.procedures.builtin.heat_flux_tune import (
+    HeatFluxTuneConfig,
+)
 from capa.runtime.dispatch import ManualClient
 from capa.ui.async_util import schedule_bg
+from capa.ui.forms import build_form
 from capa.ui.manual.cards.base import DeviceCard
 from capa.ui.state import RunController
 from capa.ui.statusbar import OperatorIdProvider
@@ -62,6 +74,13 @@ def is_heater_device(spec: DeviceConfig) -> bool:
     return "watlow" in spec.adapter.lower()
 
 
+_HEAT_FLUX_GAUGE_CHANNEL = "heat_flux_gauge"
+"""Channel name conventionally bound to the Schmidt-Boelter heat-flux
+gauge. The heater card renders its Heat-Flux Tune section only when a
+channel of this name exists in the active hardware profile — defensive
+UX so the launcher isn't visible on a rig that can't measure flux."""
+
+
 class HeaterCard(DeviceCard):
     """Per-Watlow manual-control card.
 
@@ -69,6 +88,16 @@ class HeaterCard(DeviceCard):
     exists; otherwise we fall back to the Watlow default flagset (setpoint
     + parameter config) so the card is usable in the lazy-connect window
     after a fresh config load.
+    """
+
+    tune_requested = Signal(dict)
+    """Emitted when the operator confirms the Heat-Flux Tune dialog.
+
+    Carries the validated procedure-config dict (the same shape
+    ``HeatFluxTuneConfig.model_dump()`` produces). MainWindow can connect
+    a slot to route this into the Setup tab's procedure section; if
+    unconnected, the dialog's clipboard fallback still gives the
+    operator a way to paste the config into Setup → Procedure manually.
     """
 
     def __init__(
@@ -120,6 +149,92 @@ class HeaterCard(DeviceCard):
             self._build_setpoint_section()
         if Capability.HAS_PARAMETER_CONFIG in self._capabilities:
             self._build_parameter_section()
+        if self._heat_flux_gauge_available():
+            self._build_heat_flux_tune_section()
+
+    def _heat_flux_gauge_available(self) -> bool:
+        """Return ``True`` when the active config exposes a
+        ``heat_flux_gauge`` channel.
+
+        Defensive check: the procedure's own preflight would catch a
+        missing gauge channel too, but hiding the launcher entirely is
+        clearer UX than letting the operator click a button that will
+        only refuse a few seconds later.
+        """
+        config = self._controller.active_config
+        if config is None:
+            return False
+        channels = config.hardware.channels or ()
+        return any(ch.name == _HEAT_FLUX_GAUGE_CHANNEL for ch in channels)
+
+    def _build_heat_flux_tune_section(self) -> None:
+        """Compose the Heat-Flux Tune launcher row.
+
+        One button: open a modal dialog with the auto-form for
+        :class:`HeatFluxTuneConfig`, validate on accept, copy the
+        resulting dict to the clipboard, and emit
+        :attr:`tune_requested` for any wired-up handler. The clipboard
+        path is the always-available fallback so the operator can
+        paste into Setup → Procedure → Config even when no MainWindow
+        slot is connected to the signal.
+        """
+        body = self.add_section("Heat-Flux Tune")
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        info_label = QLabel(
+            f"Gauge channel '{_HEAT_FLUX_GAUGE_CHANNEL}' detected.",
+            self,
+        )
+        info_label.setStyleSheet("color: #2a7;")
+        row.addWidget(info_label, stretch=1)
+        btn = QPushButton("Launch tune…", self)
+        btn.setToolTip(
+            "Open the Heat-Flux Tune config dialog. On accept the "
+            "validated config is copied to the clipboard for pasting "
+            "into Setup → Procedure, and a tune_requested signal is "
+            "emitted for the main window to act on."
+        )
+        btn.clicked.connect(self._on_launch_tune_clicked)
+        row.addWidget(btn)
+        body.addLayout(row)
+        # Tune launches its own audited setpoint sequence — gating this
+        # button on the run-state machine would refuse it during a run,
+        # which is what we want (you can't tune while a method runs).
+        self.register_action_widget(btn)
+
+    def _on_launch_tune_clicked(self) -> None:
+        """Pop the auto-form dialog and route the result."""
+        # Sensible defaults: 50 kW/m² target, 900 °C session ceiling.
+        initial = {
+            "targets_kw_m2": [50.0],
+            "t_set_max_c": 900.0,
+            "operator_id": self._operator_provider.current_operator_id() or None,
+        }
+        dialog = _HeatFluxTuneLaunchDialog(initial=initial, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        config_dict = dialog.validated_config()
+        if config_dict is None:
+            return
+        # Copy a clipboard-ready payload mirroring what the procedure
+        # section expects under ``experiment_payload["procedure"]``.
+        import json
+
+        clipboard_text = json.dumps(
+            {"id": HEAT_FLUX_TUNE_ID, "config": config_dict},
+            indent=2,
+            default=str,
+        )
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(clipboard_text)
+        self._set_status(
+            "tune config copied to clipboard — paste into Setup → Procedure",
+            level="ok",
+        )
+        # Emit for any wired-up handler. The signal is one-way; MainWindow
+        # can connect to push directly into the Setup tab.
+        self.tune_requested.emit(config_dict)
 
     def _build_setpoint_section(self) -> None:
         body = self.add_section("Setpoint")
@@ -381,6 +496,71 @@ def _calibrate_parameter(
         derived = str(getattr(spec, "derived_unit", "") or getattr(spec, "unit", ""))
         return calibrated, derived
     return raw_value, ""
+
+
+class _HeatFluxTuneLaunchDialog(QDialog):
+    """Modal config-editor for the Heat-Flux Tune procedure.
+
+    Embeds the auto-form for :class:`HeatFluxTuneConfig` plus a
+    standard OK/Cancel button row. ``validated_config`` returns the
+    Pydantic-validated dict on accept; on validation failure the
+    dialog shows the errors inline and stays open.
+    """
+
+    def __init__(
+        self,
+        *,
+        initial: dict[str, object] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Heat-Flux Tune")
+        self.setMinimumWidth(540)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        intro = QLabel(
+            "Configure the Heat-Flux Tune procedure. On accept the "
+            "validated config is copied to the clipboard for pasting "
+            "into Setup → Procedure → Config.",
+            self,
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self._form = build_form(HeatFluxTuneConfig, initial=initial, parent=self)
+        layout.addWidget(self._form)
+
+        self._error_label = QLabel("", self)
+        self._error_label.setWordWrap(True)
+        self._error_label.setStyleSheet("color: #b33;")
+        layout.addWidget(self._error_label)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._validated: dict[str, object] | None = None
+
+    def validated_config(self) -> dict[str, object] | None:
+        """The validated config dict from the last successful accept."""
+        return self._validated
+
+    def _on_accept(self) -> None:
+        values = self._form.values()
+        try:
+            cfg = HeatFluxTuneConfig.model_validate(values)
+        except Exception as exc:
+            self._error_label.setText(f"config invalid: {exc}")
+            return
+        self._validated = cfg.model_dump()
+        self._error_label.setText("")
+        self.accept()
 
 
 def _default_watlow_capabilities() -> frozenset[Capability]:

@@ -346,6 +346,102 @@ async def _leak_test_recency(ctx: ProfilePreflightContext) -> Problem | None:
     return None
 
 
+@register("capa.flux_calibration_freshness")
+async def _flux_calibration_freshness(ctx: ProfilePreflightContext) -> Problem | None:
+    """Warn when a flux target is declared without a recent calibration.
+
+    Implements the proposal §14 Phase 3 step: a specimen run that declares
+    a ``target_heat_flux_kw_m2`` but no ``flux_calibration_ref`` lacks the
+    flux↔setpoint mapping that justifies its chosen heater setpoint. The
+    check is non-blocking — the operator can knowingly run with a stale
+    calibration if they accept the consequences. Recency is only enforced
+    when the ref resolves to an on-disk tune artifact; free-form refs
+    (lab notebook entries, etc.) pass without recency checks.
+
+    Overrides via ``profile_metadata`` mirror the leak-test recency knob:
+
+    * ``_flux_calibration_window_days`` (default ``7``)
+    * ``_flux_calibration_dir`` (default ``configs/calibrations/flux``)
+    """
+    program = ctx.profile_metadata.get("heater_program") or {}
+    if not isinstance(program, dict):
+        return None
+    target = program.get("target_heat_flux_kw_m2")
+    try:
+        target_value = float(target) if target is not None else 0.0
+    except (TypeError, ValueError):
+        target_value = 0.0
+    if target_value <= 0:
+        return None
+
+    ref = program.get("flux_calibration_ref")
+    if not isinstance(ref, str) or not ref.strip():
+        return Problem(
+            code="capa.flux_calibration_missing",
+            message=(
+                f"target_heat_flux_kw_m2={target_value:g} declared but no "
+                f"flux_calibration_ref is set — run a heat-flux tune or pick "
+                f"an existing artifact"
+            ),
+            severity="warning",
+            blocking=False,
+            metadata={"target_kw_m2": target_value},
+        )
+    ref = ref.strip()
+
+    flux_dir = Path(
+        str(ctx.profile_metadata.get("_flux_calibration_dir") or "configs/calibrations/flux")
+    )
+    if not flux_dir.is_absolute():
+        flux_dir = (Path.cwd() / flux_dir).resolve()
+    artifact_path = flux_dir / f"{ref}.toml"
+    if not artifact_path.is_file():
+        # Free-form ref (lab notebook entry, external doc) — nothing to
+        # date-check. Pass; the operator owns the cross-reference.
+        return None
+
+    try:
+        from capa.calibration.tune_artifact import (  # noqa: PLC0415
+            TuneArtifactError,
+            load_artifact,
+        )
+
+        artifact = load_artifact(artifact_path)
+    except TuneArtifactError as exc:
+        return Problem(
+            code="capa.flux_calibration_unreadable",
+            message=(
+                f"flux_calibration_ref={ref!r} points at an on-disk artifact that "
+                f"failed to load: {exc}"
+            ),
+            severity="warning",
+            blocking=False,
+            metadata={"ref": ref, "path": str(artifact_path)},
+        )
+
+    window_days = int(ctx.profile_metadata.get("_flux_calibration_window_days", 7))
+    accepted_at = artifact.accepted_at
+    if accepted_at.tzinfo is None:
+        accepted_at = accepted_at.replace(tzinfo=UTC)
+    age = datetime.now(UTC) - accepted_at
+    if age > timedelta(days=window_days):
+        return Problem(
+            code="capa.flux_calibration_stale",
+            message=(
+                f"flux calibration {ref!r} is {age.days} days old "
+                f"(>{window_days} day window) — consider re-tuning before this run"
+            ),
+            severity="warning",
+            blocking=False,
+            metadata={
+                "ref": ref,
+                "age_days": age.days,
+                "window_days": window_days,
+            },
+        )
+    return None
+
+
 @register("capa.balance_stability", category="dynamic")
 @register("cone.balance_stability", category="dynamic")
 async def _balance_stability(ctx: ProfilePreflightContext) -> Problem | None:

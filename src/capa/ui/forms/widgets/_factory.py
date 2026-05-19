@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QWidget
 from capa.ui.forms.widgets._base import FieldWidget
 from capa.ui.forms.widgets._collection import (
     _DictStrFloatField,
+    _FloatTupleField,
     _JsonFallbackField,
     _ModelTupleField,
     _StrTupleField,
@@ -158,7 +159,13 @@ def _build_inner(
             return _ModelTupleField(model_cls=elem_type, parent=parent)
         if elem_type is str:
             return _StrTupleField(parent=parent)
-        # Fall through to JSON fallback for tuple[float] etc.
+        if elem_type is float:
+            return _FloatTupleField(
+                decimals=_decimals_for_field(field_name, field),
+                unit=_unit_from_field(field),
+                parent=parent,
+            )
+        # Fall through to JSON fallback for tuple[int, …] etc.
         return _JsonFallbackField(parent=parent)
 
     if origin is dict:

@@ -33,11 +33,13 @@ from PySide6.QtWidgets import (
 
 from capa.core.errors import CapaError
 from capa.experiment.config import ExperimentConfig
+from capa.experiment.procedures.base import procedure_uses_method
 from capa.storage.catalog import RunCatalog
 from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState, HardwareInitDialog
 from capa.ui.docks.camera_preview import CameraPreviewDock
 from capa.ui.docks.diagnostics import DiagnosticsDock
 from capa.ui.docks.events import EventsDock
+from capa.ui.docks.heat_flux_tune import HeatFluxTuneDock
 from capa.ui.docks.log import LogDock
 from capa.ui.docks.manual_control import ManualControlDock
 from capa.ui.docks.numerics import NumericsDock
@@ -181,6 +183,16 @@ class MainWindow(QMainWindow):
         # or a method file both flow through here.
         self._method_tab.methodChanged.connect(self._update_method_tab_title)
 
+        # Cache of ``procedure_id -> uses_method`` derived from the
+        # procedure registry. Populated lazily on the first
+        # ``procedureChanged`` event; entries default to ``True`` for
+        # procedure ids the registry doesn't know (so a typo in
+        # experiment.yaml doesn't silently hide the Method tab). Refreshed
+        # alongside ``_apply_loaded_config`` in case a plugin install
+        # changed which procedures are registered.
+        self._procedure_uses_method: dict[str, bool] = {}
+        self._setup_tab.procedureChanged.connect(self._on_procedure_changed)
+
         # Numerics / Camera-preview docks are constructed when a config
         # loads — both need the parsed config (channels / cameras). Until
         # then, the events dock keeps the bottom area populated so the
@@ -193,6 +205,14 @@ class MainWindow(QMainWindow):
         self._diagnostics_toggle: QAction | None = None
         self._events_dock = EventsDock(self)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._events_dock)
+
+        # Heat-Flux Tune dock — operator-command surface for the
+        # supervisory tune procedure. Auto-shown when a tune is running,
+        # hidden otherwise, so it doesn't clutter the layout when not
+        # relevant.
+        self._heat_flux_tune_dock = HeatFluxTuneDock(self._controller, self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._heat_flux_tune_dock)
+        self._heat_flux_tune_dock.setVisible(False)
 
         # Log dock — mirrors structlog stdout into the GUI so the
         # operator can diagnose pool/conductor/run-lifecycle activity
@@ -409,6 +429,10 @@ class MainWindow(QMainWindow):
         self._run_tab.load_config(cfg)
         self._manual_dock.load_config(cfg)
         self._operator_provider.set_operator_id(cfg.operator.id)
+        # Plugin set may have changed between configs (different
+        # plugins.lock, different mode). Re-discover so the Method-tab
+        # gate picks up any new procedures' ``uses_method`` values.
+        self._refresh_procedure_uses_method_cache()
 
         # Method tab is populated by DocumentCoordinator._on_setup_draft_loaded
         # in response to setup_tab's draftLoaded signal — loading it again
@@ -735,12 +759,110 @@ class MainWindow(QMainWindow):
     def _update_method_tab_title(self) -> None:
         """Decorate the Method tab label with the loaded method's name so
         the operator can tell which method is active without switching to
-        the tab. Falls back to ``"Method"`` when no method is loaded."""
+        the tab. Falls back to ``"Method"`` when no method is loaded.
+
+        When the active procedure ignores the method, the disabled-state
+        label takes precedence — :meth:`_apply_method_tab_gate` rewrites
+        the title to surface *why* the tab is unclickable, which is
+        more useful than the method's name in that mode.
+        """
+        if not self._tabs.isTabEnabled(_METHOD_TAB_INDEX):
+            return
         if self._method_tab.has_method():
             name = self._method_tab.current_method_name()
             self._tabs.setTabText(_METHOD_TAB_INDEX, f"Method — {name}")
         else:
             self._tabs.setTabText(_METHOD_TAB_INDEX, "Method")
+
+    def _on_procedure_changed(self, procedure_id: object) -> None:
+        """Setup-tab procedure selection changed — gate the Method tab.
+
+        Looks up ``uses_method`` for the selected procedure (defaulting
+        to ``True`` when the registry doesn't know the id, so a typo
+        doesn't hide the tab) and flips the Method tab between enabled
+        and disabled states. When disabling, also auto-switch the
+        operator off the Method tab if they happen to be on it —
+        leaving them parked on a disabled tab body would be confusing.
+        """
+        proc_id = str(procedure_id) if procedure_id is not None else ""
+        uses_method = self._lookup_uses_method(proc_id)
+        self._apply_method_tab_gate(uses_method, procedure_id=proc_id)
+
+    def _apply_method_tab_gate(self, uses_method: bool, *, procedure_id: str) -> None:
+        """Drive the Method tab's enabled / label / tooltip state.
+
+        Split out so tests can drive the UI state directly without
+        having to fake a procedure-registry discovery, and so the
+        no-procedure-yet case (empty id from a fresh ``clear()``) and
+        the explicit-selection case share one code path.
+        """
+        if uses_method:
+            self._tabs.setTabEnabled(_METHOD_TAB_INDEX, True)
+            self._tabs.setTabToolTip(_METHOD_TAB_INDEX, "")
+            # Restore the label from the method-tab state (handles
+            # both "Method" and "Method — <name>" forms).
+            self._update_method_tab_title()
+            return
+        # Disabled state — the operator needs to know *why* the tab
+        # they were just using is suddenly unclickable. A label hint
+        # plus a hover tooltip with the procedure name covers both
+        # the glance-at-the-tab and the hover-to-investigate flows.
+        # Snapshot the current tab BEFORE disabling: ``setTabEnabled(False)``
+        # on the active tab makes Qt auto-jump to the next enabled tab
+        # (Run, on the right), which is even more disorienting than
+        # staying put. We send the operator back to Setup explicitly.
+        was_on_method = self._tabs.currentIndex() == _METHOD_TAB_INDEX
+        readable = procedure_id or "the selected procedure"
+        self._tabs.setTabText(_METHOD_TAB_INDEX, "Method (not used)")
+        self._tabs.setTabToolTip(
+            _METHOD_TAB_INDEX,
+            f"{readable} does not use a method — it commands its own setpoints. "
+            f"Switch to a method-driven procedure (e.g. capa.builtin.recipe_runner) "
+            f"to edit method steps.",
+        )
+        self._tabs.setTabEnabled(_METHOD_TAB_INDEX, False)
+        if was_on_method:
+            self._tabs.setCurrentWidget(self._setup_tab)
+
+    def _lookup_uses_method(self, procedure_id: str) -> bool:
+        """Read ``uses_method`` for ``procedure_id`` from the registry cache.
+
+        Unknown ids default to ``True`` (the safe choice — the tab
+        stays visible). The cache is populated on first miss and on
+        :meth:`_refresh_procedure_uses_method_cache`.
+        """
+        if not procedure_id:
+            return True
+        if procedure_id in self._procedure_uses_method:
+            return self._procedure_uses_method[procedure_id]
+        self._refresh_procedure_uses_method_cache()
+        return self._procedure_uses_method.get(procedure_id, True)
+
+    def _refresh_procedure_uses_method_cache(self) -> None:
+        """Rebuild the ``procedure_id -> uses_method`` cache from the registry.
+
+        Best-effort: any discovery failure leaves the cache empty so
+        the gate falls back to the always-True default. The cache is
+        rebuilt rather than amended to pick up plugin
+        install/uninstall between calls.
+        """
+        try:
+            from capa.core.plugins_runtime import (  # noqa: PLC0415
+                ProcedureRegistry,
+                resolve_mode,
+            )
+
+            registry = ProcedureRegistry.discover(mode=resolve_mode())
+        except Exception as exc:
+            _logger.warning("ui.procedure_registry_discover_failed", error=str(exc))
+            self._procedure_uses_method = {}
+            return
+        cache: dict[str, bool] = {}
+        for proc_id in registry.ids():
+            loaded = registry.get(proc_id)
+            cls = loaded.cls if loaded is not None else None
+            cache[proc_id] = procedure_uses_method(cls) if cls is not None else True
+        self._procedure_uses_method = cache
 
     def _on_state(self, state: object) -> None:
         # When a run starts, the controller has rebuilt the buffer registry.

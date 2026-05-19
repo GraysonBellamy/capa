@@ -16,6 +16,7 @@ from typing import Any
 
 from capa.core.clock import RunClock
 from capa.runtime.conductor import RunOutcome
+from capa.runtime.recording import ResolvedRecordingPlan
 from capa.runtime.runcontext import RunContext
 from capa.runtime.saturation import WriterSaturationSource
 from tests.integration.runtime.fakes import FakeBundleRef, FakeWriterRef
@@ -54,6 +55,18 @@ class FakeRunSession:
     writer_ref: FakeWriterRef = field(default_factory=FakeWriterRef)
     bundle_ref: FakeBundleRef = field(default_factory=FakeBundleRef)
     saturation_source: WriterSaturationSource | None = None
+    config: Any = None
+    """Optional :class:`ExperimentConfig` for tests that exercise the
+    conductor's plan-resolution path. When ``None`` (the default),
+    accessing :attr:`config` raises — tests that don't trigger arm-time
+    resolution never read it."""
+    recording_plan: ResolvedRecordingPlan = field(
+        default_factory=lambda: ResolvedRecordingPlan(
+            channel_mode="all",
+            camera_mode="all",
+            source="procedure_default",
+        )
+    )
     open_raises: BaseException | None = None
     close_raises: BaseException | None = None
 
@@ -73,6 +86,7 @@ class FakeRunSession:
             clock=self.clock,
             writer=self.writer_ref,
             bundle=self.bundle_ref,
+            recording_plan=self.recording_plan,
         )
 
     def set_outcome(self, outcome: RunOutcome, exit_reason: str | None) -> None:

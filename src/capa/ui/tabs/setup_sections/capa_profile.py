@@ -15,21 +15,31 @@ changing the runtime model.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from capa.calibration.tune_artifact import (
+    HeatFluxTuneArtifact,
+    TuneArtifactError,
+    load_artifact,
+    load_latest,
+)
 from capa.channels.spec import ChannelKind
 from capa.config.capa_profile import (
     CAPA_OPTIONAL_GROUPS,
@@ -89,6 +99,13 @@ class _AtmosphereView(BaseModel):
 # Sub-dict keys under ``domain_profile.metadata`` so the three view-model
 # blocks don't stomp on each other. Each block reads/writes its own key.
 _METADATA_KEYS = ("specimen", "heater_program", "atmosphere")
+
+
+_DEFAULT_FLUX_DIR = "configs/calibrations/flux"
+"""Where :func:`save_artifact` writes daily tune artifacts. Mirrored
+in :class:`~capa.experiment.procedures.builtin.heat_flux_tune.HeatFluxTuneConfig.persist_dir`.
+The Setup tab's autofill button reads from the same path so an artifact
+written by the procedure is discoverable immediately."""
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +188,37 @@ class CapaProfileSection(SectionWidget):
         self._heater_form = build_form(_HeaterProgramView, parent=heater_frame)
         self._heater_form.valuesChanged.connect(lambda: self._on_metadata_changed("heater_program"))
         heater_box.addWidget(self._heater_form)
+        # Tune-artifact toolbar — Phase 3 §11 / §14.4. The artifact maps
+        # heater setpoint ↔ measured flux; clicking "Apply latest" reads
+        # the operator's target_heat_flux_kw_m2 and writes back the
+        # interpolated heater_setpoint_c + flux_calibration_ref. The
+        # artifact lookup is intentionally on-demand (button), not
+        # automatic — the operator owns the decision to overwrite the
+        # current setpoint.
+        tune_row = QHBoxLayout()
+        tune_row.setContentsMargins(0, 0, 0, 0)
+        tune_row.setSpacing(6)
+        self._tune_status_label = QLabel("(no tune artifact loaded)", heater_frame)
+        self._tune_status_label.setStyleSheet("color: #666; font-style: italic;")
+        tune_row.addWidget(self._tune_status_label, stretch=1)
+        apply_latest_btn = QPushButton("Apply latest tune", heater_frame)
+        apply_latest_btn.setToolTip(
+            "Look up the most recent on-disk HeatFluxTuneArtifact under "
+            f"{_DEFAULT_FLUX_DIR!s}, interpolate to the current "
+            "target_heat_flux_kw_m2, and write the result into "
+            "heater_setpoint_c + flux_calibration_ref."
+        )
+        apply_latest_btn.clicked.connect(self._on_apply_latest_tune_clicked)
+        tune_row.addWidget(apply_latest_btn)
+        browse_btn = QPushButton("Browse…", heater_frame)
+        browse_btn.setToolTip("Pick a specific tune artifact .toml from disk.")
+        browse_btn.clicked.connect(self._on_browse_tune_clicked)
+        tune_row.addWidget(browse_btn)
+        clear_btn = QPushButton("Clear ref", heater_frame)
+        clear_btn.setToolTip("Clear flux_calibration_ref (heater_setpoint_c is left as-is).")
+        clear_btn.clicked.connect(self._on_clear_tune_ref_clicked)
+        tune_row.addWidget(clear_btn)
+        heater_box.addLayout(tune_row)
         outer.addWidget(heater_frame)
 
         # Atmosphere block.
@@ -230,6 +278,151 @@ class CapaProfileSection(SectionWidget):
         if self._draft is not None:
             out["channels"] = self._compose_channels_with_mappings()
         return out
+
+    # -- slots: tune-artifact autofill --------------------------------------
+
+    def _on_apply_latest_tune_clicked(self) -> None:
+        """Load ``configs/calibrations/flux/latest.toml`` and apply it.
+
+        Failure modes:
+
+        * No directory / no ``latest.toml`` pointer → friendly toast with
+          a "run a tune first" hint.
+        * Pointer references a missing artifact → toast with the bad id.
+        * Artifact loaded but doesn't bracket the current target →
+          toast naming the artifact's bracket range so the operator
+          knows whether to re-tune or pick a different target.
+        """
+        flux_dir = self._resolve_flux_dir()
+        try:
+            artifact = load_latest(flux_dir)
+        except TuneArtifactError as exc:
+            QMessageBox.warning(
+                self,
+                "Tune artifact unreadable",
+                f"Could not load the latest tune artifact at {flux_dir}:\n\n{exc}",
+            )
+            return
+        if artifact is None:
+            QMessageBox.information(
+                self,
+                "No tune artifact found",
+                f"No HeatFluxTuneArtifact found under {flux_dir}. Run a heat-flux tune first.",
+            )
+            return
+        self._apply_artifact(artifact)
+
+    def _on_browse_tune_clicked(self) -> None:
+        """Open a file dialog and apply the chosen artifact."""
+        flux_dir = self._resolve_flux_dir()
+        start_dir = str(flux_dir) if flux_dir.is_dir() else ""
+        path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            "Pick a tune artifact",
+            start_dir,
+            "Tune artifact (*.toml)",
+        )
+        if not path_str:
+            return
+        try:
+            artifact = load_artifact(Path(path_str))
+        except TuneArtifactError as exc:
+            QMessageBox.warning(
+                self,
+                "Tune artifact unreadable",
+                f"Could not load {path_str}:\n\n{exc}",
+            )
+            return
+        self._apply_artifact(artifact)
+
+    def _on_clear_tune_ref_clicked(self) -> None:
+        """Clear ``flux_calibration_ref`` only; leave ``heater_setpoint_c``
+        alone so an operator who is about to re-enter the setpoint by
+        hand doesn't lose context."""
+        if self._heater_form is None:
+            return
+        values = dict(self._heater_form.values())
+        if not values.get("flux_calibration_ref"):
+            return
+        values["flux_calibration_ref"] = ""
+        self._suppress = True
+        try:
+            self._heater_form.set_values(values)
+        finally:
+            self._suppress = False
+        self._tune_status_label.setText("(flux_calibration_ref cleared)")
+        self._tune_status_label.setStyleSheet("color: #666; font-style: italic;")
+        self.valuesChanged.emit()
+
+    def _apply_artifact(self, artifact: HeatFluxTuneArtifact) -> None:
+        """Interpolate ``artifact`` against the form's current target.
+
+        Writes ``heater_setpoint_c`` + ``flux_calibration_ref`` back into
+        the heater form on success. On out-of-bracket targets, leaves
+        the form untouched and updates the inline status label with the
+        artifact's bracket so the operator knows what to fix.
+        """
+        if self._heater_form is None:
+            return
+        values = dict(self._heater_form.values())
+        try:
+            target = float(values.get("target_heat_flux_kw_m2") or 0.0)
+        except (TypeError, ValueError):
+            target = 0.0
+        if target <= 0:
+            QMessageBox.information(
+                self,
+                "No target declared",
+                "Set ``target_heat_flux_kw_m2`` first; the tune artifact is "
+                "applied by interpolating against the declared target.",
+            )
+            return
+        setpoint = artifact.setpoint_for_target(target)
+        accepted = [p for p in artifact.points if p.accepted]
+        if setpoint is None:
+            if accepted:
+                lo = min(p.target_flux_kw_m2 for p in accepted)
+                hi = max(p.target_flux_kw_m2 for p in accepted)
+                bracket = f"{lo:g}–{hi:g}"
+            else:
+                bracket = "(no accepted points)"
+            self._tune_status_label.setText(
+                f"⚠ artifact {artifact.id!r} does not bracket {target:g} kW/m² "
+                f"(covered range: {bracket})"
+            )
+            self._tune_status_label.setStyleSheet("color: #b33;")
+            QMessageBox.warning(
+                self,
+                "Target out of bracket",
+                f"The tune artifact {artifact.id!r} covers targets {bracket} kW/m². "
+                f"It cannot extrapolate to {target:g} kW/m² — run a new tune that "
+                f"includes this target.",
+            )
+            return
+        values["heater_setpoint_c"] = float(setpoint)
+        values["flux_calibration_ref"] = artifact.id
+        self._suppress = True
+        try:
+            self._heater_form.set_values(values)
+        finally:
+            self._suppress = False
+        self._tune_status_label.setText(
+            f"✓ applied {artifact.id} (target {target:g} → setpoint {setpoint:.1f} °C)"
+        )
+        self._tune_status_label.setStyleSheet("color: #2a7;")
+        self.valuesChanged.emit()
+
+    def _resolve_flux_dir(self) -> Path:
+        """Project root + ``configs/calibrations/flux``.
+
+        Resolved relative to the current working directory at section
+        construction time — mirrors how the procedure writes its
+        artifact. A future enhancement could pick this up from a
+        project-level config key, but the current single-rig
+        deployment doesn't need that flexibility.
+        """
+        base = Path.cwd() / _DEFAULT_FLUX_DIR
+        return base.resolve()
 
     # -- slots --------------------------------------------------------------
 

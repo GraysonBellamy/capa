@@ -218,7 +218,12 @@ def test_main_window_autoloads_method_from_experiment(qtbot: Any, tmp_path: Path
 
 def test_main_window_clears_method_on_freerun_load(qtbot: Any, tmp_path: Path) -> None:
     """Loading a free-run config after an experiment-with-method must
-    wipe the prior method so the tab agrees with the new experiment."""
+    wipe the prior method so the tab agrees with the new experiment.
+
+    FreeRun also has ``uses_method=False``, so the Method tab is
+    disabled and its label switches to the "(not used)" form — the
+    operator can't author a method that would be silently ignored.
+    """
     from capa.experiment.config import ExperimentConfig
     from capa.ui.main_window import MainWindow
 
@@ -233,10 +238,101 @@ def test_main_window_clears_method_on_freerun_load(qtbot: Any, tmp_path: Path) -
 
     window._apply_loaded_config(ExperimentConfig.load(with_method), with_method)
     assert window.method_tab.has_method() is True
+    assert window._tabs.isTabEnabled(1) is True
 
     freerun_cfg = ExperimentConfig.load(freerun)
     assert freerun_cfg.method is None  # sanity: fixture invariant
     window._apply_loaded_config(freerun_cfg, freerun)
 
     assert window.method_tab.has_method() is False
-    assert window._tabs.tabText(1) == "Method"
+    assert window._tabs.isTabEnabled(1) is False
+    assert window._tabs.tabText(1) == "Method (not used)"
+
+
+# ---------------------------------------------------------------------------
+# Method-tab gating: procedures that don't consume a method disable the tab
+# so the operator doesn't waste time editing steps that will never run.
+# ---------------------------------------------------------------------------
+
+
+_METHOD_TAB_INDEX = 1
+
+
+def test_method_tab_disabled_when_procedure_does_not_use_method(qtbot: Any, tmp_path: Path) -> None:
+    """Selecting Heat-Flux Tune as the procedure must disable the Method tab.
+
+    HeatFluxTune is self-driving — it commands its own setpoints and
+    ignores ``ExperimentConfig.method``. The UI must signal that
+    clearly rather than letting the operator edit a method that will
+    be silently dropped at run start.
+    """
+    from capa.ui.main_window import MainWindow
+
+    window = MainWindow(runs_root=tmp_path, configure_logging_for_bundle=False)
+    qtbot.addWidget(window)
+
+    # Baseline: Method tab is enabled by default.
+    assert window._tabs.isTabEnabled(_METHOD_TAB_INDEX) is True
+
+    window._on_procedure_changed("capa.builtin.heat_flux_tune")
+
+    assert window._tabs.isTabEnabled(_METHOD_TAB_INDEX) is False
+    assert window._tabs.tabText(_METHOD_TAB_INDEX) == "Method (not used)"
+    tooltip = window._tabs.tabToolTip(_METHOD_TAB_INDEX)
+    assert "heat_flux_tune" in tooltip
+    assert "does not use a method" in tooltip
+
+
+def test_method_tab_reenabled_when_switching_to_recipe_runner(qtbot: Any, tmp_path: Path) -> None:
+    """Switching back to a method-driven procedure must re-enable the tab."""
+    from capa.ui.main_window import MainWindow
+
+    window = MainWindow(runs_root=tmp_path, configure_logging_for_bundle=False)
+    qtbot.addWidget(window)
+
+    window._on_procedure_changed("capa.builtin.heat_flux_tune")
+    assert window._tabs.isTabEnabled(_METHOD_TAB_INDEX) is False
+
+    window._on_procedure_changed("capa.builtin.recipe_runner")
+    assert window._tabs.isTabEnabled(_METHOD_TAB_INDEX) is True
+    # Tab title falls back to "Method" when no method is loaded; the
+    # disabled-state label has been cleared.
+    assert window._tabs.tabText(_METHOD_TAB_INDEX) == "Method"
+    assert window._tabs.tabToolTip(_METHOD_TAB_INDEX) == ""
+
+
+def test_method_tab_auto_switches_away_when_disabled(qtbot: Any, tmp_path: Path) -> None:
+    """If the operator is on the Method tab when it gets disabled, they
+    must be bounced back to Setup. Leaving them parked on a disabled
+    tab body would be confusing — the tab would be the active one but
+    the click target would refuse selection."""
+    from capa.ui.main_window import MainWindow
+
+    window = MainWindow(runs_root=tmp_path, configure_logging_for_bundle=False)
+    qtbot.addWidget(window)
+
+    # Park the operator on the Method tab.
+    window._tabs.setCurrentIndex(_METHOD_TAB_INDEX)
+    assert window._tabs.currentIndex() == _METHOD_TAB_INDEX
+
+    window._on_procedure_changed("capa.builtin.heat_flux_tune")
+
+    assert window._tabs.isTabEnabled(_METHOD_TAB_INDEX) is False
+    assert window._tabs.currentWidget() is window.setup_tab
+
+
+def test_method_tab_unknown_procedure_keeps_tab_enabled(qtbot: Any, tmp_path: Path) -> None:
+    """A procedure id the registry doesn't know defaults to ``uses_method=True``.
+
+    This avoids the failure mode where a typo in the procedure id
+    silently hides the Method tab — the operator can still author a
+    method while they sort out the misspelling.
+    """
+    from capa.ui.main_window import MainWindow
+
+    window = MainWindow(runs_root=tmp_path, configure_logging_for_bundle=False)
+    qtbot.addWidget(window)
+
+    window._on_procedure_changed("not.a.real.procedure")
+
+    assert window._tabs.isTabEnabled(_METHOD_TAB_INDEX) is True

@@ -62,6 +62,7 @@ class RecipeRunner(Procedure):
     config_model: ClassVar[type] = RecipeRunnerConfig
     required_capabilities: ClassVar[tuple[str, ...]] = ()
     required_channels: ClassVar[tuple[ChannelRequirement, ...]] = ()
+    uses_method: ClassVar[bool] = True
 
     auto_acknowledge_prompts: bool = False
     notes: str | None = None

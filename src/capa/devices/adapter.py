@@ -68,11 +68,19 @@ class AdapterStartContext:
       Other adapters ignore it. Including it on the universal context
       avoids per-shape dispatch at the cost of one unused field for
       non-recording adapters.
+    * ``recording_enabled``: whether this adapter should persist its
+      output to the bundle. Default ``True`` preserves today's behaviour.
+      Only :class:`~capa.runtime.camera_adapter.CameraDeviceAdapter`
+      reads this in v1 — when ``False`` it skips ``start_recording`` so
+      no ``video/{name}.csq`` file lands in the bundle. Channel-level
+      filtering for non-camera adapters happens at the conductor's
+      dispatch gate, not here.
     """
 
     clock: RunClock
     run_id: str
     bundle_root: Path
+    recording_enabled: bool = True
 
 
 class Capability(Flag):

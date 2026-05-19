@@ -107,6 +107,14 @@ class SetupTab(QWidget):
     this to drive ``RunController.set_active_config`` + the existing
     rebuild-docks side effects."""
 
+    procedureChanged = Signal(str)  # noqa: N815 — Qt signal naming convention
+    """Fires with the current procedure id when it changes — either
+    because the operator picked a new procedure in the Procedure section
+    or because a fresh draft was loaded. :class:`MainWindow` consumes
+    this to gate the Method tab (disable when the procedure doesn't
+    consume a method). Emits the empty string when no procedure is
+    selected; suppresses duplicate emissions for the same id."""
+
     # ----------------------------------------------------------------------
 
     def __init__(
@@ -158,6 +166,12 @@ class SetupTab(QWidget):
         # before starting a new one, matching the DiscoveryDialog's
         # rescan behaviour.
         self._nidaq_rescan_task: Any | None = None
+        # Last procedure id emitted on ``procedureChanged``. Tracked so we
+        # only emit when the value actually changes — receivers (e.g.
+        # MainWindow's Method-tab gating) treat the signal as the
+        # authoritative trigger and re-running their handler on every
+        # keystroke in the procedure config form would churn the UI.
+        self._last_procedure_id: str = ""
         # Install the inventory provider hook for NIDAQChannelsField
         # instances built later by the Devices section's auto-form. The
         # widget itself reads through the hook lazily when the operator
@@ -400,6 +414,7 @@ class SetupTab(QWidget):
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self.draftLoaded.emit()
+        self._maybe_emit_procedure_changed()
         _logger.info("ui.setup.loaded", path=str(path))
 
     def load_config(self, config: ExperimentConfig, *, path: Path | None = None) -> None:
@@ -439,6 +454,7 @@ class SetupTab(QWidget):
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self.draftLoaded.emit()
+        self._maybe_emit_procedure_changed()
 
     def clear(self) -> None:
         """Drop the current draft and re-seed with an empty document."""
@@ -452,6 +468,7 @@ class SetupTab(QWidget):
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self.draftLoaded.emit()
+        self._maybe_emit_procedure_changed()
 
     # --------------------------------------------------------------- toolbar
 
@@ -491,6 +508,7 @@ class SetupTab(QWidget):
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self.draftLoaded.emit()
+        self._maybe_emit_procedure_changed()
 
     def _on_save(self) -> None:
         if self._draft.document.experiment_path is None:
@@ -1251,6 +1269,11 @@ class SetupTab(QWidget):
         self._refresh_apply_enabled()
         # Live Overview update — read-only but driven by the same payload.
         self._refresh_section("overview")
+        # Procedure picker edits gate the Method tab — _maybe_emit
+        # short-circuits when the id is unchanged, so config-form
+        # keystrokes don't fire spuriously.
+        if section_id == "procedure":
+            self._maybe_emit_procedure_changed()
         # Kick the debounce.
         self._validate_timer.start()
 
@@ -1634,6 +1657,34 @@ class SetupTab(QWidget):
     def _refresh_all_sections(self) -> None:
         for section in self._sections.values():
             section.set_draft(self._draft)
+
+    def current_procedure_id(self) -> str:
+        """Return the draft's currently-selected procedure id.
+
+        Empty string when no procedure is selected. Reads straight from
+        the draft's experiment payload so the answer is consistent with
+        whatever is in the Procedure section's combo, including
+        in-flight edits that haven't been saved.
+        """
+        proc = self._draft.document.experiment_payload.get("procedure")
+        if isinstance(proc, dict):
+            value = proc.get("id", "")
+            return str(value) if value is not None else ""
+        return ""
+
+    def _maybe_emit_procedure_changed(self) -> None:
+        """Emit ``procedureChanged`` if the current procedure id changed.
+
+        Tracks the last-emitted id to suppress duplicate emissions —
+        the procedure section's ``valuesChanged`` fires on every edit
+        (including config-form keystrokes), but Method-tab gating only
+        needs to react when the id itself moves.
+        """
+        proc_id = self.current_procedure_id()
+        if proc_id == self._last_procedure_id:
+            return
+        self._last_procedure_id = proc_id
+        self.procedureChanged.emit(proc_id)
 
     def _refresh_section(self, section_id: str) -> None:
         widget = self._sections.get(section_id)

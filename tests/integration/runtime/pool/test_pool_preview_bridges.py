@@ -31,6 +31,7 @@ from capa.experiment.config import (
 )
 from capa.runtime.metrics import DisarmResult
 from capa.runtime.pool import WorkerPool
+from capa.runtime.recording import ResolvedRecordingPlan
 from capa.runtime.runcontext import RunContext
 from tests.integration.runtime.fakes import FakeWriterRef
 
@@ -51,6 +52,11 @@ def _ctx_with_path(run_id: str, bundle_root: Path) -> RunContext:
         clock=RunClock.now(),
         writer=FakeWriterRef(),
         bundle=_PathBundleRef(bundle_root),
+        recording_plan=ResolvedRecordingPlan(
+            channel_mode="all",
+            camera_mode="all",
+            source="procedure_default",
+        ),
     )
 
 

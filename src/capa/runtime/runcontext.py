@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from capa.core.clock import RunClock
     from capa.devices.camera.base import FrameReceipt
     from capa.devices.records import DeviceEmission
+    from capa.runtime.recording import ResolvedRecordingPlan
 
 
 @runtime_checkable
@@ -143,6 +144,13 @@ class RunContext:
     """Opaque handle to the run bundle. Carried for symmetry with how the
     writer thread receives it today — workers read it only to include the
     root path in diagnostic events."""
+
+    recording_plan: ResolvedRecordingPlan
+    """What this run will persist. Resolved at arm time from
+    :meth:`Procedure.plan_capture` and the operator's
+    :class:`~capa.runtime.recording.RecordingPolicy`. The worker reads it
+    to set ``recording_enabled`` on each camera; the conductor caches it
+    for the dispatch gate."""
 
 
 __all__ = [

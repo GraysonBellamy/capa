@@ -58,9 +58,7 @@ def fit_table_height(table: QTableView, *, max_rows: int | None = None) -> None:
     table.setFixedHeight(header_h + rows_h + frame)
     overflow = max_rows is not None and rows > max_rows
     table.setVerticalScrollBarPolicy(
-        Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        if overflow
-        else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        Qt.ScrollBarPolicy.ScrollBarAsNeeded if overflow else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     )
 
 

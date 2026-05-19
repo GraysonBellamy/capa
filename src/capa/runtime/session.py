@@ -56,6 +56,7 @@ from capa.runtime.bundle_ref import BundleWriterRef
 from capa.runtime.conductor import RunOutcome
 from capa.runtime.outcomes import run_status_for_outcome
 from capa.runtime.progress import identity_from_device_info as _identity_from_device_info
+from capa.runtime.recording import default_recording_plan
 from capa.runtime.recovery import (
     ActiveCheckpoint,
     delete_active_checkpoint,
@@ -262,6 +263,34 @@ class RealRunSession:
         structlog logger (no bundle log sink yet); post-open, the same logger
         also tees into the bundle's ``run.log``."""
         return self._logger
+
+    @property
+    def config(self) -> ExperimentConfig:
+        """The frozen run recipe. Valid pre- and post-:meth:`open`. The
+        conductor reads ``config.run_options.recording_policy`` and
+        ``config.hardware`` during plan resolution."""
+        return self._config
+
+    def update_recording_plan(self, plan: Any) -> None:
+        """Write the resolved recording plan into the bundle manifest.
+
+        Called by the conductor after :meth:`Procedure.plan_capture`
+        runs at arm time. Delegates to
+        :meth:`RunBundleWriter.update_recording_plan` so the manifest
+        snapshot reflects what the run will actually persist before any
+        adapter starts emitting.
+
+        Reads ``policy_mode`` from this session's
+        :attr:`ExperimentConfig.run_options.recording_policy` so the
+        bundle records both the operator-facing policy and the
+        materialised plan in one place.
+        """
+        if self._bundle_writer is None:
+            return
+        self._bundle_writer.update_recording_plan(
+            policy_mode=self._config.run_options.recording_policy.mode,
+            plan=plan,
+        )
 
     def attach_adapters(
         self,
@@ -546,6 +575,7 @@ class RealRunSession:
             clock=self._clock,
             writer=writer_ref,
             bundle=bundle_ref,
+            recording_plan=default_recording_plan(self._config.hardware),
         )
 
     def _collect_equipment_blocks(self) -> list[dict[str, Any]]:

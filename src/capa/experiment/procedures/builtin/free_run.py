@@ -65,6 +65,7 @@ class FreeRun(Procedure):
     config_model: ClassVar[type] = FreeRunConfig
     required_capabilities: ClassVar[tuple[str, ...]] = ()
     required_channels: ClassVar[tuple[ChannelRequirement, ...]] = ()
+    uses_method: ClassVar[bool] = False
 
     duration_s: float | None = None
 
