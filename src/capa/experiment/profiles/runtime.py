@@ -465,7 +465,9 @@ async def _flux_calibration_freshness(ctx: ProfilePreflightContext) -> Problem |
     # CapaPyrolysisMetadata.program is the model field; ``heater_program``
     # remains accepted as a legacy fixture alias (matches the parallel
     # convention in :func:`_method_heater_setpoint_c`).
-    program = ctx.profile_metadata.get("program") or ctx.profile_metadata.get("heater_program") or {}
+    program = (
+        ctx.profile_metadata.get("program") or ctx.profile_metadata.get("heater_program") or {}
+    )
     if not isinstance(program, dict):
         return None
     target = program.get("target_heat_flux_kw_m2")
