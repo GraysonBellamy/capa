@@ -31,11 +31,10 @@ domain_profile:
         species: N2
         purity: "UHP 5.0"
         target_flow_sccm: 100.0
-    # The sim heater ramps 30°C → 600°C in 0.2 s; the dynamic preflight
-    # observes the run-temperature value, not a cold-start condition.
-    # Real CAPA runs use the default 200°C limit.
-    _safe_arm:
-      max_heater_pv_c: 800.0
+    # The capa.heater_pv_in_safe_range gate defaults to a 1000 °C
+    # rig-survival ceiling, so the sim's 600 °C ramp passes without
+    # an explicit override. Add ``_safe_arm.max_heater_pv_c`` here if
+    # a future test wants a tighter gate per-method.
 
 calibration_set:
   name: default

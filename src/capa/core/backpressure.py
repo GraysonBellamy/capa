@@ -1,9 +1,9 @@
 """Named backpressure policies and a :class:`BoundedQueue` that enforces them.
 
 every queue in the pipeline declares one of three policies, and
-sinks that violate their policy are a bug, not a configuration choice. Plan
-§13 gives the same rule a procedural framing — durable storage never silently
-loses data; UI never blocks acquisition; safety has its own queue.
+sinks that violate their policy are a bug, not a configuration choice.
+Durable storage never silently loses data; UI never blocks acquisition;
+safety has its own queue.
 
 Ships the policy enum + a small queue helper; the engine task group
 wires producers to fan-outs.

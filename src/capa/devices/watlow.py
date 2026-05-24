@@ -121,7 +121,7 @@ class WatlowAdapterParams(BaseModel):
 
     protocol: ProtocolName = "stdbus"
     """Wire protocol. ``auto`` runs the conservative detector
-    (plan-and-watlowlib §7); pin one in production."""
+    from watlowlib; pin one in production."""
 
     baudrate: int = 38400
     parity: Literal["none", "even", "odd"] = "none"

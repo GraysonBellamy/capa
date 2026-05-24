@@ -1,4 +1,4 @@
-""":class:`AdapterDescriptor` registry — one source of truth ().
+""":class:`AdapterDescriptor` registry — one source of truth.
 
 Each adapter contributes one curated record. The Setup editor, the
 runtime, and the CLI all read from :data:`ADAPTERS` so that *adding an
@@ -12,9 +12,9 @@ Plugin adapters discovered via the ``capa.adapters`` /
 ``capa.cameras`` entry-point groups register the same way through
 :func:`load_plugin_descriptors`.
 
-The plan's :class:`ChannelTemplate` ships a few canonical pre-canned
-channels per adapter family () so the Setup tab's "Add
-channel" menu covers the 90% case without operators typing 40 fields.
+Each :class:`ChannelTemplate` defines a canonical pre-canned channel for
+an adapter family so the Setup tab's "Add channel" menu covers the 90%
+case without operators typing 40 fields.
 """
 
 from __future__ import annotations

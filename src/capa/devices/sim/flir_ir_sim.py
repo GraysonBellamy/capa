@@ -392,7 +392,7 @@ class FlirIrSim:
     # ----------------------------------------------------------- command surface
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
-        """§9 authorization-gated dispatcher onto the typed sim state.
+        """Authorization-gated dispatcher onto the typed sim state.
 
         Verb table is kept in lockstep with
         :class:`capa_flir.flir_ir.FlirIrAdapter._dispatch_command` so a
@@ -586,7 +586,7 @@ class FlirIrSim:
     # -------------------------------------------------------------- internals
 
     def _select_camera(self) -> None:
-        """Apply the §12.1 selection rules. Sim publishes exactly one camera,
+        """Apply the camera-selection rules. Sim publishes exactly one camera,
         so the rules collapse to:
 
         * ``spec.serial`` set + matches → ok

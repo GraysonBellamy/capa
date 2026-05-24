@@ -1,10 +1,10 @@
 """Unit tests for :mod:`capa.runtime.lifecycle`.
 
 The lifecycle module is the single source of truth for worker and pool state
-transitions (per the migration doc's topology invariant #9, §3.11 line 524).
+transitions.
 These tests enumerate every ``(from, to)`` pair in ``WorkerState`` × ``WorkerState``
-and assert membership in ``LEGAL_WORKER_EDGES`` matches the migration doc's
-state diagrams (§3.3 / §4.3).
+and assert membership in ``LEGAL_WORKER_EDGES`` matches the intended state
+diagrams.
 
 If the edge table changes, exactly one of these tests fails — the test file
 is the regression guard for "someone added an edge but forgot the
@@ -28,7 +28,7 @@ from capa.runtime.lifecycle import (
 class TestWorkerEdges:
     """Edge-table assertions for the worker state machine.
 
-    The expected legal edges match migration doc §3.3 lines 218-258.
+    The expected legal edges match the worker lifecycle contract.
     """
 
     def test_legal_edges_exact_set(self) -> None:
@@ -76,7 +76,7 @@ class TestWorkerEdges:
                 assert dst is WorkerState.IDLE
 
     def test_sampling_only_reachable_via_armed(self) -> None:
-        """The doc's §3.3 diagram requires arm() before begin_sampling();
+        """The state graph requires arm() before begin_sampling();
         there is no shortcut from IDLE to SAMPLING."""
         for src, dst in LEGAL_WORKER_EDGES:
             if dst is WorkerState.SAMPLING:
@@ -97,7 +97,7 @@ class TestWorkerEdges:
 
 
 class TestPoolEdges:
-    """Edge-table assertions for the pool state machine (§4.3)."""
+    """Edge-table assertions for the pool state machine."""
 
     def test_legal_edges_exact_set(self) -> None:
         expected = {
@@ -130,8 +130,7 @@ class TestPoolEdges:
 
     def test_opening_can_rollback_to_closing(self) -> None:
         """Partial open failure must be able to flow OPENING → CLOSING
-        without first hitting OPEN. Verifies the rollback path documented
-        in §4.3 lines 749-756."""
+        without first hitting OPEN."""
         assert (PoolState.OPENING, PoolState.CLOSING) in LEGAL_POOL_EDGES
 
     @pytest.mark.parametrize("src", list(PoolState))

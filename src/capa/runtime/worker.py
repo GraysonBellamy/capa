@@ -765,8 +765,9 @@ class Worker:
             # the coercion here once instead of at every reader.
             bundle_root = Path(str(bundle_root))
         recording_enabled = True
-        if isinstance(adapter, CameraDeviceAdapter):
-            recording_enabled = self._run_context.recording_plan.allows_camera(adapter.name)
+        camera_adapter = _as_camera_adapter(adapter)
+        if camera_adapter is not None:
+            recording_enabled = self._run_context.recording_plan.allows_camera(camera_adapter.name)
         ctx = AdapterStartContext(
             clock=self._run_context.clock,
             run_id=self._run_context.run_id,

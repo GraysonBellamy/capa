@@ -195,8 +195,8 @@ class IntegrityBlock(BaseModel):
 class CameraEntry(BaseModel):
     """One row in :attr:`BundleManifest.cameras`. Captures everything a downstream tool needs to match a camera's frames
     back to the bundle without parsing the container itself: which adapter
-    wrote it, where the file lives (in-bundle or via the §12.4 escape
-    hatch), the frame-index parquet, the meta-JSON sidecar (IR only), the
+    wrote it, where the file lives (in-bundle or via an external output
+    root), the frame-index parquet, the meta-JSON sidecar (IR only), the
     final frame count, and the run-relative ``started_mono_ns_offset``
     captured at ``start_recording`` (anchor).
     """
@@ -210,8 +210,8 @@ class CameraEntry(BaseModel):
     model: str | None = None
     serial: str | None = None
     output_path: str
-    """Bundle-relative POSIX path to the container file. Even when the §12.4
-    ``output_root`` escape hatch is in effect, this still records the
+    """Bundle-relative POSIX path to the container file. Even when an
+    ``output_root`` is in effect, this still records the
     relative-reference name so analysis tools can locate the file given
     the ``output_path_external`` absolute path below."""
     output_path_external: str | None = None

@@ -520,9 +520,9 @@ class Conductor:
             }
         # Per-worker tick/loop metrics. Per-adapter failure policy
         # (``WorkerMetrics.on_failure``) is intentionally not serialized
-        # into this float-valued diagnostics block. # TODO(watchdog):
-        # per-device stream-silence/fatal-error enforcement will attach
-        # here, using the resolved policy metadata on each worker.
+        # into this float-valued diagnostics block. Per-device
+        # stream-silence/fatal-error enforcement can attach here using the
+        # resolved policy metadata on each worker.
         for rid, worker in self._pool.workers.items():
             wm = worker.metrics
             out[f"worker:{rid}"] = {

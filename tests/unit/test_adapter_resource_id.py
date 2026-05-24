@@ -183,8 +183,7 @@ def test_adapter_satisfies_device_adapter_protocol_resource_id_attr(
 
 def test_two_watlow_adapters_on_same_port_share_resource_id() -> None:
     """Two Watlow controllers on the same RS-485 bus must collapse onto
-    one worker. The mechanism is identical ``resource_id``; see migration
-    doc §7.1 example."""
+    one worker. The mechanism is an identical ``resource_id``."""
     primary = _make_watlow(port="COM6")
     secondary = _make_watlow(port="COM6")
     assert primary.resource_id == secondary.resource_id == "serial:COM6"
@@ -227,7 +226,7 @@ def test_watlow_resource_id_strips_whitespace() -> None:
 
 def test_nidaq_resource_id_strips_module_suffix_for_cdaq() -> None:
     """Two cDAQ tasks bound to different modules in the same chassis must
-    share a worker. Migration doc §4.10 + §7.4 rule 2."""
+    share a worker."""
     a = _make_nidaq(channels=["cDAQ1Mod1/ai0", "cDAQ1Mod1/ai1"])
     b = _make_nidaq(channels=["cDAQ1Mod3/ai0"])
     assert a.resource_id == b.resource_id == "daqmx:cDAQ1"
@@ -262,9 +261,11 @@ def test_webcam_resource_id_falls_back_to_name_when_no_serial() -> None:
 
 
 def test_webcam_resource_id_is_pure_property_no_open_required() -> None:
-    """The migration doc requires ``resource_id`` to be safe to read before
-    ``open()``. Webcam construction does not call ``av.open``; verify the
-    property is readable on the bare-constructed adapter."""
+    """``resource_id`` must be safe to read before ``open()``.
+
+    Webcam construction does not call ``av.open``; verify the property is
+    readable on the bare-constructed adapter.
+    """
     cam = _make_webcam()
     _ = cam.resource_id  # must not raise
 

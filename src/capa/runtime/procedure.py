@@ -30,6 +30,7 @@ What it does **not** do:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -40,6 +41,11 @@ from capa.experiment.procedures.base import (
     OperatorCommand,
     ProcedureContext,
     ProcedureError,
+)
+from capa.experiment.profiles.runtime import (
+    ProfilePreflightContext,
+    resolve_preflight_check_ids,
+    run_profile_preflight,
 )
 
 if TYPE_CHECKING:
@@ -177,47 +183,103 @@ class ProcedureRunner:
         """Conductor preflight hook.
 
         Constructs the :class:`ProcedureContext` once (re-used in
-        :meth:`run`) and invokes :meth:`Procedure.preflight`. Blocking
-        problems raise :class:`ProcedureError`; non-blocking problems are
-        logged and written to the bundle as warnings.
+        :meth:`run`), runs the active domain profile's declared checks,
+        then invokes :meth:`Procedure.preflight`. Blocking problems
+        (from either layer) raise :class:`ProcedureError`; non-blocking
+        problems are logged and written to the bundle as warnings.
+
+        Profile checks fire **before** procedure checks so a config-level
+        refusal (heater too hot, purge not flowing, atmosphere
+        inconsistent, etc.) surfaces before a procedure-specific one —
+        the operator usually wants to know about the higher-priority
+        problem first when both would fire.
 
         The conductor catches the raised error and turns it into a
         ``RunOutcome.CRASHED`` with the failure reason — the bundle still
         seals so the operator can inspect what went wrong.
         """
         self._proc_ctx = self._build_proc_ctx(ctx, bus)
-        problems: list[Problem] = await self._procedure.preflight(self._proc_ctx)
-        # ``blocking=True`` refuses the run regardless of severity;
-        # non-blocking is a warning regardless of severity.
-        blocking = [p for p in problems if p.blocking]
-        warnings = [p for p in problems if not p.blocking]
-        for p in warnings:
+        profile_problems = await self._run_profile_preflight(bus)
+        procedure_problems: list[Problem] = await self._procedure.preflight(self._proc_ctx)
+
+        self._record_warning_problems(
+            ctx,
+            (p for p in profile_problems if not p.blocking),
+            kind="profile.preflight.warning",
+            source="profile",
+        )
+        self._record_warning_problems(
+            ctx,
+            (p for p in procedure_problems if not p.blocking),
+            kind="procedure.preflight.warning",
+            source="procedure",
+        )
+
+        blocking = [p for p in (*profile_problems, *procedure_problems) if p.blocking]
+        if blocking:
+            messages = "; ".join(f"{p.code}: {p.message}" for p in blocking)
+            raise ProcedureError(f"preflight refused: {messages}")
+
+    async def _run_profile_preflight(self, bus: DataBus) -> list[Problem]:
+        """Run the active domain profile's declared preflight checks.
+
+        Returns an empty list when no :class:`DomainProfileRef` is set
+        on the config — many headless / test configs omit it, and the
+        absence is not itself an error. Static and dynamic checks both
+        run here; by the time this fires, drains are already spinning
+        and adapters are started, so dynamic samples are available.
+        """
+        if self._config.domain_profile is None:
+            return []
+        check_ids = resolve_preflight_check_ids(self._config.domain_profile.id)
+        if not check_ids:
+            return []
+        profile_ctx = ProfilePreflightContext(
+            config=self._config,
+            instruments=self._channel_registry,
+            databus=bus,
+            profile_metadata=dict(self._config.domain_profile.metadata),
+            adapters_started=True,
+        )
+        return await run_profile_preflight(profile_ctx, check_ids)
+
+    def _record_warning_problems(
+        self,
+        ctx: RunContext,
+        problems: Iterable[Problem],
+        *,
+        kind: str,
+        source: str,
+    ) -> None:
+        """Log + bundle-record the non-blocking ``problems``.
+
+        Best-effort: bundle-write failures degrade to a single log line
+        and do not mask the caller's preflight result. Pulled out of
+        :meth:`preflight` so the profile and procedure paths share one
+        implementation.
+        """
+        for p in problems:
             self._logger.warning(
-                "procedure.preflight.warning",
+                kind,
                 code=p.code,
                 message=p.message,
                 severity=str(p.severity),
             )
-            # Best-effort bundle record; do not let a write failure mask
-            # the procedure's preflight result.
             try:
                 self._bundle_writer.write_event(
-                    kind="procedure.preflight.warning",
+                    kind=kind,
                     message=p.message,
                     severity="warning",
-                    source="procedure",
+                    source=source,
                     t_mono_ns=ctx.clock.t_mono_ns(),
                     t_utc=datetime.now(UTC),
                     metadata={"code": p.code},
                 )
             except BaseException as exc:
                 self._logger.warning(
-                    "procedure.preflight.warning_record_failed",
+                    f"{kind}_record_failed",
                     error=str(exc),
                 )
-        if blocking:
-            messages = "; ".join(f"{p.code}: {p.message}" for p in blocking)
-            raise ProcedureError(f"procedure preflight refused: {messages}")
 
     async def run(self, ctx: RunContext, bus: DataBus) -> None:
         """Conductor run hook.

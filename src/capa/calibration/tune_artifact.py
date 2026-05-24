@@ -46,7 +46,7 @@ class TuneArtifactError(CapaError):
 AcceptReason = Literal["algorithm_converged", "operator_override", "warn_proceeded"]
 """Why a tune point was accepted.
 
-* ``algorithm_converged``: the §7.5 convergence rule (two consecutive
+* ``algorithm_converged``: the convergence rule (two consecutive
   in-tolerance windows plus a verification soak) was satisfied.
 * ``operator_override``: the operator pressed "Accept Current" — the
   point may not satisfy the convergence rule.
@@ -148,7 +148,7 @@ class HeatFluxTuneArtifact(BaseModel):
         Returned as the secant slope of the bracketing accepted points.
         ``None`` when fewer than two points are accepted, or when the
         target sits outside any bracket. Used as the step-size prior for
-        iteration 1 of a future tune session (§7.1).
+        the first iteration of a future tune session.
         """
         accepted = sorted(
             [p for p in self.points if p.accepted],

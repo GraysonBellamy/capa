@@ -115,7 +115,7 @@ class SartoriusAdapterParams(BaseModel):
 
     protocol: ProtocolName = "xbpi"
     """Wire protocol. ``auto`` runs the conservative detector
-    (sartoriuslib §6); pin one in production."""
+    from sartoriuslib; pin one in production."""
 
     baudrate: int = 9600
     """Default Sartorius shipment is 9600; some labs reconfigure higher."""

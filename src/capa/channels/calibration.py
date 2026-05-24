@@ -28,8 +28,8 @@ from capa.core.units import UnitStr, units_compatible
 class UncertaintySpec(BaseModel):
     """Documented uncertainty attached to a :class:`Calibration`.
 
-    The plan calls out k=1 / k=2 explicitly and forbids silent zero-uncertainty
-    claims — set the variant to ``None`` (i.e. don't supply an
+    The model records k=1 / k=2 explicitly and forbids silent
+    zero-uncertainty claims — set the variant to ``None`` (i.e. don't supply an
     :class:`UncertaintySpec`) only when the calibration genuinely doesn't have
     one and the bundle is to be marked as such.
     """

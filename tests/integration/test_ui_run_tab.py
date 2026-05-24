@@ -1,5 +1,4 @@
-"""``RunTab`` regression tests for the two inline UI fixes from
-hardware-day §6 — guarding against:
+"""``RunTab`` regression tests guarding against:
 
 * the plot pane being bound to the *empty* registry built in
   :meth:`RunTab.load_config` instead of the controller's freshly-rebuilt
@@ -130,7 +129,7 @@ def test_plot_pane_rebound_to_controller_buffers_on_running(
     """RunTab must replace the placeholder registry built in
     :meth:`load_config` with :attr:`RunController.buffers` once the
     engine reaches ``RUNNING`` — otherwise the live plot stays bound to
-    a registry that no producer ever writes to (the §6 inline fix)."""
+    a registry that no producer ever writes to."""
     tab = RunTab(controller=fake_controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
     tab.load_config(_config())
@@ -153,7 +152,7 @@ def test_start_button_reenables_after_seal_via_singleshot(
 ) -> None:
     """Without the deferred re-enable, ``can_start()`` returns ``False``
     at the moment ``_on_run_finished`` fires (the controller's task isn't
-    yet ``done()``); the button stays disabled forever (§6 inline fix).
+    yet ``done()``); the button stays disabled forever.
 
     Simulate that race by leaving ``is_active = True`` while the slot
     runs, then flipping it ``False`` after the signal returns. With the

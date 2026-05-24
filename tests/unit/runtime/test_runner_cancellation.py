@@ -1,6 +1,6 @@
 """Caller-cancellation tests for :mod:`capa.runtime.runner`.
 
-The shielded-dispatch contract (§4.2) says the worker-side coroutine
+The shielded-dispatch contract says the worker-side coroutine
 must run to completion even when the caller cancels its future. Before
 Both runners' ``_bridge`` callbacks once called ``out.set_result(...)``
 or ``out.set_exception(...)`` unconditionally — when the caller had
@@ -153,8 +153,8 @@ async def test_caller_cancel_does_not_log_invalid_state_error(
 async def test_caller_cancel_does_not_interrupt_coroutine(
     runner_factory: Callable[[], WorkerRunner],
 ) -> None:
-    """The §4.2 shield rule, asserted at the runner level (not just the
-    worker): the coroutine runs to completion despite caller cancellation.
+    """The shield rule, asserted at the runner level (not just the worker):
+    the coroutine runs to completion despite caller cancellation.
 
     We assert via a shared list mutation rather than the future result,
     because the future result is (correctly) dropped on the floor."""

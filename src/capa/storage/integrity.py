@@ -12,7 +12,7 @@ so that a researcher can verify the bundle five years from now with
 Walking is depth-first deterministic by sorted relative path. ``manifest.sha256``
 itself is excluded — it cannot describe its own hash. ``*.in-flight.parquet``
 files are excluded too: they only exist mid-write or in a crashed bundle, and
-finalize unlinks them before integrity is computed (see §8.5).
+finalize unlinks them before integrity is computed.
 """
 
 from __future__ import annotations

@@ -42,7 +42,7 @@ def _visible_spec(name: str = "visible_cam0") -> CameraSpec:
 
 
 def _authorized(kind: str, **payload: object) -> DeviceCommand:
-    """Build a command with the §9 authorization fields populated."""
+    """Build a command with the authorization fields populated."""
     return DeviceCommand(
         kind=kind,
         payload=payload,

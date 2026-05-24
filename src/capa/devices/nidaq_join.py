@@ -86,8 +86,8 @@ def declared_channels_from_payload(
     """
     devices = hardware_payload.get("devices")
     channels = hardware_payload.get("channels")
-    device_iter: Iterable[Mapping[str, Any]] = devices if isinstance(devices, list) else ()
-    channel_iter: Iterable[Mapping[str, Any]] = channels if isinstance(channels, list) else ()
+    device_iter: Iterable[Any] = devices if isinstance(devices, list) else ()
+    channel_iter: Iterable[Any] = channels if isinstance(channels, list) else ()
     declared = _parse_devices_dict(device_iter)
     return _attach_bound_flags(declared, _binding_keys_from_dict_channels(channel_iter))
 
@@ -102,7 +102,7 @@ def nidaq_task_keys_from_payload(
     that to report "no fields declared" instead of silently opting out.
     """
     devices = hardware_payload.get("devices")
-    device_iter: Iterable[Mapping[str, Any]] = devices if isinstance(devices, list) else ()
+    device_iter: Iterable[Any] = devices if isinstance(devices, list) else ()
     return _parse_task_keys_dict(device_iter)
 
 
@@ -205,7 +205,7 @@ def _kind_and_units(channel_dict: Mapping[str, Any]) -> tuple[str, str | None]:
 
 
 def _parse_devices_dict(
-    devices: Iterable[Mapping[str, Any]],
+    devices: Iterable[Any],
 ) -> list[DeclaredNIDAQChannel]:
     out: list[DeclaredNIDAQChannel] = []
     for dev in devices:
@@ -249,7 +249,7 @@ def _parse_devices_dict(
 
 
 def _parse_task_keys_dict(
-    devices: Iterable[Mapping[str, Any]],
+    devices: Iterable[Any],
 ) -> set[tuple[str, str]]:
     keys: set[tuple[str, str]] = set()
     for dev in devices:
@@ -270,7 +270,7 @@ def _parse_task_keys_dict(
 
 
 def _binding_keys_from_dict_channels(
-    channels: Iterable[Mapping[str, Any]],
+    channels: Iterable[Any],
 ) -> set[tuple[str, str, str]]:
     """Walk pre-validation ``[[channels]]`` dicts and collect ``(device,
     task, field)`` triples for NI bindings.

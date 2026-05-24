@@ -591,7 +591,7 @@ class NIDAQAdapter:
         error_policy = (
             NidaqErrorPolicy.RETURN if self.params.auto_reconnect else NidaqErrorPolicy.RAISE
         )
-        # The block recorder defaults to DROP_OLDEST (nidaqlib §13.3); for
+        # The block recorder defaults to DROP_OLDEST; for
         # capa's bundle path we want durable capture, so honour the same
         # ``overflow`` knob exposed for polled mode.
         overflow = (

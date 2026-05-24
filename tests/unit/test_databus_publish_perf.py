@@ -1,8 +1,8 @@
 """DataBus publish dispatch is indexed, not linear.
 
-The plan's benchmark spec: with 100 channel subscribers and 1 wildcard,
-publishing 10k samples for one channel should be dramatically faster than
-a linear ``for sub in subscriptions`` walk would be. The exact ratio is
+With 100 channel subscribers and 1 wildcard, publishing 10k samples for one
+channel should be dramatically faster than a linear
+``for sub in subscriptions`` walk would be. The exact ratio is
 host-dependent; the test pins a generous but defensive threshold so it
 fails loudly if the index regresses to O(N) without false-positiving on
 slow CI.

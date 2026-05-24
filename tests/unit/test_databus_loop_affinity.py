@@ -1,4 +1,4 @@
-"""Tests for :class:`DataBus` loop-affinity (migration doc §3.10 / §3.11 #7).
+"""Tests for :class:`DataBus` loop-affinity.
 
 Each :class:`DataBus` is pinned to exactly one asyncio loop. Its subscription
 queues are :class:`BoundedQueue`s that bind to whatever loop creates them;

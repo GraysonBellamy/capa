@@ -2,7 +2,7 @@
 
 Cross-runner: every test runs under both :class:`InlineRunner` and
 :class:`ThreadedRunner` so semantic drift between the two backends is
-caught (plan risk register §7).
+caught.
 
 These are *integration* tests because they exercise the runner thread/loop
 machinery end-to-end, not unit tests of the state table — that's
@@ -155,7 +155,7 @@ class TestOpenClose:
 
 class TestArmDisarmWithoutSampling:
     """The ARMED → DRAINING edge that bypasses SAMPLING (disarm called
-    before begin_sampling). Migration doc §3.3."""
+    before begin_sampling)."""
 
     @pytest.mark.anyio
     async def test_arm_installs_run_context(
@@ -247,9 +247,8 @@ class TestArmDisarmWithoutSampling:
 
 
 class TestMultipleRuns:
-    """Migration doc §10.2 'test_pool_supports_multiple_arm_disarm_cycles_
-    without_reopen' applies one level down: a single worker must support
-    many arm/disarm cycles without re-opening its adapter."""
+    """A single worker must support many arm/disarm cycles without
+    re-opening its adapter."""
 
     @pytest.mark.anyio
     async def test_three_arm_disarm_cycles(

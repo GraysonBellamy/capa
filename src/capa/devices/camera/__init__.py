@@ -14,7 +14,7 @@ capa core ships the Protocol, the visible :class:`~capa.devices.camera.webcam.We
 and an in-process IR sim fixture under ``capa.devices.sim.flir_ir_sim``. The
 real FLIR IR adapter ships in the separate ``capa-flir`` package, registered
 through the ``capa.cameras`` entry-point group — capa core remains FLIR-free
-(, §12.2).
+by design.
 """
 
 from __future__ import annotations

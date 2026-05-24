@@ -399,7 +399,11 @@ PREFLIGHT_CHECKS: tuple[PreflightCheck, ...] = (
     ),
     PreflightCheck(
         id="capa.heater_pv_in_safe_range",
-        description="Heater PV reading is within startup safe range (<200 °C by default).",
+        description=(
+            "Heater PV reading is within the rig-survival ceiling "
+            "(<1000 °C by default). Catches sensor runaway / miswired "
+            "channel; not a cold-start gate."
+        ),
         blocking=True,
     ),
     PreflightCheck(

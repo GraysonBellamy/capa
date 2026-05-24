@@ -1,31 +1,14 @@
 # capa — Architecture Plan
 
-**Status:** consolidated architecture, pre-implementation
-**Target:** Python 3.12/3.13 control & data-acquisition application for a custom controlled-atmosphere pyrolysis lab instrument
-**Author note:** merges the strongest elements of the prior `capa-plan-claude.md` and `capa-plan-codex.md`. Supersedes both.
+**Scope:** the product surface of capa — what a channel is, what the run bundle contains, how procedures and methods compose, how the safety layer and storage layer work. The runtime topology that hosts all of this (per-resource workers coordinated by a per-run conductor over a long-lived worker pool) is documented separately in [`runtime-architecture.md`](runtime-architecture.md); this document references it but does not duplicate it.
 
-> **Runtime cutover (2026-05-12).** The single-loop `ExperimentEngine`
-> + `DeviceRegistry` + `camera_task` scaffold described below has been
-> replaced by the per-resource worker model documented in
-> [`runtime-architecture.md`](runtime-architecture.md): one thread + one
-> asyncio loop per hardware resource, coordinated by a per-run
-> `Conductor` (`src/capa/runtime/conductor.py`) over a long-lived
-> `WorkerPool` (`src/capa/runtime/pool.py`). The CLI
-> (`python -m capa.app --headless`) is built on `run_headless()`
-> (`src/capa/runtime/headless.py`); the GUI's `RunController`
-> (`src/capa/ui/state.py`) builds a `Conductor` per run against the same
-> pool the UI keeps open across runs. Manual-card command dispatch goes
-> through `ManualClient` (`src/capa/runtime/dispatch.py`) which routes
-> to the conductor while a run is armed and to the pool otherwise.
-> Sections below that reference `ExperimentEngine`, `DeviceRegistry`, or
-> `cameras.py::camera_task` are stale; `runtime-architecture.md` is the
-> authoritative reference for the runtime layer.
+**Target:** Python 3.12/3.13 control & data-acquisition application for a custom controlled-atmosphere pyrolysis lab instrument.
 
 ---
 
 ## 1. Overview
 
-`capa` is a single-rig, single-operator control and DAQ application written in Python with a PySide6 GUI. It drives a heterogeneous instrument set (NI-DAQ, Watlow temperature controllers, Alicat mass-flow controllers, Sartorius balances, USB and IR thermal cameras) through the existing async-first device libraries (`nidaqlib`, `watlowlib`, `alicatlib`, `sartoriuslib`), records every run as a self-contained on-disk bundle, and supports research workflows (calibrations, custom routines) as first-class plugins rather than one-off UI hacks.
+`capa` is a single-rig, single-operator control and DAQ application written in Python with a PySide6 GUI. It drives a heterogeneous instrument set (NI-DAQ, Watlow temperature controllers, Alicat mass-flow controllers, Sartorius balances, USB and IR thermal cameras) through async-first device libraries (`nidaqlib`, `watlowlib`, `alicatlib`, `sartoriuslib`), records every run as a self-contained on-disk bundle, and supports research workflows (calibrations, custom routines) as first-class plugins rather than one-off UI hacks.
 
 Sample rates are modest (3–60 Hz per device); the dominant I/O concern is video, not analog throughput. The architecture is therefore optimized for **reproducibility, extensibility, and operational clarity** over raw bandwidth — with explicit escape hatches for the cases that need it (high-rate NI DAQ via TDMS, native-format radiometric IR via the FLIR Atlas SDK).
 
@@ -38,7 +21,7 @@ Sample rates are modest (3–60 Hz per device); the dominant I/O concern is vide
 - **Operable.** A trained operator can launch a known recipe, monitor it, abort safely, and review the result without touching code.
 - **Headless-capable.** The engine runs without the GUI for testing, automation, and CI.
 - **Honest about safety.** Every device-write goes through an explicit run authorization or manual confirmation gate; safety monitoring is its own subsystem with its own state, not a check buried in an acquisition callback.
-- **OS-flexible.** Primary target Windows; Linux is aspirational (kept achievable through portable choices, but not actively tested in P0–P3).
+- **OS-flexible.** Primary target Windows; Linux is aspirational (kept achievable through portable choices, but not actively tested).
 
 ### 1.2 Non-goals
 
@@ -67,7 +50,7 @@ These are the assumed working conditions; the architecture is sized for them, no
 |----------------------|-----------------------------------------|---------------------------------------------------------------------------|
 | Language             | Python 3.12 / 3.13                      | Matches device libraries; modern typing, `match`, `ExceptionGroup`; stay below Python 3.14 until `qasync` supports it |
 | Async runtime        | AnyIO (asyncio backend by default)      | Every device library is built on AnyIO; consistent task-group semantics   |
-| GUI                  | PySide6 + `qasync`                        | Mature dock framework; well-trodden asyncio bridge                        |
+| GUI                  | PySide6 + `qasync`                      | Mature dock framework; well-trodden asyncio bridge                        |
 | Plotting             | PyQtGraph                               | Only library that handles 60-Hz live updates without sweat                |
 | Data validation      | Pydantic v2                             | Auto-validation; auto-form generation; YAML/TOML-friendly                 |
 | Units                | `pint` + UCUM-aligned vocabulary        | Dimensional analysis at config-load; catches kPa/psi-class errors before a run |
@@ -76,17 +59,17 @@ These are the assumed working conditions; the architecture is sized for them, no
 | Storage — events     | SQLite (per-run)                        | Transactional, crash-safe, queryable                                      |
 | Storage — IR thermal | FLIR `.seq` / `.csq` (native, in-bundle)| Atlas SDK records directly; preserves vendor calibration metadata; large (1–20+ GB per run) but transcoding is wasteful |
 | Storage — visible    | MKV/MP4 (H.264 via PyAV)                | Tiny, broadly compatible, no radiometric data to preserve                 |
-| Camera SDK (IR)      | **FLIR Atlas Multiplatform C SDK**      | Owns the radiometric `.csq` writer; the only path that preserves vendor calibration |
-| Atlas Python binding | **CFFI (API/compiled mode)** + small wrapper | Pure-C surface → no C++ toolchain; compiled extension → type-safe + low call overhead. Fallbacks (CFFI ABI / sidecar daemon) documented in §12.2 |
+| Camera SDK (IR)      | FLIR Atlas Multiplatform C SDK          | Owns the radiometric `.csq` writer; the only path that preserves vendor calibration |
+| Atlas Python binding | CFFI (ABI mode)                         | Pure-C surface, no compile step at install, no FLIR headers vendored      |
 | Storage — manifest   | JSON / TOML                             | Human-readable, git-diffable                                              |
 | Logging              | `structlog` (JSON to `run.log`)         | Run-id correlated structured logs, captured into the bundle               |
 | High-rate DAQ escape | TDMS via `nidaqlib.TdmsLogging`         | Driver-side logging if a future task exceeds capa's normal 3–60 Hz class  |
 | Run catalog          | Single SQLite file (`runs.sqlite`)      | Cross-run index; zero-admin                                               |
 | Plugin discovery     | `importlib.metadata` entry_points + dev-folder fallback | Pip-install for stable plugins; drop-in folder for development          |
-| Packaging            | uv + `pyproject.toml` (committed `uv.lock`) | Matches existing library tooling; lockfile is provenance for the bundle |
-| Lint / format        | `ruff` (single tool, replaces black + flake8 + isort) | One tool, fast, deterministic                                  |
-| Type checking        | `mypy --strict` (or `pyright` in CI)    | Pydantic v2 + strict typing pays for itself across a long-lived codebase  |
-| GUI testing          | `pytest-qt` with `qasync` integration   | The standard for PySide6 + asyncio test harnesses                           |
+| Packaging            | uv + `pyproject.toml` (committed `uv.lock`) | Lockfile is provenance for the bundle                                  |
+| Lint / format        | `ruff`                                  | One tool, fast, deterministic                                             |
+| Type checking        | `mypy --strict`                         | Pydantic v2 + strict typing pays for itself across a long-lived codebase  |
+| GUI testing          | `pytest-qt` with `qasync` integration   | Standard for PySide6 + asyncio test harnesses                             |
 | Versioning           | `setuptools-scm` (git tag → `__version__`) | App version embedded in every bundle without manual bumps              |
 
 **On the choice of Parquet+SQLite over HDF5:** for a long-lived multi-researcher artifact, the Parquet ecosystem (DuckDB, Polars, Arrow, Spark, Julia, R) is materially richer than HDF5's, the file-per-concern layout is more crash-tolerant, and FLIR's native radiometric format preserves vendor metadata that float32 transcoding loses. HDF5 remains an option later for archival merge — see §16.
@@ -97,30 +80,33 @@ These are the assumed working conditions; the architecture is sized for them, no
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ UI Layer  (PySide6, main thread, qasync event loop)              │
+│ UI Layer  (PySide6, main thread, qasync event loop)            │
 │   Tabs: Setup · Method · Run · Review                          │
 │   Docks: Numerics · Events · Notes · Camera previews           │
-│   Talks to engine via typed Command/Event API. Owns no I/O.    │
+│   ManualClient routes commands to Conductor (during a run)     │
+│   or directly to the WorkerPool (between runs). Owns no I/O.   │
 └──────────────────────────▲─────────────────────────────────────┘
                            │ commands / state queries
-                           │ subscribes to DataBus, AlarmBus
+                           │ subscribes to ConductorDataBus + AlarmBus
 ┌──────────────────────────┴─────────────────────────────────────┐
-│ Experiment Engine  (one AnyIO task group per run)              │
+│ Run coordinator  (per-run Conductor, own thread + asyncio loop)│
 │   ┌──────────────────────────────────────────────────────────┐ │
 │   │ Procedure (state machine, plugin)                        │ │
 │   │ MethodExecutor (Hold/Ramp/Step/Wait/Prompt — reusable)   │ │
 │   │ SafetyMonitor (independent task; can call safe_shutdown) │ │
 │   │ ChannelRegistry (cross-device, name-keyed surface)       │ │
-│   │ DataBus (in-process pub/sub) + RingBuffer per channel    │ │
-│   │ Sink fan-out (Parquet + SQLite events + sidecars)        │ │
+│   │ ConductorDataBus (authoritative in-process pub/sub)      │ │
+│   │ Per-worker drain → writer thread + UI bridge             │ │
 │   └──────────────────────────────────────────────────────────┘ │
 └──────────────────────────▲─────────────────────────────────────┘
-                           │ DeviceAdapter Protocol
-                           │ (open/close · start/stop · poll/snapshot · command)
+                           │ ThreadBridge per worker (BLOCK +
+                           │ saturation deadline at Conductor side)
 ┌──────────────────────────┴─────────────────────────────────────┐
-│ Device Layer  (one adapter per vendor, plus simulated)         │
-│   nidaq · watlow · alicat · sartorius · webcam · ir_<vendor>   │
-│   Each wraps the existing library Manager with a uniform API.  │
+│ WorkerPool  (config-lived; survives runs)                      │
+│   One Worker per resource (serial port / DAQmx chassis /       │
+│   camera handle). Each Worker = own thread + own asyncio loop  │
+│   + adapter instances + IDLE↔ARMED↔SAMPLING↔DRAINING state.    │
+│   nidaq · watlow · alicat · sartorius · webcam · flir_ir       │
 │   Sim adapters mirror the same Protocol for tests + UI dev.    │
 └──────────────────────────▲─────────────────────────────────────┘
                            │
@@ -131,7 +117,13 @@ These are the assumed working conditions; the architecture is sized for them, no
 └────────────────────────────────────────────────────────────────┘
 ```
 
-The UI never directly owns a balance, controller, DAQ session, or camera. It only talks to the engine. The engine runs identically with or without the UI — see §14.
+Three nested lifetimes shape the system:
+
+1. **Config lifetime — `WorkerPool`.** Opened when a hardware config loads. Builds one `Worker` per resource, opens every adapter, and stays open across many runs. Closed only on config-reload or app-quit. Operators issue manual commands through the pool when no run is active; expensive open-once costs (e.g. the Sartorius cold-open race) are paid once per config load.
+2. **Run lifetime — `Conductor`.** Constructed when a run starts. Owns run-only state (clock, writer, procedure, drain tasks, heartbeat, saturation monitor). Arms the existing workers, drives sampling, disarms on stop. Workers stay open for the next run.
+3. **Command lifetime — single dispatch.** A UI command crosses the thread seam once or twice and resolves.
+
+The UI never directly owns a balance, controller, DAQ session, or camera. It only talks to the run coordinator (during a run) or the pool (between runs). The coordinator runs identically with or without the UI — see §14.
 
 ---
 
@@ -141,20 +133,19 @@ The UI never directly owns a balance, controller, DAQ session, or camera. It onl
 capa/
 ├── pyproject.toml
 ├── src/capa/
-│   ├── app.py                       # entry: capa run | capa validate | capa catalog | capa export-parquet
+│   ├── app.py                       # entry: capa run | capa validate | capa catalog | …
+│   ├── cli/                         # CLI subcommands (hardware discovery, plugins, etc.)
 │   ├── core/
 │   │   ├── clock.py                 # RunClock — monotonic + UTC anchor
 │   │   ├── databus.py               # in-process pub/sub
-│   │   ├── alarmbus.py
-│   │   ├── eventlog.py
 │   │   ├── ringbuffer.py            # per-channel decimating ring
 │   │   ├── backpressure.py          # BackpressurePolicy enum + queue helpers
 │   │   ├── logging.py               # structlog config + run-id context binder
 │   │   ├── metrics.py               # queue-depth + writer-lag histograms
 │   │   ├── provenance.py            # collect env/version/lockfile metadata
-│   │   ├── integrity.py             # sha256 over bundle artifacts
 │   │   ├── units.py                 # pint registry + UCUM validation
-│   │   ├── ingest.py                # external event-ingest endpoint (UDS/HTTP)
+│   │   ├── plugins_runtime.py       # entry-point discovery + trust enforcement
+│   │   ├── plugins_lock.py          # plugins.lock parser + audit journal
 │   │   └── errors.py
 │   ├── channels/
 │   │   ├── spec.py                  # ChannelSpec (Pydantic)
@@ -164,68 +155,83 @@ capa/
 │   ├── devices/
 │   │   ├── adapter.py               # DeviceAdapter Protocol + Capability enum
 │   │   ├── nidaq.py                 # wraps nidaqlib.DaqManager
+│   │   ├── nidaq_join.py            # multi-task join helpers
+│   │   ├── nidaq_channels.py
 │   │   ├── watlow.py                # wraps WatlowManager
 │   │   ├── alicat.py                # wraps AlicatManager
 │   │   ├── sartorius.py             # wraps SartoriusManager
+│   │   ├── discovery.py             # `capa devices discover`
+│   │   ├── records.py · resolved.py · materialize.py · runtime_state.py
 │   │   ├── camera/
-│   │   │   ├── base.py              # Camera Protocol + shared types (CameraSpec, CameraHealth)
-│   │   │   └── webcam.py            # PyAV USB capture (visible)
-│   │   │   # NOTE: the FLIR IR adapter (Atlas-backed) ships in a separate package, `capa-flir`,
-│   │   │   # registered through the `capa.cameras` entry point. capa core contains zero FLIR
-│   │   │   # SDK material — see §12.1–§12.2 for the licensing rationale and plugin layout.
+│   │   │   ├── base.py              # Camera Protocol + shared types
+│   │   │   ├── metadata.py
+│   │   │   └── webcam/              # PyAV USB capture (visible)
+│   │   │       ├── adapter.py · descriptor.py · encoding.py · probe.py · constants.py
+│   │   │   # The FLIR IR adapter ships in a separate package, `capa-flir`,
+│   │   │   # registered through the `capa.cameras` entry point. capa core
+│   │   │   # contains zero FLIR SDK material — see §12 for the rationale.
 │   │   └── sim/                     # simulated adapters mirroring each Protocol
-│   │       └── flir_ir_sim.py       # in-process .csq writer fixture (fake header + frames) — capa core, no SDK
+│   │       └── flir_ir_sim.py       # in-process .csq writer fixture (fake header + frames)
 │   ├── experiment/
 │   │   ├── config.py                # ExperimentConfig (Pydantic)
 │   │   ├── method.py                # Step types + Method
 │   │   ├── executor.py              # MethodExecutor — reusable, callable from any procedure
-│   │   ├── engine.py                # ExperimentEngine — task group + lifecycle
-│   │   ├── safety.py                # SafetyMonitor
 │   │   ├── authorization.py         # arm/start approvals + manual-command confirmations
 │   │   ├── profiles/
 │   │   │   ├── base.py              # DomainProfile Protocol
-│   │   │   └── capa_pyrolysis.py    # controlled-atmosphere pyrolysis metadata + preflight profile
+│   │   │   ├── runtime.py           # static/dynamic preflight registry
+│   │   │   └── capa_pyrolysis.py    # controlled-atmosphere pyrolysis metadata + preflight
 │   │   └── procedures/
 │   │       ├── base.py              # Procedure Protocol + ProcedureContext
 │   │       └── builtin/
-│   │           ├── recipe_runner.py # thin: delegates to MethodExecutor (covers most runs)
+│   │           ├── recipe_runner.py # thin: delegates to MethodExecutor
 │   │           ├── free_run.py      # record-only, no method
 │   │           ├── batch.py         # run a recipe N times with auto-increment sample IDs
-│   │           ├── hf_calibration.py
-│   │           └── emissivity_ramp.py
+│   │           └── heat_flux_tune/  # heater→flux tuning routine (controller + signals + …)
+│   ├── runtime/                     # per-resource worker runtime — see runtime-architecture.md
+│   │   ├── worker.py · pool.py · conductor.py · dispatch.py · bridge.py
+│   │   ├── headless.py · build.py · session.py · runner.py · recording.py
+│   │   ├── saturation.py · heartbeat.py · shutdown.py · lifecycle.py
+│   │   └── camera_adapter.py · preview.py · …
+│   ├── calibration/
+│   │   └── tune_artifact.py         # calibration artifact emit/load + uncertainty
 │   ├── storage/
 │   │   ├── bundle.py                # RunBundleWriter — opens / finalizes a run dir
 │   │   ├── channel_samples_sink.py  # scalars.parquet normalized long table
-│   │   ├── device_records_sink.py   # device_records/*.parquet native library row/block sidecars
+│   │   ├── device_records_sink.py   # device_records/*.parquet native sidecars
 │   │   ├── events_sink.py           # events.sqlite
 │   │   ├── status_sink.py           # status.sqlite (device snapshots)
-│   │   ├── video_sink.py            # MKV via PyAV (visible)
+│   │   ├── video_sink.py            # frame-index Arrow-IPC → frames.parquet
 │   │   ├── log_sink.py              # run.log (structlog JSON, captured into bundle)
-│   │   ├── tdms_sink.py             # optional pass-through for nidaqlib.TdmsLogging
-│   │   ├── parquet_export.py        # post-hoc selective export from a sealed bundle
-│   │   ├── rocrate_export.py        # generate ro-crate-metadata.json for FAIR/Zenodo publishing
+│   │   ├── writer_thread.py         # per-run writer task ownership
 │   │   ├── finalize.py              # idempotent finalize-in-place (recover orphaned bundles)
+│   │   ├── integrity.py             # sha256 over bundle artifacts
+│   │   ├── manifest.py              # manifest.json read/write + schema
 │   │   ├── catalog.py               # runs.sqlite (cross-run index)
 │   │   └── schema.py                # bundle_schema_version + migration registry
 │   └── ui/
 │       ├── main_window.py
-│       ├── docks/                   # numerics, events, notes, camera_preview
+│       ├── docks/                   # numerics, events, notes, camera_preview, manual_control
 │       ├── tabs/                    # setup, method, run, review
 │       ├── plots/                   # PyQtGraph multi-pane
 │       ├── forms/                   # auto-form from Pydantic models
+│       ├── manual/                  # manual cards (Watlow, Alicat, …)
 │       ├── statusbar.py             # run state, dropped samples, writer lag, disk free
 │       └── theme.py
 ├── plugins/                         # local-dev procedure plugins (hot-load)
 ├── configs/
 │   ├── hardware/                    # one TOML per rig setup
 │   ├── methods/                     # segmented profiles
-│   └── experiments/                 # full ExperimentConfig recipes
+│   ├── experiments/                 # full ExperimentConfig recipes
+│   └── calibrations/                # calibration sets
 ├── runs/                            # default run-bundle root
 └── tests/
     ├── unit/
     ├── integration/
     └── hardware/                    # gated behind env var; otherwise skipped
 ```
+
+The FLIR IR adapter lives in a sibling repository, `capa-flir/`, with its own pyproject and CFFI binding. It registers on `capa.cameras` and is consumed by capa core like any other plugin.
 
 ---
 
@@ -291,7 +297,7 @@ class DeviceAdapter(Protocol):
 
 `DeviceEmission` is a small tagged union: `SourceRecord | ChannelSample | DeviceEvent | DeviceSnapshot`. Most adapters emit one `SourceRecord` plus zero or more mapped `ChannelSample`s per poll tick; status and error paths may emit events/snapshots without channel samples.
 
-Lifecycle is split deliberately: `open`/`close` is the connection layer (USB/serial/IP), `start`/`stop` is the sampling layer. This matters for hardware-clocked NI tasks (you want to arm them at run start, not adapter open) and for resuming after a transient I/O hiccup without renegotiating the device.
+Lifecycle is split deliberately: `open`/`close` is the connection layer (USB/serial/IP), `start`/`stop` is the sampling layer. This matters for hardware-clocked NI tasks (you want to arm them at run start, not adapter open) and for resuming after a transient I/O hiccup without renegotiating the device. The per-resource `Worker` (§3) hosts an adapter through these transitions; the `WorkerPool` keeps `open()` paid once per config load while individual runs arm and disarm.
 
 **Two-tier command surface.** The generic `.command(...)` exists for plugins and recipe steps that need to issue commands without knowing the concrete adapter type. Each concrete adapter *also* exposes typed methods for IDE help and refactor safety:
 
@@ -305,7 +311,7 @@ class WatlowAdapter(DeviceAdapter):
 
 `Capability` flags gate UI — "show ramp control only if the adapter declares `HAS_RAMP`" — and `Procedure.preflight()` can validate against them.
 
-**Simulated adapters** mirror each Protocol exactly. This unblocks UI development from hardware on Day 1 and gives integration tests a fast deterministic substrate.
+**Simulated adapters** mirror each Protocol exactly. This unblocks UI development from hardware and gives integration tests a fast deterministic substrate. Each sim adapter has a `from_params` classmethod so a hardware TOML can declare `[devices.params.signals.<key>] kind = "ramp" start = ... end = ...` and the runtime materialises it at construction — sim runs are fully driven from disk, no Python fixtures required.
 
 ### 5.3 `Method` and `Step`
 
@@ -356,7 +362,7 @@ steps:
   - {kind: safe_shutdown}
 ```
 
-`MethodExecutor` is a reusable service exposed on `ProcedureContext`. The builtin `RecipeRunner` procedure is a thin wrapper that calls `executor.run_to_completion(method)`; custom procedures can call `executor.advance_until(step_id)`, `executor.run_segment(step)`, or skip the executor entirely.
+`MethodExecutor` is a reusable service exposed on `ProcedureContext`. The builtin `RecipeRunner` procedure is a thin wrapper that calls `executor.run_to_completion(method)`; custom procedures can call `executor.advance_until(step_id)`, `executor.run_segment(step)`, or skip the executor entirely. Every command the executor issues is routed through `Authorization` and stamped with `(issued_by, authorization_id)`; the audit trail lands in `events.sqlite` as `method.command.issued` events.
 
 ### 5.4 `ExperimentConfig`
 
@@ -388,11 +394,11 @@ Domain profiles are optional schema/preflight bundles layered on top of the gene
 - atmosphere metadata: purge-gas spec (species, purity, supplier, cylinder lot, target purge flow), optional reactive-gas spec (species, purity, target flow, target mole fraction) for partial-oxidation runs
 - optional downstream-analyzer block (reserved for future setups; the current CAPA rig does not route gases to an analyzer): kind (FTIR / GC / MS / GC-MS / NDIR / other), serial, sampling-line delay, response time, external-file ref. If a future rig adds one, the analyzer is not capa-controlled — its data lives outside the bundle — but the pedigree fields are captured so the run record cross-references the right external dataset
 - required channel groups: `heater_setpoint`, `heater_pv`, `sample_temperature`, `purge_gas_flow`. Optional: `mass` (load-cell rigs), `reactive_gas_flow`, `reactor_pressure`
-- preflight checks: required channel mappings, atmosphere consistency (oxidative/blend mode requires a reactive-gas channel), heater PV in safe startup range, purge flow established, leak-test recency, balance stability when mass is present, disk projection
+- preflight checks: static — required channel mappings, atmosphere consistency (oxidative/blend mode requires a reactive-gas channel), leak-test recency, disk projection; dynamic (after adapters start, inside the task group) — heater PV in safe startup range, purge flow established, balance stability when mass is present. A silent live-data channel post-start is a blocking error, not a downgraded warning.
 
 The profile snapshot lands in `profiles/capa_pyrolysis.toml` and is referenced from `manifest.json.domain_profile`. The profile does not make `capa` a standards-certification tool; it ensures the run bundle captures the metadata a researcher or later analyzer needs.
 
-**Future profiles.** A cone-calorimeter profile module exists in the codebase but is not part of the active product surface; there are no current plans to drive a cone calorimeter with capa. If a cone-mode (or any other) profile becomes a real workload it will be (re-)introduced as an additional profile alongside CAPA pyrolysis on the same Protocol.
+A cone-calorimeter profile module exists in the codebase but is not part of the active product surface; there are no current plans to drive a cone calorimeter with capa. If a cone-mode (or any other) profile becomes a real workload it will be (re-)introduced alongside CAPA pyrolysis on the same Protocol.
 
 ### 5.5 `Calibration` — first-class snapshotted objects, with uncertainty
 
@@ -480,7 +486,7 @@ class RunClock:
     def to_wall(self, t_mono: float) -> datetime: ...
 ```
 
-Every `ChannelSample` carries `t_mono_s` (float64 seconds since run start) as the ergonomic join key and `t_mono_ns` as the canonical persisted join key. Wall time is derived from the run-start UTC anchor. NI-DAQ samples carry the driver's own timestamps (highest-quality timebase available). Serial-attached devices use the provenance already exposed by the libraries: `alicatlib`, `watlowlib`, and `sartoriuslib` samples all carry `requested_at`, `received_at`, and `midpoint_at` wall-clock timestamps plus a `monotonic_ns` int from `time.monotonic_ns()`; capa uses `midpoint_at` as the best point estimate to halve worst-case round-trip skew. Visible-camera frames are stamped on `frame_received` and stored in `visible_cam0.frames.parquet`. IR-camera frames are timestamped *internally* by the FLIR Atlas SDK in the `.csq` file; capa captures a single anchor (`t_mono_s` at "recording started") in `ir_cam0.meta.json`, and a post-finalize step extracts per-frame offsets from the `.csq` header into `ir_cam0.frames.parquet` so analysis tools can correlate without parsing the full file.
+Every `ChannelSample` carries `t_mono_s` (float64 seconds since run start) as the ergonomic join key and `t_mono_ns` as the canonical persisted join key. Wall time is derived from the run-start UTC anchor. NI-DAQ samples carry the driver's own timestamps (highest-quality timebase available). Serial-attached devices use the provenance already exposed by the libraries: `alicatlib`, `watlowlib`, and `sartoriuslib` samples all carry `requested_at`, `received_at`, and `midpoint_at` wall-clock timestamps plus a `monotonic_ns` int from `time.monotonic_ns()`; capa uses `midpoint_at` as the best point estimate to halve worst-case round-trip skew. Visible-camera frames are stamped on `frame_received` and stored in `visible_cam0.frames.parquet`. IR-camera frames are timestamped by the FLIR Atlas SDK via the per-frame receipt records the adapter pumps onto the engine loop; each receipt carries `(frame_idx, t_mono_ns, t_utc, capture_latency_s)` and lands in `ir_cam0.frames.parquet` directly, so analysis tools can correlate without parsing the `.csq` container.
 
 At 3–60 Hz this is fine — sub-millisecond cross-device jitter is invisible. Hardware sync can be added later (NI trigger lines, IRIG-B) if a measurement demands it.
 
@@ -490,32 +496,36 @@ The run-start UTC anchor is also embedded in the visible MKV container metadata 
 
 ## 7. Acquisition pipeline
 
-One AnyIO task group per run. Inside it:
+Each `Worker` runs a producer loop on its own asyncio loop, draining the adapter at its native rate. A `Conductor` drain task (one per worker, run on the Conductor's loop) consumes via the per-worker `ThreadBridge` and applies the fan-out:
 
 ```
-   [Device producer tasks]                    [Procedure task]
-   nidaq · watlow · alicat ·                  walks the Method via
-   sartorius (each polls at                   MethodExecutor; issues
-   its native rate)                           setpoints; awaits events
-            │                                          │
-            │  SourceRecord + ChannelSample            │  Commands
-            ▼                                          │
-       ┌────────────────────┐                          ▼
+   [Per-worker producer loops]                  [Procedure task on Conductor loop]
+   nidaq · watlow · alicat ·                    walks the Method via
+   sartorius · webcam · flir_ir                 MethodExecutor; issues
+   (each on its own thread+loop;                setpoints; awaits events
+    polls at its native rate)                            │
+            │                                            │
+            │  SourceRecord + ChannelSample              │  Commands
+            │  via ThreadBridge (BLOCK +                 │  (dispatched via Worker
+            │  saturation deadline)                      │   from the Conductor loop)
+            ▼                                            │
+       ┌────────────────────┐                            ▼
        │  Calibration apply │              ┌───────────────────┐
        │  (raw -> value)    │              │ ChannelRegistry   │
        └─────────┬──────────┘              │ .write(name, val) │
                  │                         └─────────┬─────────┘
                  ▼                                   │
         ┌────────────────────┐                       ▼
-        │      Fan-out       │              [Adapters issue
-        │  (single consumer) │               typed commands
-        └──┬──────┬──────┬───┘               with run authorization]
+        │  Conductor fan-out │              [Adapters issue
+        │  (one consumer per │               typed commands
+        │   worker drain)    │               with run authorization]
+        └──┬──────┬──────┬───┘
            │      │      │
            ▼      ▼      ▼
       ┌────┐  ┌────────┐ ┌────────┐  ┌──────────────┐
-      │Ring│  │Sinkpool│ │ Alarm  │  │ Camera tasks │
-      │buf │  │native +│ │ check  │  │ (own writers)│
-      │    │  │channel │ │        │  │              │
+      │Ring│  │Writer  │ │ Alarm  │  │ Camera workers│
+      │buf │  │thread  │ │ check  │  │ (frame-index  │
+      │    │  │+sinks  │ │        │  │  + container) │
       └─┬──┘  └───┬────┘ └────┬───┘  └──────┬───────┘
         │       │          │             │
         ▼       ▼          ▼             ▼
@@ -533,17 +543,17 @@ class BackpressurePolicy(Enum):
     ABORT_RUN     = "abort_run"      # fault if queue stays full past a timeout
 ```
 
-| Stage                         | Policy                          | Reason                                                          |
-|-------------------------------|---------------------------------|-----------------------------------------------------------------|
-| Producer → fan-out            | `BLOCK` (small bound)           | Sample rates are low; loss on the floor is unacceptable         |
-| Fan-out → durable sinks       | `BLOCK` then `ABORT_RUN` @ 5 s  | The bundle is the scientific record                             |
-| Fan-out → safety checker      | `BLOCK` (own queue)             | Safety must never starve behind a slow disk; separate queue from sinks |
-| Fan-out → ring buffers (UI)   | `DROP_OLDEST`                   | Repaint freshness matters more than every point                 |
-| Fan-out → alarm checker       | `BLOCK`                         | Missed alarm checks defeat the purpose                          |
-| Camera SDK → file             | (vendor-managed)                | Surface failure via health watchdog, not by intercepting bytes  |
-| Producer → status snapshots   | `DROP_OLDEST`                   | Latest-value semantics; periodic, not historical                |
+| Stage                              | Policy                          | Reason                                                          |
+|------------------------------------|---------------------------------|-----------------------------------------------------------------|
+| Worker → ThreadBridge → Conductor  | `BLOCK` + saturation deadline   | Sample rates are low; loss on the floor is unacceptable. Conductor-side deadline trips a `safe_shutdown` if the bridge stays full. |
+| Conductor → durable sinks          | `BLOCK` then `ABORT_RUN` @ 5 s  | The bundle is the scientific record                             |
+| Conductor → safety checker         | `BLOCK` (own queue)             | Safety must never starve behind a slow disk; separate queue from sinks |
+| Conductor → ring buffers (UI)      | `DROP_OLDEST`                   | Repaint freshness matters more than every point                 |
+| Conductor → alarm checker          | `BLOCK`                         | Missed alarm checks defeat the purpose                          |
+| Camera SDK → file                  | (vendor-managed)                | Surface failure via health watchdog, not by intercepting bytes  |
+| Worker → status snapshots          | `DROP_OLDEST`                   | Latest-value semantics; periodic, not historical                |
 
-**Disk writes never happen on the fan-out hot path.** Sinks own their own queues and writer tasks. The fan-out enqueues and moves on.
+**Disk writes never happen on the fan-out hot path.** The writer thread (constructed per run by the Conductor) owns its own queue and writer task. The fan-out enqueues and moves on.
 
 **Every queue is instrumented.** Each queue exposes (current depth, depth-high-water-mark, dequeue-latency-p50/p99). These feed the status bar live (§10.4) **and** are written to `manifest.json` at finalize as a histogram per queue, so post-run "was this run healthy?" is a one-glance check rather than a forensic dive into the log.
 
@@ -552,13 +562,13 @@ class BackpressurePolicy(Enum):
 - **Producers** wrap each library Manager via the library's module-level recorder — `nidaqlib.record_polled(manager, ...)`, `alicatlib.record(manager, ...)`, `watlowlib.record(manager, ...)`, `sartoriuslib.record(manager, ...)` (each takes the Manager as a `PollSource`) — and translate the emitted `Sample` / `DaqReading` / `DaqBlock` into adapter-specific `SourceRecord` streams plus mapped `ChannelSample`s.
 - **Native row preservation** happens before normalization. Adapters use the libraries' own `sample_to_row(...)` / `reading_to_row(...)` helpers where available so the bundle preserves the same row fields researchers would see if they used the library directly. Capa then applies `SourceBinding` mappings to derive named channel samples.
 - **Calibration application** is the only non-trivial CPU step in the normalized pipeline; happens before fan-out so all consumers see calibrated `ChannelSample`s. Raw values are still routed to the channel-sample sink when `keep_raw=True` on the channel, and the unmodified library row remains in `device_records/`.
-- **Fan-out** is the single consumer of the producer streams. It writes normalized channel samples to ring buffers (RAM, for plots), the channel-sample sink, the alarm checker, and procedure DataBus subscriptions. It also routes native source records to the device-record sink.
+- **Fan-out** is the single consumer of the producer streams (one drain task per worker on the Conductor loop). It writes normalized channel samples to ring buffers (RAM, for plots), the channel-sample sink, the alarm checker, and procedure DataBus subscriptions. It also routes native source records to the device-record sink.
 - **UI bridge** drains ring buffers at **10 Hz** and emits Qt signals on the GUI thread via `qasync`. Underlying disk capture is at native rate, untouched by the repaint cadence.
 - **Control loop cadence.** Method/procedure control loops tick at a fixed cadence (default 10 Hz, configurable to 20 Hz). Polling rates are per-channel.
-- **Command serialization.** Commands to a given physical bus are serialized by the underlying library Manager. Every commanded value is logged as an event *and*, when applicable, as a setpoint channel sample.
-- **Safety** runs as its own task — see §9.
+- **Command serialization.** Commands to a given physical bus are serialized by the underlying library Manager and routed through the owning Worker. Every commanded value is logged as an event *and*, when applicable, as a setpoint channel sample.
+- **Safety** runs as its own task on the Conductor loop — see §9.
 
-Aborting cancels the task group; a `finally` block flushes sinks, closes camera files, writes `ended_utc`, `run_status`, and `bundle_status` into the bundle and the run catalog, and transitions the bundle through `finalizing` to `sealed`, `finalized_unverified`, or `verification_failed` as appropriate. The scientific run outcome remains separate: `completed`, `aborted`, or `crashed`.
+Aborting cancels the Conductor's task group and disarms the workers; a `finally` block flushes sinks, closes camera files, writes `ended_utc`, `run_status`, and `bundle_status` into the bundle and the run catalog, and transitions the bundle through `finalizing` to `sealed`, `finalized_unverified`, or `verification_failed` as appropriate. The scientific run outcome remains separate: `completed`, `aborted`, or `crashed`. The pool stays open for the next run.
 
 ---
 
@@ -590,8 +600,8 @@ runs/2026-05-07_153000_S073-paint-A/
 │   ├── visible_cam0.mkv       # H.264, 30 fps (small, capa-encoded)
 │   ├── visible_cam0.frames.parquet
 │   ├── ir_cam0.csq            # FLIR native, SDK-recorded, 1–20+ GB, NOT transcoded
-│   ├── ir_cam0.meta.json      # capa-recorded sidecar: anchor offset, SDK config, file size, sha256
-│   └── ir_cam0.frames.parquet # post-finalize: (frame_idx, t_mono_ns, t_utc) extracted from .csq headers
+│   ├── ir_cam0.meta.json      # capa-recorded sidecar: SDK config, file size, sha256
+│   └── ir_cam0.frames.parquet # per-frame (frame_idx, t_mono_ns, t_utc, capture_latency_s)
 ├── tdms/                      # optional, present only if storage.tdms.enabled
 │   └── nidaq_<task>.tdms
 ├── exports/                   # optional, generated post-hoc by `capa export-parquet`
@@ -609,11 +619,12 @@ runs/2026-05-07_153000_S073-paint-A/
 - `manifest.json` / `*.toml` are git-diff-friendly; you can inspect them with `cat` and review them in a PR.
 - `tar -cf` over the directory produces a single-artifact bundle whenever you want one.
 - Visible video stays in MKV (no need to preserve radiometry); IR thermal stays in native FLIR `.csq` (raw radiometry preserved, vendor calibration intact, can be re-colorized at any time).
+- Frame-index parquets carry the canonical `(frame_idx, t_mono_ns, t_utc, capture_latency_s)` schema for every camera, so visible and IR analyses share the same join key against `scalars.parquet`.
 - `status.sqlite` keeps low-rate device-health rows (e.g., Watlow alarm bits, Alicat valve drive, balance stable flag) separate from the `scalars.parquet` engineering channels — different cadence, different consumer.
 - `profiles/` captures domain-standard context such as the temperature program summary, atmosphere metadata, specimen form/holder, leak-check recency, and (when present) downstream-analyzer pedigree fields.
 - `env/` and `manifest.sha256` make the bundle a closed scientific record. Re-deriving values five years later does not depend on what tooling happened to be installed today.
 
-**Live readback during a run is not needed** — the in-memory DataBus serves the UI. Files are written in flush-bounded chunks for crash safety, then **rewritten into well-sized row groups at finalize** (see §8.5). They are opened for analysis only after the bundle is readable (`finalized_unverified` or `sealed`).
+**Live readback during a run is not needed** — the in-memory ConductorDataBus serves the UI. Files are written in flush-bounded chunks for crash safety, then **rewritten into well-sized row groups at finalize** (see §8.5). They are opened for analysis only after the bundle is readable (`finalized_unverified` or `sealed`).
 
 ### 8.1 Manifest contents — full provenance
 
@@ -770,10 +781,10 @@ The naive "row group every 1–2 s" approach gives crash safety but *destroys* c
 
 Capa uses a **two-stage write**:
 
-1. **In-flight (during the run).** Append to `scalars.in-flight.parquet` and `device_records/*.in-flight.parquet` with small row groups (~1 s of data) for crash safety. Compression: `zstd:1` (fast). Metadata is fsync'd at every row-group close.
-2. **Finalize (run end).** Rewrite to `scalars.parquet` and final `device_records/*.parquet` with **large row groups (target 256k rows or ~64 MB)**, sorted by `t_mono_ns` where present, compressed with `zstd:6`. Delete in-flight files only after the new files' sha256 entries are verified.
+1. **In-flight (during the run).** Append to Arrow-IPC streams (`scalars.in-flight.arrows`, `device_records/*.in-flight.arrows`, `video/<camera>.frames.in-flight.arrows`) with small flush boundaries (~1 s of data) for crash safety. Metadata is fsync'd at every flush.
+2. **Finalize (run end).** Rewrite to `scalars.parquet`, final `device_records/*.parquet`, and `video/<camera>.frames.parquet` with **large row groups (target 256k rows or ~64 MB)**, sorted by `t_mono_ns` where present, compressed with `zstd:6`. Delete in-flight files only after the new files' sha256 entries are verified.
 
-If the engine crashes before finalize, the in-flight file is still readable and `capa finalize RUN_ID` (§14) performs the rewrite offline — no data is lost. The run remains scientifically marked `run_status="crashed"`, even after `bundle_status="sealed"`, so downstream users can distinguish clean runs from recovered ones.
+If the engine crashes before finalize, the in-flight files are still readable and `capa finalize RUN_ID` (§14) performs the rewrite offline — no data is lost. The run remains scientifically marked `run_status="crashed"`, even after `bundle_status="sealed"`, so downstream users can distinguish clean runs from recovered ones.
 
 This pattern makes both the live system crash-tolerant and the long-term archive query-fast.
 
@@ -860,6 +871,8 @@ The action is part of the rule, not the verdict — the same fault should always
 
 **Two abort modes.** `safe_shutdown()` is itself a Procedure phase: it ramps heaters to a configured cool target, closes flow setpoints to zero, marks the run as aborted, and waits for thermal verification before finalizing the bundle. The UI's red button defaults to safe-shutdown; an "Emergency abort" submenu offers the immediate cancel path. Hardware-enforced safety (over-temp relays, gas interlocks) lives outside Python and is not replaced by this layer — `SafetyMonitor` is the *application-level* monitor, not the only line of defense.
 
+**Watchdog vs. SafetyMonitor.** The per-worker watchdog (already wired into the Conductor heartbeat / saturation deadline) detects silent producers and writes `device_silent` events. SafetyMonitor consumes that same `watchdog_state()` view and applies configured actions; activation of the rule set above is the work still in flight (see §16).
+
 **Audit trail by default.** Every `DeviceCommand` carries `issued_by: OperatorId`, `authorization_id: str | None`, and `confirmed_by: OperatorId | None`. Scheduled method/procedure commands inherit the arm/start authorization that the operator explicitly approved; manual overrides and ad-hoc writes still require an immediate confirmation gesture in the UI. The engine refuses to issue a command without either a valid run authorization or a manual confirmation, and `events.sqlite` records the full trail for every write. The result: any setpoint change in the bundle is attributable to a named operator without after-the-fact reconstruction, while automated recipes do not grind through a confirmation dialog for every scheduled setpoint.
 
 ---
@@ -871,7 +884,7 @@ The action is part of the rule, not the verdict — the same fault should always
 ### 10.1 Tabs (central widget)
 
 - **Setup.** Hardware profile editor. Tree on the left (devices → channels), Pydantic-driven form on the right. "Detect devices" button issues a discovery scan (each adapter contributes a `discover()` classmethod). Calibration manager lives here as a sub-pane. The active domain profile (CAPA pyrolysis by default) contributes required metadata and preflight checks.
-- **Method.** Segmented-profile editor: Step table on top, profile graph below, both edit each other live. Saves as `.method.toml`.
+- **Method.** Third tab between Setup and Run. `QTableView` over `MethodTableModel` (`list[Step]` owner) with `#` / `kind` / `target` / `summary` columns; selecting a row builds a detail panel via `build_form(type(step))` so edits flow back into the model and the table summary updates live. Toolbar actions for Open / Save / Save As / Validate / Add Step (one menu entry per step kind, each with sane defaults) / Delete. A `pyqtgraph.PlotWidget` at the bottom shows operator-declared setpoint vs. elapsed time across the method, one series per target channel; non-setpoint steps render as dashed vertical guide lines. Saves as `.method.toml`.
 - **Run.** The instrument-console view. Big run-state header (Idle / Armed / Running / Aborting / Finalizing / Sealed), Arm/Start/Abort buttons, method-progress bar, procedure-specific custom widget (rendered from the plugin), active authorization summary, live numeric grid, dockable plot panes, camera previews. This is the screen you stare at during a run.
 - **Review.** Completed-run summary: manifest, headline plots, event log, segment timeline, link to "Open in analyzer." No editing.
 
@@ -880,7 +893,8 @@ The action is part of the rule, not the verdict — the same fault should always
 - **Numerics** — large readouts of starred channels.
 - **Events** — append-only log of segment transitions, alarms, and errors.
 - **Notes** — operator-typed free text; each entry is tagged with `t_mono_s` and written to `events.sqlite` so it joins everything else on the timeline.
-- **Camera previews** — small thumbnails for each active camera.
+- **Camera previews** — small thumbnails for each active camera. Cameras whose adapters do not declare `CameraCapability.LIVE_PREVIEW` show a static "no preview" placeholder. Tiles update at the adapter's throttled cadence (the webcam adapter caps at 2 Hz), flip `idle` / `live` / `stale` based on preview arrival, and surface drops + sticky failure borders driven by `pump_warning` / `pump_failed` camera events.
+- **Manual control cards** — one card per controllable device family (Watlow, Alicat, …) that routes through `ManualClient` to either the Conductor (during a run) or the WorkerPool (between runs).
 
 Default placement: hardware tree on the left, important numerics and procedure-specific control widgets on the right, events / notes / alarms across the bottom. All panels are dockable / floatable / hidable; layout is per-user and persisted to `~/.capa/window_state.json`.
 
@@ -904,7 +918,7 @@ These are the numbers that answer "is my run OK right now?" without digging. The
 
 ### 10.5 Forms from Pydantic
 
-Procedure config and per-channel config are Pydantic models. A small auto-form generator (`forms/from_model.py`) walks the schema and produces a Qt form, with field types inferred from annotations and validation surfacing errors inline. New plugins get a UI for free.
+Procedure config and per-channel config are Pydantic models. The form generator (`ui/forms/`) walks `model_cls.model_fields` and produces a `ModelForm` (`QFormLayout`-based) with one widget per field. Annotation-driven mapping covers primitives (str, int/float with `Field(gt/ge/lt/le)` constraint application, bool, datetime, Path), `Literal[...]`, nested `BaseModel` (recursive form in a group box), `tuple[X, ...]` / `list[X]` (string and nested-model variants), `dict[str, float]`, and `X | None` (wrapped with a "Set" enable checkbox). `validate()` runs `model_cls.model_validate(values())` and paints inline error styles on offending widgets. New plugins get a UI for free.
 
 ### 10.6 Modes
 
@@ -935,7 +949,9 @@ class ProcedureContext:
     config: BaseModel                    # validated config instance
     method: Method | None
     method_executor: MethodExecutor      # reusable; call to walk all/part of the method
-    instruments: ChannelRegistry
+    instruments: ChannelRegistry         # frozen at run start
+    adapters: dict[str, DeviceAdapter]   # device-name → adapter
+    authorization: Authorization         # minted at arm; stamps every DeviceCommand
     databus: DataBus
     events: EventLog
     log: structlog.BoundLogger           # already bound with run_id / procedure_id
@@ -957,9 +973,9 @@ This is the flexibility researchers need for novel workflows without re-implemen
 
 **Discovery:**
 1. Installed packages registering on the `capa.procedures` entry-point group.
-2. Local `plugins/` folder — any module exporting a `Procedure` subclass is loaded at startup **only in dev mode**. Useful during development; disabled for production rig operation unless `CAPA_ENABLE_DEV_PLUGINS=1` or an explicit config flag is set.
+2. Local `plugins/` folder — any module exporting a `Procedure` subclass is loaded at startup **only in dev mode**. Useful during development; disabled for production rig operation unless `CAPA_PLUGIN_MODE=production` is overridden or an explicit config flag is set.
 
-**Trust policy.** Procedure plugins can command real hardware, so discovery is not the same as trust. Production mode uses a `plugins.lock` file containing plugin id, package name, version, entry point, and distribution hash. Startup refuses an installed plugin whose hash/version differs from the lock unless the operator explicitly runs `capa plugins trust ...` from an administrator-approved workflow. The lock snapshot is copied into every bundle and mirrored into `manifest.json.plugins`.
+**Trust policy.** Procedure plugins can command real hardware, so discovery is not the same as trust. Plugin mode is two-state — `dev` loads every contract-passing plugin and records drift for inspection; `production` refuses any drift. Production mode uses a `plugins.lock` file containing plugin id, package name, version, entry point, and distribution hash. Startup refuses an installed plugin whose hash/version differs from the lock (HASH_MISMATCH / VERSION_MISMATCH / ENTRY_POINT_MISMATCH / MISSING_FROM_LOCK all block load) unless the operator explicitly runs `capa plugins trust <id> --reason ...`, which writes the lock entry and appends an audit row to `plugins.lock.journal`. Mode resolves from `--plugin-mode` > `CAPA_PLUGIN_MODE` env > `dev` default. The lock snapshot is copied into every bundle and mirrored into `manifest.json.plugins`.
 
 **Plugin contract is enforced at registration, not arm time.** When a plugin loads:
 - The class is checked against the `runtime_checkable` `Procedure` protocol.
@@ -969,16 +985,14 @@ This is the flexibility researchers need for novel workflows without re-implemen
 - The plugin API version range is checked against capa's current plugin API.
 - In production mode, the plugin is checked against `plugins.lock`.
 
-A plugin with bad declarations fails to *load*; it never appears in the procedure picker. `preflight()` then handles run-specific checks against the *current* `HardwareProfile` (which devices the operator has connected for *this* run).
+A plugin with bad declarations fails to *load*; it never appears in the procedure picker. `preflight()` then handles run-specific checks against the *current* `HardwareProfile` (which devices the operator has connected for *this* run), returning a `list[Problem]` rather than raising; `Problem` has `code`, `message`, `severity`, `blocking`.
 
-**Builtins shipped on Day 1:**
-- `FreeRun` — record only, no method. Useful for ad-hoc captures.
-- `RecipeRunner` — walks a `Method` via `MethodExecutor`. 90% of standard runs use this.
-- `Batch` — runs a recipe N times with auto-increment sample IDs and a configurable cooldown between runs. Catches the most common composition (replicate runs) so each researcher does not re-implement it badly. Each iteration produces its own bundle; the parent batch id is recorded in each bundle's `manifest.json` and indexed in `runs.sqlite`.
+**Builtins.** All registered on the `capa.procedures` entry-point group.
 
-**Builtins added in P5:**
-- `HeatFluxGaugeCalibration` — sweeps the heater through configured flux levels, captures gauge response, fits and writes a Calibration (with uncertainty from reference comparison).
-- `EmissivityRamp` — paint emissivity calibration via ramped heater temperature.
+- `capa.builtin.free_run` — record only, no method. Useful for ad-hoc captures.
+- `capa.builtin.recipe_runner` — walks a `Method` via `MethodExecutor.run_to_completion`. 90% of standard runs use this.
+- `capa.builtin.batch` — runs an inner procedure N times with auto-increment sample IDs and a configurable cooldown between runs. Each iteration spawns its own Conductor and writes its own bundle; the parent batch id is recorded in each child's `manifest.json.custom.batch.batch_id`. `fail_fast`, `cooldown_s`, and `sample_id_template` are configurable. Schema-rejects nested Batch.
+- `capa.builtin.heat_flux_tune` — heater-to-flux tuning routine that converges the heater setpoint on a target heat flux at the specimen plane using a configurable controller; emits a `Calibration` artifact and surfaces an "approve and save into the active set?" gate to the operator. The supporting calibration-artifact emit/load + uncertainty plumbing lives in `src/capa/calibration/tune_artifact.py`.
 
 A new routine is one file. Calibration routines are procedures whose final act is to emit a Calibration artifact and surface an "approve and save into the active set?" gate to the operator.
 
@@ -991,9 +1005,9 @@ Some research workflows want to inject timestamped events from a sibling process
 
 Both accept newline-delimited JSON events: `{"t_utc": "...", "channel": "...", "kind": "annotation"|"event", "payload": {...}}`. Capa stamps `t_mono_ns` from the engine's `RunClock` at receipt (worse than producer-side stamping; the protocol allows the producer to provide its own `t_mono_ns_anchor` if it has one). Events land in the same `events.sqlite` everything else uses.
 
-This avoids forcing every external integration to become a Python plugin and keeps the bundle as the single source of truth for the run timeline.
+Ingest is **opt-in** at run-start so the default test path stays simple; production callers pass the flag. Bind failures (stale socket, missing AF_UNIX) are non-fatal — the run logs `engine.ingest.start_failed` and continues without ingest rather than aborting. The shutdown coordinator closes the listener so accept tasks exit cleanly when the procedure finishes.
 
-**As of P3, ingest is opt-in** via `ExperimentEngine(enable_ingest=True)`. Bind failures (stale socket, missing AF_UNIX) are non-fatal — the engine logs `engine.ingest.start_failed` and runs without ingest rather than aborting. The shutdown coordinator closes the listener so accept tasks exit cleanly when the procedure finishes.
+This avoids forcing every external integration to become a Python plugin and keeps the bundle as the single source of truth for the run timeline.
 
 ---
 
@@ -1003,6 +1017,8 @@ Cameras are first-class devices but their data shape (frames, not scalar measure
 
 - **Visible (capa-encoded).** capa pulls frames from the SDK and encodes via PyAV → MKV. capa owns the byte path.
 - **IR thermal (Atlas-recorded).** The FLIR Atlas SDK writes `.seq` / `.csq` directly to a path we configure. capa **does not stream IR frame pixels through Python** during recording — the file is huge (1–20+ GB) and Atlas's native writer preserves vendor calibration metadata, atmospheric correction, emissivity, etc. that we'd lose by transcoding. capa only consumes a low-rate preview stream for the UI thumbnail and monitors recording health.
+
+The `Camera` Protocol is intentionally separate from `DeviceAdapter`:
 
 ```python
 class Camera(Protocol):
@@ -1025,9 +1041,16 @@ class Camera(Protocol):
     async def stop_recording(self) -> RecordingResult: ...   # final path, frame count, size
     async def preview_frame(self) -> np.ndarray | None: ...  # for UI thumbnail (low-rate)
     async def health(self) -> CameraHealth: ...
+    def discover(self) -> AsyncIterator[CameraInfo]: ...     # if SUPPORTS_DISCOVERY
 ```
 
-### 12.1 FLIR IR adapter (ships in `capa-flir`)
+Lifecycle is `open` / `close` / `start_recording(path)` / `stop_recording` — *recording* is the explicit verb because cameras own their output container. Emissions are `FrameReceipt` records (one per frame, lightweight, posted from whichever thread the SDK callback runs on) and periodic `CameraHealth` snapshots, *not* `ChannelSample`. Discovery returns `CameraInfo` with model + serial + transport so the `serial` / `model_hint` selection rules can run without opening every camera.
+
+`CameraCapability` is a `Flag` enum the UI uses to gate widgets and the engine's preflight uses to validate against profile requirements: `RADIOMETRIC`, `PALETTE`, `MEASUREMENT_SHAPES`, `SUPPORTS_DISCOVERY`, `MODEL_HINT`, `SERIAL_SELECT`, `LIVE_PREVIEW`, plus the FLIR control-surface flags (`NUC_TRIGGER`, `RADIOMETRIC_PARAMS`, `TEMPERATURE_RANGE_SELECT`, `AUTO_NUC_INTERVAL`, `REMOTE_PALETTE`, …).
+
+### 12.1 FLIR IR adapter (`capa-flir`)
+
+The FLIR adapter ships in a separate package, `capa-flir`, registered through the `capa.cameras` entry point. capa core contains the `Camera` Protocol, the webcam adapter, and the IR sim fixture; everything FLIR-specific lives in `capa-flir`. The split is motivated by the SDK license — see "Licensing posture" below.
 
 - **Camera scope: any FLIR camera Atlas can drive over USB.** Reference / validation target is the **FLIR E85** (Exx handheld family, 384×288 radiometric, 30 Hz). The adapter is intentionally not E85-specific — Atlas presents Exx, Txxx, Axxx, and other FLIR families through the same `ACS_Camera` / `ACS_Stream` / `ACS_ThermalSequenceRecorder` surface, so any FLIR USB camera the operator has should work. Per-model differences (resolution, max frame rate, supported palettes, available measurement shapes) are read from the camera at `open()` and stored in `ir_cam0.meta.json`. capa-flir does not support non-FLIR thermal cameras — that constraint is set by the SDK license (§2.2(i)), not by capa.
 - **Camera selection.** `CameraSpec` carries optional `model_hint: str | None` and `serial: str | None` fields. `discover()` enumerates all FLIR USB cameras via `ACS_Discovery_scan`; selection rules: if `serial` is set, require an exact match; else if `model_hint` is set, prefer a matching model and warn if multiple match; else pick the unique camera and fail clearly if more than one is connected.
@@ -1035,18 +1058,15 @@ class Camera(Protocol):
 - **OS: Linux and Windows.** Atlas ships native binaries for both (`libatlas_c_sdk.so` / `atlas_c_sdk.dll`); the CFFI ABI binding (§12.2) is platform-independent — only the loader resolves the right shared library.
 - **Recording strategy: a single, unified frame-pump path on both platforms.** Atlas's `ACS_Stream_attachRecorder` auto-attaches to the recorder for USB streams on Windows but *not* on Linux (the SDK headers explicitly mark USB attach as Windows-only). Rather than maintain two recording paths, capa-flir uses the manual pump everywhere:
   1. Open the camera, get its `ACS_Stream`, register an `ACS_OnImageReceived` callback.
-  2. In the callback, call `ACS_ThermalSequenceRecorder_addImage(recorder, image)` to feed the recorder, and post a small "frame received at `t_mono_s`" record onto an AnyIO memory stream so the health monitor and frame-index builder run on the engine's event loop, not Atlas's streaming thread.
+  2. In the callback, call `ACS_ThermalSequenceRecorder_addImage(recorder, image)` to feed the recorder, and post a small `FrameReceipt` (`frame_idx`, `t_mono_ns`, `t_utc`, `capture_latency_s`) onto an AnyIO memory stream so the health monitor and frame-index sink run on the engine's event loop, not Atlas's streaming thread.
   3. The recorder still produces a proper FFF-encoded `.csq` — capa is just feeding it explicitly instead of letting Atlas auto-attach. Per-frame overhead vs. auto-attach is one C call (~µs), invisible at 30 Hz.
 
   This makes Linux and Windows behaviorally identical, halves the test matrix, and means the Linux-USB constraint is not a "workaround" — it's just how the adapter works.
 - Output path: `runs/<bundle>/video/ir_cam0.csq` (or `.seq` if uncompressed is required for some downstream tool — configurable, default `.csq`).
-- Captures one `t_mono_s` anchor at `start_recording()` — the offset between `RunClock.t_mono = 0` and "first IR frame written." Stored in `ir_cam0.meta.json`.
+- The frame-receipt stream feeds the video sink (§7.2) in real time, so `video/ir_cam0.frames.parquet` is built from per-frame receipts during the run rather than parsed post-hoc from `.csq` headers. The Conductor's writer thread owns the Arrow-IPC sidecar and the finalize-time Parquet rewrite, identical to the visible-camera path.
 - Polls the SDK at ~5 Hz for: file size growth (health), frame count (health), live preview frame (UI). If file size hasn't grown for >2 s while recording is active, raises camera-recording-failure to `SafetyMonitor`.
 - At `stop_recording()`: tells SDK to flush, waits for handle release, computes file size, optionally streams a sha256 in the background (10–60 s for 20 GB — non-blocking on finalize).
-- **Post-finalize** (background task after acquisition stops, while `bundle_status` is `finalizing` / `finalized_unverified` and before the bundle is `sealed`): parses the `.csq` header index to extract per-frame timestamps and writes `ir_cam0.frames.parquet` with `(frame_idx, sdk_t_offset_s, t_mono_s, t_utc)`. Header-only parsing is fast (~seconds even for 20 GB) and gives downstream analysis a frame correlation table without re-parsing the .csq. If extraction fails, the .csq is still the source of truth — analyzer can extract on demand.
 - **SDK choice: FLIR Atlas Multiplatform C SDK** (version 2.19.0 pinned; gcc11 x64 build on Linux, matching MSVC build on Windows). Atlas owns the native `.csq` writer and preserves vendor calibration metadata, atmospheric correction, and emissivity. Camera control and recording both go through Atlas. Spinnaker (FLIR's GenICam machine-vision stack) is *not* used here — it does not own the radiometric `.csq` recording path.
-- **Adapter home:** the adapter and its CFFI binding are not in capa core. They ship as a separate package, `capa-flir`, registered through the `capa.cameras` entry point. capa core contains the `Camera` Protocol, the webcam adapter, and the IR sim fixture; everything FLIR-specific lives in `capa-flir`. See §12.2 for the licensing rationale.
-- Python integration: see §12.2 for the C-SDK-to-Python binding approach.
 
 ### 12.2 FLIR Atlas SDK ↔ Python binding
 
@@ -1068,20 +1088,23 @@ Atlas is shipped as a multiplatform **C** SDK (headers + `.dll` on Windows, `.so
 ```
 capa-flir/
 ├── pyproject.toml               # entry: capa.cameras = "flir_ir = capa_flir:FlirIrAdapter"
+├── NOTICE.md                    # SDK licensing posture; no-redistribution statement
 └── src/capa_flir/
     ├── __init__.py              # exposes FlirIrAdapter
     ├── flir_ir.py               # high-level Camera Protocol implementation
+    ├── _preview.py              # preview-frame rendering helpers
     ├── _atlas/
-    │   ├── _loader.py           # resolves CAPA_FLIR_ATLAS_ROOT; dlopens libatlas_c_sdk.so (Linux) or atlas_c_sdk.dll (Windows)
+    │   ├── _loader.py           # resolves CAPA_FLIR_ATLAS_ROOT; dlopens libatlas_c_sdk.so / atlas_c_sdk.dll
     │   ├── _cdef.py             # ffi.cdef("""...""") — the ~15 function signatures we use
     │   ├── _atlas_api.py        # thin pythonic wrapper around the cffi binding
-    │   └── _frame_pump.py       # AnyIO bridge for the OnImageReceived callback (§12.1)
+    │   ├── _frame_pump.py       # AnyIO bridge for the OnImageReceived callback (§12.1)
+    │   └── _preview_cb.py       # Atlas preview-callback shim
     └── errors.py                # FlirAtlasError(AdapterError) + SDK-code translation
 ```
 
 The wrapped surface is small (~15 functions: discovery, camera connect/disconnect, stream start/stop, recorder alloc/start/addImage/stop/free, error/log helpers, status getters, native-string helpers), so any of the fallbacks is a one-to-two-day port, not a rewrite.
 
-**Threading.** Atlas's `ACS_Stream_start` callback runs on its own native thread. The adapter never does work in that callback — it only calls `ACS_ThermalSequenceRecorder_addImage` and pushes a tiny record (`frame_idx`, `t_mono_s`, optional preview pointer) onto an `anyio.streams.memory.MemoryObjectSendStream`. Everything else — health polling, preview rendering, frame-index building — runs on the engine's event loop. Each remaining blocking SDK call is wrapped in `anyio.to_thread.run_sync(...)`. Health polls at ~5 Hz, preview frames at ~2 Hz — both well within budget.
+**Threading.** Atlas's `ACS_Stream_start` callback runs on its own native thread. The adapter never does work in that callback — it only calls `ACS_ThermalSequenceRecorder_addImage` and pushes a `FrameReceipt` (`frame_idx`, `t_mono_ns`, optional preview pointer) onto an `anyio.streams.memory.MemoryObjectSendStream`. Everything else — health polling, preview rendering, frame-index building — runs on the engine's event loop. Each remaining blocking SDK call is wrapped in `anyio.to_thread.run_sync(...)`. Health polls at ~5 Hz, preview frames at ~2 Hz — both well within budget.
 
 **Resource safety.** Every Atlas handle is owned by a Python object whose context-manager `__exit__` (and `__del__` as backstop) calls the corresponding SDK release. Atlas error codes are wrapped into a `FlirAtlasError(AdapterError)` carrying the SDK error name + message, so they surface in `events.sqlite` and the UI like any other adapter error.
 
@@ -1101,11 +1124,11 @@ The adapter's `discover()` validates that the platform-appropriate Atlas shared 
 - **§8.1 — export controls.** Standard notice in capa-flir's README.
 - **§11.2 — termination is fast** (60-day notice, 10-day cure). The plugin split means termination forces removal of `capa-flir` only; capa keeps shipping with webcam + IR-sim cameras, unaffected.
 
-**Distribution.** capa ships as an open, permissively-licensed wheel on PyPI with no FLIR dependencies. capa-flir ships from a private package index to FLIR licensees only, after FLIR App Review (§5.1) for the first public release.
+**Distribution.** capa ships as an open, permissively-licensed wheel on PyPI with no FLIR dependencies. capa-flir ships from a private package index to FLIR licensees only; the FLIR App Review submission for public distribution is tracked in §16 as an open decision.
 
-### 12.3 Visible adapter (`webcam.py`)
+### 12.3 Visible adapter (`webcam`)
 
-PyAV-based H.264 → MKV. Per-frame receipt timestamps written into `visible_cam0.frames.parquet`. Cross-platform (relies on FFmpeg). For most lab webcams this produces files in the tens-of-MB-per-hour range.
+PyAV-based H.264 → MKV. Per-frame receipt timestamps written into `visible_cam0.frames.parquet` via the same Arrow-IPC sidecar pipeline the IR adapter uses. Cross-platform (relies on FFmpeg). For most lab webcams this produces files in the tens-of-MB-per-hour range. The webcam adapter package (`src/capa/devices/camera/webcam/`) splits responsibilities into `adapter.py` (the Camera Protocol implementation), `descriptor.py` (device descriptors), `encoding.py` (PyAV encoder management), `probe.py` (UVC probing), and `constants.py` (preview cadence, JPEG sizing).
 
 ### 12.4 Bundle storage path for large IR files
 
@@ -1115,11 +1138,11 @@ Escape hatch for sites where the bundle root is on a slow/small volume: `Experim
 
 ### 12.5 Frame-to-DAQ correlation
 
-All timestamps derive from `RunClock`. For visible video, every frame's receipt time is in `visible_cam0.frames.parquet`. For IR, the `.csq` carries SDK-relative timestamps internally; the `t_mono_s` anchor in `ir_cam0.meta.json` plus the post-finalize `ir_cam0.frames.parquet` complete the picture. The run-start UTC anchor is embedded in MKV container metadata and stored as `started_utc` in `manifest.json` so external tools can re-correlate by absolute time.
+All timestamps derive from `RunClock`. Every camera writes a `<name>.frames.parquet` with `(frame_idx, t_mono_ns, t_utc, capture_latency_s, camera)`, so visible and IR analyses share the same join key against `scalars.parquet`. The run-start UTC anchor is embedded in MKV container metadata and stored as `started_utc` in `manifest.json` so external tools can re-correlate by absolute time.
 
 ### 12.6 Health, failure policy, preflight
 
-Camera tasks run inside the run task group. Each camera has a configurable `on_failure` policy (`warn` | `abort_run` | `safe_shutdown`). Disk-space preflight: before arming, capa checks free space against `projected_size = duration_s * estimated_bps_per_camera` and refuses to arm if the margin is below a configured threshold (default: 1.5×).
+Camera tasks run inside the Conductor's task group. Each camera has a configurable `on_failure` policy (`warn` | `abort_run` | `safe_shutdown`). Disk-space preflight: before arming, capa checks free space against `projected_size = duration_s * estimated_bps_per_camera` and refuses to arm if the margin is below a configured threshold (default: 1.5×).
 
 ---
 
@@ -1141,16 +1164,17 @@ Crash logs from before run-start (config errors, plugin load failures) go to `~/
 
 - **All device writes require authorization.** Scheduled method writes inherit the arm/start approval; manual writes go through `confirm=True`. UI exposes manual confirm as a checkbox-then-button pattern, never auto-yes. Every command carries `issued_by`, `authorization_id`, and/or `confirmed_by` operator IDs (§9); all are recorded in `events.sqlite` for full provenance.
 - **Typed errors.** Each library already exposes a typed exception hierarchy (`SartoriusError`, `WatlowError`, ...). Adapters re-raise into a `capa.devices.AdapterError` that adds the channel/device context. UI error toasts read from these.
-- **Watchdog.** Each producer task reports last-sample time; `SafetyMonitor` raises a fault if any goes silent past `2 / sample_rate_hz`.
+- **Watchdog.** Each producer task reports last-sample time; the per-worker watchdog state is the canonical "is this producer alive" view, and SafetyMonitor consumes it to apply configured actions.
+- **Task-group unwrap.** anyio 4.x wraps in-task-group exceptions in a `BaseExceptionGroup`; the Conductor's `try/except` chain unwraps single-exception groups so `ProcedureError` (from preflight) and `BackpressureAbortError` route to the same `run_status="aborted"` / `run_status="crashed"` paths that pre-task-group raises do.
 - **Abort vs. safe-shutdown.** Abort = immediate cancel + finalize. Safe-shutdown = run a configured cooldown phase first (heaters to safe temp, flows to zero, hold) and *then* finalize. The UI's red button defaults to safe-shutdown; an "Emergency abort" submenu offers the immediate option.
 
 ### 13.3 Crash recovery and finalize-in-place
 
-Bundles are openable mid-write because Parquet is row-group-finalized every flush, SQLite is journaled, and the manifest's `ended_utc` is null until clean exit. On startup, `runs.sqlite` flips any open-but-orphaned run to `run_status="crashed"` so the operator sees what happened.
+Bundles are openable mid-write because Arrow-IPC sidecars are flush-bounded, SQLite is journaled, and the manifest's `ended_utc` is null until clean exit. On startup, `runs.sqlite` flips any open-but-orphaned run to `run_status="crashed"` so the operator sees what happened.
 
 For a crashed bundle, capa offers **finalize-in-place**:
 
-- Read `scalars.in-flight.parquet` and rewrite into the well-sized `scalars.parquet` (§8.5).
+- Read the in-flight Arrow-IPC streams and rewrite into the well-sized `scalars.parquet` and `device_records/*.parquet` (§8.5).
 - Walk `events.sqlite` to recover the last good `t_mono_ns`.
 - Set `ended_utc` to the wall-time of the last sample (with an `inferred_ended_utc: true` flag in the manifest).
 - Compute checksums and write `manifest.sha256`.
@@ -1162,7 +1186,7 @@ This is exposed both in the Review tab and as `capa finalize RUN_ID` (§14). The
 
 ## 14. Headless operation and CLI
 
-The engine runs without the GUI — for testing, CI, automation, and reproducibility. The CLI is a first-class surface, not a debugging afterthought.
+The engine runs without the GUI — for testing, CI, automation, and reproducibility. The CLI is a first-class surface, not a debugging afterthought. Headless mode is built on `run_headless()` (`src/capa/runtime/headless.py`), which constructs a `WorkerPool` + per-run `Conductor` exactly as the GUI does and then drives one run to completion.
 
 ```
 capa validate configs/experiments/example.yaml
@@ -1198,9 +1222,9 @@ capa catalog verify [RUN_ID | --all]
     in the catalog as integrity_status = mismatch.
 
 capa finalize RUN_ID
-    Idempotent: rewrite in-flight Parquet, compute checksums, set ended_utc,
-    progress bundle_status through finalized_unverified to sealed or
-    verification_failed. Safe to run on already-sealed bundles (no-op).
+    Idempotent: rewrite in-flight Arrow-IPC streams, compute checksums, set
+    ended_utc, progress bundle_status through finalized_unverified to sealed
+    or verification_failed. Safe to run on already-sealed bundles (no-op).
 
 capa export-parquet RUN_ID [--channels ...] [--time-range ...] [--out PATH]
     Generate a focused Parquet export from a sealed bundle.
@@ -1214,10 +1238,14 @@ capa devices discover
 
 capa plugins list
     Print discovered plugins, trust status, API compatibility, package version,
-    and distribution hash.
+    distribution hash, drift report, and rejection reasons.
 
-capa plugins trust PLUGIN_ID
-    Update plugins.lock after operator/admin review. Never run implicitly.
+capa plugins trust PLUGIN_ID --reason "..."
+    Write a PluginEntry into plugins.lock and append an audit row to
+    plugins.lock.journal. Never run implicitly.
+
+capa method validate FILE
+    Pydantic-validate a standalone method TOML/YAML.
 
 capa profile validate capa_pyrolysis configs/experiments/example.yaml
     Validate domain-profile metadata and required channel mappings without
@@ -1251,9 +1279,9 @@ Headless mode is the primary substrate for integration tests and for any future 
 - Plugin trust policy: production mode refuses unlocked plugins; dev-folder loading is gated; `plugins.lock` hash drift is visible.
 - CAPA pyrolysis profile validation: missing required channel groups (heater_setpoint, heater_pv, sample_temperature, purge_gas_flow), atmosphere-mode/reactive-gas inconsistency, missing leak-test timestamp, and absent specimen form fail preflight.
 - Ring buffer decimation and wrap-around.
-- Backpressure policy enforcement (BLOCK actually blocks; DROP_OLDEST actually drops).
+- Backpressure policy enforcement (BLOCK actually blocks; DROP_OLDEST actually drops; saturation deadline trips a safe_shutdown).
 - External event ingest: events submitted via the UDS / HTTP loopback land in `events.sqlite` with correct timestamps.
-- FLIR Atlas binding (sim): `_flir_atlas/_atlas_api.py` against `flir_ir_sim.py` in-process fixture — open/start/stop lifecycle, error-code translation, RAII handle release on exception, threading via `anyio.to_thread.run_sync`. No real SDK required.
+- FLIR Atlas binding (sim): `capa_flir._atlas._atlas_api` against `capa.devices.sim.flir_ir_sim` in-process fixture — open/start/stop lifecycle, error-code translation, RAII handle release on exception, threading via `anyio.to_thread.run_sync`. No real SDK required.
 
 ### 15.2 Integration tests
 
@@ -1267,6 +1295,7 @@ All run against simulated adapters — no hardware required. UI tests use **`pyt
 - `Batch` builtin: 3 replicates, each producing its own bundle, all linked by parent batch id in the catalog.
 - Writer crash mid-run: kill the engine, restart, run `capa finalize`, verify bundle reads cleanly with `inferred_ended_utc` set, `run_status: crashed`, and `bundle_status: sealed`.
 - Safety: induce each fault type via simulator; verify safe-shutdown executes.
+- CAPA pyrolysis end-to-end: `tests/integration/test_capa_recipe_run.py` exercises the headless path including the dynamic preflight phase inside the task group and the verbatim profile snapshot in the sealed bundle.
 - UI smoke test (`pytest-qt`): bring up MainWindow against simulated adapters, click through Arm → Start → Abort, assert state transitions and that the resulting bundle is valid.
 
 ### 15.3 Performance regression tests
@@ -1288,86 +1317,34 @@ Gated behind `CAPA_HARDWARE_TESTS=1`; otherwise skipped. Run on the rig PC.
 - Sartorius: read mass; tare/zero behind explicit operator gate.
 - NI DAQ: discover devices; one short hardware-clocked acquisition; verify sample timestamps.
 - Visible camera: open, record 5 s, verify frame count and timestamps.
-- IR camera (Atlas SDK): open via CFFI binding, record 5 s to `.csq`, verify file growth, frame count, post-finalize frame-index extraction, and clean release of all SDK handles.
+- IR camera (Atlas SDK): open via CFFI binding, record 5 s to `.csq`, verify file growth, frame count, per-frame receipt parquet, and clean release of all SDK handles.
 
 ### 15.5 Continuous integration
 
 - All unit + integration + performance tests run on every PR (Linux + Windows runners, Python 3.12 and 3.13).
-- **Static checks on every PR:** `ruff check`, `ruff format --check`, `mypy --strict src/capa` (or `pyright` — pick one).
+- **Static checks on every PR:** `ruff check`, `ruff format --check`, `mypy --strict src/capa`.
 - Hardware tests run manually on the rig PC before tagged releases.
 - A `capa validate` step runs against every example YAML in `configs/` to ensure they stay valid as the schema evolves.
 - A `capa validate` pre-commit hook is shipped in the repo (opt-in) so config files do not regress between commits.
 
 ---
 
-## 16. Build phases
+## 16. Roadmap
 
-| Phase | Scope | Outcome |
-|-------|-------|---------|
-| **P0a — Schema + sim substrate** | `RunClock`, `ChannelSpec` with `SourceBinding` variants, `SourceRecord`, `ChannelSample`, `ExperimentConfig`, `DeviceAdapter` Protocol + `BackpressurePolicy`, simulated adapters for every device class, plugin trust model skeleton (`plugins.lock` parser), CAPA pyrolysis profile schema | Configs validate; simulated records can be mapped into normalized channel samples |
-| **P0b — Bundle writer** | `RunBundleWriter`, normalized `scalars.parquet`, `device_records/*.parquet` sidecars, two-stage Parquet rewrite, SQLite event/status sinks, manifest with env/version/lockfile provenance, separate `run_status` and `bundle_status`, sha256 integrity table | A synthetic run writes a valid, reread-able, checksum-verifiable bundle preserving both normalized and native device-record surfaces |
-| **P0c — Headless engine + catalog** | Engine task group, `FreeRun` procedure, `run.log` via structlog, queue-depth/writer-lag metrics, `RunCatalog` with `operators`, `run_status`, `bundle_status`, and `integrity_status`, `capa validate`, `capa run --headless`, `capa finalize`, `capa catalog verify`, `capa plugins list` CLI | `capa run --headless freerun.yaml` writes a completed + sealed bundle with full software-environment provenance and catalog entry |
-| **P0d — First hardware adapter** | Real `WatlowAdapter` (smallest viable real device), Watlow SourceRecord preservation, Watlow parameter-to-channel mapping, hardware smoke-test gate | One real controller can be read headlessly and recorded into both `scalars.parquet` and `device_records/watlow.parquet` |
-| **P1 — UI core** | qasync bootstrap, main window, Setup tab (read-only inspect), Run tab with PyQtGraph live plots and numerics dock, events dock, status bar (queue depths, writer lag, disk free, operator id, camera health), run/abort controls wired to engine | Click-to-record working against sim adapters and Watlow |
-| **P2 — Device adapters** | Real `NIDAQAdapter`, `AlicatAdapter`, `SartoriusAdapter`. Capability flags. Device watchdogs and health surfacing. Discovery (`capa devices discover`). `capa validate --strict` (read-only handshake against connected hardware) | Real multi-device scalar acquisition, headless and with UI |
-| **P3 — Methods + procedures** *(shipped 2026-05-09)* | Step / Method types, `MethodExecutor` service, `RecipeRunner` and `Batch` builtins, `Authorization` handle, full `Procedure` Protocol + `ProcedureContext`, procedure preflight checks (`Problem` collection), plugin discovery + load-time contract enforcement + production trust checks (`plugins.lock`), domain-profile preflight runtime with split static/dynamic phases, **CAPA pyrolysis profile (default and only active profile)**, dedicated `profiles/<id>.toml` snapshot in the bundle, Pydantic auto-form generator, Method editor UI (table + graph), external event-ingest endpoint (opt-in), `capa plugins trust` / `capa method validate` / `capa profile validate` CLI, TOML-friendly sim signal schema. | First end-to-end recipe-driven CAPA pyrolysis run via `RecipeRunner` against sim adapters; `Batch` produces N child bundles each with the parent batch id; profile metadata snapshotted into `config.toml` and `profiles/capa_pyrolysis.toml`; every device write carries a stamped `authorization_id` in the audit trail; operator can author methods in the GUI |
-| **P4 — Cameras** | `Camera` Protocol + `flir_ir_sim` fixture in capa core, `WebcamAdapter` (PyAV) in capa core, video sinks, preview docks, frame-to-clock alignment, disk-space preflight. **`capa-flir` plugin package** (separate repo): CFFI ABI-mode binding to FLIR Atlas 2.19.0, `FlirIrAdapter` driving any FLIR USB camera Atlas supports (E85 is the validation/reference camera) via a single manual `OnImageReceived` → `addImage` frame-pump path that runs identically on Linux and Windows, model + serial selection in `CameraSpec`, post-finalize frame-index extraction, `CAPA_FLIR_ATLAS_ROOT` install convention, `NOTICE.md` documenting the no-redistribution licensing posture. **P4 entry gate:** confirm the FLIR SDK click-through was accepted by an authorized signer; verify capa's license is permissive; open the FLIR App Review conversation if public release of `capa-flir` is intended. | Visible + IR video aligned with channel data in a single bundle; capa core remains FLIR-free and publishable; capa-flir validated on Linux with the lab's E85, sanity-checked on Windows |
-| **P5 — Calibration workflows** | Calibration types + manager UI (with uncertainty), `HeatFluxGaugeCalibration`, `EmissivityRamp` builtins, calibration snapshot in bundle (with fit metadata + procedure pedigree), approval flow to save new curves | Calibration workflows shipped with documented uncertainty |
-| **P6 — Polish** | Review tab, run-catalog browser, completed-run summary view (with queue-health histograms and sealed/unverified state), theme, window-state persistence, Simple/Expert mode presets, `capa export-parquet`, `capa export-rocrate`, Linux smoke test, schema-version migration registry exercise | Daily-driver ready, FAIR-publishable sealed bundles |
+The engine, builtins, plugin runtime, CAPA pyrolysis profile, the per-resource worker runtime, the bundle writer (including frame-index parquets for every camera), the Method editor UI, and the headless + GUI run paths are all in place. The CAPA sim configs drive an end-to-end integration test from disk with no Python fixtures, and `capa-flir` (FLIR Atlas binding + `FlirIrAdapter`) is implemented as a sibling package consumed via the `capa.cameras` entry point. What remains, in rough priority order:
 
-**Why simulated adapters in P0a:** they unblock every UI iteration from hardware availability and give the test suite a fast deterministic substrate. They mirror the real Protocol exactly, so any Procedure or sink that works against a sim adapter works against the real one.
+**Calibration workflows.** A calibration manager UI (with uncertainty surfaced), the in-tree `heat_flux_tune` procedure (currently in progress on the working branch) finished and wired to the manager, an `EmissivityRamp` builtin, and an "approve and save into the active set?" gate that writes a fitted Calibration (with documented fit metadata + procedure pedigree) into the active `CalibrationSet`. The supporting plumbing — calibration snapshot in the bundle, uncertainty propagation, `CustomCallable` provenance — is already in place.
 
-**Why P2 splits adapters out from methods:** wiring real devices is its own integration risk surface (drivers, USB enumeration, vendor SDKs, Windows DLL loader paths). Doing it before the method editor lets us discover hardware-specific quirks without also debugging method-execution bugs.
+**SafetyMonitor activation.** The per-worker watchdog already detects silent producers and writes `device_silent` events; the rule set in §9 (heater max temp, ramp-rate windows, mass/flow bounds, camera failure, writer-lag, disk-low, emergency-stop) is declarative and ready. What is left is the `SafetyMonitor` task that consumes `adapter.watchdog_state()` plus the channel-sample stream, evaluates the rules, and dispatches `warn` / `pause_method` / `abort_run` / `safe_shutdown` actions through the Conductor.
 
-### 16.1 P3 delivery status (2026-05-09)
-
-P3 shipped the engine spine, builtins, plugin trust runtime, the CAPA profile, the dedicated profile snapshot, dynamic preflight inside the task group, the Pydantic auto-form generator, and the Method editor UI. The full operator workflow — headless or GUI — is now exercisable against the CAPA sim hardware. 569 non-hardware tests pass; the integration test `tests/integration/test_capa_recipe_run.py` exercises the headless path end-to-end including the dynamic preflight phase and the verbatim profile snapshot in the sealed bundle.
-
-**Shipped:**
-
-- **Step / Method types** (`src/capa/experiment/method.py`) — already in P0a; consumed unchanged by the executor.
-- **`MethodExecutor`** (`src/capa/experiment/executor.py`) — reusable service. Walks every step kind (`hold`, `ramp`, `setpoint`, `wait`, `prompt`, `acquire`, `safe_shutdown`, `custom`); commands routed through `Authorization`; emits `method.step.entered/exited/failed` plus `method.command.issued` audit events; `wait` evaluates `EndCondition` against the data bus; `ramp` ticks at `DEFAULT_RAMP_TICK_HZ` (10 Hz); `prompt` supports headless auto-acknowledge and operator-confirm via `ctx.metadata["_prompt_confirmed"]`; `custom` dispatches to `custom_handlers` registered by the loading procedure. Surface: `run_to_completion`, `advance_until`, `run_segment`.
-- **`Authorization` handle** (`src/capa/experiment/authorization.py`) — minted at run-arm with a fresh `authorization_id`. `issue()` stamps `(issued_by, authorization_id)` on every `DeviceCommand`; `issue_manual()` produces an unscheduled override carrying `confirmed_by`. `disarm()` invoked in the engine's `finally` block so straggler tasks cannot keep commanding.
-- **`Procedure` Protocol + `ProcedureContext` (full §11)** — promoted from the P0c stub. Procedures declare `id` / `name` / `version` / `config_model` (Pydantic) / `required_capabilities` / `required_channels`; `preflight()` returns `list[Problem]` rather than raising; `Problem` has `code`, `message`, `severity`, `blocking`. Context includes `instruments` (frozen `ChannelRegistry`), `adapters` (device-name → adapter), `authorization`, `method_executor`, plus the existing clock/config/databus/writer/logger/external_stop.
-- **Builtin procedures**, all entry-point-registered on `capa.procedures`:
-    - `capa.builtin.recipe_runner` — one-line wrapper around `MethodExecutor.run_to_completion`.
-    - `capa.builtin.batch` — runs an inner procedure N times. Each iteration spawns its own `ExperimentEngine` and writes its own bundle; the parent batch id is recorded in each child's `manifest.json.custom.batch.batch_id`. `fail_fast`, `cooldown_s`, and `sample_id_template` configurable. Schema-rejects nested Batch.
-    - `capa.builtin.free_run` — updated to the new contract.
-- **Plugin runtime** (`src/capa/core/plugins_runtime.py`) — entry-point discovery, load-time contract enforcement (id/name/version/config_model present, async preflight+run, structural Procedure check), production-mode trust gate against `plugins.lock` (HASH_MISMATCH / VERSION_MISMATCH / ENTRY_POINT_MISMATCH / MISSING_FROM_LOCK all block load), `ProcedureRegistry` keyed by id with `from_config` instantiation. Mode resolves from `--plugin-mode` > `CAPA_PLUGIN_MODE` env > `dev` default.
-- **Profile preflight runtime** (`src/capa/experiment/profiles/runtime.py`) — `id → callable` registry tagged with a `static`/`dynamic` category. The engine runs static checks before opening adapters and dynamic checks inside the task group after every `adapter.start()` returns, so a silent live-data channel post-start is a blocking error rather than a downgraded warning. Builtin checks: static — `capa.required_channel_mappings`, `capa.atmosphere_consistency`, `capa.leak_test_recency`, `capa.disk_projection`; dynamic — `capa.heater_pv_in_safe_range`, `capa.purge_flow_established`, `capa.balance_stability`. `ProfilePreflightContext.adapters_started` drives the silent-channel branching.
-- **Dedicated profile snapshot** (`src/capa/storage/bundle.py`) — when `domain_profile` is set, the bundle writer mirrors `domain_profile.metadata` verbatim into `profiles/<short_id>.toml` (e.g. `profiles/capa_pyrolysis.toml`) at run-arm. The integrity walker (`bundle_root.rglob("*")`) covers it automatically; `manifest.sha256` includes it for sealed bundles.
-- **Pydantic auto-form generator** (`src/capa/ui/forms/`) — `build_form(model_cls, *, initial=None)` walks `model_cls.model_fields` and produces a `ModelForm` (`QFormLayout`-based) with one widget per field. Annotation-driven mapping covers primitives (str, int/float with `Field(gt/ge/lt/le)` constraint application, bool, datetime, Path), `Literal[...]`, nested `BaseModel` (recursive form in a group box), `tuple[X, ...]` / `list[X]` (string and nested-model variants), `dict[str, float]`, and `X | None` (wrapped with a "Set" enable checkbox). `validate()` runs `model_cls.model_validate(values())` and paints inline error styles on offending widgets.
-- **Method editor UI** (`src/capa/ui/tabs/method.py`) — third tab between Setup and Run. `QTableView` over `MethodTableModel` (`list[Step]` owner) with `#` / `kind` / `target` / `summary` columns; selecting a row builds a detail panel via `build_form(type(step))` so edits flow back into the model and the table summary updates live. Toolbar actions for Open / Save / Save As / Validate / Add Step (one menu entry per step kind, each with sane defaults) / Delete. `pyqtgraph.PlotWidget` at the bottom shows operator-declared setpoint vs. elapsed time across the method, one series per target channel; non-setpoint steps render as dashed vertical guide lines.
-- **CAPA pyrolysis profile** (`src/capa/experiment/profiles/capa_pyrolysis.py`) — see §5.4.1. Default and only active profile: `domain_profile.id = "capa.profiles.capa_pyrolysis"`. (A cone-calorimeter module exists in the codebase but is not part of the active product surface; see §5.4.1.)
-- **External event ingest** (`src/capa/core/ingest.py`) — UDS + optional HTTP loopback per §11.1. **Opt-in via `ExperimentEngine(enable_ingest=True)`**: keeps the default test path simple; production callers pass the flag. The shutdown coordinator closes the listener so accept tasks exit when the procedure finishes. Bind failures log + downgrade to "ingest disabled for this run" rather than aborting.
-- **CLI extensions** (`src/capa/app.py`) — `capa plugins list` now prints the live discovery, drift report, and rejection reasons; `capa plugins trust <id> --reason ...` writes a `PluginEntry` into `plugins.lock` and appends an audit row to `plugins.lock.journal`; `capa method validate <file>` Pydantic-validates a standalone method TOML/YAML; `capa profile validate <experiment>` validates the profile metadata block against the active profile's metadata model.
-- **TOML-friendly sim signal schema** (`src/capa/devices/sim/_signals.py`) — `signal_from_dict({"kind": "sine|ramp|constant|step", ...})` plus per-adapter `from_params` classmethods. The engine's `_construct_adapters` prefers `from_params` when present so a hardware TOML can declare `[devices.params.signals.<key>] kind = "ramp" start = ... end = ...` and the engine materialises it at construction. Existing tests that pass already-built `SignalFn` instances continue to work via a `_materialise` pass-through.
-- **CAPA sim configs** — `configs/hardware/sim_capa.toml`, `configs/methods/sim_capa_pyrolysis.method.toml`, `configs/experiments/sim_capa_pyrolysis.yaml`. Drives the integration test purely from disk (no Python fixtures).
-
-**Deferred (intentional; carried into a later phase):**
-
-- **Watchdog → SafetyMonitor escalation.** §13.2 plans `safety_monitor` reading the same `adapter.watchdog_state()` view and applying configured actions; the watchdog still only logs + writes `device_silent` events. SafetyMonitor itself is P5 territory (alongside the safety-system work) and is not a P3 deferral.
-
-**New / changed beyond the original P3 scope (decisions):**
-
-- **CAPA pyrolysis profile is the only active profile** (operator-confirmed). A cone-calorimeter module exists in the codebase but is not part of the active product surface and there are no current plans to drive a cone calorimeter with capa.
-- **CAPA domain terminology corrected.** The original schema carried TGA-flavored field names (`crucible`, `atmosphere.carrier`, `program.ramp_rate_c_per_min`) that did not match how operators describe runs. P3 renamed these to CAPA-correct equivalents: `specimen_holder` (with optional `specimen_holder_diameter_mm` / `specimen_holder_depth_mm`), `atmosphere.purge` (and `PurgeGas` / `purge_gas_flow` channel group), and a redesigned `HeaterProgram` with `target_heat_flux_kw_m2` (the scientific parameter) + `heater_setpoint_c` (the actual command) + optional `flux_calibration_ref` and optional `ramp_rate_c_per_min`. `SpecimenForm` collapsed from seven options to `disk` + `other` (~99% of CAPA runs use a disk). Channel-group keys, preflight check ids (`capa.purge_flow_established`), and problem codes (`capa.purge_silent`, `capa.purge_below_target`, …) renamed in lock-step. Backwards-compatible shims were not introduced; CAPA has no shipped runs in the wild.
-- **Authorization handle promoted to a concrete class.** §9 / §18 #12 implied this; P3 made it explicit so every executor command path is auditable end-to-end via `method.command.issued` events.
-- **Plugin mode is two-state** (`dev` / `production`) rather than a richer policy. Production refuses any drift; dev loads every contract-passing plugin and records drift for inspection.
-- **TOML-friendly sim signals.** Took the long-term path here — every sim adapter now has a `from_params` classmethod so hardware TOMLs can fully drive sim runs without Python fixtures. This is the substrate for the CAPA integration test and for any future config-only smoke tests.
-- **`anyio` task-group exception handling.** anyio 4.x wraps in-task-group exceptions in a `BaseExceptionGroup`; the engine's `try/except` chain unwraps single-exception groups via `_unwrap_single` so `ProcedureError` (from preflight) and `BackpressureAbortError` route to the same `run_status="aborted"` / `run_status="crashed"` paths that pre-task-group raises do.
+**Review and polish.** The Review tab and run-catalog browser (completed-run summary with queue-health histograms and the sealed/unverified distinction visible), per-user theme + window-state persistence, Simple/Expert mode presets, the `capa export-parquet` and `capa export-rocrate` CLIs, a Linux smoke test exercising the same path as Windows, and an end-to-end exercise of the schema-version migration registry.
 
 ---
 
 ## 17. Open decisions
 
-These do not block P0.
-
-1. ~~**FLIR camera model.**~~ **Resolved:** capa-flir targets **any FLIR camera Atlas supports over USB**, with the **E85** as the reference/validation camera. Atlas SDK pinned to **2.19.0**. Linux and Windows are both supported via a single manual `OnImageReceived → addImage` pump path (§12.1) — uniform code, halved test matrix, no auto-attach divergence.
-2. ~~**Atlas redistribution licensing.**~~ **Resolved:** Atlas is *not* redistributed. The binding lives in a separate package, `capa-flir`, distributed only to FLIR licensees. capa core is FLIR-free and publishable. CFFI **ABI mode** is primary (no headers vendored, no compile step). See §12.2 for the licensing posture.
-3. **Plugin trust workflow owner.** P3 ships the technical primitive (`capa plugins trust <id> --reason ...` writes the lock + an audit journal); the policy question — who is allowed to run that command on the rig PC and how the review is documented — is still open. Decide before flipping `CAPA_PLUGIN_MODE=production` on the rig.
-4. ~~**Naming.**~~ **Resolved by P3 ship:** the public-facing surface stabilised on `capa.builtin.*` plugin ids, the `capa.procedures` and `capa.profiles` entry-point groups, the `capa` CLI verb namespace, and `manifest.json.capa.version`. Future renames now incur the multi-day-chore tax.
-5. **`capa-flir` public-distribution timing.** If/when capa-flir is to be distributed beyond UMD, submit the App-Review package to FLIR (§5.1). Not blocking P4 development; only blocks public release of capa-flir. Decide who owns the submission and on what timeline.
+1. **Plugin trust workflow owner.** The technical primitive ships (`capa plugins trust <id> --reason ...` writes the lock + an audit journal); the policy question — who is allowed to run that command on the rig PC and how the review is documented — is open. Decide before flipping `CAPA_PLUGIN_MODE=production` on the rig.
+2. **`capa-flir` public-distribution timing.** If/when capa-flir is to be distributed beyond UMD, submit the App-Review package to FLIR (§12.2 / SDK §5.1). Not blocking ongoing capa-flir development; only blocks public release of capa-flir. Decide who owns the submission and on what timeline.
 
 ---
 
@@ -1386,8 +1363,9 @@ These do not block P0.
 11. **Plugins, not patches — but trusted.** New routines, new IR cameras, new sinks all enter as plugins with a Pydantic config model and a Protocol implementation. Plugin contracts are enforced at load time; production plugins are checked against `plugins.lock`; bad or untrusted plugins do not reach the picker.
 12. **Auditable by default.** Every device write is attributable (`issued_by` plus run authorization or manual `confirmed_by` operator IDs). Every artifact is hashable. Every run carries the exact environment that produced it.
 13. **Observable, not just logging-capable.** Structured logs, queue-depth and writer-lag metrics, performance-regression budgets — all instrumented from Day 1, not bolted on after the first regression bites.
-14. **Headless is first-class.** The engine runs without the GUI; the CLI exposes `validate`, `validate --strict`, `run --headless`, `catalog`, `catalog verify`, `finalize`, `export-parquet`, `export-rocrate`, `devices discover`, `plugins`, and `profile validate`.
+14. **Headless is first-class.** The engine runs without the GUI; the CLI exposes `validate`, `validate --strict`, `run --headless`, `catalog`, `catalog verify`, `finalize`, `export-parquet`, `export-rocrate`, `devices discover`, `plugins`, `method validate`, and `profile validate`.
 15. **The supervisor doesn't pretend to be real-time.** Closed-loop control lives on the instruments. Python's job is to issue setpoints, watch, and record.
+16. **One resource, one thread, one loop.** Every hardware resource runs on its own thread and asyncio loop, hosted in a `WorkerPool` that survives across runs; a per-run `Conductor` arms the pool, drives sampling, and disarms on stop. The UI never owns I/O.
 
 ---
 

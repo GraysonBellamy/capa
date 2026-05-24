@@ -380,8 +380,8 @@ class MethodExecutor:
         ``issued_by`` / ``authorization_id`` come from the run-arm
         :class:`Authorization`.
 
-        Migration doc §3.5: the dispatch surface is an abstraction over
-        the concurrency layer — engine-style ``AdapterDispatcher`` (direct
+        The dispatch surface is an abstraction over the concurrency layer:
+        engine-style ``AdapterDispatcher`` (direct
         in-loop call) and conductor-style ``ConductorDispatcher`` (worker-
         thread routed) both satisfy the same async contract, so this
         method is loop-shape-agnostic."""

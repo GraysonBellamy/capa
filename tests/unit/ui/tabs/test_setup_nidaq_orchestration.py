@@ -1,7 +1,7 @@
 """Tests for SetupTab's NI-DAQ cross-section orchestration.
 
-Step 6 of the NI-DAQ UX work wires the SetupTab to handle two coupled
-mutations the NIDAQChannelsField surfaces but cannot perform itself:
+SetupTab handles two coupled mutations that NIDAQChannelsField surfaces
+but cannot perform itself:
 
 1. Create one capa channel per unbound NI input — driven from the
    widget's "Create capa channels…" button.

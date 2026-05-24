@@ -92,9 +92,7 @@ class TestCameraSuppression:
         try:
             ctx = _ctx(tmp_path, camera_mode="none", recorded_cameras=())
             await worker.async_arm(ctx)
-            bridge = await worker.async_begin_sampling(
-                consumer_loop=asyncio.get_running_loop()
-            )
+            bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             assert worker.state is WorkerState.SAMPLING
             # Give the stream task a moment to exhaust the (empty) iterator.
             # No frames should ever appear — race that against a short timeout.
@@ -127,9 +125,7 @@ class TestCameraSuppression:
         try:
             ctx = _ctx(tmp_path)  # camera_mode='all' by default
             await worker.async_arm(ctx)
-            bridge = await worker.async_begin_sampling(
-                consumer_loop=asyncio.get_running_loop()
-            )
+            bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             # We should see at least one frame
             emission = await asyncio.wait_for(bridge.get(), timeout=2.0)  # type: ignore[union-attr]
             assert emission is not None

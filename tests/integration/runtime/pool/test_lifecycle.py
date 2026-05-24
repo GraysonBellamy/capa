@@ -1,14 +1,14 @@
 """Pool open/close + arm/disarm tests.
 
-Migration doc §4.3. Pool tests use prebuilt worker maps (via the
+Pool tests use prebuilt worker maps (via the
 :class:`WorkerPool` constructor) rather than ``from_config`` so test
 fakes inject directly without going through TOML.
 
 Each test asserts both the pool's state and (where relevant) the
 per-worker counters from :mod:`tests.integration.runtime.fakes` —
 the multi-arm-disarm tests in particular need to verify ``open_calls``
-stays at 1 across cycles, which is the load-bearing manual-control-
-between-runs property (migration doc §10.2 acceptance criterion #6).
+stays at 1 across cycles, which is the load-bearing manual-control
+between-runs property.
 """
 
 from __future__ import annotations
@@ -207,7 +207,7 @@ class TestDispatchRouting:
 
 
 class TestRunLifecycle:
-    """Migration doc §3.7 / §3.8: arm_all, begin_sampling_all, disarm_all."""
+    """Pool run lifecycle: arm_all, begin_sampling_all, disarm_all."""
 
     @pytest.mark.anyio
     async def test_arm_all_transitions_every_worker(self) -> None:

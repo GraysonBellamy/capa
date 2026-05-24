@@ -204,7 +204,7 @@ class ProcedureContext:
     The engine wires :class:`~capa.runtime.dispatch.AdapterDispatcher` here
     for the single-loop path; the conductor wires
     :class:`~capa.runtime.dispatch.ConductorDispatcher` for per-resource-
-    worker runs. Migration doc §3.5."""
+    worker runs."""
 
     authorization: Authorization
     """Run-arm authorization handle. Every device command goes through
@@ -243,7 +243,7 @@ class ProcedureContext:
 
 
 # ---------------------------------------------------------------------------
-# Procedure protocol — full §11 contract.
+# Procedure protocol.
 # ---------------------------------------------------------------------------
 
 
@@ -333,8 +333,7 @@ class Procedure(Protocol):
         any adapter's :meth:`start` is invoked. The procedure has not yet
         received its :class:`ProcedureContext`, so this method must
         derive its return value from the procedure's own ``cfg`` fields
-        (not from channel-name string constants — see the proposal's
-        rename-resilience requirement).
+        rather than channel-name string constants.
         """
         ...
 

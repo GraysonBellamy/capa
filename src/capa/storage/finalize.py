@@ -213,9 +213,8 @@ def _infer_layout_for_adapter(adapter: str) -> str:
     """Look up the documented layout for an adapter family.
 
     Falls back to ``wide_row`` for unknown adapters — that's the safest
-    default for "I don't know what this library emits." The plan's §8.9
-    table is the source of truth; new adapters add an entry here at the
-    same time they ship.
+    default for "I don't know what this library emits." New adapters add an
+    entry here at the same time they ship.
     """
     return _KNOWN_LAYOUTS.get(adapter, "wide_row")
 

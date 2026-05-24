@@ -18,8 +18,6 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from capa.runtime.recording import ResolvedRecordingPlan
 from capa.storage.manifest import (
     BundleManifest,
@@ -44,9 +42,7 @@ def _minimal_manifest(**overrides: object) -> BundleManifest:
         sample=SampleBlock(id="SPEC-1"),
         procedure=ProcedureBlock(id="capa.builtin.free_run"),
         capa=CapaBlock(version="0.7.3"),
-        python=PythonBlock(
-            version="3.13.0", implementation="CPython", executable="/usr/bin/py"
-        ),
+        python=PythonBlock(version="3.13.0", implementation="CPython", executable="/usr/bin/py"),
         platform=PlatformBlock(os="Linux", machine="x86_64", node="rig01"),
         lockfile=LockfileBlock(path=None, sha256=None),
     )
@@ -178,9 +174,7 @@ class TestBackCompat:
 
 
 class TestUpdateRecordingPlanRewrite:
-    def test_rewrites_manifest_with_block_and_camera_flags(
-        self, tmp_path: Path
-    ) -> None:
+    def test_rewrites_manifest_with_block_and_camera_flags(self, tmp_path: Path) -> None:
         """End-to-end: write a manifest with two cameras, then update with
         a plan that suppresses one. Both the ``recording`` block and the
         per-camera flags should reflect the plan after rewrite.
@@ -233,9 +227,7 @@ class TestUpdateRecordingPlanRewrite:
                         update={
                             "recorded": plan.allows_camera(entry.name),
                             "suppressed_reason": (
-                                None
-                                if plan.allows_camera(entry.name)
-                                else "recording_policy"
+                                None if plan.allows_camera(entry.name) else "recording_policy"
                             ),
                         }
                     )

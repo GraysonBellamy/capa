@@ -41,7 +41,7 @@ class TestWorkerMetricsInit:
 
 
 class TestCommandCounters:
-    """The accepted/completed/failed accounting from migration doc §5.5."""
+    """Accepted/completed/failed command accounting."""
 
     def test_accepted_then_completed_clean(self) -> None:
         m = WorkerMetrics(resource_id="r", adapter_names=("a",))

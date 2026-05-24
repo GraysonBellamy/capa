@@ -240,8 +240,8 @@ class DeviceAdapter(Protocol):
     def stream(self) -> AsyncIterable[DeviceEmission]:
         """Yield emissions while sampling is active.
 
-        The plan's §5.2 wording uses ``poll() -> list[DeviceEmission]``; capa
-        uses an async-iterator instead because every underlying library
+        This interface uses an async iterator instead of
+        ``poll() -> list[DeviceEmission]`` because every underlying library
         already exposes one (``recorder.stream()``), and it composes more
         cleanly with AnyIO task groups. Adapters back this with their library's
         existing recorder.

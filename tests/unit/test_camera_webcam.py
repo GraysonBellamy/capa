@@ -728,7 +728,7 @@ class TestPreviewEncoding:
 
     Until this lands the preview stream emitted a ``bytes(frame[:1,:,0][:64])``
     placeholder that no consumer could render. Replacing it with JPEG +
-    throttle is the visible-camera half of the §10.2 camera-preview dock.
+    throttle makes the visible-camera preview renderable.
     """
 
     async def test_first_preview_is_decodable_jpeg(self, tmp_path: Path) -> None:

@@ -8,7 +8,7 @@ toggles on the correct edges.
 Load-bearing tests:
 
 * ``test_preview_channel_runs_continuously_across_arm_sample_disarm`` —
-  guards the rev-1 two-scopes-conflated bug. The drainer must keep
+  guards the channel/source lifetime separation. The drainer must keep
   yielding JPEGs through SAMPLING.
 * ``test_preview_tasks_stop_on_pool_close`` — clean shutdown drains the
   bridge.
@@ -95,9 +95,8 @@ class TestWorkerPreviewLifecycle:
     ) -> None:
         """The drainer must keep yielding JPEGs through SAMPLING.
 
-        Regression guard for rev-1 of the migration plan, which conflated
-        the channel and the source so they died together on the sampling
-        edge.
+        Regression guard for keeping the channel and source lifetimes
+        separate so they do not die together on the sampling edge.
         """
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec(fps=30))
         bridge = _make_preview_bridge(wrapper.name)

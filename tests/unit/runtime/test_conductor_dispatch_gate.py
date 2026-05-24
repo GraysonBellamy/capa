@@ -1,7 +1,6 @@
 """Unit tests for :meth:`Conductor._dispatch_emission` filtering behaviour.
 
-Pins the three invariants from the per-procedure recording-filter proposal
-(see ``docs/recording-filter-proposal.md`` §4.4):
+Pins the core recording-filter invariants:
 
 1. DataBus is never filtered (safety / procedure subscribers depend on it).
 2. UI mirror is never filtered (operator visibility).
@@ -22,7 +21,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from capa.core.databus import DataBus
 from capa.devices.camera.base import CameraEvent, FrameReceipt
 from capa.devices.records import ChannelSample, SourceRecord
 from capa.runtime.conductor import Conductor, ConductorConfig
@@ -122,7 +120,9 @@ class _UiBridgeSpy:
         self.received.append(emission)
 
 
-def _install_spies(plan: ResolvedRecordingPlan) -> tuple[Conductor, FakeWriterRef, _BusSpy, _UiBridgeSpy]:
+def _install_spies(
+    plan: ResolvedRecordingPlan,
+) -> tuple[Conductor, FakeWriterRef, _BusSpy, _UiBridgeSpy]:
     cond = _make_conductor(plan)
     writer = FakeWriterRef()
     bus = _BusSpy()
@@ -255,7 +255,7 @@ class TestCameraEventAlwaysPasses:
 
 
 class TestProcedureTickPassesThroughUiOnly:
-    """Phase 3.5 invariant: ticks are operator-facing telemetry only.
+    """Procedure ticks are operator-facing telemetry only.
 
     Tested separately from the recording-filter invariants because
     ticks short-circuit at the top of ``_dispatch_emission`` —

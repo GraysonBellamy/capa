@@ -1,11 +1,9 @@
 """Pool open partial-failure rollback.
 
-Migration doc §4.3 lines 744-756: if any worker fails to start during
-:meth:`WorkerPool.open`, every successfully-started worker must be closed
+If any worker fails to start during :meth:`WorkerPool.open`, every
+successfully-started worker must be closed
 in reverse order before the original exception propagates and the pool
 returns to :attr:`PoolState.CLOSED`.
-
-This is acceptance criterion #4 in done-criteria.
 """
 
 from __future__ import annotations

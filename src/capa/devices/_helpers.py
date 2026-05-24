@@ -5,8 +5,8 @@ Both sim and real adapters need:
 * the same channel-routing and calibration-application logic when turning a
   library record into one or more
   :class:`~capa.devices.records.ChannelSample`\\ s,
-* the same authorization gate on every :meth:`DeviceAdapter.command` (plan
-  §9: a command without either ``authorization_id`` or ``confirmed_by`` is
+* the same authorization gate on every :meth:`DeviceAdapter.command` (a
+  command without either ``authorization_id`` or ``confirmed_by`` is
   refused at the adapter boundary regardless of the underlying device's own
   gates),
 * a uniform "last-sample-emitted" timestamp so adapter health code can
@@ -284,7 +284,7 @@ def daqmx_resource_id_from_channels(physical_channels: Iterable[str]) -> str:
     The contention domain is the chassis (cDAQ) or the device (single-board
     card). Channel strings are parsed locally — no call into ``nidaqmx`` —
     so the property is safe to read before :meth:`open` and in sim/CI where
-    the NI runtime is absent. Per the migration doc §4.10: ``cDAQ1Mod1`` and
+    the NI runtime is absent. ``cDAQ1Mod1`` and
     ``cDAQ1Mod3`` collapse to ``daqmx:cDAQ1``; a single-board ``Dev1`` stays
     ``daqmx:Dev1``.
     """

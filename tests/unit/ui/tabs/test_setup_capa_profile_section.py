@@ -157,7 +157,7 @@ def test_capa_profile_compose_preserves_unmanaged_capa_group(qtbot: Any) -> None
 
 
 # ---------------------------------------------------------------------------
-# Tune-artifact autofill (Phase 3 W7)
+# Tune-artifact autofill
 # ---------------------------------------------------------------------------
 
 
@@ -265,3 +265,130 @@ def test_clear_tune_ref_clears_ref_only(qtbot: Any) -> None:
     assert values["flux_calibration_ref"] == ""
     # Setpoint untouched.
     assert values["heater_setpoint_c"] == 600.0
+
+
+# ---------------------------------------------------------------------------
+# Post-tune apply prompt (hold mode)
+# ---------------------------------------------------------------------------
+
+
+def _holding_tick(target_kw_m2: float = 25.0, setpoint_c: float = 520.0) -> Any:
+    """Build a ``ProcedureTick`` carrying the hold-mode phase payload.
+
+    Construction mirrors what
+    :meth:`HeatFluxTune._emit_holding_tick` publishes on the run's
+    final tick — the section's subscriber walks ``payload["phase"]``
+    and the held SP/target pair off this shape."""
+    from capa.experiment.procedures.builtin.heat_flux_tune.config import (
+        PROCEDURE_ID as HEAT_FLUX_TUNE_PROCEDURE_ID,
+    )
+    from capa.runtime.emissions import ProcedureTick
+
+    return ProcedureTick(
+        procedure_id=HEAT_FLUX_TUNE_PROCEDURE_ID,
+        t_mono_ns=0,
+        payload={
+            "phase": "holding",
+            "target_kw_m2": target_kw_m2,
+            "commanded_setpoint_c": setpoint_c,
+            "mean_flux_kw_m2": target_kw_m2,
+            "accept_reason": "in_tolerance",
+        },
+    )
+
+
+def test_holding_tick_applies_setpoint_to_heater_form(qtbot: Any, monkeypatch: Any) -> None:
+    """On a ``phase="holding"`` tick the section writes the held SP /
+    target pair into the heater-program form. The prompt is suppressed
+    in tests by monkey-patching ``_prompt_apply_hold`` to call the
+    apply path directly — the dialog itself is non-modal and hard to
+    drive headlessly, but the apply logic is the contract worth
+    pinning."""
+    section, _ = _make_section(qtbot)
+    monkeypatch.setattr(
+        section,
+        "_prompt_apply_hold",
+        lambda t, s: section._apply_held_values(t, s),
+    )
+
+    section._on_procedure_tick(_holding_tick(target_kw_m2=25.0, setpoint_c=520.0))
+
+    values = section._heater_form.values()
+    assert values["heater_setpoint_c"] == 520.0
+    assert values["target_heat_flux_kw_m2"] == 25.0
+
+
+def test_holding_tick_latches_to_fire_once_per_run(qtbot: Any, monkeypatch: Any) -> None:
+    """Repeat ``phase="holding"`` ticks (the procedure may emit more
+    than one, or the UI may resubscribe mid-hold) must not re-pop the
+    prompt within the same hold state."""
+    section, _ = _make_section(qtbot)
+    call_count = {"n": 0}
+    monkeypatch.setattr(
+        section,
+        "_prompt_apply_hold",
+        lambda *a, **kw: call_count.__setitem__("n", call_count["n"] + 1),
+    )
+
+    section._on_procedure_tick(_holding_tick())
+    section._on_procedure_tick(_holding_tick())
+    section._on_procedure_tick(_holding_tick())
+    assert call_count["n"] == 1
+
+
+def test_holding_latch_resets_on_non_holding_tick(qtbot: Any, monkeypatch: Any) -> None:
+    """A non-holding tick (e.g. the next run's ``phase="settle"``)
+    resets the latch so the next hold gets a fresh dialog. Without
+    this, only the first tune of a session would prompt."""
+    from capa.experiment.procedures.builtin.heat_flux_tune.config import (
+        PROCEDURE_ID as HEAT_FLUX_TUNE_PROCEDURE_ID,
+    )
+    from capa.runtime.emissions import ProcedureTick
+
+    section, _ = _make_section(qtbot)
+    call_count = {"n": 0}
+    monkeypatch.setattr(
+        section,
+        "_prompt_apply_hold",
+        lambda *a, **kw: call_count.__setitem__("n", call_count["n"] + 1),
+    )
+
+    section._on_procedure_tick(_holding_tick())
+    assert call_count["n"] == 1
+
+    # Simulate a new run starting — phase="settle" reaches the
+    # subscriber before the next hold tick lands.
+    section._on_procedure_tick(
+        ProcedureTick(
+            procedure_id=HEAT_FLUX_TUNE_PROCEDURE_ID,
+            t_mono_ns=1,
+            payload={"phase": "settle"},
+        )
+    )
+    section._on_procedure_tick(_holding_tick())
+    assert call_count["n"] == 2
+
+
+def test_holding_tick_ignored_for_foreign_procedure_id(qtbot: Any, monkeypatch: Any) -> None:
+    """A tick from a different procedure (a future TGA-style procedure,
+    say) must not trigger the heat-flux-tune apply prompt — payload
+    shapes are procedure-specific and the section only consumes its own."""
+    from capa.runtime.emissions import ProcedureTick
+
+    section, _ = _make_section(qtbot)
+    called = False
+
+    def _fail(*_a: Any, **_kw: Any) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(section, "_prompt_apply_hold", _fail)
+
+    section._on_procedure_tick(
+        ProcedureTick(
+            procedure_id="capa.builtin.free_run",
+            t_mono_ns=0,
+            payload={"phase": "holding", "target_kw_m2": 25.0, "commanded_setpoint_c": 520.0},
+        )
+    )
+    assert called is False

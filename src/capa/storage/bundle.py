@@ -64,6 +64,7 @@ from capa.storage.manifest import (
     OperatorBlock,
     ProcedureBlock,
     RecordingBlock,
+    RecordingPolicyMode,
     RunStatus,
     SampleBlock,
 )
@@ -356,7 +357,7 @@ class RunBundleWriter:
     def update_recording_plan(
         self,
         *,
-        policy_mode: str,
+        policy_mode: RecordingPolicyMode,
         plan: Any,
     ) -> None:
         """Rewrite ``manifest.json`` with the resolved recording plan.
@@ -382,7 +383,7 @@ class RunBundleWriter:
         manifest_path = self._bundle_path / "manifest.json"
         manifest = BundleManifest.read(manifest_path)
         recording = RecordingBlock(
-            policy=policy_mode,  # type: ignore[arg-type]
+            policy=policy_mode,
             source=plan.source,
             channel_mode=plan.channel_mode,
             recorded_channels=plan.recorded_channels,

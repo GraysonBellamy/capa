@@ -363,6 +363,227 @@ class TestAlicatCard:
 
 
 # ============================================================================
+# HeaterCard — Cool to safe
+# ============================================================================
+
+
+def _heater_cfg(*, procedure: ProcedureRef | None = None) -> ExperimentConfig:
+    """Build a watlow-sim-backed ExperimentConfig.
+
+    Procedure defaults to free_run; pass a heat_flux_tune ProcedureRef
+    to exercise the t_safe_c readout path.
+    """
+    if procedure is None:
+        procedure = ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1})
+    return ExperimentConfig(
+        hardware=HardwareProfile(
+            name="x",
+            devices=(
+                DeviceConfig(
+                    name="heater",
+                    adapter="capa.devices.sim.watlow_sim",
+                    params={
+                        "tick_period_s": 0.05,
+                        "signals": {
+                            ("process_value", 1): Sine(
+                                amplitude=1.0, frequency_hz=1.0, offset=300.0
+                            ),
+                        },
+                    },
+                ),
+            ),
+            channels=(
+                ChannelSpec(
+                    name="heater.pv",
+                    kind="process_var",
+                    unit="degC",
+                    derived_unit="degC",
+                    source=WatlowParameter(device="heater", parameter="process_value", instance=1),
+                    calibration=Identity(input_unit="degC", output_unit="degC"),
+                ),
+            ),
+        ),
+        procedure=procedure,
+        calibration_set=CalibrationSetRef(name="default"),
+        operator=OperatorRef(id="opA", display_name="Op A"),
+        sample=SampleInfo(id="S"),
+    )
+
+
+class TestHeaterCardSafeCool:
+    """Cool-to-safe quick-action on the heater card.
+
+    Ships standalone of hold mode — the affordance is generally useful.
+    Reads the safe temperature from the active method's Heat-Flux Tune
+    config when present, otherwise falls back to 25 °C.
+    """
+
+    def test_button_renders_with_fallback_temp_when_no_tune_config(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        from capa.ui.manual.cards.watlow import HeaterCard
+
+        cfg = _heater_cfg()  # free_run procedure — no t_safe_c
+        _open_pool_sync(controller, cfg)
+        card = HeaterCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        button_texts = [b.text() for b in card.findChildren(QPushButton)]
+        assert "Cool to safe" in button_texts
+        # The fallback constant is 25 °C — surfaced in the info label.
+        from PySide6.QtWidgets import QLabel
+
+        info_texts = [lbl.text() for lbl in card.findChildren(QLabel)]
+        assert any("25" in t and "°C" in t for t in info_texts), info_texts
+        _close_pool_sync(controller)
+
+    def test_resolve_safe_temp_reads_heat_flux_tune_config(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        """When the active procedure is heat_flux_tune, ``t_safe_c`` from
+        the procedure config wins over the 25 °C fallback."""
+        from capa.ui.manual.cards.watlow import HeaterCard
+
+        cfg = _heater_cfg(
+            procedure=ProcedureRef(
+                id="capa.builtin.heat_flux_tune",
+                config={"targets_kw_m2": [50.0], "t_safe_c": 20.0},
+            )
+        )
+        _open_pool_sync(controller, cfg)
+        card = HeaterCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        assert card._resolve_safe_temp_c() == 20.0
+        _close_pool_sync(controller)
+
+    def test_resolve_safe_temp_falls_back_on_missing_key(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        """A heat_flux_tune procedure config that omits ``t_safe_c``
+        (defaulted at validation time, absent from a partial dict) still
+        resolves to the 25 °C fallback rather than raising."""
+        from capa.ui.manual.cards.watlow import HeaterCard
+
+        cfg = _heater_cfg(
+            procedure=ProcedureRef(
+                id="capa.builtin.heat_flux_tune",
+                config={"targets_kw_m2": [50.0]},  # no t_safe_c
+            )
+        )
+        _open_pool_sync(controller, cfg)
+        card = HeaterCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        assert card._resolve_safe_temp_c() == 25.0
+        _close_pool_sync(controller)
+
+    def test_confirmation_rejection_suppresses_dispatch(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A 'Cancel' on the safe-cool confirm dialog must not dispatch.
+
+        Watlow sim doesn't expose a ``commands_received`` log, so we
+        observe via the card's own ``schedule_dispatch`` — a clean
+        seam since the test cares about whether the dispatch was
+        scheduled, not what the sim adapter did afterwards.
+        """
+        from capa.ui.manual.cards.watlow import HeaterCard
+
+        cfg = _heater_cfg()
+        _open_pool_sync(controller, cfg)
+        card = HeaterCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        dispatched: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            card,
+            "schedule_dispatch",
+            lambda **kw: dispatched.append(kw),
+        )
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *a, **kw: QMessageBox.StandardButton.Cancel,
+        )
+        card._on_safe_cool_clicked()
+        assert dispatched == []
+        _close_pool_sync(controller)
+
+    def test_confirmation_accept_dispatches_safe_setpoint(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Accepting the confirm dialog dispatches a ``set_setpoint`` write
+        at the procedure's ``t_safe_c`` (30 °C in this fixture)."""
+        from capa.ui.manual.cards.watlow import HeaterCard
+
+        cfg = _heater_cfg(
+            procedure=ProcedureRef(
+                id="capa.builtin.heat_flux_tune",
+                config={"targets_kw_m2": [50.0], "t_safe_c": 30.0},
+            )
+        )
+        _open_pool_sync(controller, cfg)
+        card = HeaterCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+
+        dispatched: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            card,
+            "schedule_dispatch",
+            lambda **kw: dispatched.append(kw),
+        )
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *a, **kw: QMessageBox.StandardButton.Ok,
+        )
+        card._on_safe_cool_clicked()
+        assert len(dispatched) == 1
+        call = dispatched[0]
+        assert call["kind"] == "set_setpoint"
+        assert call["payload"]["value"] == 30.0
+        assert call["payload"]["instance"] == 1
+        assert call["destructive"] is True
+        _close_pool_sync(controller)
+
+
+# ============================================================================
 # ManualControlDock
 # ============================================================================
 

@@ -174,8 +174,8 @@ class CalibrationSetRef(BaseModel):
 class StoragePolicy(BaseModel):
     """Storage knobs.
 
-    –§8.7: in-flight flush cadence, final Parquet codec, optional
-    TDMS pass-through, optional RO-Crate generation. Stores the
+    In-flight flush cadence, final Parquet codec, optional TDMS pass-through,
+    optional RO-Crate generation. Stores the
     schema; the bundle writer reads it.
 
     In-flight artifacts are Arrow IPC streams (``*.in-flight.arrows``); see

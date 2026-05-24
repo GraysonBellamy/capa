@@ -8,6 +8,7 @@ against the underlying :class:`ConfigDocument`.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -698,7 +699,7 @@ class SetupTab(QWidget):
             for name, info in self._last_nidaq_inventory.items()
         }
 
-    def update_nidaq_inventory(self, rows: list[dict[str, Any]]) -> None:
+    def update_nidaq_inventory(self, rows: Iterable[Any]) -> None:
         """Replace the cached NI inventory with the given rows.
 
         Each row is one dict in the shape returned by
@@ -829,8 +830,7 @@ class SetupTab(QWidget):
         Walks the draft's NI devices, matches each unbound entry by
         ``field_name``, and synthesises a ``[[channels]]`` row with
         units derived from the NI row (so DEG_C produces a degC capa
-        channel — closing the §2.4 unit-mismatch path for this flow
-        too). Routes the mutation through :meth:`_apply_payload` so
+        channel). Routes the mutation through :meth:`_apply_payload` so
         dirty state, validation, and undo stay coherent.
         """
         if not unbound:
@@ -1643,7 +1643,15 @@ class SetupTab(QWidget):
         if section_id == "capa_profile":
             from capa.ui.tabs.setup_sections.capa_profile import CapaProfileSection  # noqa: PLC0415
 
-            return CapaProfileSection(self)
+            section = CapaProfileSection(self)
+            # Wire the run controller for the post-tune apply prompt —
+            # a successful Heat-Flux Tune with hold_at_completion=True
+            # emits a phase="holding" tick that the section listens
+            # for to offer writing the converged values into the
+            # heater-program form.
+            if self._controller is not None:
+                section.set_run_controller(self._controller)
+            return section
         if section_id == "calibration":
             from capa.ui.tabs.setup_sections.calibration import CalibrationSection  # noqa: PLC0415
 

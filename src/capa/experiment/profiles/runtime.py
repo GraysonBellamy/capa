@@ -26,7 +26,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import anyio
 
@@ -228,16 +228,72 @@ async def _atmosphere_consistency(ctx: ProfilePreflightContext) -> Problem | Non
     return None
 
 
+_HEATER_PV_DEFAULT_LIMIT_C: Final[float] = 1000.0
+"""Default safe-arm limit on heater PV.
+
+Set to a rig-survival ceiling (1000 °C) rather than a room-temperature
+floor — operationally the gate only blocks "something is on fire"
+states (insulation melting, runaway, miswired sensor reading well past
+any plausible operating point). The hold-mode workflow drives the
+heater to 520-700 °C and arms against that PV; a strict cold-start
+gate refuses the very workflow hold mode is built around. Cold-start
+runs still pass trivially because PV starts low.
+
+Operators that need a tighter gate (diagnostic / new-rig commissioning)
+can override per-method via
+``profile_metadata['_safe_arm']['max_heater_pv_c']``."""
+
+_HOT_START_MARGIN_C: Final[float] = 50.0
+"""Headroom above the upcoming method's ``heater_setpoint_c`` when the
+hot-start policy raises the arm-time PV limit. 50 °C covers typical
+``PV_at_converge − heater_setpoint_c`` offsets observed during steady
+state on this rig; revisit if a tighter / looser margin proves needed."""
+
+
 @register("capa.heater_pv_in_safe_range", category="dynamic")
 async def _heater_pv_safe(ctx: ProfilePreflightContext) -> Problem | None:
-    """Heater PV is below a sane startup limit before arming.
+    """Heater PV is below a rig-survival ceiling before arming.
 
-    Default limit is 200 °C — a CAPA reactor at room temperature is
-    expected. The limit can be overridden in
-    ``profile_metadata['_safe_arm']['max_heater_pv_c']`` for hot-swap or
-    rapid-cycle routines."""
-    safe = ctx.profile_metadata.get("_safe_arm", {})
-    limit_c: float = float(safe.get("max_heater_pv_c", 200.0))
+    Default limit is :data:`_HEATER_PV_DEFAULT_LIMIT_C` (1000 °C) — the
+    point past which something is genuinely wrong on this rig (sensor
+    runaway, miswired channel, mechanical failure). The CAPA workflow
+    routinely arms experiments against a 500-700 °C held heater, so a
+    strict room-temperature gate would refuse the workflow hold mode
+    is built around. Watlow hardware over-temp interlocks remain the
+    ground-truth thermal safety; this check catches the diagnostic
+    "is the PV sane?" case.
+
+    Three tiers of limit, in priority order:
+
+    1. ``profile_metadata['_safe_arm']['max_heater_pv_c']`` — explicit
+       per-method override. Wins over everything; used for diagnostic /
+       commissioning workflows that intentionally want a *tighter* gate
+       (e.g. new-rig burn-in requiring cold start).
+    2. **Hot-start policy.** When the active method declares a
+       ``heater_program.heater_setpoint_c`` above the default ceiling,
+       the limit auto-raises to ``heater_setpoint_c + _HOT_START_MARGIN_C``.
+       At a 1000 °C default this branch is rare — only fires when an
+       exotic high-temp method declares a setpoint above the rig-survival
+       ceiling, which itself would warrant operator scrutiny.
+    3. Default 1000 °C.
+
+    Surfaces an ``info`` (non-blocking) ``Problem`` whenever the
+    policy-raised limit applies, so the relaxation appears alongside
+    other preflight outcomes rather than silently passing.
+    """
+    explicit_override = ctx.profile_metadata.get("_safe_arm", {}).get("max_heater_pv_c")
+    method_setpoint_c = _method_heater_setpoint_c(ctx.profile_metadata)
+
+    limit_c: float
+    policy_raised = False
+    if explicit_override is not None:
+        limit_c = float(explicit_override)
+    elif method_setpoint_c is not None and method_setpoint_c > _HEATER_PV_DEFAULT_LIMIT_C:
+        limit_c = float(method_setpoint_c) + _HOT_START_MARGIN_C
+        policy_raised = True
+    else:
+        limit_c = _HEATER_PV_DEFAULT_LIMIT_C
+
     sample = await _sample_one(ctx, group_key="capa_group", group_value="heater_pv")
     if sample is None:
         # Silent post-start = device broken; pre-start = stream not yet open.
@@ -259,6 +315,49 @@ async def _heater_pv_safe(ctx: ProfilePreflightContext) -> Problem | None:
             blocking=True,
             metadata={"observed_c": value, "limit_c": limit_c},
         )
+    if policy_raised:
+        return Problem(
+            code="capa.heater_pv_hot_start_permitted",
+            message=(
+                f"hot-start permit: raised arm-time PV gate from "
+                f"{_HEATER_PV_DEFAULT_LIMIT_C:.0f} °C to {limit_c:.0f} °C "
+                f"based on method heater_setpoint_c={method_setpoint_c:.0f} °C "
+                f"(+{_HOT_START_MARGIN_C:.0f} °C margin)"
+            ),
+            severity="info",
+            blocking=False,
+            metadata={
+                "limit_c": limit_c,
+                "method_setpoint_c": method_setpoint_c,
+                "margin_c": _HOT_START_MARGIN_C,
+                "observed_c": value,
+            },
+        )
+    return None
+
+
+def _method_heater_setpoint_c(profile_metadata: dict[str, Any]) -> float | None:
+    """Extract the method's ``heater_setpoint_c`` from ``profile_metadata``.
+
+    The CAPA pyrolysis profile carries this under the ``program`` key
+    (matching :attr:`CapaPyrolysisMetadata.program`); accepts the
+    legacy / test-fixture ``heater_program`` alias as a fallback so a
+    profile that ships with either key still feeds the hot-start
+    policy. Returns ``None`` when no setpoint is declared or the value
+    is non-numeric — the caller treats that as "no policy override,
+    use the default limit."
+    """
+    for key in ("program", "heater_program"):
+        program = profile_metadata.get(key)
+        if not isinstance(program, dict):
+            continue
+        raw = program.get("heater_setpoint_c")
+        if raw is None:
+            continue
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
     return None
 
 
@@ -350,8 +449,8 @@ async def _leak_test_recency(ctx: ProfilePreflightContext) -> Problem | None:
 async def _flux_calibration_freshness(ctx: ProfilePreflightContext) -> Problem | None:
     """Warn when a flux target is declared without a recent calibration.
 
-    Implements the proposal §14 Phase 3 step: a specimen run that declares
-    a ``target_heat_flux_kw_m2`` but no ``flux_calibration_ref`` lacks the
+    A specimen run that declares a ``target_heat_flux_kw_m2`` but no
+    ``flux_calibration_ref`` lacks the
     flux↔setpoint mapping that justifies its chosen heater setpoint. The
     check is non-blocking — the operator can knowingly run with a stale
     calibration if they accept the consequences. Recency is only enforced
@@ -363,7 +462,10 @@ async def _flux_calibration_freshness(ctx: ProfilePreflightContext) -> Problem |
     * ``_flux_calibration_window_days`` (default ``7``)
     * ``_flux_calibration_dir`` (default ``configs/calibrations/flux``)
     """
-    program = ctx.profile_metadata.get("heater_program") or {}
+    # CapaPyrolysisMetadata.program is the model field; ``heater_program``
+    # remains accepted as a legacy fixture alias (matches the parallel
+    # convention in :func:`_method_heater_setpoint_c`).
+    program = ctx.profile_metadata.get("program") or ctx.profile_metadata.get("heater_program") or {}
     if not isinstance(program, dict):
         return None
     target = program.get("target_heat_flux_kw_m2")
@@ -573,11 +675,39 @@ def _resolve_required_groups(profile_id: str) -> tuple[ChannelRequirement, ...]:
     return ()
 
 
+def resolve_preflight_check_ids(profile_id: str) -> tuple[str, ...]:
+    """Defer-import the profile module and return its preflight check ids.
+
+    Mirrors :func:`_resolve_required_groups` — the conductor's
+    profile-preflight hook calls this to learn which checks the active
+    profile declares without importing the profile module at runtime
+    top-level (the profile modules already import this module via
+    :mod:`capa.experiment.profiles.base`, so a direct import here would
+    create a cycle).
+
+    Unknown profile ids return an empty tuple — the caller treats that
+    as "no profile-level checks to run" rather than raising, mirroring
+    :func:`_resolve_required_groups`.
+    """
+    if "capa_pyrolysis" in profile_id:
+        from capa.experiment.profiles.capa_pyrolysis import PREFLIGHT_CHECKS  # noqa: PLC0415
+
+        return tuple(check.id for check in PREFLIGHT_CHECKS)
+    if "cone_calorimeter" in profile_id:
+        from capa.experiment.profiles.cone_calorimeter import (  # noqa: PLC0415
+            PREFLIGHT_CHECKS,
+        )
+
+        return tuple(check.id for check in PREFLIGHT_CHECKS)
+    return ()
+
+
 __all__ = [
     "CheckFn",
     "ProfilePreflightContext",
     "get",
     "register",
     "registered_ids",
+    "resolve_preflight_check_ids",
     "run_profile_preflight",
 ]

@@ -1,6 +1,6 @@
 """In-process pub/sub for :class:`DeviceEmission`.
 
-, §7. The engine fan-out reads from per-adapter producer tasks and
+The engine fan-out reads from per-adapter producer tasks and
 publishes onto the :class:`DataBus`; the safety monitor, the UI ring
 buffers, and procedure subscribers all consume from it. The durable sinks do
 *not* go through here — the engine fan-out forwards to the bundle writer
@@ -63,8 +63,8 @@ class DataBusLoopError(CapaError):
     """Raised when :meth:`DataBus.publish` / :meth:`DataBus.publish_nowait`
     is called from a different event loop than the one that owns the bus.
 
-    Migration doc §3.10 / §3.11 invariant 7. Each :class:`DataBus` instance
-    is **loop-affine**: its subscription queues are :class:`BoundedQueue`s
+    Each :class:`DataBus` instance is **loop-affine**: its subscription queues
+    are :class:`BoundedQueue`s
     bound to one loop, and mutating them from a different loop's task is
     undefined behaviour for asyncio. The :class:`Conductor` builds one
     bus on the conductor loop; UIBridge builds a separate mirror
@@ -126,7 +126,7 @@ class DataBus:
         # cheap "what was the last value?" lookups without re-implementing
         # a per-channel ring. Only ChannelSample emissions populate this.
         self._last_values: dict[str, float] = {}
-        # Loop the bus is pinned to (migration doc §3.10). ``None`` until the
+        # Loop the bus is pinned to. ``None`` until the
         # first :meth:`publish` / :meth:`publish_nowait` call, at which point
         # the running loop is captured. :meth:`bind_loop` lets owners (the
         # Conductor) bind explicitly at construction time so a misconfigured
@@ -324,8 +324,8 @@ class DataBus:
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Pin the bus to ``loop`` explicitly.
 
-        Migration doc §3.10. The :class:`Conductor` calls this once at
-        startup so a misconfigured subscriber (e.g. a UI thread accidentally
+        The :class:`Conductor` calls this once at startup so a misconfigured
+        subscriber (e.g. a UI thread accidentally
         publishing into the conductor bus) fails at bind time rather than at
         first publish.
 
@@ -339,7 +339,7 @@ class DataBus:
             raise DataBusLoopError(
                 "DataBus already bound to a different loop "
                 f"(bound={self._owning_loop!r}, new={loop!r}); each bus is "
-                "loop-affine (migration doc §3.10) — construct a separate "
+                "loop-affine; construct a separate "
                 "DataBus on the other loop instead."
             )
 
@@ -378,7 +378,7 @@ class DataBus:
             raise DataBusLoopError(
                 "DataBus publish from wrong loop "
                 f"(bound={self._owning_loop!r}, running={running!r}); each "
-                "bus is loop-affine (migration doc §3.10)."
+                "bus is loop-affine."
             )
 
     # ------------------------------------------------------------------ publish

@@ -8,8 +8,7 @@ Verifies the pool-level bridge construction and lifetime guarantees:
   idempotent.
 * ``pool.close()`` closes every bridge so UI-side drainers wake on
   ``ThreadBridgeClosedError`` and exit cleanly.
-* Multiple arm/disarm cycles do not invalidate the bridges (load-bearing
-  for the "open hardware once" acceptance criterion).
+* Multiple arm/disarm cycles do not invalidate the bridges.
 """
 
 from __future__ import annotations
@@ -145,8 +144,9 @@ class TestPoolBridgeLifetime:
             assert bridge.closed is True
 
     async def test_pool_preview_bridges_survive_multiple_runs(self, tmp_path: Path) -> None:
-        """Load-bearing for §11 acceptance criterion 5/6: pool stays open
-        across many runs, and preview must too. Multiple arm/disarm
+        """The pool stays open across many runs, and preview must too.
+
+        Multiple arm/disarm
         cycles must NOT invalidate the bridges.
         """
         cfg = _make_config((_ir_cam_spec(),))

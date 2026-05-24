@@ -15,12 +15,14 @@ changing the runtime model.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -46,11 +48,16 @@ from capa.config.capa_profile import (
     CAPA_REQUIRED_GROUPS,
     current_capa_mappings,
 )
+from capa.experiment.procedures.builtin.heat_flux_tune.config import (
+    PROCEDURE_ID as HEAT_FLUX_TUNE_PROCEDURE_ID,
+)
+from capa.runtime.emissions import ProcedureTick
 from capa.ui.forms import build_form
 from capa.ui.tabs.setup_sections._base import SectionWidget
 
 if TYPE_CHECKING:
     from capa.ui.forms.from_model import ModelForm
+    from capa.ui.state import RunController
     from capa.ui.tabs.setup_state import SetupDraft
 
 
@@ -167,6 +174,15 @@ class CapaProfileSection(SectionWidget):
         self._specimen_form: ModelForm | None = None
         self._heater_form: ModelForm | None = None
         self._atmosphere_form: ModelForm | None = None
+        # Hold-mode post-tune apply prompt state. ``_hold_prompt`` holds
+        # the live non-modal QMessageBox so Qt doesn't garbage-collect
+        # the dialog out from under us; ``_hold_prompt_fired`` latches
+        # for the current run so a procedure that keeps emitting
+        # ``phase="holding"`` ticks (or the UI re-receiving the same
+        # tick on resubscribe) doesn't re-pop the dialog.
+        self._controller: RunController | None = None
+        self._hold_prompt: QMessageBox | None = None
+        self._hold_prompt_fired = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
@@ -188,7 +204,7 @@ class CapaProfileSection(SectionWidget):
         self._heater_form = build_form(_HeaterProgramView, parent=heater_frame)
         self._heater_form.valuesChanged.connect(lambda: self._on_metadata_changed("heater_program"))
         heater_box.addWidget(self._heater_form)
-        # Tune-artifact toolbar — Phase 3 §11 / §14.4. The artifact maps
+        # Tune-artifact toolbar. The artifact maps
         # heater setpoint ↔ measured flux; clicking "Apply latest" reads
         # the operator's target_heat_flux_kw_m2 and writes back the
         # interpolated heater_setpoint_c + flux_calibration_ref. The
@@ -408,6 +424,135 @@ class CapaProfileSection(SectionWidget):
             self._suppress = False
         self._tune_status_label.setText(
             f"✓ applied {artifact.id} (target {target:g} → setpoint {setpoint:.1f} °C)"
+        )
+        self._tune_status_label.setStyleSheet("color: #2a7;")
+        self.valuesChanged.emit()
+
+    # -- slots: post-tune apply prompt --------------------------------------
+
+    def set_run_controller(self, controller: RunController) -> None:
+        """Attach a run controller for the post-tune apply prompt.
+
+        Subscribes to :attr:`RunController.procedure_tick_received` so a
+        successful Heat-Flux Tune that emits ``phase="holding"`` can
+        offer to write its converged target/setpoint pair into this
+        section's heater-program form. Idempotent: re-attaching the
+        same controller is a no-op.
+
+        The connection uses ``contextlib.suppress(AttributeError)`` to
+        survive stub controllers in tests that don't define the signal
+        — the section degrades to the old "no hold prompt" behavior
+        rather than refusing to render.
+        """
+        if self._controller is controller:
+            return
+        self._controller = controller
+        with contextlib.suppress(AttributeError):
+            controller.procedure_tick_received.connect(self._on_procedure_tick)
+
+    def _on_procedure_tick(self, tick: object) -> None:
+        """Listen for ``phase="holding"`` and offer to apply the held SP.
+
+        Non-holding ticks reset the prompt-fired latch so the next run
+        in the same session gets a fresh dialog when its hold tick
+        lands. The dock's tick path uses the same signal; this
+        subscriber is independent.
+        """
+        if not isinstance(tick, ProcedureTick):
+            return
+        if tick.procedure_id != HEAT_FLUX_TUNE_PROCEDURE_ID:
+            return
+        payload = dict(tick.payload)
+        if payload.get("phase") != "holding":
+            self._hold_prompt_fired = False
+            return
+        if self._hold_prompt_fired:
+            return
+        try:
+            target_f = float(payload.get("target_kw_m2"))  # type: ignore[arg-type]
+            sp_f = float(payload.get("commanded_setpoint_c"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return
+        self._hold_prompt_fired = True
+        self._prompt_apply_hold(target_f, sp_f)
+
+    def _prompt_apply_hold(self, target_kw_m2: float, setpoint_c: float) -> None:
+        """Raise the non-modal "apply held tune?" dialog.
+
+        Suppresses to a status-label toast when no heater-program form
+        is loaded — avoids a confusing dialog with nowhere to write.
+        Stored as ``self._hold_prompt`` until dismissed so Qt doesn't
+        garbage-collect the dialog while the operator is reading it.
+        """
+        if self._heater_form is None:
+            self._tune_status_label.setText(
+                f"Tune held at {setpoint_c:.1f} °C → {target_kw_m2:g} kW/m². "
+                f"Load a method to apply."
+            )
+            self._tune_status_label.setStyleSheet("color: #2a7;")
+            return
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setWindowTitle("Apply held tune?")
+        msg.setText(
+            f"Apply this tune's {target_kw_m2:g} kW/m² → "
+            f"{setpoint_c:.1f} °C to the active method's "
+            f"heater_setpoint_c?"
+        )
+        msg.setInformativeText(
+            "The tune left the heater holding at this setpoint. Apply "
+            "writes the converged value into the heater-program form; "
+            "Dismiss leaves the form untouched (you can apply later "
+            "via 'Apply latest tune')."
+        )
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Apply | QMessageBox.StandardButton.Discard
+        )
+        msg.setDefaultButton(QMessageBox.StandardButton.Apply)
+        msg.setWindowModality(Qt.WindowModality.NonModal)
+        msg.buttonClicked.connect(
+            lambda btn, m=msg, t=target_kw_m2, s=setpoint_c: self._on_hold_prompt_button(
+                btn, m, t, s
+            )
+        )
+        self._hold_prompt = msg
+        msg.show()
+
+    def _on_hold_prompt_button(
+        self,
+        button: QAbstractButton,
+        msg: QMessageBox,
+        target_kw_m2: float,
+        setpoint_c: float,
+    ) -> None:
+        if msg.standardButton(button) == QMessageBox.StandardButton.Apply:
+            self._apply_held_values(target_kw_m2, setpoint_c)
+        msg.deleteLater()
+        if self._hold_prompt is msg:
+            self._hold_prompt = None
+
+    def _apply_held_values(self, target_kw_m2: float, setpoint_c: float) -> None:
+        """Write the held ``(target, setpoint)`` pair into the heater form.
+
+        Mirrors :meth:`_apply_artifact` but skips the artifact-lookup
+        path — the held tune just produced exactly the values we want,
+        so we can write them through directly rather than re-loading
+        the on-disk artifact and interpolating. ``flux_calibration_ref``
+        is intentionally left untouched: the artifact-based "Apply
+        latest tune" button is still the right way to set that.
+        """
+        if self._heater_form is None:
+            return
+        values = dict(self._heater_form.values())
+        values["target_heat_flux_kw_m2"] = float(target_kw_m2)
+        values["heater_setpoint_c"] = float(setpoint_c)
+        self._suppress = True
+        try:
+            self._heater_form.set_values(values)
+        finally:
+            self._suppress = False
+        self._tune_status_label.setText(
+            f"✓ applied held tune (target {target_kw_m2:g} kW/m² → setpoint {setpoint_c:.1f} °C)"
         )
         self._tune_status_label.setStyleSheet("color: #2a7;")
         self.valuesChanged.emit()

@@ -299,15 +299,14 @@ kind = "relative"
 value = 0.03
 coverage_factor = 2.0
 method = "manufacturer cert + reference comparison"
-# TODO(rig): replace with the cert's stated uncertainty if it differs
-# from the 3% k=2 placeholder.
+# Replace with the cert's stated uncertainty if it differs from the 3%
+# k=2 placeholder.
 [channels.calibration.fit_metadata]
 reference_instrument = "Medtherm Corporation 32-10SB-18-20608"
 reference_serial = "232041"
-# fitted_at is a deliberate Unix-epoch placeholder — the actual cert
-# date isn't at hand. TODO(rig): replace with the real cert-issue date
-# (any ISO-8601 datetime; the value drives no automated behaviour but
-# is part of the bundle's calibration pedigree).
+# fitted_at is a deliberate Unix-epoch placeholder until the real cert-issue
+# date is available (any ISO-8601 datetime; the value drives no automated
+# behaviour but is part of the bundle's calibration pedigree).
 fitted_at = 1970-01-01T00:00:00Z
 notes = "linear fit: slope 12867.29134 kW/m^2/V, intercept -0.064771278 kW/m^2 (named NI MAX scale 'CAPA HFG'); applied software-side, not via the driver scale. fitted_at is a placeholder; replace with the actual cert date when available."
 

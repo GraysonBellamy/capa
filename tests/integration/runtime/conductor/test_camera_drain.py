@@ -1,8 +1,7 @@
 """Conductor drain emission-type dispatch tests.
 
-Verifies the central guarantee of migration doc §6.1 (camera unification):
-the Conductor's per-worker drain dispatches by runtime type so cameras
-land on the right writer paths.
+Verifies that the Conductor's per-worker drain dispatches by runtime type
+so cameras land on the right writer paths.
 
 * :class:`FrameReceipt` → :meth:`WriterRef.record_frame` (the FakeWriterRef
   collects them in ``frames``).

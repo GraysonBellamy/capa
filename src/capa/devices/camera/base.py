@@ -10,7 +10,7 @@ The Protocol is intentionally separate from
   posted from whichever thread the SDK callback runs on) and periodic
   :class:`CameraHealth` snapshots, *not* ``ChannelSample``,
 * discovery returns :class:`CameraInfo` with model + serial + transport so the
-  ``serial`` / ``model_hint`` selection rules in §12.1 can run without opening
+  ``serial`` / ``model_hint`` selection rules can run without opening
   every camera.
 
 Concrete adapters live under :mod:`capa.devices.camera` (visible) and in the
@@ -376,7 +376,7 @@ class Camera(Protocol):
     async def command(self, cmd: DeviceCommand) -> CommandResult:
         """Issue a generic command. Same contract as
         :meth:`~capa.devices.adapter.DeviceAdapter.command`: the adapter
-        applies the §9 authorization gate, dispatches ``cmd.kind`` onto its
+        applies the authorization gate, dispatches ``cmd.kind`` onto its
         typed methods, and returns a :class:`CommandResult` with
         ``accepted`` reflecting acceptance.
 

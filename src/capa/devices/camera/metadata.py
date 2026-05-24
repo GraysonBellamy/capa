@@ -4,7 +4,7 @@ The :class:`~capa.ui.manual.cards.webcam.WebcamCard`
 needs UVC ranges, supported resolutions, and per-resolution fps caps to
 rebuild its widgets when the pool publishes. Those values live on the
 :class:`~capa.devices.camera.webcam.WebcamAdapter` instance, which is
-owned by the worker loop (migration doc §3.11 invariant 2).
+owned by the worker loop.
 Reading them from the qasync loop is a cross-loop access.
 
 The de facto read used to be safe — the attributes are populated at

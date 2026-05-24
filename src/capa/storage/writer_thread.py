@@ -156,7 +156,7 @@ class WriterThread:
         # the drain thread. The Conductor saturation monitor reads this to
         # detect a stalled writer: if `depth > 0` but `last_accept_monotonic`
         # hasn't advanced within `saturation_deadline_s`, the writer has
-        # stopped accepting work (migration doc §4.5). Initialized to the
+        # stopped accepting work. Initialized to the
         # start-of-process monotonic time so a freshly-started, empty inbox
         # doesn't immediately read as "stalled". Updated without locks; a
         # single 64-bit int store is atomic under the GIL on CPython and the
@@ -188,8 +188,8 @@ class WriterThread:
     def last_accept_monotonic_ns(self) -> int:
         """Monotonic-ns timestamp of the most recent successful inbox pop.
 
-        Read by the Conductor saturation monitor (migration doc §4.5) to
-        detect a stalled writer: ``depth > 0`` combined with
+        Read by the Conductor saturation monitor to detect a stalled writer:
+        ``depth > 0`` combined with
         ``last_accept_monotonic_ns`` not advancing for
         ``saturation_deadline_s`` is the canonical writer-stall signal.
 

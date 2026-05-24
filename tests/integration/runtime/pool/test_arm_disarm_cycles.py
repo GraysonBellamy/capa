@@ -51,7 +51,7 @@ def _build_pool(n_devices: int = 3) -> tuple[WorkerPool, list]:
 class TestMultipleRunsNoReopen:
     @pytest.mark.anyio
     async def test_five_arm_disarm_cycles_one_open_call(self) -> None:
-        """The headline test from the migration doc §10.2."""
+        """Multiple arm/disarm cycles reuse the already-open adapters."""
         pool, adapters = _build_pool(n_devices=3)
         await pool.open()
         # Snapshot open-call counts after pool.open.

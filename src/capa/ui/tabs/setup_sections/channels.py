@@ -177,11 +177,11 @@ class ChannelTableModel(QAbstractTableModel):
         super().__init__()
         self._rows: list[dict[str, Any]] = []
         # Row index → tooltip text for the "reads from" cell. Driven by
-        # the section-level live validator (Step 4.4 of the NI-DAQ UX work):
-        # an NI binding whose ``(device, task, field)`` doesn't resolve
-        # against any declared NI channel paints the cell red and surfaces
-        # the available alternatives in the tooltip. Cleared and re-set
-        # whenever the section sees a draft / channel mutation.
+        # the section-level live validator: an NI binding whose
+        # ``(device, task, field)`` doesn't resolve against any declared
+        # NI channel paints the cell red and surfaces the available
+        # alternatives in the tooltip. Cleared and re-set whenever the
+        # section sees a draft / channel mutation.
         self._row_issues: dict[int, str] = {}
 
     def channels(self) -> list[dict[str, Any]]:
@@ -941,8 +941,8 @@ class ChannelsSection(SectionWidget):
             return
         declared_keys = set(declared)
         by_device_task: dict[tuple[str, str], list[str]] = {}
-        for dev, task, field in declared:
-            by_device_task.setdefault((dev, task), []).append(field)
+        for declared_dev, declared_task, declared_field in declared:
+            by_device_task.setdefault((declared_dev, declared_task), []).append(declared_field)
         issues: dict[int, str] = {}
         for idx, row in enumerate(self._model.channels()):
             source = row.get("source")
@@ -1337,8 +1337,8 @@ class ChannelsSection(SectionWidget):
         Units, kind, and calibration come from the NI row's declared
         ``units`` — closing the latent ``K``/``degC`` mismatch in the
         generic ``NIDAQ_THERMOCOUPLE`` template for any new channel
-        added through this menu (the template fix in Step 1 covers the
-        generic add; this is the hardware-aware version).
+        added through this menu. The generic-template add closes the
+        same mismatch; this is the hardware-aware version.
         """
         if self._draft is None:
             return

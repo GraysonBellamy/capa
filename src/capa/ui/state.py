@@ -60,6 +60,7 @@ from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState
 from capa.ui.lifecycle import LifecycleKind, LifecycleRegistry
 
 if TYPE_CHECKING:
+    from capa.experiment.procedures.base import OperatorCommand
     from capa.runtime.conductor import RunSession
     from capa.runtime.runcontext import RunContext
 

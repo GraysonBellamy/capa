@@ -319,21 +319,21 @@ def _layer2_nidaq_join(hardware: Any, document: ConfigDocument) -> list[ConfigPr
         binding_src = getattr(binding, "source", None)
         if binding_src not in nidaq_bind_kinds:
             continue
-        device_name = getattr(binding, "device", None)
-        task_name = getattr(binding, "task", None)
+        binding_device_name = getattr(binding, "device", None)
+        binding_task_name = getattr(binding, "task", None)
         field_attr = "field" if binding_src == "nidaq_reading_field" else "channel"
-        field_name = getattr(binding, field_attr, None)
+        binding_field_name = getattr(binding, field_attr, None)
         if not (
-            isinstance(device_name, str)
-            and isinstance(task_name, str)
-            and isinstance(field_name, str)
+            isinstance(binding_device_name, str)
+            and isinstance(binding_task_name, str)
+            and isinstance(binding_field_name, str)
         ):
             continue
-        if (device_name, task_name, field_name) in declared_by_key:
+        if (binding_device_name, binding_task_name, binding_field_name) in declared_by_key:
             continue
         # If the device exists but isn't NI, the family-mismatch check above
         # already flagged it — don't double-emit.
-        task_key = (device_name, task_name)
+        task_key = (binding_device_name, binding_task_name)
         known_fields = fields_by_device_task.get(task_key)
         if known_fields is None and task_key in task_keys:
             known_fields = []
@@ -343,8 +343,8 @@ def _layer2_nidaq_join(hardware: Any, document: ConfigDocument) -> list[ConfigPr
             # as an NI device. Family mismatch covers the latter; for the
             # former, surface the available tasks on the device.
             available_tasks = sorted(
-                {t for (d, t) in fields_by_device_task if d == device_name}
-                | {t for (d, t) in task_keys if d == device_name}
+                {t for (d, t) in fields_by_device_task if d == binding_device_name}
+                | {t for (d, t) in task_keys if d == binding_device_name}
             )
             if not available_tasks:
                 continue
@@ -353,7 +353,8 @@ def _layer2_nidaq_join(hardware: Any, document: ConfigDocument) -> list[ConfigPr
                     severity="error",
                     code="channels.binding_field_unresolved",
                     message=(
-                        f"channel {ch.name!r} binds to {device_name!r}.{task_name!r} but "
+                        f"channel {ch.name!r} binds to "
+                        f"{binding_device_name!r}.{binding_task_name!r} but "
                         f"that task isn't declared on the device. Available tasks: "
                         f"{available_tasks!r}"
                     ),
@@ -369,9 +370,10 @@ def _layer2_nidaq_join(hardware: Any, document: ConfigDocument) -> list[ConfigPr
                     severity="error",
                     code="channels.binding_field_unresolved",
                     message=(
-                        f"channel {ch.name!r} reads from NI field {field_name!r} on "
-                        f"{device_name!r}.{task_name!r}, but that task has no NI fields "
-                        "declared"
+                        f"channel {ch.name!r} reads from NI field "
+                        f"{binding_field_name!r} on "
+                        f"{binding_device_name!r}.{binding_task_name!r}, "
+                        "but that task has no NI fields declared"
                     ),
                     section="channels",
                     path=("channels", idx, "source", field_attr),
@@ -384,8 +386,9 @@ def _layer2_nidaq_join(hardware: Any, document: ConfigDocument) -> list[ConfigPr
                 severity="error",
                 code="channels.binding_field_unresolved",
                 message=(
-                    f"channel {ch.name!r} reads from NI field {field_name!r} on "
-                    f"{device_name!r}.{task_name!r}, but that field isn't declared. "
+                    f"channel {ch.name!r} reads from NI field {binding_field_name!r} on "
+                    f"{binding_device_name!r}.{binding_task_name!r}, "
+                    "but that field isn't declared. "
                     f"Available fields: {sorted(set(known_fields))!r}"
                 ),
                 section="channels",
@@ -408,9 +411,9 @@ def _layer3_domain(config: Any, document: ConfigDocument) -> list[ConfigProblem]
     """CAPA profile required-mapping check.
 
     For CAPA pyrolysis: every required group above must be present at
-    least once in ``channel.metadata["capa_group"]``. The plan's open
-    question 5 says ~90% of CAPA experiments are single-setpoint, so
-    we don't over-constrain ramp parameters at this layer.
+    least once in ``channel.metadata["capa_group"]``. Most CAPA experiments
+    are single-setpoint, so we don't over-constrain ramp parameters at this
+    layer.
     """
     profile_ref = getattr(config, "domain_profile", None)
     if profile_ref is None:

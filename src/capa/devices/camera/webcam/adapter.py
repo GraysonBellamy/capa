@@ -644,7 +644,7 @@ class WebcamAdapter:
         * ``drop_reason`` is non-``None`` only when the encoder rejected
           the frame mid-recording (libx264 EINVAL, format renegotiation,
           …). Dropping rather than raising keeps the pump alive across
-          single-frame faults (hardware-day §6).
+          single-frame faults.
 
         The CPU-heavy work (libx264 encode, container mux, JPEG encode)
         lives here so :meth:`push_frame` can run it in a worker thread via
@@ -861,8 +861,7 @@ class WebcamAdapter:
         ``av.open`` is wrapped in :meth:`_open_input_with_retry` so the
         Windows DirectShow filter-graph hold-time after a previous close
         is absorbed transparently. Decode + reformat each run in a worker
-        thread so the per-frame CPU work doesn't block the asyncio loop
-        (hardware-day §5.B: 14 fps regression).
+        thread so the per-frame CPU work doesn't block the asyncio loop.
 
         When ``CAPA_WEBCAM_FRAME_DIAG=1`` is set, the first 150 input
         frames are logged at INFO with ``frame.format.name`` /

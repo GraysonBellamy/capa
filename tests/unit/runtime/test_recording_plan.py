@@ -11,10 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from capa.experiment.config import RecordingPolicy
-from capa.experiment.procedures.builtin.heat_flux_tune import (
-    HeatFluxTune,
-    HeatFluxTuneConfig,
-)
+from capa.experiment.procedures.builtin.heat_flux_tune.controller import HeatFluxTune
 from capa.runtime.recording import (
     ResolvedRecordingPlan,
     default_recording_plan,
@@ -42,9 +39,7 @@ class _PlanCaptureProcedure:
     def __init__(self, plan: ResolvedRecordingPlan | None) -> None:
         self._plan = plan
 
-    def plan_capture(
-        self, default_plan: ResolvedRecordingPlan
-    ) -> ResolvedRecordingPlan | None:
+    def plan_capture(self, default_plan: ResolvedRecordingPlan) -> ResolvedRecordingPlan | None:
         return self._plan
 
 
@@ -172,9 +167,9 @@ class TestHeatFluxTunePlanCapture:
     def test_rename_resilience(self) -> None:
         """Rebinding ``flux_channel`` produces the rebound name in the plan.
 
-        This is the proposal's §9 critical test — the filter must derive
-        from config fields, not string literals. A plugin author who
-        hardcodes ``"heat_flux_gauge"`` will fail this test.
+        The filter must derive from config fields, not string literals.
+        A plugin author who hardcodes ``"heat_flux_gauge"`` will fail this
+        test.
         """
         hw = _FakeHardware(channels=("flux_b", "pv_b", "sp_b"), cameras=())
         proc = HeatFluxTune.from_config(
@@ -200,9 +195,7 @@ class TestHeatFluxTunePlanCapture:
             cameras=("ir", "visible"),
         )
         proc = HeatFluxTune.from_config({"targets_kw_m2": (50.0,), "t_set_max_c": 900.0})
-        plan = resolve_recording_plan(
-            hardware=hw, procedure=proc, policy=RecordingPolicy()
-        )
+        plan = resolve_recording_plan(hardware=hw, procedure=proc, policy=RecordingPolicy())
         # Procedure-narrowed: only three channels, no cameras.
         assert plan.channel_mode == "only"
         assert plan.recorded_channels == (

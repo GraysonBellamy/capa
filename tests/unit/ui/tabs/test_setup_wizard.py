@@ -109,12 +109,12 @@ def test_method_attach_carries_path_through() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Save round-trip — the §9.1 acceptance path.
+# Save round-trip.
 # ---------------------------------------------------------------------------
 
 
 def test_save_now_writes_external_layout(tmp_path: Path) -> None:
-    """Acceptance §9.1 — create a sim CAPA setup, save, reload."""
+    """Create a sim CAPA setup, save, reload."""
     from capa.ui.tabs.setup_wizard import _layout_for
 
     spec = _Spec()
@@ -166,7 +166,7 @@ def test_save_now_inline_layout_writes_one_file(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Wizard validation (§9.4 — saved drafts validate cleanly).
+# Wizard validation.
 # ---------------------------------------------------------------------------
 
 

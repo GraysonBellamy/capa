@@ -35,7 +35,8 @@ Filtering happens at two enforcement points:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -135,9 +136,9 @@ def resolve_recording_plan(
     *,
     hardware: HardwareProfile,
     procedure: Procedure | None,
-    policy: "RecordingPolicy",
+    policy: RecordingPolicy,
 ) -> ResolvedRecordingPlan:
-    """Run the §4.3 resolution pipeline.
+    """Run the recording-plan resolution pipeline.
 
     Order:
 
@@ -158,9 +159,13 @@ def resolve_recording_plan(
     if procedure is None:
         return default
     plan_capture = getattr(procedure, "plan_capture", None)
-    if plan_capture is None:
+    if not callable(plan_capture):
         return default
-    narrowed = plan_capture(default)
+    capture = cast(
+        Callable[[ResolvedRecordingPlan], ResolvedRecordingPlan | None],
+        plan_capture,
+    )
+    narrowed = capture(default)
     if narrowed is None:
         return default
     return narrowed

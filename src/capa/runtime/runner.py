@@ -55,8 +55,8 @@ def _bridge_task_to_future[T](out: Future[T], task: asyncio.Task[T]) -> None:
 
     Why drop instead of error: the worker-side coroutine is shielded (see
     :meth:`capa.runtime.worker.Worker._dispatch_impl`) and must run to
-    completion regardless of caller cancellation — that is the §4.2 rule
-    that keeps in-flight hardware transactions intact. If the caller has
+    completion regardless of caller cancellation, which keeps in-flight
+    hardware transactions intact. If the caller has
     abandoned the future before the task finishes, the result has nowhere
     to go; setting it would raise ``InvalidStateError`` on the runner's
     loop. The early return is the fast path; the ``except`` clause covers

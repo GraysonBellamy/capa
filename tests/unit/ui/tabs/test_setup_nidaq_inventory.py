@@ -1,10 +1,10 @@
 """Tests for SetupTab's NI-DAQ inventory cache.
 
-The Devices and Channels editors (Steps 4 and 5 of the NI-DAQ UX work)
-read NI hardware inventory through :meth:`SetupTab.nidaq_inventory`
-instead of calling ``capa.devices.nidaq.discover()`` themselves —
-form widgets should be pure UI, discovery is I/O. These tests cover the
-cache surface, signal emission, and the DiscoveryDialog → SetupTab join.
+The Devices and Channels editors read NI hardware inventory through
+:meth:`SetupTab.nidaq_inventory` instead of calling
+``capa.devices.nidaq.discover()`` themselves — form widgets should be
+pure UI, discovery is I/O. These tests cover the cache surface, signal
+emission, and the DiscoveryDialog → SetupTab join.
 """
 
 from __future__ import annotations

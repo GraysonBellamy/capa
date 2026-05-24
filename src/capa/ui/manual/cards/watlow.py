@@ -21,6 +21,7 @@ calibration to the wire-side reading.
 
 from __future__ import annotations
 
+import json
 from typing import Final
 
 import structlog
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -41,10 +43,10 @@ from PySide6.QtWidgets import (
 from capa.devices.adapter import Capability
 from capa.devices.watlow import WatlowStateSnapshot
 from capa.experiment.config import DeviceConfig
-from capa.experiment.procedures.builtin.heat_flux_tune import (
+from capa.experiment.procedures.builtin.heat_flux_tune.config import (
     PROCEDURE_ID as HEAT_FLUX_TUNE_ID,
 )
-from capa.experiment.procedures.builtin.heat_flux_tune import (
+from capa.experiment.procedures.builtin.heat_flux_tune.config import (
     HeatFluxTuneConfig,
 )
 from capa.runtime.dispatch import ManualClient
@@ -79,6 +81,13 @@ _HEAT_FLUX_GAUGE_CHANNEL = "heat_flux_gauge"
 gauge. The heater card renders its Heat-Flux Tune section only when a
 channel of this name exists in the active hardware profile — defensive
 UX so the launcher isn't visible on a rig that can't measure flux."""
+
+
+_FALLBACK_SAFE_C: Final[float] = 25.0
+"""Safe-cool fallback when the active method has no Heat-Flux Tune config
+to read ``t_safe_c`` from. Matches :attr:`HeatFluxTuneConfig.t_safe_c`'s
+own default — picking a different value would surprise an operator who
+has been seeing 25 °C in the procedure dialogs."""
 
 
 class HeaterCard(DeviceCard):
@@ -147,6 +156,7 @@ class HeaterCard(DeviceCard):
     def _build_capability_sections(self) -> None:
         if Capability.HAS_SETPOINT in self._capabilities:
             self._build_setpoint_section()
+            self._build_safe_cool_section()
         if Capability.HAS_PARAMETER_CONFIG in self._capabilities:
             self._build_parameter_section()
         if self._heat_flux_gauge_available():
@@ -218,8 +228,6 @@ class HeaterCard(DeviceCard):
             return
         # Copy a clipboard-ready payload mirroring what the procedure
         # section expects under ``experiment_payload["procedure"]``.
-        import json
-
         clipboard_text = json.dumps(
             {"id": HEAT_FLUX_TUNE_ID, "config": config_dict},
             indent=2,
@@ -282,6 +290,91 @@ class HeaterCard(DeviceCard):
         body.addLayout(row)
         for w in (spin, instance_spin, btn):
             self.register_action_widget(w)
+
+    def _build_safe_cool_section(self) -> None:
+        """Compose the Cool-to-safe quick-action row.
+
+        The button issues a single setpoint write to the safe temperature
+        read from the active method's :class:`HeatFluxTuneConfig` (when
+        present) or :data:`_FALLBACK_SAFE_C`. Confirmation dialog gives
+        one click of friction so a fat-finger on a hot rig doesn't drive
+        the heater to ambient mid-experiment.
+
+        Ships independent of hold mode: even without the
+        ``hold_at_completion`` flag, this affordance is a generally
+        useful safety control — a faster path than typing 25 into the
+        setpoint spinbox.
+        """
+        body = self.add_section("Safe cool")
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        safe_c = self._resolve_safe_temp_c()
+        info_label = QLabel(
+            f"Drive heater to {safe_c:g} °C.",
+            self,
+        )
+        info_label.setStyleSheet("color: #666;")
+        row.addWidget(info_label, stretch=1)
+        btn = QPushButton("Cool to safe", self)
+        btn.setToolTip(
+            "Issue a single setpoint write driving the heater to its "
+            "safe temperature. Safe temperature is read from the active "
+            "method's Heat-Flux Tune config (t_safe_c) when present, "
+            f"otherwise {_FALLBACK_SAFE_C:g} °C."
+        )
+        btn.clicked.connect(self._on_safe_cool_clicked)
+        row.addWidget(btn)
+        body.addLayout(row)
+        self.register_action_widget(btn)
+
+    def _on_safe_cool_clicked(self) -> None:
+        """Confirm + dispatch the safe-cool setpoint write.
+
+        Re-reads the safe temperature at click time (rather than caching
+        it at section-build time) so a mid-session active-config swap
+        picks up the new value.
+        """
+        safe_c = self._resolve_safe_temp_c()
+        instance = int(self._instance_spin.value()) if self._instance_spin is not None else 1
+        reply = QMessageBox.question(
+            self,
+            "Cool heater to safe?",
+            f"Drive heater to {safe_c:g} °C? The current setpoint will be overwritten.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Ok:
+            return
+        self.schedule_dispatch(
+            kind="set_setpoint",
+            payload={"value": float(safe_c), "instance": instance},
+            destructive=True,
+            destructive_summary=(
+                f"Cool heater {self._spec.name!r} to safe temperature {safe_c:g} °C."
+            ),
+        )
+
+    def _resolve_safe_temp_c(self) -> float:
+        """Look up ``t_safe_c`` from the active Heat-Flux Tune config.
+
+        Returns :data:`_FALLBACK_SAFE_C` when no config is loaded, when
+        the procedure is something other than heat-flux tune, or when
+        ``t_safe_c`` is missing / non-numeric. The procedure config dict
+        is the raw operator-supplied blob — pydantic validation lives
+        with the procedure plugin, not here, so we treat the dict
+        defensively.
+        """
+        config = self._controller.active_config
+        if config is None:
+            return _FALLBACK_SAFE_C
+        procedure_ref = getattr(config, "procedure", None)
+        if procedure_ref is None or procedure_ref.id != HEAT_FLUX_TUNE_ID:
+            return _FALLBACK_SAFE_C
+        raw = procedure_ref.config.get("t_safe_c")
+        try:
+            return float(raw) if raw is not None else _FALLBACK_SAFE_C
+        except (TypeError, ValueError):
+            return _FALLBACK_SAFE_C
 
     def _build_parameter_section(self) -> None:
         body = self.add_section("Raw parameter write")

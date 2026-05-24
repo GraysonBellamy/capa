@@ -22,22 +22,21 @@ The procedure is **slow and supervisory** — not a low-level flux PID.
 The Schmidt-Boelter gauge is removed before the specimen run; the
 experiment-time controller remains temperature-only.
 
-See ``docs/heat-flux-control-proposal.md`` for the design rationale,
-algorithm derivation, and safety-condition table.
+This module owns the async state machine, stream consumers, operator
+command handling, artifact persistence, and tick emission. Pure-math
+helpers, the pydantic config, and the initial-setpoint heuristics live
+in sibling modules.
 """
 
 from __future__ import annotations
 
 import math
-import statistics
-from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import ClassVar
 
 import anyio
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from capa.calibration.tune_artifact import (
     HeatFluxTuneArtifact,
@@ -46,7 +45,6 @@ from capa.calibration.tune_artifact import (
     load_latest,
     save_artifact,
 )
-from capa.core.errors import CapaError
 from capa.devices.records import ChannelSample
 from capa.experiment.procedures.base import (
     ChannelRequirement,
@@ -58,839 +56,24 @@ from capa.experiment.procedures.base import (
 from capa.runtime.emissions import ProcedureTick
 from capa.runtime.recording import ResolvedRecordingPlan
 
-PROCEDURE_ID = "capa.builtin.heat_flux_tune"
-PROCEDURE_NAME = "Heat-Flux Tune"
-PROCEDURE_VERSION = "0.1.0"
-
-
-class HeatFluxTuneError(CapaError):
-    """Raised when the tuner cannot make progress.
-
-    Distinct from
-    :class:`~capa.experiment.procedures.base.ProcedureError` (preflight
-    refusal) so the engine can classify an in-flight tune failure as a
-    procedure crash rather than a misconfiguration. Caught by
-    :meth:`HeatFluxTune.run` itself for the abort-and-cool path; the
-    engine sees a clean return after the cooldown.
-    """
-
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-
-InitialGuessSource = Literal["lookup", "operator", "sigma_t4"]
-"""How to pick the first heater setpoint per target.
-
-* ``lookup``: most-recent on-disk artifact (default).
-* ``operator``: ``operator_initial_setpoint_c`` from the config.
-* ``sigma_t4``: σT⁴ fallback for a genuine cold start.
-"""
-
-
-class HeatFluxTuneConfig(BaseModel):
-    """``config.procedure.config`` shape for :class:`HeatFluxTune`.
-
-    Defaults are intentionally generous on time and tight on safety —
-    the procedure runs once a day and an extra five minutes of dwell is
-    cheap compared to an undercharacterised flux number going into the
-    bundle. Per-rig tuning of the predicate thresholds is expected once
-    a few tune sessions have been compared against operator judgement.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    targets_kw_m2: tuple[float, ...] = Field(
-        min_length=1,
-        json_schema_extra={
-            "capa_unit": "kW/m²",
-            "capa_help": (
-                "One or more target radiant heat fluxes to converge. Typically "
-                "supplied ascending (25, 50, 75) so the heater warms monotonically "
-                "across the session."
-            ),
-            "capa_group_open": True,
-        },
-    )
-
-    t_set_max_c: float = Field(
-        default=900.0,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "°C",
-            "capa_help": (
-                "Per-session hard ceiling on commanded heater setpoint. 900 °C is "
-                "the typical CAPA upper end; 1000 °C is the absolute rig-survival "
-                "limit — preflight refuses anything higher."
-            ),
-            "capa_group_open": True,
-        },
-    )
-
-    operator_id: str | None = Field(
-        default=None,
-        json_schema_extra={
-            "capa_help": "Operator running the tune; recorded into the artifact.",
-            "capa_group_open": True,
-        },
-    )
-
-    tolerance_kw_m2: float | None = Field(
-        default=None,
-        json_schema_extra={
-            "capa_unit": "kW/m²",
-            "capa_help": (
-                "Absolute tolerance for convergence. Leave unset to use the default "
-                "``max(0.1, 0.005 × target)`` per target — relative-or-floor."
-            ),
-            "capa_group_open": True,
-        },
-    )
-
-    initial_guess: InitialGuessSource = Field(
-        default="lookup",
-        json_schema_extra={
-            "capa_help": (
-                "How to pick the first heater setpoint. ``lookup`` interpolates the "
-                "most recent on-disk artifact; ``operator`` uses the supplied "
-                "value; ``sigma_t4`` is the cold-start σT⁴ fallback."
-            ),
-            "capa_group": "initial_setpoint",
-            "capa_group_subtitle": "First-iteration heater setpoint",
-        },
-    )
-    operator_initial_setpoint_c: float | None = Field(
-        default=None,
-        json_schema_extra={
-            "capa_unit": "°C",
-            "capa_help": (
-                "Required when ``initial_guess = operator``. Operator-supplied "
-                "known-safe starting setpoint."
-            ),
-            "capa_group": "initial_setpoint",
-        },
-    )
-
-    flux_channel: str = Field(
-        default="heat_flux_gauge",
-        json_schema_extra={
-            "capa_help": "Channel name of the calibrated heat-flux gauge reading.",
-            "capa_group": "channels",
-            "capa_group_subtitle": "Bound channels (advanced)",
-        },
-    )
-    heater_setpoint_channel: str = Field(
-        default="heater.setpoint",
-        json_schema_extra={
-            "capa_help": "Channel name to issue heater setpoint writes against.",
-            "capa_group": "channels",
-        },
-    )
-    heater_pv_channel: str = Field(
-        default="heater.pv",
-        json_schema_extra={
-            "capa_help": "Channel name of the heater process variable (live PV).",
-            "capa_group": "channels",
-        },
-    )
-
-    t_stable_s: float = Field(
-        default=90.0,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": (
-                "How long every steady-state condition (PV in band, flux variance "
-                "low, flux slope flat) must hold continuously before a measurement "
-                "window is taken."
-            ),
-            "capa_group": "predicate",
-            "capa_group_subtitle": "Steady-state predicate (advanced)",
-        },
-    )
-    t_window_s: float = Field(
-        default=60.0,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": (
-                "Rolling-statistics window for mean / std / slope of flux. At the "
-                "rig's 5 Hz sample rate this gives ~300 samples per window — wide "
-                "enough that the least-squares slope estimator's 1-σ error from "
-                "gauge noise is ~0.02 kW/m²/min, well below the strict slope cap."
-            ),
-            "capa_group": "predicate",
-        },
-    )
-    delta_t_band_c: float = Field(
-        default=0.3,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "°C",
-            "capa_help": (
-                "Heater PV deadband: ``|PV − setpoint| ≤ this`` is required for the "
-                "predicate to hold."
-            ),
-            "capa_group": "predicate",
-        },
-    )
-    sigma_flux_floor_kw_m2: float = Field(
-        default=0.05,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "kW/m²",
-            "capa_help": (
-                "Absolute floor on the rolling std-dev cap. The effective cap is "
-                "``max(sigma_flux_floor_kw_m2, sigma_flux_max_pct × target)`` — the "
-                "floor keeps low-flux targets from chasing a cap below the gauge's "
-                "intrinsic noise. Empirically the rig's S-B head delivers σ ~0.03 kW/m² "
-                "on a steady field, so a 0.05 floor leaves ~1.7× headroom."
-            ),
-            "capa_group": "predicate",
-        },
-    )
-    sigma_flux_max_pct: float = Field(
-        default=0.0025,
-        gt=0,
-        json_schema_extra={
-            "capa_help": (
-                "Relative cap on rolling std-dev, as a fraction of the target flux. "
-                "0.0025 = 0.25% — at a 50 kW/m² target this allows ±0.125 kW/m² rolling σ, "
-                "still above the floor. Used together with ``sigma_flux_floor_kw_m2`` "
-                "(whichever is larger wins per-target)."
-            ),
-            "capa_group": "predicate",
-        },
-    )
-    predicate_relax_factor: float = Field(
-        default=3.0,
-        ge=1.0,
-        json_schema_extra={
-            "capa_help": (
-                "Distance-based relaxation of the slope-flat and dwell-time "
-                "predicate gates. When the previous iteration was far from target "
-                "(|err| ≥ 30 % of target), ``slope_max_kw_per_min`` is multiplied "
-                "by this factor and ``t_stable_s`` is divided by it — so a noisy / "
-                "still-drifting field is accepted faster so the next big secant "
-                "step can be taken. Decays linearly to 1.0 (full strictness) by "
-                "the time |err| reaches 2× ``tolerance_kw_m2``. The verify soak is "
-                "unaffected. Set to 1.0 to disable."
-            ),
-            "capa_group": "predicate",
-        },
-    )
-    slope_max_kw_per_min: float = Field(
-        default=0.15,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "kW/m²/min",
-            "capa_help": (
-                "Maximum |d(flux)/dt|. Catches slow monotonic drift that the "
-                "variance check would miss. With ~0.1 kW/m² gauge noise over a "
-                "60-s window (5 Hz × 60 s = 300 samples), the slope estimator's "
-                "1-σ error is ~0.02 kW/m²/min, so 0.15 sits at ~7σ above the "
-                "noise floor — false-positives are vanishingly rare while real "
-                "drift > ~0.2 kW/m²/min still fails the gate."
-            ),
-            "capa_group": "predicate",
-        },
-    )
-    hampel_k: float = Field(
-        default=3.0,
-        gt=0,
-        json_schema_extra={
-            "capa_help": (
-                "Outlier threshold in MADs over the rolling window. Hampel's "
-                "classical recommendation is 3.0."
-            ),
-            "capa_group": "predicate",
-        },
-    )
-
-    t_settle_max_s: float = Field(
-        default=900.0,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": (
-                "Hard cap on settle time per iteration. After this elapses the "
-                "procedure warns and proceeds with the noisier reading."
-            ),
-            "capa_group": "timing",
-            "capa_group_subtitle": "Timing budgets (advanced)",
-        },
-    )
-    t_verify_s: float = Field(
-        default=300.0,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": (
-                "Verification soak after the in-tolerance window pair. The "
-                "predicate must keep holding for this dwell before acceptance."
-            ),
-            "capa_group": "timing",
-        },
-    )
-    t_total_max_s: float = Field(
-        default=5400.0,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": "Total wall-clock budget for the whole session.",
-            "capa_group": "timing",
-        },
-    )
-    gauge_silence_max_s: float = Field(
-        default=30.0,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": (
-                "Abort if no fresh flux sample arrives within this window. Catches "
-                "wiring or adapter failures mid-run."
-            ),
-            "capa_group": "timing",
-        },
-    )
-    poll_interval_s: float = Field(
-        default=0.5,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": (
-                "How often the predicate loop wakes to re-evaluate. 0.5 s is plenty "
-                "since channel sample rates are typically 1–10 Hz."
-            ),
-            "capa_group": "timing",
-        },
-    )
-
-    damping: float = Field(
-        default=0.7,
-        gt=0,
-        le=1.0,
-        json_schema_extra={
-            "capa_help": (
-                "Damping on the secant step. ``1.0`` is undamped Newton; ``0.7`` "
-                "default prevents oscillation when the prior slope is stale."
-            ),
-            "capa_group": "correction",
-            "capa_group_subtitle": "Correction step (advanced)",
-        },
-    )
-    delta_t_step_max_c: float = Field(
-        default=25.0,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "°C",
-            "capa_help": "Anti-runaway / human-comprehensible per-iteration ΔT clamp.",
-            "capa_group": "correction",
-        },
-    )
-    n_iter_max: int = Field(
-        default=10,
-        ge=1,
-        json_schema_extra={
-            "capa_help": (
-                "Maximum iterations per target. Exhausting the cap accepts the last "
-                "reading with ``warn_proceeded``."
-            ),
-            "capa_group": "correction",
-        },
-    )
-    runaway_sign_disagreement_count: int = Field(
-        default=3,
-        ge=2,
-        json_schema_extra={
-            "capa_help": (
-                "Abort if ``sign(err)`` and ``sign(ΔT_last)`` disagree for this "
-                "many consecutive iterations (sign-flipped prior / wiring fault)."
-            ),
-            "capa_group": "correction",
-        },
-    )
-
-    t_safe_c: float = Field(
-        default=25.0,
-        ge=0,
-        json_schema_extra={
-            "capa_unit": "°C",
-            "capa_help": (
-                "Cooldown setpoint on abort or completion. Must be below ``t_set_max_c``."
-            ),
-            "capa_group": "safety",
-            "capa_group_subtitle": "Safety limits (advanced)",
-        },
-    )
-    f_gauge_sanity_max_kw_m2: float = Field(
-        default=150.0,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "kW/m²",
-            "capa_help": (
-                "Gauge-alive sanity ceiling, checked once before the iteration "
-                "loop starts. A reading above this indicates a wiring fault, "
-                "calibration off by an order of magnitude, or a runaway gauge "
-                "(real fluxes above the gauge's design full-scale of ~100 kW/m² "
-                "shouldn't occur in normal operation). This is NOT a \"must be "
-                "cold\" check — starting the tune with the heater already at "
-                "an intermediate setpoint is the supported workflow."
-            ),
-            "capa_group": "safety",
-        },
-    )
-
-    persist_dir: str | None = Field(
-        default="configs/calibrations/flux",
-        json_schema_extra={
-            "capa_help": (
-                "Directory to write the tune artifact into. Set to blank/None to "
-                "skip on-disk persistence (the artifact still lands in the bundle)."
-            ),
-            "capa_group": "artifact",
-            "capa_group_subtitle": "Artifact metadata (advanced)",
-        },
-    )
-    geometry: str = Field(
-        default="40 mm below heater, centerline",
-        json_schema_extra={
-            "capa_help": "Description of the gauge placement, recorded in the artifact.",
-            "capa_group": "artifact",
-        },
-    )
-    gauge_calibration_ref: str | None = Field(
-        default=None,
-        json_schema_extra={
-            "capa_help": (
-                "Link to the gauge's V→kW/m² calibration cert. Recorded into the "
-                "artifact so a later analyst can detect a calibration change."
-            ),
-            "capa_group": "artifact",
-        },
-    )
-    artifact_id_prefix: str = Field(
-        default="capa_flux",
-        json_schema_extra={
-            "capa_help": (
-                "Artifact id prefix. The full id is "
-                "``<prefix>_<YYYY-MM-DD>`` — one artifact per day per rig."
-            ),
-            "capa_group": "artifact",
-        },
-    )
-
-    @model_validator(mode="after")
-    def _check(self) -> HeatFluxTuneConfig:
-        if self.t_safe_c >= self.t_set_max_c:
-            raise ValueError(
-                f"t_safe_c ({self.t_safe_c} °C) must be below t_set_max_c "
-                f"({self.t_set_max_c} °C) — cooldown must not exceed the "
-                f"session ceiling."
-            )
-        if self.initial_guess == "operator" and self.operator_initial_setpoint_c is None:
-            raise ValueError("initial_guess='operator' requires operator_initial_setpoint_c")
-        if any(t <= 0 for t in self.targets_kw_m2):
-            raise ValueError("every target_kw_m2 must be positive")
-        return self
-
-
-# ---------------------------------------------------------------------------
-# Pure-function building blocks (unit-testable without async / databus)
-# ---------------------------------------------------------------------------
-
-
-def hampel_mask(values: list[float], *, k: float = 3.0) -> list[bool]:
-    """Return a per-sample keep/discard mask via the Hampel identifier.
-
-    Any sample more than ``k`` median-absolute-deviations from the
-    window median is marked for discard (``False`` in the returned
-    mask). A window with zero MAD (every sample identical) returns an
-    all-``True`` mask. Non-finite samples are always rejected.
-
-    Returning a mask (not a filtered value list) lets callers apply the
-    same rejection decision to paired sequences — e.g. timestamps and
-    values — without value-matching gymnastics.
-    """
-    n = len(values)
-    if n < 3:
-        return [math.isfinite(v) for v in values]
-    finite_vals = [v for v in values if math.isfinite(v)]
-    if len(finite_vals) < 3:
-        return [math.isfinite(v) for v in values]
-    med = statistics.median(finite_vals)
-    deviations = [abs(v - med) for v in finite_vals]
-    mad = statistics.median(deviations)
-    if mad == 0.0:
-        # Degenerate case: ≥ half the samples equal the median. A
-        # value not equal to the median (a single 999 spike against a
-        # constant baseline) is then a clear outlier. A genuinely
-        # all-identical window has every ``v == med`` so this still
-        # keeps everything.
-        return [math.isfinite(v) and v == med for v in values]
-    threshold = k * 1.4826 * mad  # 1.4826 = consistency factor for Gaussian
-    return [math.isfinite(v) and abs(v - med) <= threshold for v in values]
-
-
-def linear_slope_per_min(samples: list[tuple[float, float]]) -> float:
-    """Least-squares slope of ``samples`` in units-per-minute.
-
-    ``samples`` is ``[(t_seconds, value), ...]`` ordered by time. Fewer
-    than two points returns ``0.0``. Two identical timestamps that
-    would produce a divide-by-zero similarly return ``0.0`` — the
-    caller is feeding a rolling window where a degenerate slice
-    shouldn't abort the procedure.
-    """
-    n = len(samples)
-    if n < 2:
-        return 0.0
-    sum_t = 0.0
-    sum_v = 0.0
-    sum_tt = 0.0
-    sum_tv = 0.0
-    for t, v in samples:
-        sum_t += t
-        sum_v += v
-        sum_tt += t * t
-        sum_tv += t * v
-    denom = n * sum_tt - sum_t * sum_t
-    if denom == 0.0:
-        return 0.0
-    slope_per_s = (n * sum_tv - sum_t * sum_v) / denom
-    return slope_per_s * 60.0
-
-
-@dataclass(slots=True)
-class RollingWindow:
-    """Bounded-time rolling window of ``(t_seconds, value)`` samples.
-
-    Eviction is purely time-based — push the newest, drop everything
-    older than ``window_s``. Mean/std/slope all run over the
-    Hampel-filtered subset of the current window; the filtered samples
-    are dropped from those statistics but stay in the window itself
-    (so a transient spike doesn't shorten the effective dwell when the
-    next non-spike sample lands).
-    """
-
-    window_s: float
-    hampel_k: float = 3.0
-    _samples: deque[tuple[float, float]] = field(default_factory=deque)
-
-    def push(self, t_s: float, value: float) -> None:
-        if not math.isfinite(value):
-            return
-        self._samples.append((t_s, value))
-        cutoff = t_s - self.window_s
-        while self._samples and self._samples[0][0] < cutoff:
-            self._samples.popleft()
-
-    def count(self) -> int:
-        return len(self._samples)
-
-    def clear(self) -> None:
-        """Drop all samples. Used at iteration boundaries so the rolling
-        statistics reflect only post-setpoint-change data — without this
-        the std and slope are dominated by stale samples from before the
-        last secant step for up to ``window_s`` seconds.
-        """
-        self._samples.clear()
-
-    def span_s(self) -> float:
-        if len(self._samples) < 2:
-            return 0.0
-        return self._samples[-1][0] - self._samples[0][0]
-
-    def is_warm(self, target_window_s: float) -> bool:
-        """Return True once enough wall time has elapsed since the first push.
-
-        ``span_s()`` is bounded above by ``window_s`` minus one sample
-        period — the oldest retained sample sits one period *inside*
-        the eviction cutoff — so a naive ``span >= window_s`` check can
-        never fire at non-trivial sample rates. Use the in-window
-        average period as the slop term: at steady state
-        ``span + period`` straddles ``window_s`` from below.
-        """
-        n = len(self._samples)
-        if n < 2:
-            return False
-        span = self._samples[-1][0] - self._samples[0][0]
-        avg_period = span / (n - 1) if n > 1 else 0.0
-        return span + avg_period >= target_window_s
-
-    def _keep_pairs(self) -> list[tuple[float, float]]:
-        pairs = list(self._samples)
-        if not pairs:
-            return []
-        values = [v for _, v in pairs]
-        mask = hampel_mask(values, k=self.hampel_k)
-        return [pair for pair, keep in zip(pairs, mask, strict=True) if keep]
-
-    def mean(self) -> float:
-        pairs = self._keep_pairs()
-        if not pairs:
-            return 0.0
-        return statistics.fmean(v for _, v in pairs)
-
-    def std(self) -> float:
-        pairs = self._keep_pairs()
-        if len(pairs) < 2:
-            return 0.0
-        return statistics.pstdev(v for _, v in pairs)
-
-    def slope_per_min(self) -> float:
-        return linear_slope_per_min(self._keep_pairs())
-
-
-# ---------------------------------------------------------------------------
-# Steady-state predicate
-# ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class SteadyStatePredicate:
-    """Three-condition predicate with hold-time confirmation.
-
-    Conditions:
-
-    * ``|heater.pv - heater.setpoint| <= delta_t_band_c``
-    * rolling std-dev of flux ``<= sigma_flux_max``
-    * ``|d(flux)/d(min)| <= slope_max_kw_per_min``
-
-    All three must hold continuously for ``t_stable_s`` before
-    :meth:`fired` returns ``True``. As soon as any one fails, the hold
-    timer resets.
-    """
-
-    delta_t_band_c: float
-    sigma_flux_max: float
-    slope_max_kw_per_min: float
-    t_stable_s: float
-    _hold_start_s: float | None = None
-    _last_reason: str = "no-samples-yet"
-
-    def evaluate(
-        self,
-        *,
-        now_s: float,
-        pv_c: float | None,
-        setpoint_c: float | None,
-        flux_std_kw_m2: float,
-        flux_slope_kw_per_min: float,
-        window_full: bool,
-    ) -> None:
-        if not window_full:
-            self._hold_start_s = None
-            self._last_reason = "window-not-full"
-            return
-        if pv_c is None or setpoint_c is None:
-            self._hold_start_s = None
-            self._last_reason = "missing-pv-or-setpoint"
-            return
-        if abs(pv_c - setpoint_c) > self.delta_t_band_c:
-            self._hold_start_s = None
-            self._last_reason = "pv-out-of-band"
-            return
-        if flux_std_kw_m2 > self.sigma_flux_max:
-            self._hold_start_s = None
-            self._last_reason = "flux-noisy"
-            return
-        if abs(flux_slope_kw_per_min) > self.slope_max_kw_per_min:
-            self._hold_start_s = None
-            self._last_reason = "flux-drifting"
-            return
-        if self._hold_start_s is None:
-            self._hold_start_s = now_s
-        self._last_reason = "holding"
-
-    def fired(self, now_s: float) -> bool:
-        return self._hold_start_s is not None and (now_s - self._hold_start_s) >= self.t_stable_s
-
-    def dwell_s(self, now_s: float) -> float:
-        if self._hold_start_s is None:
-            return 0.0
-        return now_s - self._hold_start_s
-
-    @property
-    def last_reason(self) -> str:
-        return self._last_reason
-
-    def reset(self) -> None:
-        self._hold_start_s = None
-        self._last_reason = "reset"
-
-
-# ---------------------------------------------------------------------------
-# Correction step and runaway detector
-# ---------------------------------------------------------------------------
-
-
-def secant_step(
-    *,
-    err_kw_m2: float,
-    df_dt_kw_m2_per_c: float,
-    damping: float,
-    delta_t_step_max_c: float,
-) -> float:
-    """Compute one damped, clamped ΔT correction.
-
-    Returns ``0.0`` when ``df_dt`` is non-positive or numerically tiny
-    — applying a step with a zero/wrong-sign Jacobian would do nothing
-    useful or move the heater the wrong way. The runaway detector
-    handles wrong-sign explicitly via the next-iteration check; this
-    function just refuses to amplify a bad slope.
-    """
-    if not math.isfinite(df_dt_kw_m2_per_c) or df_dt_kw_m2_per_c <= 1e-6:
-        return 0.0
-    raw = err_kw_m2 / df_dt_kw_m2_per_c
-    damped = damping * raw
-    return max(-delta_t_step_max_c, min(delta_t_step_max_c, damped))
-
-
-@dataclass(slots=True)
-class RunawayDetector:
-    """Tripwire for "the heater is being commanded the wrong way".
-
-    Counts consecutive iterations where ``sign(err)`` and
-    ``sign(delta_t_last)`` disagree. Trips after ``trip_threshold``
-    such iterations.
-
-    ``record(err=0.0, delta=0.0)`` resets — converged iterations are
-    not runaway candidates and neither are step-zero iterations
-    (already-clamped, no information).
-    """
-
-    trip_threshold: int
-    _count: int = 0
-
-    def record(self, *, err_kw_m2: float, delta_t_c: float) -> None:
-        if err_kw_m2 == 0.0 or delta_t_c == 0.0:
-            self._count = 0
-            return
-        same_sign = (err_kw_m2 > 0) == (delta_t_c > 0)
-        if same_sign:
-            self._count = 0
-        else:
-            self._count += 1
-
-    @property
-    def count(self) -> int:
-        return self._count
-
-    def tripped(self) -> bool:
-        return self._count >= self.trip_threshold
-
-
-# ---------------------------------------------------------------------------
-# Initial-setpoint chooser
-# ---------------------------------------------------------------------------
-
-
-def sigma_t4_setpoint_c(target_kw_m2: float, ambient_c: float = 25.0) -> float:
-    """σT⁴ fallback for a true cold start (no artifact, no operator guess).
-
-    Solves ``F = k (T_h⁴ − T_∞⁴)`` for ``T_h`` with ``k`` fixed at an
-    empirical anchor (50 kW/m² ≈ 650 °C heater-side, approximately
-    right for the CAPA cone). The result is a *guess*, not a
-    measurement — the procedure discovers the truth via feedback on
-    iteration 1.
-    """
-    if target_kw_m2 <= 0:
-        return ambient_c
-    t_h_anchor_k = 923.15  # 650 °C
-    t_inf_k = ambient_c + 273.15
-    k = 50.0 / (t_h_anchor_k**4 - t_inf_k**4)
-    # Explicit float math: ``x ** 0.25`` returns complex when ``x`` is
-    # negative, so mypy infers Any for the result. We control the inputs
-    # (all positive) so a math.pow call keeps the annotation honest.
-    target_t_k: float = math.pow(target_kw_m2 / k + t_inf_k**4, 0.25)
-    return target_t_k - 273.15
-
-
-def choose_initial_setpoint(
-    *,
-    target_kw_m2: float,
-    source: InitialGuessSource,
-    operator_setpoint_c: float | None,
-    prior_artifact: HeatFluxTuneArtifact | None,
-    t_min_c: float,
-    t_set_max_c: float,
-    ambient_c: float = 25.0,
-) -> tuple[float, str]:
-    """Pick the first setpoint for ``target_kw_m2``.
-
-    Priority chain:
-
-    1. ``lookup`` — interpolated from the most recent on-disk artifact
-       when one is available and brackets the target.
-    2. ``operator`` — ``operator_initial_setpoint_c`` when set.
-    3. ``sigma_t4`` — empirical σT⁴ fallback.
-
-    Returns the chosen setpoint (clamped to ``[t_min_c, t_set_max_c]``)
-    and a short reason string for logging.
-    """
-    if source == "lookup" and prior_artifact is not None:
-        guess = prior_artifact.setpoint_for_target(target_kw_m2)
-        if guess is not None:
-            return max(t_min_c, min(t_set_max_c, guess)), "lookup"
-    if operator_setpoint_c is not None:
-        return (
-            max(t_min_c, min(t_set_max_c, operator_setpoint_c)),
-            "operator",
-        )
-    guess = sigma_t4_setpoint_c(target_kw_m2, ambient_c=ambient_c)
-    return max(t_min_c, min(t_set_max_c, guess)), "sigma_t4"
-
-
-def default_tolerance_kw_m2(target_kw_m2: float) -> float:
-    """``max(0.1 kW/m², 0.005 * target)`` — the §7.5 default."""
-    return max(0.1, 0.005 * target_kw_m2)
-
-
-def predicate_strictness(
-    *,
-    err_kw_m2: float,
-    target_kw_m2: float,
-    tolerance_kw_m2: float,
-    relax_factor: float,
-    far_fraction: float = 0.30,
-) -> float:
-    """Return the per-iteration predicate strictness multiplier ``k``.
-
-    ``k`` lives in ``[1.0, relax_factor]`` and is applied as::
-
-        slope_max_effective = slope_max_kw_per_min * k
-        t_stable_effective  = t_stable_s / k
-
-    so that being far from target loosens the slope-flat gate **and**
-    shortens the confirmation dwell — wasting wall-clock waiting for a
-    quiet field doesn't help when the next secant step is going to be a
-    big move anyway. Linear ramp between ``near = 2·tolerance`` and
-    ``far = far_fraction · target`` (with ``far`` clamped above ``near``
-    for small targets). At iteration 1 the caller passes ``err_kw_m2 =
-    None``-equivalent (e.g. ``inf``) so ``k = relax_factor`` — the most
-    conservative assumption when there's no information about distance.
-
-    ``relax_factor = 1.0`` disables the feature (predicate stays at
-    config defaults throughout). The verify soak is unaffected by this —
-    callers construct that predicate from ``cfg`` directly.
-    """
-    if relax_factor <= 1.0:
-        return 1.0
-    near = 2.0 * tolerance_kw_m2
-    far = max(near + 1e-9, far_fraction * target_kw_m2)
-    abs_err = abs(err_kw_m2)
-    if not math.isfinite(abs_err) or abs_err >= far:
-        return relax_factor
-    if abs_err <= near:
-        return 1.0
-    frac = (abs_err - near) / (far - near)
-    return 1.0 + (relax_factor - 1.0) * frac
-
-
-# ---------------------------------------------------------------------------
-# Procedure
-# ---------------------------------------------------------------------------
+from .config import (
+    PROCEDURE_ID,
+    PROCEDURE_NAME,
+    PROCEDURE_VERSION,
+    HeatFluxTuneConfig,
+    HeatFluxTuneError,
+)
+from .setpoint import (
+    choose_initial_setpoint,
+    default_tolerance_kw_m2,
+    predicate_strictness,
+)
+from .signals import (
+    RollingWindow,
+    RunawayDetector,
+    SteadyStatePredicate,
+    secant_step,
+)
 
 
 @dataclass(slots=True)
@@ -984,8 +167,7 @@ class HeatFluxTune(Procedure):
     """Set by the operator-command consumer on ``pause``; cleared on
     ``resume``. The settle/verify poll loops sleep without re-evaluating
     the predicate while paused — the heater stays at its current
-    commanded setpoint and the rolling windows keep filling. This is
-    decision D2 ("Freeze") from the §11 design discussion."""
+    commanded setpoint and the rolling windows keep filling."""
 
     _accept_now: bool = field(default=False, init=False)
     """One-shot flag: set to ``True`` when the operator clicks "Accept
@@ -1096,6 +278,15 @@ class HeatFluxTune(Procedure):
         # pause/resume/accept_current survive across per-target loops. The
         # consumer is a no-op when the UI hasn't wired the stream (CLI
         # headless, tests).
+        #
+        # ``completed_all_targets`` is set **inside** the loop, after the
+        # final target's point is appended. This shape — rather than a
+        # post-loop ``success = True`` — survives the ``break`` paths
+        # below (external_stop, wall-clock exhaustion) which leave the
+        # for-loop without raising. A naive post-loop flag would falsely
+        # signal "completed" on those paths and hold a heater the
+        # operator just told us to stop using.
+        completed_all_targets = False
         async with anyio.create_task_group() as session_tg:
             if ctx.operator_commands is not None:
                 session_tg.start_soon(self._consume_operator_commands, ctx)
@@ -1104,7 +295,7 @@ class HeatFluxTune(Procedure):
                 target_count = len(self.cfg.targets_kw_m2)
                 for target_index, target in enumerate(self.cfg.targets_kw_m2, start=1):
                     if ctx.external_stop.is_set():
-                        break
+                        break  # completed_all_targets stays False → cool
                     if self._wall_clock_exhausted(ctx):
                         self._emit_event(
                             ctx,
@@ -1113,7 +304,7 @@ class HeatFluxTune(Procedure):
                             severity="error",
                             metadata={"reason": "t_total_max_s"},
                         )
-                        break
+                        break  # stays False → cool
                     point = await self._converge_to(
                         ctx,
                         target=target,
@@ -1138,7 +329,15 @@ class HeatFluxTune(Procedure):
                             "accept_reason": point.accept_reason,
                         },
                     )
+                    if target_index == target_count:
+                        completed_all_targets = True
             except HeatFluxTuneError as exc:
+                # Catch only HeatFluxTuneError, not bare Exception —
+                # broadening would mask programmer bugs while the loop's
+                # last iteration may have appended a point; the hold
+                # gate would then see ``completed_all_targets=False`` (good)
+                # but at the cost of swallowing a real crash. Let other
+                # exceptions propagate to the engine's crash handler.
                 self._emit_event(
                     ctx,
                     kind="heat_flux_tune.aborted",
@@ -1148,9 +347,13 @@ class HeatFluxTune(Procedure):
                 )
             finally:
                 # Stop the operator-command consumer; no further commands
-                # are meaningful once we're cooling down.
+                # are meaningful once we're cooling down or holding.
                 session_tg.cancel_scope.cancel()
-                await self._safe_cool(ctx)
+                if self._should_hold(completed_all_targets):
+                    self._emit_hold_event(ctx)
+                    self._emit_holding_tick(ctx)
+                else:
+                    await self._safe_cool(ctx)
                 self._emit_event(
                     ctx,
                     kind="heat_flux_tune.completed",
@@ -1160,8 +363,101 @@ class HeatFluxTune(Procedure):
                     metadata={
                         "accepted_points": len(self._accepted_points),
                         "targets_kw_m2": list(self.cfg.targets_kw_m2),
+                        "held": self._should_hold(completed_all_targets),
                     },
                 )
+
+    # ----------------------------------------------------------------- hold mode
+
+    def _should_hold(self, completed_all_targets: bool) -> bool:
+        """Decide whether the finally block should leave the heater hot.
+
+        Four gates, all required:
+
+        1. The operator opted in (``hold_at_completion=True``).
+        2. The loop ran to completion of the final target — every
+           abort path (external_stop, wall-clock, HeatFluxTuneError)
+           leaves ``completed_all_targets=False`` and cools.
+        3. At least one accepted point exists (defensive — if no point
+           was appended somehow, there's nothing to hold at).
+        4. The last accepted point's ``accept_reason`` is not
+           ``warn_proceeded``. The artifact filters non-accepted points,
+           so holding at a ``warn_proceeded`` SP would leave the
+           operator with a hot heater whose tuned value the rest of
+           the system refuses to re-surface via "Apply latest tune" —
+           a broken handoff. Cool and let them re-tune.
+        """
+        if not (completed_all_targets and self.cfg.hold_at_completion):
+            return False
+        if not self._accepted_points:
+            return False
+        return self._accepted_points[-1].accepted
+
+    def _emit_hold_event(self, ctx: ProcedureContext) -> None:
+        """Emit ``heat_flux_tune.holding`` describing the held setpoint.
+
+        Distinguishes "ended cold" from "ended holding at X" in the
+        bundle audit trail; the post-tune apply prompt in the CAPA
+        profile UI listens for this kind to know whether to surface
+        the suggestion. The accept reason rides along so a later
+        analyst can see why the procedure picked this point — even
+        the ``operator_override`` case lands here cleanly.
+        """
+        point = self._accepted_points[-1]
+        self._emit_event(
+            ctx,
+            kind="heat_flux_tune.holding",
+            message=(
+                f"Tune complete; heater HOLDING at "
+                f"{point.heater_setpoint_c:.2f} °C "
+                f"({point.target_flux_kw_m2:g} kW/m²). "
+                f"Use the heater card's 'Cool to safe' action to drive "
+                f"to safe when finished."
+            ),
+            severity="info",
+            metadata={
+                "held_setpoint_c": point.heater_setpoint_c,
+                "held_target_kw_m2": point.target_flux_kw_m2,
+                "held_measured_flux_kw_m2": point.measured_flux_mean_kw_m2,
+                "accept_reason": point.accept_reason,
+                "gauge_calibration_ref": self.cfg.gauge_calibration_ref,
+            },
+        )
+
+    def _emit_holding_tick(self, ctx: ProcedureContext) -> None:
+        """Publish one final tick with ``phase="holding"``.
+
+        The dock already renders ``payload["phase"]`` directly from the
+        existing live-numerics tick path — no new IPC, no state
+        machine, just one last frame that latches the dock into the
+        HOLDING display before the run leaves :data:`RunUiState.RUNNING`
+        and the dock auto-hides. The held SP, target, measured flux,
+        and accept reason ride in the payload so a debugger inspecting
+        the bridge can recover the same info the event log carries.
+        """
+        sink = ctx.ui_sink
+        if sink is None:
+            return
+        point = self._accepted_points[-1]
+        payload: dict[str, object] = {
+            "phase": "holding",
+            "target_index": len(self._accepted_points),
+            "target_count": len(self._accepted_points),
+            "target_kw_m2": point.target_flux_kw_m2,
+            "commanded_setpoint_c": point.heater_setpoint_c,
+            "mean_flux_kw_m2": point.measured_flux_mean_kw_m2,
+            "accept_reason": point.accept_reason,
+            "paused": False,
+        }
+        tick = ProcedureTick(
+            procedure_id=PROCEDURE_ID,
+            t_mono_ns=ctx.clock.t_mono_ns(),
+            payload=payload,
+        )
+        try:
+            sink.publish(tick)
+        except Exception as exc:  # pragma: no cover - defensive
+            ctx.logger.warning("heat_flux_tune.holding_tick_publish_failed", error=str(exc))
 
     # ----------------------------------------------------------------- per-target loop
 
@@ -1205,7 +501,7 @@ class HeatFluxTune(Procedure):
         prior_slope = prior_artifact.local_df_dt(target) if prior_artifact is not None else None
         sigma_max = max(
             self.cfg.sigma_flux_floor_kw_m2,
-            self.cfg.sigma_flux_max_pct * target,
+            self.cfg.sigma_flux_max_fraction * target,
         )
 
         last_delta_t = 0.0
@@ -1508,9 +804,10 @@ class HeatFluxTune(Procedure):
                 )
 
             window_full = state.flux_window.is_warm(self.cfg.t_window_s)
+            pv_mean = state.pv_window.mean() if state.pv_window.count() else None
             predicate.evaluate(
                 now_s=elapsed_s,
-                pv_c=state.pv_latest,
+                pv_mean_c=pv_mean,
                 setpoint_c=commanded_sp_c,
                 flux_std_kw_m2=state.flux_window.std(),
                 flux_slope_kw_per_min=state.flux_window.slope_per_min(),
@@ -1590,9 +887,10 @@ class HeatFluxTune(Procedure):
             now_ns = ctx.clock.t_mono_ns()
             elapsed_s = (now_ns - start_ns) / 1e9
             window_full = state.flux_window.is_warm(self.cfg.t_window_s)
+            pv_mean = state.pv_window.mean() if state.pv_window.count() else None
             predicate.evaluate(
                 now_s=elapsed_s,
-                pv_c=state.pv_latest,
+                pv_mean_c=pv_mean,
                 setpoint_c=commanded_sp_c,
                 flux_std_kw_m2=state.flux_window.std(),
                 flux_slope_kw_per_min=state.flux_window.slope_per_min(),
@@ -1987,7 +1285,6 @@ class HeatFluxTune(Procedure):
             },
         )
 
-
     # ----------------------------------------------------------------- ticks
 
     def _emit_tick(
@@ -2033,11 +1330,7 @@ class HeatFluxTune(Procedure):
         else:
             dwell_s = 0.0
             last_reason = phase
-        error_kw_m2: float | None
-        if state.iterations:
-            error_kw_m2 = state.target_kw_m2 - mean_flux
-        else:
-            error_kw_m2 = None
+        error_kw_m2 = state.target_kw_m2 - mean_flux if state.iterations else None
         payload: dict[str, object] = {
             "phase": "paused" if self._paused else phase,
             "target_index": state.target_index,
@@ -2048,6 +1341,7 @@ class HeatFluxTune(Procedure):
             "iteration_max": state.iteration_max,
             "commanded_setpoint_c": state.commanded_setpoint_c,
             "pv_latest_c": state.pv_latest,
+            "pv_mean_c": state.pv_window.mean() if state.pv_window.count() else None,
             "mean_flux_kw_m2": mean_flux,
             "std_flux_kw_m2": std_flux,
             "slope_flux_kw_m2_per_min": slope_flux,
@@ -2079,24 +1373,3 @@ class HeatFluxTune(Procedure):
             # A misbehaving sink must not crash the procedure. Log
             # once at warning; ticks resume on the next poll cycle.
             ctx.logger.warning("heat_flux_tune.tick_publish_failed", error=str(exc))
-
-
-__all__ = [
-    "PROCEDURE_ID",
-    "PROCEDURE_NAME",
-    "PROCEDURE_VERSION",
-    "HeatFluxTune",
-    "HeatFluxTuneConfig",
-    "HeatFluxTuneError",
-    "InitialGuessSource",
-    "RollingWindow",
-    "RunawayDetector",
-    "SteadyStatePredicate",
-    "choose_initial_setpoint",
-    "default_tolerance_kw_m2",
-    "hampel_mask",
-    "linear_slope_per_min",
-    "predicate_strictness",
-    "secant_step",
-    "sigma_t4_setpoint_c",
-]

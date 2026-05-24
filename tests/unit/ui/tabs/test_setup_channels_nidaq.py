@@ -1,7 +1,7 @@
 """NI-DAQ-aware channels-section behaviours.
 
-Step 4 of the NI-DAQ UX work wires the channels section to
-:mod:`capa.devices.nidaq_join` for three things:
+The channels section consumes :mod:`capa.devices.nidaq_join` to deliver
+three behaviours:
 
 1. The "reads from" combo (NI variant) sources its field choices from
    declared NI channels instead of free-text.
@@ -161,8 +161,8 @@ def test_add_menu_includes_declared_nidaq_entries(qtbot: Any) -> None:
 
 def test_add_from_declared_nidaq_uses_declared_units(qtbot: Any) -> None:
     """Clicking an NI-aware Add entry on a DEG_C thermocouple must produce
-    a capa channel with ``unit="degC"`` — the bug §2.4 in the evaluation
-    doc was that the generic template hard-coded ``K``.
+    a capa channel with ``unit="degC"`` rather than the generic template's
+    ``K`` default.
     """
     section, _draft = _make_section(qtbot)
     from capa.devices.nidaq_join import declared_channels_from_payload

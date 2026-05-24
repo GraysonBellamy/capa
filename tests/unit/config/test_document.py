@@ -100,8 +100,7 @@ def test_roundtrip_byte_identical(tmp_path: Path, configs_dir: Path) -> None:
     """Save → reload → save (to second tmp tree) yields byte-identical files.
 
     The canonical writers must be idempotent: once a file is written in
-    canonical order, re-saving it produces identical bytes. This is the
-    property plan acceptance criterion 9 requires.
+    canonical order, re-saving it produces identical bytes.
 
     The two save targets live in sibling directories with identical
     filenames so the relative ``hardware:`` ref is the same string in

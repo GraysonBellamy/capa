@@ -1,5 +1,4 @@
-"""Real-OS-kill crash-recovery — closes the §7 acceptance gap from the
-2026-05-09 hardware day.
+"""Real-OS-kill crash-recovery.
 
 Spawns a child writer process, lets it cross several flush boundaries,
 forces termination via :meth:`multiprocessing.Process.kill` (which maps to

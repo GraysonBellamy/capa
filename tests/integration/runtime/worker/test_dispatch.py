@@ -1,8 +1,8 @@
 """Dispatch state-gating for :class:`Worker`.
 
-Migration doc §4.1 line 591: ``dispatch()`` is permitted in IDLE, ARMED,
-SAMPLING; refused in DRAINING and CLOSED. The state gate runs *on the
-worker loop*, not on the caller side () — these tests verify
+``dispatch()`` is permitted in IDLE, ARMED, SAMPLING; refused in DRAINING
+and CLOSED. The state gate runs *on the worker loop*, not on the caller side
+— these tests verify
 both the happy paths and the refusal paths.
 
 Cancellation-shield tests live in ``test_cancellation_shield.py``; here we

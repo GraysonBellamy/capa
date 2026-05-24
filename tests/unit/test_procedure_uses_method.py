@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from capa.experiment.procedures.base import procedure_uses_method
 from capa.experiment.procedures.builtin.free_run import FreeRun
-from capa.experiment.procedures.builtin.heat_flux_tune import HeatFluxTune
+from capa.experiment.procedures.builtin.heat_flux_tune.controller import HeatFluxTune
 from capa.experiment.procedures.builtin.recipe_runner import RecipeRunner
 
 

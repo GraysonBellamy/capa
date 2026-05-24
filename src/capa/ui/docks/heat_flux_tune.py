@@ -19,7 +19,7 @@ procedure accepts mid-run plus a live-numerics panel fed by
 The dock auto-shows when :attr:`RunController.active_procedure_id`
 matches the heat-flux-tune procedure id, and hides on run completion.
 
-The live numerics panel (Phase 3.5) reads
+The live numerics panel reads
 :class:`~capa.runtime.emissions.ProcedureTick`\\ s off the
 ``procedure_tick_received`` signal: target progress, iteration number,
 windowed flux statistics, predicate dwell, and the predicate's
@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from capa.experiment.procedures.base import OperatorCommand
-from capa.experiment.procedures.builtin.heat_flux_tune import (
+from capa.experiment.procedures.builtin.heat_flux_tune.config import (
     PROCEDURE_ID as HEAT_FLUX_TUNE_PROCEDURE_ID,
 )
 from capa.runtime.emissions import ProcedureTick
@@ -99,6 +99,25 @@ class _LiveNumericsPanel(QFrame):
     itself stays Qt-event-loop-agnostic.
     """
 
+    _flux_value: QLabel
+    _flux_extra: QLabel
+    _std_value: QLabel
+    _std_unit: QLabel
+    _slope_value: QLabel
+    _slope_unit: QLabel
+    _pv_value: QLabel
+    _pv_extra: QLabel
+    _settle_value: QLabel
+    _settle_extra: QLabel
+    _window_value: QLabel
+    _window_extra: QLabel
+    _phase_value: QLabel
+    _phase_extra: QLabel
+    _intol_value: QLabel
+    _intol_extra: QLabel
+    _dfdt_value: QLabel
+    _dfdt_extra: QLabel
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -133,9 +152,7 @@ class _LiveNumericsPanel(QFrame):
             grid.addWidget(caption_label, row, 0)
             value_label = QLabel("—", self)
             value_label.setStyleSheet("font-family: Consolas, 'Courier New', monospace;")
-            value_label.setAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             grid.addWidget(value_label, row, 1)
             extra_label = QLabel("", self)
             extra_label.setStyleSheet("color: #888;")
@@ -156,7 +173,17 @@ class _LiveNumericsPanel(QFrame):
         Defensive against missing keys — the dock and the procedure may
         be on different versions during a hot-reload, and the panel
         should degrade to a dash rather than raise.
+
+        Stale-style clearing runs *before* per-label styling so that
+        element-specific colors (in-tol checkmark green, runaway amber,
+        holding success-green) survive a stale → fresh transition.
         """
+        # Clear stale dimming first — later per-element setStyleSheet
+        # calls would otherwise be overwritten by _refresh_stale_style.
+        if self._stale:
+            self._stale = False
+            self._refresh_stale_style()
+
         target_idx = payload.get("target_index", 0)
         target_count = payload.get("target_count", 0)
         target_kw_m2 = payload.get("target_kw_m2")
@@ -174,8 +201,7 @@ class _LiveNumericsPanel(QFrame):
         commanded_sp = payload.get("commanded_setpoint_c")
         if iteration_max > 0:
             self._iteration_label.setText(
-                f"Iteration {iteration} of {iteration_max} · SP "
-                f"{_fmt_float(commanded_sp)} °C"
+                f"Iteration {iteration} of {iteration_max} · SP {_fmt_float(commanded_sp)} °C"
             )
         else:
             self._iteration_label.setText("Iteration — of —")
@@ -200,9 +226,7 @@ class _LiveNumericsPanel(QFrame):
 
         slope = payload.get("slope_flux_kw_m2_per_min")
         slope_max = payload.get("slope_max_kw_m2_per_min")
-        self._slope_value.setText(
-            f"{_fmt_float(slope, '{:+.3f}')} kW/m²/min"
-        )
+        self._slope_value.setText(f"{_fmt_float(slope, '{:+.3f}')} kW/m²/min")
         self._slope_unit.setText(f"≤ {_fmt_float(slope_max, '{:.3f}')}")
 
         pv = payload.get("pv_latest_c")
@@ -213,9 +237,7 @@ class _LiveNumericsPanel(QFrame):
         budget = payload.get("settle_budget_s")
         elapsed = payload.get("elapsed_s", 0.0)
         if budget is not None and budget > 0.0:
-            self._settle_value.setText(
-                f"dwell {_fmt_float(dwell, '{:.0f}')} s"
-            )
+            self._settle_value.setText(f"dwell {_fmt_float(dwell, '{:.0f}')} s")
             self._settle_extra.setText(
                 f"{_fmt_float(elapsed, '{:.0f}')}/{_fmt_float(budget, '{:.0f}')} s"
             )
@@ -241,6 +263,16 @@ class _LiveNumericsPanel(QFrame):
         last_reason = payload.get("predicate_last_reason", "")
         self._phase_value.setText(str(phase))
         self._phase_extra.setText(str(last_reason))
+        # Render the converged-and-holding state in success green to
+        # match the converged-window styling elsewhere. The dock will
+        # still auto-hide on run completion — this one final tick
+        # latches the visual confirmation before it goes away.
+        if phase == "holding":
+            self._phase_value.setStyleSheet(
+                "font-family: Consolas, 'Courier New', monospace; color: #2c8e3f;"
+            )
+        else:
+            self._phase_value.setStyleSheet("font-family: Consolas, 'Courier New', monospace;")
 
         in_tol_windows = payload.get("in_tol_windows", 0)
         self._intol_value.setText(f"{in_tol_windows} of 2")
@@ -258,9 +290,6 @@ class _LiveNumericsPanel(QFrame):
         self._dfdt_extra.setText(str(df_dt_source))
 
         self._has_tick = True
-        if self._stale:
-            self._stale = False
-            self._refresh_stale_style()
 
     def mark_stale(self) -> None:
         """Dim the value labels (without changing their text) when no

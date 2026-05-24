@@ -14,7 +14,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from capa.experiment.procedures.base import OperatorCommand
-from capa.experiment.procedures.builtin.heat_flux_tune import (
+from capa.experiment.procedures.builtin.heat_flux_tune.config import (
     PROCEDURE_ID as HEAT_FLUX_TUNE_PROCEDURE_ID,
 )
 from capa.ui.docks.heat_flux_tune import HeatFluxTuneDock
@@ -113,7 +113,7 @@ def test_dock_operator_command_uses_dataclass(qtbot: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Live numerics — Phase 3.5
+# Live numerics
 # ---------------------------------------------------------------------------
 
 
@@ -223,6 +223,63 @@ def test_panel_handles_none_values_gracefully(qtbot: Any) -> None:
     assert "—" in panel._pv_value.text()
     # No error overlay when error is None.
     assert panel._flux_extra.text() == ""
+
+
+def test_panel_holding_phase_renders_in_success_green(qtbot: Any) -> None:
+    """The hold-mode tick (``phase="holding"``) styles the phase value
+    in success green to match the converged-window styling. Pins the
+    visual confirmation the dock latches before auto-hiding on run
+    completion."""
+    from capa.ui.docks.heat_flux_tune import _LiveNumericsPanel
+
+    panel = _LiveNumericsPanel()
+    qtbot.addWidget(panel)
+
+    payload = _full_payload()
+    payload["phase"] = "holding"
+    panel.update_from_tick(payload)
+
+    assert panel._phase_value.text() == "holding"
+    style = panel._phase_value.styleSheet()
+    assert "#2c8e3f" in style, f"expected success-green color, got: {style!r}"
+
+
+def test_panel_non_holding_phase_uses_default_style(qtbot: Any) -> None:
+    """Non-holding phases (settle / verify / etc.) keep the default
+    monospace styling — the green is reserved for the final hold tick."""
+    from capa.ui.docks.heat_flux_tune import _LiveNumericsPanel
+
+    panel = _LiveNumericsPanel()
+    qtbot.addWidget(panel)
+    panel.update_from_tick(_full_payload())  # phase == "settle"
+
+    style = panel._phase_value.styleSheet()
+    assert "#2c8e3f" not in style
+
+
+def test_panel_holding_phase_survives_stale_transition(qtbot: Any) -> None:
+    """A holding tick arriving while the panel was stale must keep its
+    success-green styling. Regression guard: ``_refresh_stale_style``
+    runs first now (before per-element styling) so its blanket
+    setStyleSheet call doesn't overwrite the holding color.
+    """
+    from capa.ui.docks.heat_flux_tune import _LiveNumericsPanel
+
+    panel = _LiveNumericsPanel()
+    qtbot.addWidget(panel)
+    # Seed with a fresh tick so mark_stale takes effect.
+    panel.update_from_tick(_full_payload())
+    panel.mark_stale()
+    assert panel._stale is True
+
+    payload = _full_payload()
+    payload["phase"] = "holding"
+    panel.update_from_tick(payload)
+
+    assert panel._stale is False
+    assert "#2c8e3f" in panel._phase_value.styleSheet()
+    # And the rest of the labels are un-dimmed.
+    assert "#999" not in panel._flux_value.styleSheet()
 
 
 def test_panel_mark_stale_is_noop_before_first_tick(qtbot: Any) -> None:

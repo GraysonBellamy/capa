@@ -21,8 +21,8 @@ read-only fd via ``os.open(path, os.O_RDONLY)`` purely to call ``os.fsync``
 on. POSIX fsync flushes dirty pages at the inode level, so any fd to the
 file works.
 
-When we eventually pin ``pyarrow >= 25``, drop the shadow fd and call
-``os.fsync(self._arrow_file.fileno())`` directly — TODO(pyarrow>=25).
+When pyarrow exposes ``fileno()`` on this stream, drop the shadow fd and call
+``os.fsync(self._arrow_file.fileno())`` directly.
 
 Windows portability of this approach: pyarrow's ``FileOutputStream`` opens
 with ``FILE_SHARE_READ | FILE_SHARE_WRITE`` (arrow C++ ``io_util.cc``
@@ -110,8 +110,8 @@ class IpcStreamSink:
         # OSFile is pyarrow's C++ fast path — writes go straight to the OS
         # via FileOutputStream's syscall path, no Python-side buffering.
         self._arrow_file = pa.OSFile(str(self._path), "wb")
-        # Shadow fd for fsync; see module docstring. TODO(pyarrow>=25): drop
-        # this and call self._arrow_file.fileno() directly.
+        # Shadow fd for fsync; see module docstring. Drop this once
+        # self._arrow_file.fileno() is available.
         try:
             self._sync_fd = os.open(str(self._path), os.O_RDONLY)
         except OSError:

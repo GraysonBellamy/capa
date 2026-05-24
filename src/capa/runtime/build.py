@@ -34,9 +34,8 @@ _logger = structlog.get_logger("capa.runtime.build")
 
 _BRIDGE_CAPACITY_FACTOR: Final[float] = 8.0
 """How many seconds of emission headroom the worker outbound bridge
-holds at the adapter's declared rate. Documented at
-[runtime-architecture.md §13](docs/runtime-architecture.md). Internal
-constant — not part of the user-facing :class:`RuntimeConfig`."""
+holds at the adapter's declared rate. Internal constant — not part of the
+user-facing :class:`RuntimeConfig`."""
 
 _BRIDGE_MIN_CAPACITY: Final[int] = 64
 """Floor for the per-worker outbound bridge. Below ~64 slots a transient
@@ -124,8 +123,7 @@ def _outbound_capacity_for(rates: Iterable[float | None]) -> int:
     Adapters that decline to declare a rate (return ``None``) contribute
     nothing; a worker whose adapters all decline falls back to the
     minimum floor. The formula matches the documented
-    ``bridge_capacity_factor`` at [runtime-architecture.md §13]
-    (docs/runtime-architecture.md).
+    ``bridge_capacity_factor``.
     """
     total = sum(r for r in rates if r is not None)
     if total <= 0.0:

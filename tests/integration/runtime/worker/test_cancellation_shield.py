@@ -1,10 +1,10 @@
-"""Cancellation-shield tests — the load-bearing §4.2 rule.
+"""Cancellation-shield tests for worker dispatch.
 
-Migration doc §4.2 lines 685-719: when a caller cancels a ``dispatch``
-future mid-flight, the worker's ``adapter.command()`` MUST run to
-completion regardless. The original Watlow ReadResponse incident (§1.1) was
-caused by a cancellation propagating into a serial transaction; the worker's
-``asyncio.shield(...)`` around ``adapter.command()`` is what prevents that.
+When a caller cancels a ``dispatch`` future mid-flight, the worker's
+``adapter.command()`` MUST run to completion regardless. A stale serial
+response incident showed that cancellation must not propagate into a
+device transaction; the worker's ``asyncio.shield(...)`` around
+``adapter.command()`` is what prevents that.
 
 These tests cover:
 
@@ -14,7 +14,7 @@ These tests cover:
 
 2. **Per-sim tests (one per adapter family)** — confirms the worker
    integrates the shield correctly against each real sim adapter type
-   (the migration doc §10.2 list: Watlow, Alicat, Sartorius, NI-DAQ).
+   (Watlow, Alicat, Sartorius, NI-DAQ).
 
 These tests stage the equivalent against the sim adapters; corresponding
 hardware tests run the same assertions against real hardware.
@@ -76,7 +76,7 @@ def _has_invalid_state_error(entries: list[dict[str, Any]]) -> bool:
 
 
 class TestShieldMechanism:
-    """The §4.2 rule, observed end-to-end on a controllable adapter."""
+    """Cancellation shielding observed end-to-end on a controllable adapter."""
 
     @pytest.mark.anyio
     async def test_caller_cancel_does_not_interrupt_adapter_command(self) -> None:
@@ -91,8 +91,8 @@ class TestShieldMechanism:
         5. The worker loop saw no ``InvalidStateError`` (caller-cancellation guarantee:
            caller cancellation must not leave noise on the runner loop).
 
-        This is the exact mechanism that prevents the Watlow ReadResponse
-        regression (§1.1)."""
+        This is the exact mechanism that prevents stale serial responses
+        after a cancelled command."""
         adapter = make_fake_adapter("a", command_delay_s=0.2)
         runner = ThreadedRunner(name="shield-cancel")
         worker = Worker(
@@ -131,8 +131,8 @@ class TestShieldMechanism:
     @pytest.mark.anyio
     async def test_subsequent_dispatch_reads_clean_state(self) -> None:
         """After a cancelled-but-completed command, the next dispatch must
-        return its own clean result. On real hardware this is where the
-        Watlow stale-bytes bug surfaced (§1.1)."""
+        return its own clean result. On real hardware this is where stale
+        serial bytes previously surfaced."""
         adapter = make_fake_adapter("a", command_delay_s=0.1)
         worker = Worker(
             resource_id=adapter.resource_id,
@@ -165,9 +165,11 @@ class TestShieldMechanism:
 
     @pytest.mark.anyio
     async def test_metrics_record_completion_not_cancellation(self) -> None:
-        """Per the §4.2 rule: the caller cancelled, but the *worker*
-        observes completion. ``commands_total`` increments; ``commands_failed``
-        stays at 0 because the adapter returned a CommandResult normally."""
+        """The caller cancelled, but the *worker* observes completion.
+
+        ``commands_total`` increments; ``commands_failed`` stays at 0 because
+        the adapter returned a CommandResult normally.
+        """
         adapter = make_fake_adapter("a", command_delay_s=0.1)
         worker = Worker(
             resource_id=adapter.resource_id,
@@ -188,7 +190,7 @@ class TestShieldMechanism:
 
 
 # ---------------------------------------------------------------------------
-# Per-sim tests — migration doc §10.2 list.
+# Per-sim tests.
 # ---------------------------------------------------------------------------
 
 
@@ -284,7 +286,7 @@ async def _run_shield_against_sim(
 
 
 class TestPerSimShield:
-    """One test per sim adapter family, mirroring migration doc §10.2."""
+    """One test per sim adapter family."""
 
     @pytest.mark.anyio
     async def test_watlow_sim_dispatch_cancel_does_not_corrupt_next_call(

@@ -14,21 +14,25 @@ from datetime import UTC, datetime
 import pytest
 
 from capa.calibration.tune_artifact import HeatFluxTuneArtifact, HeatFluxTunePoint
-from capa.experiment.procedures.builtin.heat_flux_tune import (
+from capa.experiment.procedures.builtin.heat_flux_tune.config import (
     PROCEDURE_ID,
     PROCEDURE_VERSION,
-    HeatFluxTune,
     HeatFluxTuneConfig,
+)
+from capa.experiment.procedures.builtin.heat_flux_tune.controller import HeatFluxTune
+from capa.experiment.procedures.builtin.heat_flux_tune.setpoint import (
+    choose_initial_setpoint,
+    default_tolerance_kw_m2,
+    predicate_strictness,
+    sigma_t4_setpoint_c,
+)
+from capa.experiment.procedures.builtin.heat_flux_tune.signals import (
     RollingWindow,
     RunawayDetector,
     SteadyStatePredicate,
-    choose_initial_setpoint,
-    default_tolerance_kw_m2,
     hampel_mask,
     linear_slope_per_min,
-    predicate_strictness,
     secant_step,
-    sigma_t4_setpoint_c,
 )
 
 # ---------------------------------------------------------------------------
@@ -66,10 +70,169 @@ def test_config_operator_initial_requires_value() -> None:
 
 def test_config_defaults_are_sensible() -> None:
     cfg = HeatFluxTuneConfig.model_validate({"targets_kw_m2": [50.0], "t_set_max_c": 900.0})
-    assert cfg.t_settle_max_s == 900.0
+    assert cfg.t_settle_max_s == 1200.0
     assert cfg.tolerance_kw_m2 is None  # use default_tolerance_kw_m2
     assert cfg.initial_guess == "lookup"
     assert cfg.persist_dir == "configs/calibrations/flux"
+    assert cfg.hold_at_completion is False  # opt-in per session
+
+
+def test_config_hold_default_false_keeps_legacy_cool() -> None:
+    """Default cool-on-completion behavior is unchanged for any config
+    that doesn't opt in. Regression for the most common path."""
+    cfg = HeatFluxTuneConfig.model_validate({"targets_kw_m2": [50.0], "t_set_max_c": 900.0})
+    assert cfg.hold_at_completion is False
+
+
+def test_config_hold_multi_target_rejected() -> None:
+    """Holding at the highest target of a calibration-curve session is
+    almost never the intent. The validator refuses at parse time so
+    the operator sees the error before the session runs."""
+    with pytest.raises(ValueError, match="hold_at_completion"):
+        HeatFluxTuneConfig.model_validate(
+            {
+                "targets_kw_m2": [25.0, 50.0, 75.0],
+                "t_set_max_c": 900.0,
+                "hold_at_completion": True,
+            }
+        )
+
+
+def test_config_hold_single_target_allowed() -> None:
+    """The dominant CAPA workflow (single target per session) accepts hold."""
+    cfg = HeatFluxTuneConfig.model_validate(
+        {
+            "targets_kw_m2": [50.0],
+            "t_set_max_c": 900.0,
+            "hold_at_completion": True,
+        }
+    )
+    assert cfg.hold_at_completion is True
+
+
+# ---------------------------------------------------------------------------
+# Hold mode — `_should_hold` gate
+# ---------------------------------------------------------------------------
+
+
+def _hold_proc(hold: bool = True) -> HeatFluxTune:
+    """Build a HeatFluxTune procedure with a single 50 kW/m² target."""
+    return HeatFluxTune.from_config(
+        {
+            "targets_kw_m2": [50.0],
+            "t_set_max_c": 900.0,
+            "hold_at_completion": hold,
+        }
+    )
+
+
+def _make_point(*, accepted: bool, accept_reason: str = "algorithm_converged") -> HeatFluxTunePoint:
+    return HeatFluxTunePoint(
+        target_flux_kw_m2=50.0,
+        heater_setpoint_c=520.0,
+        measured_flux_mean_kw_m2=50.05,
+        measured_flux_std_kw_m2=0.05,
+        measured_flux_slope_kw_m2_per_min=0.0,
+        heater_pv_mean_c=519.8,
+        soak_s=300.0,
+        accepted=accepted,
+        accept_reason=accept_reason,
+    )
+
+
+def test_should_hold_requires_completed_all_targets() -> None:
+    """A run that aborted mid-session (completed_all_targets=False) must
+    cool, even if hold_at_completion=True. Guards the doc's named bug:
+    the `break` paths must not leak past the hold gate."""
+    proc = _hold_proc(hold=True)
+    proc._accepted_points.append(_make_point(accepted=True))
+    assert proc._should_hold(completed_all_targets=False) is False
+
+
+def test_should_hold_requires_opt_in() -> None:
+    """Without ``hold_at_completion=True`` the gate refuses — default
+    cool behavior is preserved."""
+    proc = _hold_proc(hold=False)
+    proc._accepted_points.append(_make_point(accepted=True))
+    assert proc._should_hold(completed_all_targets=True) is False
+
+
+def test_should_hold_requires_non_empty_points() -> None:
+    """Defensive: no point appended → nothing to hold at."""
+    proc = _hold_proc(hold=True)
+    assert proc._should_hold(completed_all_targets=True) is False
+
+
+def test_should_hold_refuses_warn_proceeded_last_point() -> None:
+    """Holding at a ``warn_proceeded`` SP would leave the operator with
+    a hot heater whose tuned value the artifact's setpoint_for_target
+    refuses to re-surface (it filters non-accepted points). Cool
+    instead and let them re-tune — the cost is one warm-up, the
+    alternative is a broken handoff."""
+    proc = _hold_proc(hold=True)
+    proc._accepted_points.append(_make_point(accepted=False, accept_reason="warn_proceeded"))
+    assert proc._should_hold(completed_all_targets=True) is False
+
+
+def test_should_hold_accepts_clean_completion() -> None:
+    """Happy path: opt-in, completed, point accepted → hold."""
+    proc = _hold_proc(hold=True)
+    proc._accepted_points.append(_make_point(accepted=True))
+    assert proc._should_hold(completed_all_targets=True) is True
+
+
+def test_should_hold_accepts_operator_override_point() -> None:
+    """An operator-accepted point is still ``accepted=True``; holding
+    on it is intentional behavior, not a corner case."""
+    proc = _hold_proc(hold=True)
+    proc._accepted_points.append(_make_point(accepted=True, accept_reason="operator_override"))
+    assert proc._should_hold(completed_all_targets=True) is True
+
+
+# ---------------------------------------------------------------------------
+# Hold mode — holding tick payload
+# ---------------------------------------------------------------------------
+
+
+def test_emit_holding_tick_publishes_phase_holding(qtbot_unused: object = None) -> None:
+    """The final tick on a hold path carries ``phase="holding"`` with
+    the held SP / target / measured-flux / accept-reason. The dock's
+    update_from_tick path is what makes it visible — pinning the
+    payload contract guards against silent dock breakage on later
+    payload-shape changes."""
+    from unittest.mock import MagicMock
+
+    proc = _hold_proc(hold=True)
+    proc._accepted_points.append(_make_point(accepted=True, accept_reason="algorithm_converged"))
+    sink = MagicMock()
+    ctx = MagicMock()
+    ctx.ui_sink = sink
+    ctx.clock.t_mono_ns.return_value = 12345
+
+    proc._emit_holding_tick(ctx)
+
+    assert sink.publish.call_count == 1
+    tick = sink.publish.call_args[0][0]
+    assert tick.payload["phase"] == "holding"
+    assert tick.payload["commanded_setpoint_c"] == 520.0
+    assert tick.payload["target_kw_m2"] == 50.0
+    assert tick.payload["mean_flux_kw_m2"] == 50.05
+    assert tick.payload["accept_reason"] == "algorithm_converged"
+
+
+def test_emit_holding_tick_silent_with_no_sink() -> None:
+    """Headless / test paths without a UI sink keep working — the
+    helper degrades to a no-op rather than raising."""
+    from unittest.mock import MagicMock
+
+    proc = _hold_proc(hold=True)
+    proc._accepted_points.append(_make_point(accepted=True))
+    ctx = MagicMock()
+    ctx.ui_sink = None
+    ctx.clock.t_mono_ns.return_value = 0
+
+    # Returns None — assertion is "did not raise".
+    proc._emit_holding_tick(ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +246,7 @@ def test_hampel_mask_passes_clean_signal() -> None:
     # threshold of 3 * 1.4826 * MAD, every sample stays in.
     vals = [10.0, 10.01, 9.99, 10.02, 9.98, 10.01, 10.0, 9.99, 10.0, 10.01, 9.99]
     mask = hampel_mask(vals)
-    assert all(mask), f"clean signal should not be filtered: {list(zip(vals, mask))}"
+    assert all(mask), f"clean signal should not be filtered: {list(zip(vals, mask, strict=True))}"
 
 
 def test_hampel_mask_rejects_isolated_spike() -> None:
@@ -255,7 +418,7 @@ def test_predicate_fires_when_all_conditions_hold_for_t_stable() -> None:
     for now in [0.0, 1.0, 5.0]:
         pred.evaluate(
             now_s=now,
-            pv_c=500.0,
+            pv_mean_c=500.0,
             setpoint_c=500.0,
             flux_std_kw_m2=0.05,
             flux_slope_kw_per_min=0.0,
@@ -264,7 +427,7 @@ def test_predicate_fires_when_all_conditions_hold_for_t_stable() -> None:
     assert pred.fired(5.0) is False  # 5 s < 10 s hold
     pred.evaluate(
         now_s=11.0,
-        pv_c=500.0,
+        pv_mean_c=500.0,
         setpoint_c=500.0,
         flux_std_kw_m2=0.05,
         flux_slope_kw_per_min=0.0,
@@ -282,7 +445,7 @@ def test_predicate_resets_on_pv_band_violation() -> None:
     )
     pred.evaluate(
         now_s=0.0,
-        pv_c=500.0,
+        pv_mean_c=500.0,
         setpoint_c=500.0,
         flux_std_kw_m2=0.05,
         flux_slope_kw_per_min=0.0,
@@ -290,7 +453,7 @@ def test_predicate_resets_on_pv_band_violation() -> None:
     )
     pred.evaluate(
         now_s=5.0,
-        pv_c=510.0,
+        pv_mean_c=510.0,
         setpoint_c=500.0,  # 10 °C off!
         flux_std_kw_m2=0.05,
         flux_slope_kw_per_min=0.0,
@@ -310,7 +473,7 @@ def test_predicate_resets_on_slow_drift() -> None:
     )
     pred.evaluate(
         now_s=0.0,
-        pv_c=500.0,
+        pv_mean_c=500.0,
         setpoint_c=500.0,
         flux_std_kw_m2=0.05,
         flux_slope_kw_per_min=0.1,  # drifting at 0.1 per min > 0.02 cap
@@ -329,7 +492,7 @@ def test_predicate_does_not_fire_until_window_full() -> None:
     )
     pred.evaluate(
         now_s=0.0,
-        pv_c=500.0,
+        pv_mean_c=500.0,
         setpoint_c=500.0,
         flux_std_kw_m2=0.05,
         flux_slope_kw_per_min=0.0,
@@ -660,7 +823,7 @@ def test_t_set_max_above_ceiling_fails_preflight_path_via_pydantic() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Operator-command handling (W1 — Phase 3)
+# Operator-command handling
 # ---------------------------------------------------------------------------
 
 
@@ -751,19 +914,17 @@ async def test_consume_operator_commands_translates_stream_to_state() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ProcedureTick emission — Phase 3.5 live numerics
+# ProcedureTick live numerics
 # ---------------------------------------------------------------------------
 
 
-def _build_state_with_samples() -> "object":
+def _build_state_with_samples() -> object:
     """Construct a ``_SessionState`` populated with enough samples that
     the rolling-window statistics are non-trivial. Returned typed as
     ``object`` to keep the private import inside the helper rather
     than in the test file's top-level namespace."""
-    from capa.experiment.procedures.builtin.heat_flux_tune import (
-        RollingWindow,
-        _SessionState,
-    )
+    from capa.experiment.procedures.builtin.heat_flux_tune.controller import _SessionState
+    from capa.experiment.procedures.builtin.heat_flux_tune.signals import RollingWindow
 
     state = _SessionState(
         flux_window=RollingWindow(window_s=10.0),
@@ -820,7 +981,7 @@ def test_emit_tick_payload_carries_full_state() -> None:
     """
     from unittest.mock import MagicMock
 
-    from capa.experiment.procedures.builtin.heat_flux_tune import SteadyStatePredicate
+    from capa.experiment.procedures.builtin.heat_flux_tune.signals import SteadyStatePredicate
 
     proc = HeatFluxTune.from_config({"targets_kw_m2": [50.0], "t_set_max_c": 900.0})
     sink = MagicMock()
@@ -916,10 +1077,8 @@ def test_emit_tick_error_is_none_before_any_iteration() -> None:
     on ``error_kw_m2 is None`` to suppress the err/✓ overlay."""
     from unittest.mock import MagicMock
 
-    from capa.experiment.procedures.builtin.heat_flux_tune import (
-        RollingWindow,
-        _SessionState,
-    )
+    from capa.experiment.procedures.builtin.heat_flux_tune.controller import _SessionState
+    from capa.experiment.procedures.builtin.heat_flux_tune.signals import RollingWindow
 
     proc = HeatFluxTune.from_config({"targets_kw_m2": [50.0], "t_set_max_c": 900.0})
     sink = MagicMock()
