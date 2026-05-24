@@ -120,7 +120,7 @@ def gather_capa(
     ``repo_root`` is the directory to ask git about. Pass ``None`` (default)
     to skip the git probe — useful when capa is installed from a wheel and
     the running tree is not a checkout. ``engine_version`` is the engine
-    code revision marker (); the engine plumbs this in at
+    code revision marker; the engine plumbs this in at
     construction time.
     """
     sha, dirty = _git_metadata(repo_root)

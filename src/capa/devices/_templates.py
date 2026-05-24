@@ -1,4 +1,4 @@
-"""Built-in :class:`ChannelTemplate` instances ().
+"""Built-in :class:`ChannelTemplate` instances.
 
 Templates are shared between real and sim adapters when their
 :class:`SourceBinding` shape is identical — a Watlow heater PV is the

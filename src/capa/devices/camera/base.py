@@ -35,7 +35,7 @@ from capa.devices.adapter import CommandResult, DeviceCommand
 
 class CameraCapability(Flag):
     """Camera capability flags. Used by the UI to gate widgets and by the
-    engine's preflight to validate against profile requirements ().
+    engine's preflight to validate against profile requirements.
     """
 
     NONE = 0
@@ -161,7 +161,7 @@ class CameraSpec(BaseModel):
     camera whose serial equals this string or :meth:`Camera.open` fails."""
 
     output_root: str | None = None
-    """Optional override for the recorded file location (). When
+    """Optional override for the recorded file location. When
     set, the file lands at ``<output_root>/<run_id>/video/<name>.<ext>`` and
     the manifest records both the absolute path and a relative reference. When
     ``None`` (default), the file lives inside the bundle directory."""
@@ -170,7 +170,7 @@ class CameraSpec(BaseModel):
     """Policy metadata for future camera safety escalation."""
 
     estimated_bps: int = Field(default=4_000_000, gt=0)
-    """Bytes-per-second estimate used by the disk-space preflight ().
+    """Bytes-per-second estimate used by the disk-space preflight.
     Defaults to ~4 MB/s — conservative for 30 fps H.264 webcam capture and
     realistic for E85 ``.csq`` at 30 Hz."""
 
@@ -252,7 +252,7 @@ class CameraHealth(BaseModel):
 class FrameReceipt(BaseModel):
     """One frame-arrival record. Posted from the SDK / capture thread onto a
     memory object stream; consumed on the engine event loop by the frame-index
-    builder ().
+    builder.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -289,7 +289,7 @@ class CameraEvent(BaseModel):
 
 @runtime_checkable
 class Camera(Protocol):
-    """Uniform camera surface ().
+    """Uniform camera surface.
 
     Concrete adapters back this with a vendor SDK or container library. The
     Protocol is *runtime_checkable* so the engine's adapter dispatch can
@@ -320,7 +320,7 @@ class Camera(Protocol):
     async def open(self) -> CameraInfo:
         """Establish the connection and return identifying info.
 
-        Selection rules ():
+        Selection rules:
 
         * if ``self.spec.serial`` is set, require an exact match;
         * else if ``self.spec.model_hint`` is set, prefer a matching model

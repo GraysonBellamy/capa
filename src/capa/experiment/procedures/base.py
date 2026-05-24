@@ -159,7 +159,7 @@ class ProcedureContext:
     """
 
     clock: RunClock
-    """Single monotonic timebase for the run ()."""
+    """Single monotonic timebase for the run."""
 
     config: ExperimentConfig
     """Frozen run recipe. The procedure reads ``config.method``,

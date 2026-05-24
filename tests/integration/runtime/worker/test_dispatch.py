@@ -122,7 +122,7 @@ class TestDispatchRefusedStates:
     async def test_dispatch_refused_in_draining(
         self, make_runner: Callable[[str], WorkerRunner]
     ) -> None:
-        """The DRAINING gate is on the worker loop (). To force
+        """The DRAINING gate is on the worker loop. To force
         the race deterministically we slow the disarm's adapter.stop()
         path and submit a dispatch concurrently.
 

@@ -175,7 +175,7 @@ class DeviceEvent(BaseModel):
 
 
 DeviceHealth = Literal["ok", "degraded", "down"]
-"""Per-adapter health pill, surfaced in the UI status bar () and
+"""Per-adapter health pill, surfaced in the UI status bar and
 recorded into ``status.sqlite``.
 
 ``ok`` is the success path; ``degraded`` covers transient retries / late

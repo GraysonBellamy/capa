@@ -226,7 +226,7 @@ class TestFinalizeRewrites:
         assert not inflight.exists()
         table = pq.read_table(final)
         assert table.num_rows == 7
-        # Sorted by t_mono_ns post-rewrite ().
+        # Sorted by t_mono_ns post-rewrite.
         ts = table.column("t_mono_ns").to_pylist()
         assert ts == sorted(ts)
 

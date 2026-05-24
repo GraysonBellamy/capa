@@ -66,7 +66,7 @@ async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> N
     # Manifest captures the procedure id and the profile id; the profile's
     # rich metadata is snapshotted into config.toml (the full
     # ExperimentConfig dump) and also into a dedicated profiles/<id>.toml
-    # file ().
+    # file.
     manifest = json.loads((bundle / "manifest.json").read_text())
     assert manifest["procedure"]["id"] == "capa.builtin.recipe_runner"
     assert manifest["domain_profile"]["id"] == "capa.profiles.capa_pyrolysis"

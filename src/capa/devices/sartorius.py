@@ -1,10 +1,6 @@
 """Real :class:`SartoriusAdapter` — wraps a :class:`sartoriuslib.Balance`.
 
-"real ``SartoriusAdapter``. Capability flags. Device
-health surfacing. Discovery (``capa devices discover``).
-``capa validate --strict``."
-
-Architecture ():
+Architecture:
 
 * ``open`` opens the serial transport via :func:`sartoriuslib.open_device` and
   runs :meth:`Balance.identify` to capture model / serial / firmware. The
@@ -20,7 +16,7 @@ Architecture ():
 * ``snapshot`` returns a :class:`DeviceSnapshot` with cached identity plus
   live health fields (auto-reconnect counter, last-sample age,
   :class:`DeviceHealth` pill).
-* ``command`` enforces the authorization gate () and dispatches
+* ``command`` enforces the authorization gate and dispatches
   :meth:`Balance.tare` / :meth:`Balance.zero`.
 """
 

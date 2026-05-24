@@ -239,7 +239,7 @@ class ChannelSamplesSink:
 
         No-op when the buffer is empty. The underlying :class:`IpcStreamSink`
         fsyncs after every write so a power-loss after this call leaves the
-        last batch on disk ().
+        last batch on disk.
         """
         if self._closed:
             raise ChannelSamplesSinkError("flush() after close()")

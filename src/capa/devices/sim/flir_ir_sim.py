@@ -1,4 +1,4 @@
-"""In-process IR-camera sim fixture ().
+"""In-process IR-camera sim fixture.
 
 Writes a small, deterministic "fake-csq" file at the path the engine asks for.
 The format is **not** a real FLIR FFF/`.csq` — it is a capa-private layout
@@ -23,7 +23,7 @@ The sim's job is twofold:
    files appear in the bundle, ``manifest.json.cameras`` populates,
    ``manifest.sha256`` covers the file, the frame-index parquet round-trips.
 2. Give downstream tools a header-only parser target so the
-   "post-finalize frame index extractor" path () is testable from
+   "post-finalize frame index extractor" path is testable from
    capa core without importing ``capa-flir``.
 
 Because the file is capa-private, capa core ships its own
@@ -94,7 +94,7 @@ class FlirIrSim:
     sim cadence and pushes :class:`FrameReceipt`\\ s onto the frame stream
     while writing payload bytes to disk. This mirrors how the real
     :class:`capa_flir.FlirIrAdapter` pumps Atlas's ``OnImageReceived``
-    callbacks () — only the source of frames differs.
+    callbacks — only the source of frames differs.
     """
 
     __slots__ = (
@@ -760,7 +760,7 @@ async def handshake(cam_spec: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Setup-editor descriptor ().
+# Setup-editor descriptor.
 # ---------------------------------------------------------------------------
 
 
@@ -768,7 +768,7 @@ from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
 
 class FlirIrSimParams(BaseModel):
-    """View model for :class:`FlirIrSim` params ()."""
+    """View model for :class:`FlirIrSim` params."""
 
     model_config = ConfigDict(extra="ignore")
 

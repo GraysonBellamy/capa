@@ -4,7 +4,7 @@ Low-rate device-health rows (Watlow alarm bits, Alicat valve
 drive, balance stable flag, comm latency, firmware version) live here, kept
 separate from ``scalars.parquet`` so the engineering signal table doesn't get
 polluted with diagnostic noise. Drop-oldest semantics are enforced by the
-producer queue () — this sink simply persists what arrives.
+producer queue — this sink simply persists what arrives.
 
 Schema is one row per :class:`~capa.devices.records.DeviceSnapshot`. The
 free-form ``fields`` dict is JSON-encoded into ``fields_json``.

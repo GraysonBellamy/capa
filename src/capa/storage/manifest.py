@@ -216,7 +216,7 @@ class CameraEntry(BaseModel):
     the ``output_path_external`` absolute path below."""
     output_path_external: str | None = None
     """Absolute path when the camera's :attr:`CameraSpec.output_root`
-    overrode the bundle directory (). ``None`` for the common
+    overrode the bundle directory. ``None`` for the common
     case where the file lives inside the bundle."""
     frames_path: str | None = None
     """Bundle-relative path to ``<name>.frames.parquet``. ``None`` until the
@@ -319,7 +319,7 @@ class BundleManifest(BaseModel):
     integrity: IntegrityBlock = Field(default_factory=IntegrityBlock)
 
     cameras: tuple[CameraEntry, ...] = Field(default_factory=tuple)
-    """Per-camera summary (). Populated by the bundle writer at
+    """Per-camera summary. Populated by the bundle writer at
     arm-time with the spec-derived fields and refreshed at finalize with
     the final frame count + frames.parquet path."""
 

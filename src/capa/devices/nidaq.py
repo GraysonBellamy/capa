@@ -11,7 +11,7 @@ declaratively: ``task_name``, a list of ``channels`` (dicts that
 optional ``tdms`` driver-side logging, and ``rate_hz`` (the recorder's
 polling cadence in software-timed mode).
 
-Two emission shapes ():
+Two emission shapes:
 
 * **Polled (software-timed).** ``timing is None`` or ``timing.mode ==
   on_demand``. The adapter drives :func:`nidaqlib.streaming.record_polled`
@@ -27,7 +27,7 @@ Two emission shapes ():
   ``task_started_at + (first_sample_index + k) / sample_rate_hz``. The
   unroll is gated by :attr:`NIDAQAdapterParams.max_samples_per_block_unroll`
   so kHz acquisition cannot accidentally land on this path; the
-  rectangular-block sidecar / TDMS escape () is future work.
+  rectangular-block sidecar / TDMS escape is future work.
 
 For tests, an opt-in ``backend`` kwarg is forwarded to
 :func:`nidaqlib.tasks.open_device` so a

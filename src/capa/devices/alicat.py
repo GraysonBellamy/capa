@@ -1,10 +1,6 @@
 """Real :class:`AlicatAdapter` — wraps an :class:`alicatlib.devices.base.Device`.
 
-"real ``AlicatAdapter``. Capability flags. Device health
-and health surfacing. Discovery (``capa devices discover``).
-``capa validate --strict``."
-
-Architecture ():
+Architecture:
 
 * ``open`` opens the serial transport via :func:`alicatlib.open_device` and runs
   the library's identification + capability probes. The cached
@@ -20,7 +16,7 @@ Architecture ():
 * ``snapshot`` returns a :class:`DeviceSnapshot` with cached identity plus
   live health fields (auto-reconnect counter, last-sample age,
   :class:`DeviceHealth` pill).
-* ``command`` enforces the authorization gate () and dispatches
+* ``command`` enforces the authorization gate and dispatches
   :meth:`Device.setpoint`, :meth:`Device.gas`, :meth:`Device.tare_flow` /
   :meth:`Device.tare_absolute_pressure` / :meth:`Device.tare_gauge_pressure`.
 

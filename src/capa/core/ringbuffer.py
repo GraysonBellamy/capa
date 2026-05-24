@@ -274,7 +274,7 @@ class RingBufferRegistry:
 
     def total_dropped(self) -> int:
         """Sum of dropped samples across every registered buffer. Used by
-        the status bar's "Dropped UI samples" readout ()."""
+        the status bar's "Dropped UI samples" readout."""
         return sum(b.total_dropped for b in self._buffers.values())
 
     def total_overflow(self) -> int:

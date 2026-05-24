@@ -70,7 +70,7 @@ class HardwareProfile(BaseModel):
     devices: tuple[DeviceConfig, ...] = Field(default_factory=tuple)
     channels: tuple[ChannelSpec, ...] = Field(default_factory=tuple)
     cameras: tuple[CameraSpec, ...] = Field(default_factory=tuple)
-    """Per-rig camera entries (). Cameras are peers of devices, not
+    """Per-rig camera entries. Cameras are peers of devices, not
     a subtype: they own their own output container, emit frame receipts +
     health snapshots rather than ``ChannelSample``\\ s, and are wired into
     the engine task group through a parallel construction pass."""
@@ -156,7 +156,7 @@ class CalibrationSetRef(BaseModel):
     """Pointer to a CalibrationSet on disk.
 
     A snapshot of the resolved set is written into the bundle as
-    ``calibration.json`` () so the bundle is self-sufficient even
+    ``calibration.json`` so the bundle is self-sufficient even
     if the on-disk source moves.
     """
 
@@ -247,7 +247,7 @@ class SafetyRuleConfig(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     action: str = "warn"
     """One of ``"warn"`` / ``"pause_method"`` / ``"abort_run"`` /
-    ``"safe_shutdown"`` ()."""
+    ``"safe_shutdown"``."""
 
 
 class SafetyPolicy(BaseModel):

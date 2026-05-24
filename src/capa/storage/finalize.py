@@ -159,7 +159,7 @@ def _scan_inflight_pairs(bundle_root: Path) -> list[tuple[Path, Path]]:
             final = dr_dir / f"{adapter}{FINAL_SUFFIX}"
             pairs.append((path, final))
 
-    # Per-camera frame-index parquets (). One in-flight file per
+    # Per-camera frame-index parquets. One in-flight file per
     # camera that actually emitted frames; cameras that opened but never
     # recorded leave nothing on disk.
     video_dir = bundle_root / VIDEO_DIRNAME
@@ -322,7 +322,7 @@ def finalize_in_place(
         exit_reason: human-readable detail when ``run_status`` is non-normal.
             Recorded in the manifest ``exit_reason`` field.
         inferred_ended_utc: when ``True``, mark in the manifest's ``custom``
-            block that ``ended_utc`` was reconstructed (). Used by
+            block that ``ended_utc`` was reconstructed. Used by
             crash-recovery callers when the engine never wrote a clean
             ``ended_utc``.
         ended_utc: explicit end timestamp. ``None`` (default) means "use

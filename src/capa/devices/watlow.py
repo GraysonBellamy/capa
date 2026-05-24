@@ -1,10 +1,6 @@
 """Real :class:`WatlowAdapter` — wraps a :class:`watlowlib.Controller`.
 
-"real :class:`WatlowAdapter` (smallest viable real device);
-Watlow ``SourceRecord`` preservation; Watlow parameter-to-channel mapping;
-hardware smoke-test gate."
-
-Architecture ():
+Architecture:
 
 * ``open`` opens the serial transport via :func:`watlowlib.open_device` and runs
   :meth:`watlowlib.Controller.identify` to capture firmware / part-number
@@ -1139,7 +1135,7 @@ async def discover(
 
 
 # ---------------------------------------------------------------------------
-# Setup-editor descriptor (). Lives next to the adapter so the
+# Setup-editor descriptor. Lives next to the adapter so the
 # descriptor and adapter cannot drift; the bottom-of-file register() call
 # adds this to capa.devices.registry.ADAPTERS at import time.
 # ---------------------------------------------------------------------------

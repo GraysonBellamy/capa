@@ -1,4 +1,4 @@
-"""Tests for canonical TOML/YAML writers ()."""
+"""Tests for canonical TOML/YAML writers."""
 
 from __future__ import annotations
 

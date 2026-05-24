@@ -1,4 +1,4 @@
-"""Camera subsystem ().
+"""Camera subsystem.
 
 A :class:`Camera` is a peer of :class:`~capa.devices.adapter.DeviceAdapter` —
 not a subtype. The shape is different:

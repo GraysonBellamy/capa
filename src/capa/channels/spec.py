@@ -127,7 +127,7 @@ class NIDAQBlockChannel(_BindingBase):
 
     Hardware-clocked blocks stay rectangular until either the adapter derives
     channel samples at capa's normal 3–60 Hz class or hands the byte path to
-    TDMS for kHz-rate capture ().
+    TDMS for kHz-rate capture.
     """
 
     source: Literal["nidaq_block_channel"] = "nidaq_block_channel"
