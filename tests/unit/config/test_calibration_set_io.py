@@ -129,7 +129,7 @@ def test_diff_ordering_actionable_first() -> None:
 
 
 def test_apply_diff_selection_mutates_only_selected_channels() -> None:
-    channels = [
+    channels: list[dict[str, Any]] = [
         {"name": "TC_top_1", "calibration": _identity("V")},
         {"name": "TC_top_2", "calibration": _identity("V")},
         {"name": "TC_top_3", "calibration": _identity("V")},
@@ -171,7 +171,7 @@ def test_apply_diff_selection_skips_set_only_rows() -> None:
 
 
 def test_build_set_from_channels_skips_malformed_calibrations() -> None:
-    channels = [
+    channels: list[dict[str, Any]] = [
         {"name": "ok", "calibration": _identity("degC")},
         {"name": "bad", "calibration": {"kind": "no_such_variant"}},
         {"name": "no_cal"},

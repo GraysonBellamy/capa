@@ -61,7 +61,7 @@ class TestOpenClose:
         assert worker.state is WorkerState.CLOSED
         await worker.async_start()
         try:
-            assert worker.state is WorkerState.IDLE
+            assert getattr(worker, "state") is WorkerState.IDLE  # noqa: B009
             assert adapter.open_calls == 1
             assert adapter.close_calls == 0
         finally:
@@ -267,7 +267,7 @@ class TestMultipleRuns:
                 assert worker.state is WorkerState.ARMED
                 result = await worker.async_disarm(grace_s=1.0)
                 assert result is DisarmResult.OK
-                assert worker.state is WorkerState.IDLE
+                assert getattr(worker, "state") is WorkerState.IDLE  # noqa: B009
         finally:
             await worker.async_close(grace_s=1.0)
         # adapter.open called exactly once — the entire point of pool-level

@@ -15,4 +15,3 @@
 - Limitations — what sims do NOT model (real saturation, IR radiometric noise floor, etc.)
 
 *See also:* [Devices: Simulators](../devices/simulators.md).
-

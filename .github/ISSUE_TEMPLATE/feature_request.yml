@@ -1,0 +1,53 @@
+name: Feature request
+description: Propose a new procedure, device adapter, UI affordance, or runtime behaviour
+labels: [enhancement]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: |
+        What experiment, workflow, or rig change is blocked or made harder
+        by capa today? Concrete examples beat abstract ones.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: |
+        Sketch the surface. New CLI command? New device adapter? New
+        method-step kind? Link to the relevant docs page if you are
+        proposing a change to an existing one.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Subsystem
+      options:
+        - New device adapter
+        - New procedure or method step (plugin)
+        - New profile (plugin)
+        - GUI / operator workflow
+        - Runtime / scheduling / backpressure
+        - Bundle format / sinks
+        - CLI
+        - Calibration
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What did you try first? What workaround exists today?
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope notes
+      options:
+        - label: This could ship as a plugin (entry-point-discovered procedure / profile / adapter / sink) rather than core code.
+        - label: This is a breaking change to a public API surface (`capa.runtime`, `capa.devices`, `capa.config`).
+        - label: This affects a safety-critical path (saturation, authorization gate, shutdown sequence, bundle seal).

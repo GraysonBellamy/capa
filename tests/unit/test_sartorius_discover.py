@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 import sartoriuslib
-from sartoriuslib import ProtocolKind, SartoriusDiscoveryResult
+from sartoriuslib import ProtocolKind, SartoriusDiscoveryResult, SartoriusError
 
 from capa.devices import sartorius
 
@@ -24,7 +24,7 @@ def _probe(
     protocol: ProtocolKind | None,
     ok: bool,
     autoprint_active: bool = False,
-    error: Exception | None = None,
+    error: SartoriusError | None = None,
 ) -> SartoriusDiscoveryResult:
     return SartoriusDiscoveryResult(
         ok=ok,

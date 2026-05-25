@@ -1,0 +1,89 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: |
+        What did you do, what did you expect, what happened instead?
+        Include the exact exception type and message if one was raised.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: |
+        Steps, config snippet, or smallest script that triggers the bug.
+        Prefer simulator configs (`configs/experiments/sim_*.yaml`) so the
+        reproduction does not require hardware. Attach a bundle directory
+        (zipped) if the bug is about a sealed run.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: capa-version
+    attributes:
+      label: capa version
+      description: Output of `uv run capa version`.
+      placeholder: e.g. 0.1.0.dev15+g0b51148 (runtime 0.1-p3)
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: e.g. 3.13.1
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: e.g. Windows 11 24H2, Ubuntu 24.04
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Subsystem
+      description: Best guess at where the bug lives.
+      options:
+        - GUI / Setup tab
+        - GUI / Run tab
+        - GUI / Method tab
+        - Runtime (Conductor / WorkerPool)
+        - Device adapter (Watlow, Alicat, Sartorius, NI-DAQ, camera)
+        - Bundle / writer / manifest
+        - CLI
+        - Config / validation
+        - Calibration
+        - Plugin / procedure / profile
+        - Docs
+        - Other / not sure
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware config (if hardware-related)
+      description: |
+        Device list, serial ports, NI-DAQ chassis, camera model. The
+        `[devices]` block from your hardware TOML is ideal.
+      render: toml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant log lines or `events.sqlite` event excerpts. The
+        diagnostics dock (Help → Open logs folder) is the right place to
+        grab these from. Drop the file or paste the last ~50 lines.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirm
+      options:
+        - label: I am running a pre-alpha build and have read the unstable-API warning in the README.
+          required: true
+        - label: I have searched existing issues for duplicates.
+          required: true

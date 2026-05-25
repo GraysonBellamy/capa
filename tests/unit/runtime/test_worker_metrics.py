@@ -177,8 +177,7 @@ class TestDisarmResult:
     """The enum the conductor reads to decide whether a run is degraded."""
 
     def test_distinct_values(self) -> None:
-        assert DisarmResult.OK is not DisarmResult.FORCED
-        assert DisarmResult.FORCED is not DisarmResult.LEAKED
+        assert len({DisarmResult.OK, DisarmResult.FORCED, DisarmResult.LEAKED}) == 3
 
     @pytest.mark.parametrize("value", ["ok", "forced", "leaked"])
     def test_value_round_trip(self, value: str) -> None:

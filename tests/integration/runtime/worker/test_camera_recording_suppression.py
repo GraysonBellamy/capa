@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from capa.core.clock import RunClock
+from capa.devices.adapter import DeviceAdapter
 from capa.devices.camera.base import CameraSpec
 from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.runtime.camera_adapter import make_camera_adapter
@@ -72,7 +74,7 @@ def _ctx(
         bundle=_PathBundleRef(bundle_root),
         recording_plan=ResolvedRecordingPlan(
             channel_mode="all",
-            camera_mode=camera_mode,  # type: ignore[arg-type]
+            camera_mode=camera_mode,
             recorded_cameras=recorded_cameras,
             source="procedure_default",
         ),
@@ -85,7 +87,7 @@ class TestCameraSuppression:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec(fps=20))
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-suppress"),
         )
         await worker.async_start()
@@ -97,12 +99,12 @@ class TestCameraSuppression:
             # Give the stream task a moment to exhaust the (empty) iterator.
             # No frames should ever appear — race that against a short timeout.
             with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(bridge.get(), timeout=0.5)  # type: ignore[union-attr]
+                await asyncio.wait_for(bridge.get(), timeout=0.5)
 
             result = await worker.async_disarm(grace_s=3.0)
             # The stream task exited cleanly — disarm returns OK, not FORCED.
             assert result is DisarmResult.OK
-            assert worker.state is WorkerState.IDLE
+            assert getattr(worker, "state") is WorkerState.IDLE  # noqa: B009
         finally:
             await worker.async_close(grace_s=2.0)
 
@@ -118,7 +120,7 @@ class TestCameraSuppression:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec(fps=20))
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-normal"),
         )
         await worker.async_start()
@@ -127,7 +129,7 @@ class TestCameraSuppression:
             await worker.async_arm(ctx)
             bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             # We should see at least one frame
-            emission = await asyncio.wait_for(bridge.get(), timeout=2.0)  # type: ignore[union-attr]
+            emission = await asyncio.wait_for(bridge.get(), timeout=2.0)
             assert emission is not None
 
             await worker.async_disarm(grace_s=3.0)
@@ -142,7 +144,7 @@ class TestCameraSuppression:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec(fps=20))
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-stop-clean"),
         )
         await worker.async_start()

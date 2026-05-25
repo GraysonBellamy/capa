@@ -29,6 +29,8 @@ import random
 
 import pytest
 
+from capa.runtime.bridge import ThreadBridge
+from capa.runtime.emissions import WorkerEmission
 from capa.runtime.errors import WorkerStateError
 from capa.runtime.lifecycle import PoolState, WorkerState
 from capa.runtime.pool import WorkerPool
@@ -64,7 +66,7 @@ async def _run_random_sequence(seed: int, num_devices: int = 2) -> None:
     device_to_resource = {a.name: a.resource_id for a in adapters}
     pool = WorkerPool(workers=workers, device_to_resource=device_to_resource)
     await pool.open()
-    bridges: dict[str, object] = {}
+    bridges: dict[str, ThreadBridge[WorkerEmission]] = {}
 
     # State the action picker tracks (parallel to the pool's own state).
     armed = False
@@ -97,7 +99,7 @@ async def _run_random_sequence(seed: int, num_devices: int = 2) -> None:
                     if sampling:
                         for b in bridges.values():
                             with contextlib.suppress(asyncio.TimeoutError):
-                                await asyncio.wait_for(b.get(), timeout=0.05)  # type: ignore[arg-type]
+                                await asyncio.wait_for(b.get(), timeout=0.05)
                     await pool.disarm_all(grace_s=2.0)
                     armed = False
                     sampling = False
@@ -127,7 +129,7 @@ async def _run_random_sequence(seed: int, num_devices: int = 2) -> None:
             if sampling:
                 for b in bridges.values():
                     with contextlib.suppress(asyncio.TimeoutError):
-                        await asyncio.wait_for(b.get(), timeout=0.05)  # type: ignore[arg-type]
+                        await asyncio.wait_for(b.get(), timeout=0.05)
             await pool.disarm_all(grace_s=2.0)
 
         # All workers reached IDLE; pool still OPEN.

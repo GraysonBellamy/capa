@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -142,7 +143,9 @@ def _frame(idx: int) -> FrameReceipt:
     )
 
 
-def _wait_for(predicate, *, timeout: float = 2.0, interval: float = 0.005) -> None:
+def _wait_for(
+    predicate: Callable[[], bool], *, timeout: float = 2.0, interval: float = 0.005
+) -> None:
     """Spin-wait helper for assertions against the writer thread's drain."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -163,8 +166,8 @@ class TestLifecycle:
         wt.start()
         assert wt.is_alive
         assert wt.close()
-        assert not wt.is_alive
         assert wt.closed
+        assert not getattr(wt, "is_alive")  # noqa: B009  defeat mypy property narrowing
 
     def test_close_without_start_is_safe(self) -> None:
         wt = WriterThread(FakeWriter())
@@ -245,9 +248,9 @@ class TestDispatch:
         wt.start()
         try:
             for i in range(2000):
-                wt.submit_nowait(_sample("c", i, float(i))) or wt.submit_blocking(
-                    _sample("c", i, float(i))
-                )
+                sample = _sample("c", i, float(i))
+                if not wt.submit_nowait(sample):
+                    wt.submit_blocking(sample)
         finally:
             assert wt.close()
         assert len(fake.samples) == 2000
@@ -396,11 +399,12 @@ class TestMetrics:
                 wt.submit_nowait(_sample("a", i, float(i)))
                 # Each accept must move the timestamp strictly forward; spin
                 # until the drain visibly advances past the previous reading.
-                prev = wt.last_accept_monotonic_ns
-                _wait_for(
-                    lambda p=prev: wt.last_accept_monotonic_ns > p,
-                    timeout=1.0,
-                )
+                prev: int = wt.last_accept_monotonic_ns
+
+                def _advanced(p: int = prev) -> bool:
+                    return wt.last_accept_monotonic_ns > p
+
+                _wait_for(_advanced, timeout=1.0)
         finally:
             assert wt.close()
         assert wt.last_accept_monotonic_ns > before_start

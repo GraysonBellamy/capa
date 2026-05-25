@@ -239,10 +239,10 @@ class _SlowCommandProxy:
         await self._inner.stop()  # type: ignore[attr-defined]
 
     async def snapshot(self) -> object:
-        return await self._inner.snapshot()  # type: ignore[attr-defined,no-any-return]
+        return await self._inner.snapshot()  # type: ignore[attr-defined]
 
     def stream(self) -> object:
-        return self._inner.stream()  # type: ignore[attr-defined,no-any-return]
+        return self._inner.stream()  # type: ignore[attr-defined]
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
         await asyncio.sleep(self._delay_s)
@@ -261,7 +261,7 @@ async def _run_shield_against_sim(
     proxy = _SlowCommandProxy(sim_adapter, delay_s=0.15)
 
     worker = Worker(
-        resource_id=sim_adapter.resource_id,
+        resource_id=sim_adapter.resource_id,  # type: ignore[attr-defined]
         adapters=[proxy],  # type: ignore[list-item]
         runner=ThreadedRunner(name=f"shield-{sim_name}"),
     )

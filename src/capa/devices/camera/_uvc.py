@@ -161,7 +161,7 @@ CAPABILITY_REQUIREMENTS: dict[CameraCapability, tuple[UvcProperty, ...]] = {
 class UvcPropertyRange:
     """Subset of duvc-ctl's :class:`PropRange` capa cares about.
 
-    Frozen because the UI caches ranges from the open() probe and re-uses
+    Frozen because the UI caches ranges from the open() probe and reuses
     them across slider rebuilds. duvc-ctl's PropRange is mutable.
     """
 

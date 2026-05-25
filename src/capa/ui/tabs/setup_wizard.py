@@ -345,7 +345,7 @@ def build_document(spec: _Spec) -> ConfigDocument:
     Public so tests can drive the seed logic without running Qt.
 
     Strategy: load a canonical fixture from ``configs/`` for each
-    starting point and re-use its payloads. This is *substantially*
+    starting point and reuse its payloads. This is *substantially*
     simpler than maintaining a parallel inline seed and guarantees
     that wizard output passes Layers 1-4 without the operator typing
     anything.

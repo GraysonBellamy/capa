@@ -13,4 +13,3 @@
 - Backup recommendations
 
 *See also:* [Environment variables](../reference/environment-variables.md).
-

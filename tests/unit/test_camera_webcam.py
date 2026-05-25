@@ -137,7 +137,7 @@ class TestWebcamPreviewBetweenRuns:
             out = tmp_path / "v.mkv"
             await cam.start_recording(out)
             # Throttle must be reset; first push_frame produces a preview.
-            assert cam._last_preview_t_mono_ns is None
+            assert getattr(cam, "_last_preview_t_mono_ns") is None  # noqa: B009
 
             await cam.push_frame(_solid_frame(64, 48, (255, 0, 0)))
 
@@ -884,7 +884,7 @@ class TestDshowFormatInfoProbe:
         class _FakeContainer:
             def close(self) -> None: ...
 
-        monkeypatch.setattr(probe_mod.av, "open", lambda *a, **kw: _FakeContainer())
+        monkeypatch.setattr(probe_mod.av, "open", lambda *a, **kw: _FakeContainer())  # type: ignore[attr-defined]
 
         fake_log_entries = [
             (0, "dshow", "  pixel_format=yuyv422  min s=1920x1080 fps=5 max s=1920x1080 fps=15"),
@@ -923,7 +923,7 @@ class TestDshowFormatInfoProbe:
         class _FakeContainer:
             def close(self) -> None: ...
 
-        monkeypatch.setattr(probe_mod.av, "open", lambda *a, **kw: _FakeContainer())
+        monkeypatch.setattr(probe_mod.av, "open", lambda *a, **kw: _FakeContainer())  # type: ignore[attr-defined]
 
         fake_log_entries = [
             # No "max s=" — only "min s=", fps annotation present but lives

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -190,7 +191,10 @@ class TestStartStop:
                 assert expected.exists()
                 # The camera's internal clock is now the run's clock
                 # (proxied — same monotonic anchor)
-                assert wrapper.camera._clock.started_mono_ns == ctx.clock.started_mono_ns
+                assert (
+                    cast(FlirIrSim, wrapper.camera)._clock.started_mono_ns
+                    == ctx.clock.started_mono_ns
+                )
             finally:
                 await wrapper.stop()
         finally:

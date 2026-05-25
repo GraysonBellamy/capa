@@ -10,6 +10,8 @@ Covers both entry points:
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from capa.devices.nidaq_join import (
@@ -26,9 +28,9 @@ from capa.devices.nidaq_join import (
 def _ni_device(
     name: str = "cdaq1",
     task: str = "ai_task",
-    channels: list[dict] | None = None,
+    channels: list[dict[str, Any]] | None = None,
     adapter: str = "capa.devices.nidaq",
-) -> dict:
+) -> dict[str, Any]:
     return {
         "name": name,
         "adapter": adapter,
@@ -39,8 +41,10 @@ def _ni_device(
     }
 
 
-def _tc_channel(name: str | None, physical: str = "cDAQ1Mod1/ai0", units: str = "DEG_C") -> dict:
-    out: dict = {
+def _tc_channel(
+    name: str | None, physical: str = "cDAQ1Mod1/ai0", units: str = "DEG_C"
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
         "kind": "thermocouple",
         "physical_channel": physical,
         "thermocouple_type": "K",
@@ -234,7 +238,7 @@ def test_payload_survives_malformed_inputs() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_hardware_profile_with_tc():
+def _build_hardware_profile_with_tc() -> Any:
     from capa.channels.calibration import Identity
     from capa.channels.spec import ChannelSpec, NIDAQReadingField
     from capa.experiment.config import DeviceConfig, HardwareProfile

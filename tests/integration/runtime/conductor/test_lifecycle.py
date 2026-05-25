@@ -9,9 +9,12 @@ mask — drain ordering, parallel arm/disarm, completion signalling.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+from typing import Any
 
 import pytest
 
+from capa.core.databus import DataBus
 from capa.runtime.conductor import (
     Conductor,
     NoOpRunner,
@@ -19,6 +22,7 @@ from capa.runtime.conductor import (
 )
 from capa.runtime.errors import ConductorStateError
 from capa.runtime.pool import WorkerPool
+from capa.runtime.runcontext import RunContext
 from capa.runtime.runner import ThreadedRunner
 from capa.runtime.state import ConductorState
 from capa.runtime.worker import Worker
@@ -46,7 +50,7 @@ def _build_pool(adapters: list[FakeAdapter]) -> WorkerPool:
     return WorkerPool(workers=workers, device_to_resource=device_to_resource)
 
 
-def _wait_future(fut, timeout: float = 5.0):
+def _wait_future(fut: concurrent.futures.Future[Any], timeout: float = 5.0) -> Any:
     """Block until a concurrent.futures.Future resolves; raise on timeout."""
     return fut.result(timeout=timeout)
 
@@ -106,7 +110,7 @@ class TestHappyPath:
         await pool.open()
         try:
             session = make_fake_session()
-            collected: list = []
+            collected: list[Any] = []
             barrier = asyncio.Event()
 
             async def _capture(cond: Conductor) -> None:
@@ -180,7 +184,6 @@ class TestStop:
         try:
             cond = Conductor(pool=pool, session=make_fake_session(), runner=NoOpRunner())
             cond.start()
-            _wait_future(cond.start(), timeout=5.0) if False else None  # noqa: linter
             # Second start should raise; first stop wins.
             cond.stop(reason="first")
             cond.stop(reason="second")  # second call is a no-op
@@ -224,10 +227,10 @@ class TestFailures:
         try:
 
             class CrashingRunner:
-                async def preflight(self, ctx, bus) -> None:
+                async def preflight(self, ctx: RunContext, bus: DataBus) -> None:
                     pass
 
-                async def run(self, ctx, bus) -> None:
+                async def run(self, ctx: RunContext, bus: DataBus) -> None:
                     await asyncio.sleep(0.05)
                     raise RuntimeError("procedure exploded")
 
@@ -249,10 +252,10 @@ class TestFailures:
         try:
 
             class BadPreflight:
-                async def preflight(self, ctx, bus) -> None:
+                async def preflight(self, ctx: RunContext, bus: DataBus) -> None:
                     raise ValueError("preflight nope")
 
-                async def run(self, ctx, bus) -> None:
+                async def run(self, ctx: RunContext, bus: DataBus) -> None:
                     raise AssertionError("never reached")
 
             cond = Conductor(pool=pool, session=make_fake_session(), runner=BadPreflight())

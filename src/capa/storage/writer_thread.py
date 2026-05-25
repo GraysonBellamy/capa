@@ -34,7 +34,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 import anyio
 import structlog
@@ -50,7 +50,6 @@ from capa.devices.records import (
 
 if TYPE_CHECKING:
     from capa.core.metrics import WriterMetrics
-    from capa.storage.bundle import RunBundleWriter
 
 
 class _CloseSentinel:
@@ -100,6 +99,37 @@ class WriterThreadError(CapaError):
     """Raised when the writer thread enters an unrecoverable state."""
 
 
+class _WriterSink(Protocol):
+    """Sink surface :class:`WriterThread` calls on the writer.
+
+    :class:`~capa.storage.bundle.RunBundleWriter` satisfies this; tests can
+    use a stub that records the same five record + ``write_event`` calls
+    without owning a real bundle on disk.
+    """
+
+    def record_sample(self, sample: ChannelSample) -> None: ...
+
+    def record_source(self, record: SourceRecord) -> None: ...
+
+    def record_event(self, event: DeviceEvent) -> None: ...
+
+    def record_snapshot(self, snapshot: DeviceSnapshot) -> None: ...
+
+    def record_frame(self, receipt: FrameReceipt) -> None: ...
+
+    def write_event(
+        self,
+        *,
+        kind: str,
+        message: str,
+        severity: str,
+        source: str,
+        t_mono_ns: int,
+        t_utc: datetime,
+        metadata: dict[str, Any] | None,
+    ) -> None: ...
+
+
 class WriterThread:
     """Dedicated background thread that owns all sink writes for one run.
 
@@ -131,7 +161,7 @@ class WriterThread:
 
     def __init__(
         self,
-        writer: RunBundleWriter,
+        writer: _WriterSink,
         *,
         metrics: WriterMetrics | None = None,
         logger: structlog.stdlib.BoundLogger | None = None,

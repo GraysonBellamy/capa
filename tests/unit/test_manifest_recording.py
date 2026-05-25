@@ -47,7 +47,7 @@ def _minimal_manifest(**overrides: object) -> BundleManifest:
         lockfile=LockfileBlock(path=None, sha256=None),
     )
     base.update(overrides)
-    return BundleManifest(**base)  # type: ignore[arg-type]
+    return BundleManifest(**base)
 
 
 # ---------------------------------------------------------------------------

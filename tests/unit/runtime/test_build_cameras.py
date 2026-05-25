@@ -19,6 +19,8 @@ spawn threads.
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from capa.devices.materialize import (
@@ -56,7 +58,7 @@ def _config_with_cameras(camera_blocks: list[dict[str, object]]) -> ExperimentCo
             name="cam-test",
             devices=(),
             channels=(),
-            cameras=camera_blocks,  # type: ignore[arg-type]
+            cameras=camera_blocks,
         ),
         procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
         calibration_set=CalibrationSetRef(name="default"),
@@ -141,10 +143,13 @@ class TestMaterializeCameras:
         )
         resolved, problems = _materialize_cameras(cfg)
         assert problems == []
-        wrapper = resolved[0].adapter
-        assert isinstance(wrapper, CameraDeviceAdapter)
+        from capa.devices.sim.flir_ir_sim import FlirIrSim
+
+        wrapper_obj: object = resolved[0].adapter
+        assert isinstance(wrapper_obj, CameraDeviceAdapter)
+        wrapper = wrapper_obj
         # Underlying camera received the proxy as its clock
-        clock_attr = wrapper.camera._clock
+        clock_attr = cast(FlirIrSim, wrapper.camera)._clock
         assert hasattr(clock_attr, "rebind")
         # Proxy currently anchored at "now" (within slack)
         assert clock_attr.t_mono_ns() < 100_000_000  # < 100ms
@@ -181,9 +186,9 @@ class TestBuildWorkersWithCameras:
         # Each worker hosts exactly the wrapper
         for rid, worker in workers.items():
             assert len(worker.adapter_names) == 1
-            adapter = worker.adapters[worker.adapter_names[0]]
-            assert isinstance(adapter, CameraDeviceAdapter)
-            assert adapter.resource_id == rid
+            adapter_obj: object = worker.adapters[worker.adapter_names[0]]
+            assert isinstance(adapter_obj, CameraDeviceAdapter)
+            assert adapter_obj.resource_id == rid
         # Device map keys both camera names
         assert device_to_resource == {
             "thermal_top": "sim:thermal_top",
@@ -194,7 +199,7 @@ class TestBuildWorkersWithCameras:
         """A pool with devices AND cameras → workers for both,
         identified by their respective ``resource_id`` schemes.
         """
-        # Need a small device config — re-use the watlow sim which
+        # Need a small device config — reuse the watlow sim which
         # exposes serial:<port> resource_id when configured.
         cfg = ExperimentConfig(
             hardware=HardwareProfile(
@@ -207,7 +212,7 @@ class TestBuildWorkersWithCameras:
                         "adapter": "capa.devices.sim.flir_ir_sim",
                         "kind": "ir",
                     }
-                ],  # type: ignore[arg-type]
+                ],
             ),
             procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
             calibration_set=CalibrationSetRef(name="default"),

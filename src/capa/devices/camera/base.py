@@ -303,10 +303,17 @@ class Camera(Protocol):
     pattern; see capa-flir's :mod:`_atlas._frame_pump`).
     """
 
-    spec: CameraSpec
-    capabilities: frozenset[CameraCapability]
-    kind: Literal["visible", "ir"]
-    resource_id: str
+    @property
+    def spec(self) -> CameraSpec: ...
+
+    @property
+    def capabilities(self) -> frozenset[CameraCapability]: ...
+
+    @property
+    def kind(self) -> Literal["visible", "ir"]: ...
+
+    @property
+    def resource_id(self) -> str: ...
 
     async def discover(self) -> tuple[CameraInfo, ...]:
         """Enumerate connected cameras the adapter can drive.

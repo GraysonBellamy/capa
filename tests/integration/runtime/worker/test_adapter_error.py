@@ -148,7 +148,7 @@ class TestStreamRaises:
             adapter.stream_raises = None
             adapter.raise_after = 0
             await worker.async_arm(make_run_context())
-            assert worker.fatal_error is None
+            assert getattr(worker, "fatal_error") is None  # noqa: B009
             await worker.async_disarm(grace_s=1.0)
         finally:
             await worker.async_close(grace_s=1.0)

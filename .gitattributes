@@ -1,0 +1,30 @@
+# Consistent line endings across Windows + Linux developers.
+* text=auto eol=lf
+
+# Python
+*.py text eol=lf diff=python
+*.pyi text eol=lf diff=python
+
+# Config / data
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Binary — never line-end-converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.parquet binary
+*.sqlite binary
+*.whl binary
+
+# Don't export dev-only files into sdists.
+.github/ export-ignore
+.editorconfig export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+.claude/ export-ignore

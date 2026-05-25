@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Literal, cast
 
 import pytest
 
+from capa.devices.adapter import CommandResult, DeviceCommand
 from capa.devices.camera.base import (
+    Camera,
     CameraCapability,
     CameraEvent,
     CameraHealth,
@@ -48,7 +51,7 @@ class _FakeCamera:
         raise_on_index: int | None = None,
     ) -> None:
         self.spec = spec
-        self.kind = "ir"
+        self.kind: Literal["visible", "ir"] = "ir"
         self.resource_id = f"fake:{spec.name}"
         self.capabilities = frozenset({CameraCapability.LIVE_PREVIEW})
         self._jpegs = list(jpegs)
@@ -81,7 +84,7 @@ class _FakeCamera:
     def event_stream(self) -> AsyncIterator[CameraEvent]:  # pragma: no cover
         raise NotImplementedError
 
-    async def command(self, cmd: object) -> object:  # pragma: no cover
+    async def command(self, cmd: DeviceCommand) -> CommandResult:  # pragma: no cover
         raise NotImplementedError
 
     async def preview_stream(self) -> AsyncIterator[bytes]:
@@ -134,7 +137,7 @@ class TestRunPreviewDrain:
         jpegs = [b"jpeg-0", b"jpeg-1", b"jpeg-2"]
         cam = _FakeCamera(spec=_spec(), jpegs=jpegs)
         bridge = _make_bridge()
-        drain_task = asyncio.create_task(run_preview_drain(camera=cam, bridge=bridge))
+        drain_task = asyncio.create_task(run_preview_drain(camera=cast(Camera, cam), bridge=bridge))
         received: list[PreviewFrame] = []
         try:
             for _ in range(len(jpegs)):
@@ -151,7 +154,7 @@ class TestRunPreviewDrain:
     async def test_exits_when_camera_closes(self) -> None:
         cam = _FakeCamera(spec=_spec(), jpegs=[b"one"])
         bridge = _make_bridge()
-        drain_task = asyncio.create_task(run_preview_drain(camera=cam, bridge=bridge))
+        drain_task = asyncio.create_task(run_preview_drain(camera=cast(Camera, cam), bridge=bridge))
         # Drain the one frame then trigger close — the drainer's
         # ``async for`` exits on the next iteration.
         pf = await asyncio.wait_for(bridge.get(), timeout=1.0)
@@ -163,7 +166,7 @@ class TestRunPreviewDrain:
     async def test_logs_and_returns_when_bridge_closes(self) -> None:
         cam = _FakeCamera(spec=_spec(), jpegs=[b"one", b"two", b"three"])
         bridge = _make_bridge()
-        drain_task = asyncio.create_task(run_preview_drain(camera=cam, bridge=bridge))
+        drain_task = asyncio.create_task(run_preview_drain(camera=cast(Camera, cam), bridge=bridge))
         # Receive one frame so the loop is mid-stream, then slam the
         # bridge closed. The next put raises ThreadBridgeClosedError;
         # the drainer logs and returns cleanly.
@@ -182,6 +185,6 @@ class TestRunPreviewDrain:
         """
         cam = _FakeCamera(spec=_spec(), jpegs=[b"one"], raise_on_index=0)
         bridge = _make_bridge()
-        drain_task = asyncio.create_task(run_preview_drain(camera=cam, bridge=bridge))
+        drain_task = asyncio.create_task(run_preview_drain(camera=cast(Camera, cam), bridge=bridge))
         await asyncio.wait_for(drain_task, timeout=1.0)
         assert drain_task.exception() is None

@@ -12,7 +12,7 @@ Why a frozen dataclass over passing four arguments to ``arm()``:
 2. The :class:`Conductor` passes the same context to several subsystems
    (workers, drain tasks, procedure runner, saturation monitor). Bundling means
    no plumbing churn when adding a new consumer.
-3. Tests construct a context once and re-use it across multiple
+3. Tests construct a context once and reuse it across multiple
    arm/disarm cycles in the same run, which mirrors how real runs work.
 
 Tests use the in-package fakes from

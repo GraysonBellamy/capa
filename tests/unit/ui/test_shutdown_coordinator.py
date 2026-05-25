@@ -48,11 +48,20 @@ def _make_coordinator(
     return coord, calls
 
 
+async def _await_shutdown(coord: ShutdownCoordinator, reason: str) -> ShutdownResult:
+    """Drive shutdown to completion. Inside ``@pytest.mark.anyio`` tests a
+    running loop is always present, so ``begin_shutdown`` never returns ``None``."""
+    task = coord.begin_shutdown(reason)
+    assert task is not None
+    return await task
+
+
 @pytest.mark.anyio
 async def test_idle_shutdown_completes_cleanly(tmp_path: Path) -> None:
     controller = RunController(runs_root=tmp_path)
     coord, _ = _make_coordinator(controller)
     task = coord.begin_shutdown("test")
+    assert task is not None
     result = await task
     assert isinstance(result, ShutdownResult)
     assert result.clean is True
@@ -71,6 +80,7 @@ async def test_begin_shutdown_is_idempotent(tmp_path: Path) -> None:
     task1 = coord.begin_shutdown("first")
     task2 = coord.begin_shutdown("second")
     assert task1 is task2
+    assert task1 is not None
     result = await task1
     # The first reason wins — second call is a no-op observer.
     assert result.reason == "first"
@@ -82,7 +92,7 @@ async def test_stage_changed_signal_fires_per_meaningful_stage(tmp_path: Path) -
     coord, _ = _make_coordinator(controller)
     seen: list[ShutdownStage] = []
     coord.stage_changed.connect(seen.append)
-    await coord.begin_shutdown("test")
+    await _await_shutdown(coord, "test")
     # We expect at least the DISABLE_UI through CLOSE_CATALOG stages to
     # have fired. Internal stages (REQUESTED, CANCEL_LIFECYCLE_TASKS,
     # STOP_UI_DRAINERS) intentionally don't emit operator messages, but
@@ -100,7 +110,7 @@ async def test_completed_signal_emits_result(tmp_path: Path) -> None:
     coord, _ = _make_coordinator(controller)
     received: list[ShutdownResult] = []
     coord.completed.connect(received.append)
-    result = await coord.begin_shutdown("emit-test")
+    result = await _await_shutdown(coord, "emit-test")
     assert received == [result]
 
 
@@ -142,6 +152,7 @@ async def test_hard_wall_fuse_fires_when_stage_wedges(tmp_path: Path) -> None:
     )
 
     task = coord.begin_shutdown("wedge-test")
+    assert task is not None
     # Give the threading.Timer time to fire.
     await asyncio.sleep(0.5)
     assert hard_exit_calls == [None]
@@ -175,7 +186,7 @@ async def test_pool_close_timeout_is_recorded_as_error(tmp_path: Path) -> None:
             hard_wall_s=5.0,  # well above the sum
         ),
     )
-    result = await coord.begin_shutdown("pool-timeout")
+    result = await _await_shutdown(coord, "pool-timeout")
     assert hard_calls == []  # hard fuse must NOT have fired
     assert result.hard_exit_required is False
     # Errors should mention the pool close timeout.
@@ -206,7 +217,7 @@ async def test_non_critical_lifecycle_tasks_are_cancelled(tmp_path: Path) -> Non
     await started.wait()
 
     coord, _ = _make_coordinator(controller)
-    await coord.begin_shutdown("cancel-test")
+    await _await_shutdown(coord, "cancel-test")
     assert cancelled.is_set()
     assert task.done()
 
@@ -232,7 +243,7 @@ async def test_critical_lifecycle_tasks_are_not_cancelled_in_cancel_stage(
     await started.wait()
 
     coord, _ = _make_coordinator(controller)
-    await coord.begin_shutdown("critical-preserved")
+    await _await_shutdown(coord, "critical-preserved")
     # The cancel-lifecycle stage MUST NOT have cancelled the critical
     # task. (It may still be running; the coordinator's WAIT_ACTIVE_RUN
     # stage only awaits controller._task, not arbitrarily-registered
@@ -250,7 +261,7 @@ async def test_shutdown_disables_controller_ui_actions(tmp_path: Path) -> None:
     silently ignores config-load calls."""
     controller = RunController(runs_root=tmp_path)
     coord, _ = _make_coordinator(controller)
-    await coord.begin_shutdown("ui-disable")
+    await _await_shutdown(coord, "ui-disable")
     assert controller.shutdown_requested is True
     with pytest.raises(RuntimeError, match="shutdown in progress"):
         controller.start(config=None)  # type: ignore[arg-type]
@@ -290,7 +301,7 @@ async def test_hard_wall_timer_cancelled_on_clean_completion(
         deadlines=ShutdownDeadlines(hard_wall_s=0.5),
         hard_exit=lambda: hard_exit_calls.append(None),
     )
-    await coord.begin_shutdown("clean-then-wait")
+    await _await_shutdown(coord, "clean-then-wait")
     # Wait past the hard_wall_s; the timer should be cancelled.
     await asyncio.sleep(0.7)
     assert hard_exit_calls == []

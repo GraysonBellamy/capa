@@ -18,11 +18,14 @@ today's engine behavior where ``FrameReceipt`` never reached the bus.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from capa.core.clock import RunClock
+from capa.devices.adapter import DeviceAdapter
 from capa.devices.camera.base import CameraEvent, CameraSpec, FrameReceipt
 from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.runtime.camera_adapter import make_camera_adapter
@@ -73,7 +76,7 @@ def _make_camera_pool(spec: CameraSpec) -> WorkerPool:
     rid = wrapper.resource_id
     worker = Worker(
         resource_id=rid,
-        adapters=[wrapper],
+        adapters=[cast(DeviceAdapter, wrapper)],
         runner=ThreadedRunner(name=f"worker-{rid}"),
     )
     return WorkerPool(
@@ -90,7 +93,7 @@ def _make_mixed_pool(
     cam_rid = wrapper.resource_id
     cam_worker = Worker(
         resource_id=cam_rid,
-        adapters=[wrapper],
+        adapters=[cast(DeviceAdapter, wrapper)],
         runner=ThreadedRunner(name=f"worker-{cam_rid}"),
     )
     dev = make_fake_adapter("fake_dev", resource_id=device_resource_id, tick_period_s=0.02)
@@ -120,7 +123,7 @@ def _session(bundle_root: Path) -> FakeRunSession:
     )
 
 
-def _wait_until(predicate, *, timeout: float = 5.0) -> None:
+def _wait_until(predicate: Callable[[], bool], *, timeout: float = 5.0) -> None:
     """Poll predicate until it returns truthy or timeout expires."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -167,7 +170,10 @@ class TestCameraDrainDispatch:
             # crash WriterThread._dispatch — the union doesn't include
             # bare FrameReceipt)
             for emission in session.writer_ref.submitted:
-                assert not isinstance(emission, FrameReceipt)
+                # Defensive runtime check: mypy already proves DeviceEmission
+                # excludes FrameReceipt, but the test guards against
+                # regressions that would widen the union.
+                assert not isinstance(emission, FrameReceipt)  # type: ignore[unreachable]
         finally:
             await pool.close()
 
@@ -279,7 +285,10 @@ class TestMixedPoolDispatch:
             # Device side — the FakeAdapter emits DeviceSnapshot; none of
             # the camera types should have leaked through .submit
             for emission in session.writer_ref.submitted:
-                assert not isinstance(emission, FrameReceipt)
-                assert not isinstance(emission, CameraEvent)
+                # Defensive runtime check: DeviceEmission excludes both
+                # camera types per mypy, but the assertion guards against
+                # union widening regressions.
+                assert not isinstance(emission, FrameReceipt)  # type: ignore[unreachable]
+                assert not isinstance(emission, CameraEvent)  # type: ignore[unreachable]
         finally:
             await pool.close()

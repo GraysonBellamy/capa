@@ -173,7 +173,7 @@ class FlirCard(DeviceCard):
         spin.setRange(0, 8)
         spin.setToolTip(
             "Camera-side temperature range. Forbidden during recording "
-            "(switching ranges typically forces a multi-second recal)."
+            "(switching ranges typically forces a multi-second recalibration)."
         )
         row.addWidget(spin)
         btn = QPushButton("Apply", self)

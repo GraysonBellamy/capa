@@ -71,7 +71,7 @@ async def main(explicit_port: str | None = None) -> int:
     print("    sweeping baudrates (capa's wrapper only tries the library default,")
     print("    which is broader than the normal wrapper path):")
     from sartoriuslib.errors import SartoriusError  # local import per layer
-    from sartoriuslib.transport.base import SerialSettings  # type: ignore[import-not-found]
+    from sartoriuslib.transport.base import SerialSettings
 
     sweep_baudrates = (9600, 19200, 38400, 57600, 115200)
     any_hit = False

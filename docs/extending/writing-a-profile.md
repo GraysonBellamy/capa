@@ -137,7 +137,7 @@ async def _required_channel_mappings(ctx: ProfilePreflightContext) -> Problem | 
 
 Two practical conventions to follow:
 
-- Re-use the shipped check ids when the implementation is identical. Both CAPA and cone profiles register `"<prefix>.required_channel_mappings"` and `"<prefix>.balance_stability"` against the same Python function. The registry allows multiple ids to point at one callable.
+- Reuse the shipped check ids when the implementation is identical. Both CAPA and cone profiles register `"<prefix>.required_channel_mappings"` and `"<prefix>.balance_stability"` against the same Python function. The registry allows multiple ids to point at one callable.
 - A non-blocking check (`blocking=False`) records a warning into the bundle but does not refuse to arm. Use this for "the lab SOP says this calibration should be < 7 days old" and similar policy-rather-than-safety gates.
 
 If your profile references a check id that is not registered, the engine surfaces a `profile.unknown_check` blocking problem at arm time. The registry catches typos early.

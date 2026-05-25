@@ -16,19 +16,20 @@ from capa.runtime.progress import DeviceInitProgress, DeviceInitStatus
 from capa.runtime.runner import ThreadedRunner
 from capa.runtime.worker import Worker
 from tests.integration.runtime.fakes import (
+    FakeAdapter,
     make_fake_adapter,
     make_open_failing_adapter,
 )
 
 
-def _pool_with_one_failure() -> tuple[WorkerPool, list]:
+def _pool_with_one_failure() -> tuple[WorkerPool, list[FakeAdapter]]:
     """One good adapter + one open-failing adapter, in separate workers
     (separate resources).
 
     Returns ``(pool, [good, bad])``."""
     good = make_fake_adapter("good", resource_id="sim:good")
     bad = make_open_failing_adapter("bad")
-    bad.resource_id = "sim:bad"  # type: ignore[assignment] - fake permits it
+    bad.resource_id = "sim:bad"
 
     workers = {
         "sim:good": Worker(

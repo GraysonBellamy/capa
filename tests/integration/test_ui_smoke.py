@@ -274,8 +274,8 @@ def test_main_window_renders_with_initial_config(qtbot: Any, tmp_path: Path) -> 
     setup = window.setup_tab
     assert setup is not None
     # Numerics dock attached.
-    nd = window.numerics_dock
-    assert nd is not None
+    numerics = window.numerics_dock
+    assert numerics is not None
 
     # Events dock present.
     events = window.events_dock

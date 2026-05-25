@@ -1,0 +1,28 @@
+# Citation metadata for capa.
+# Schema: https://citation-file-format.github.io
+cff-version: 1.2.0
+title: "capa: control and DAQ for a controlled-atmosphere pyrolysis instrument"
+message: "If you use capa in academic work, please cite it as below."
+type: software
+authors:
+  - family-names: Bellamy
+    given-names: Grayson
+    email: gbellamy@umd.edu
+    affiliation: University of Maryland
+license: MIT
+repository-code: "https://github.com/GraysonBellamy/capa"
+url: "https://GraysonBellamy.github.io/capa/"
+abstract: >-
+  capa is a control and data-acquisition application for a custom
+  cone-calorimeter-class lab instrument used for controlled-atmosphere
+  pyrolysis. It drives heaters, mass-flow controllers, balances,
+  NI-DAQ, and USB/IR cameras through async-first device libraries and
+  records every run as a self-contained on-disk bundle (config, method,
+  calibration snapshot, events, samples, video).
+keywords:
+  - cone-calorimeter
+  - controlled-atmosphere-pyrolysis
+  - data-acquisition
+  - laboratory-instrument
+  - astm-e1354
+  - iso-5660

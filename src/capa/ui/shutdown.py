@@ -475,7 +475,7 @@ class ShutdownCoordinator(QObject):
         try:
             # ``RunCatalog.close`` is sync (SQLite handle). Off-load to
             # a thread so a slow close doesn't block the asyncio loop —
-            # the hard-wall fuse cannot pre-empt the loop, only the
+            # the hard-wall fuse cannot preempt the loop, only the
             # process, so we keep the loop responsive at every step.
             await asyncio.wait_for(
                 asyncio.to_thread(self._catalog.close),

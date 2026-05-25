@@ -48,7 +48,7 @@ IntegrityStatus = Literal["unknown", "ok", "mismatch", "partial"]
 # ---------------------------------------------------------------------------
 # Recording-plan literals
 # ---------------------------------------------------------------------------
-# Re-declared locally (not imported from :mod:`capa.runtime.recording`) so the
+# Redeclared locally (not imported from :mod:`capa.runtime.recording`) so the
 # storage layer stays runtime-independent — a bundle reader doesn't need to
 # import the runtime to parse a manifest.
 

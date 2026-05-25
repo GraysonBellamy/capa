@@ -40,7 +40,7 @@ Before tagging, run the full local gate plus a manual GUI smoke:
 git fetch
 git status                                # clean working tree
 git log --oneline origin/main..HEAD       # nothing local that hasn't landed
-uv sync --extra dev --group docs
+uv sync --group dev --group docs
 uv run ruff format --check
 uv run ruff check
 uv run mypy

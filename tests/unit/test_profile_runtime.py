@@ -10,6 +10,7 @@ a blocking error once they should be running.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -407,7 +408,7 @@ async def test_flux_calibration_freshness_freeform_ref_passes() -> None:
 
 
 @pytest.mark.anyio
-async def test_flux_calibration_freshness_fresh_artifact_passes(tmp_path) -> None:
+async def test_flux_calibration_freshness_fresh_artifact_passes(tmp_path: Path) -> None:
     """An on-disk artifact within the recency window passes."""
     from datetime import UTC, datetime, timedelta
 
@@ -458,7 +459,7 @@ async def test_flux_calibration_freshness_fresh_artifact_passes(tmp_path) -> Non
 
 
 @pytest.mark.anyio
-async def test_flux_calibration_freshness_stale_artifact_warns(tmp_path) -> None:
+async def test_flux_calibration_freshness_stale_artifact_warns(tmp_path: Path) -> None:
     """An on-disk artifact older than the recency window warns (non-blocking)."""
     from datetime import UTC, datetime, timedelta
 

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from capa.devices.adapter import DeviceAdapter, FailurePolicy
+
+if TYPE_CHECKING:
+    from capa.experiment.config import ExperimentConfig
 from capa.devices.materialize import (
     _check_daqmx_channel_uniqueness,
     _check_webcam_uniqueness,
@@ -218,7 +221,7 @@ class TestResolveDeviceAdapters:
         *,
         resource_id_override: str | None = None,
         on_failure: FailurePolicy = FailurePolicy.ABORT,
-    ) -> ExperimentConfig:  # noqa: F821 — local import below
+    ) -> ExperimentConfig:
         from capa.channels.calibration import Identity
         from capa.channels.spec import (
             ChannelKind,

@@ -96,7 +96,7 @@ def test_set_value_with_dicts_round_trips_through_pydantic(qtbot: Any) -> None:
     widget.set_value(rows)
     out = widget.value()
     assert len(out) == 1
-    adapter = TypeAdapter(NIDAQChannelConfig)
+    adapter: TypeAdapter[NIDAQChannelConfig] = TypeAdapter(NIDAQChannelConfig)
     parsed = adapter.validate_python(out[0])
     assert isinstance(parsed, NIDAQThermocoupleConfig)
     assert parsed.name == "TC_a"

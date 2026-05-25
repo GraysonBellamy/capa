@@ -278,13 +278,13 @@ def test_webcam_resource_id_is_pure_property_no_open_required() -> None:
 def test_distinct_sim_adapters_have_distinct_resource_ids() -> None:
     """Sim adapters do not share physical resources; each gets its own
     worker. Verify uniqueness across the canonical sim configuration."""
-    sims = [
+    sims: list[DeviceAdapter] = [
         _make_watlow_sim(name="heater"),
         _make_alicat_sim(name="purge_mfc"),
         _make_sartorius_sim(name="balance"),
         _make_nidaq_polled_sim(name="cdaq1"),
         _make_nidaq_block_sim(name="cdaq1_block"),
-        _make_flir_ir_sim(name="ir_cam0"),
+        _make_flir_ir_sim(name="ir_cam0"),  # type: ignore[list-item]
     ]
     rids = [s.resource_id for s in sims]
     assert len(set(rids)) == len(rids), f"sim adapter resource_ids collided: {rids}"
@@ -307,4 +307,7 @@ def test_two_sim_adapters_with_same_name_share_resource_id() -> None:
 def test_device_adapter_protocol_declares_resource_id() -> None:
     """The ``DeviceAdapter`` Protocol declares ``resource_id`` so ``build_workers``
     can ``getattr`` it without per-adapter dispatch."""
-    assert "resource_id" in DeviceAdapter.__annotations__
+    # ``resource_id`` is declared as a read-only @property on the Protocol, so it
+    # lives on the class (with ``fget``) rather than in ``__annotations__``.
+    member = getattr(DeviceAdapter, "resource_id", None)
+    assert isinstance(member, property)

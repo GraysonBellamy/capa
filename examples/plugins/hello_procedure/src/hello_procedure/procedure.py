@@ -18,6 +18,7 @@ from typing import ClassVar
 import anyio
 from pydantic import BaseModel, ConfigDict, Field
 
+from capa.channels.spec import DerivedBinding
 from capa.experiment.procedures.base import (
     ChannelRequirement,
     Problem,
@@ -83,6 +84,11 @@ class HoldSetpoint(Procedure):
 
     async def run(self, ctx: ProcedureContext) -> None:
         resolved = ctx.instruments.resolve(self.target_channel)
+        if isinstance(resolved.binding, DerivedBinding):
+            raise RuntimeError(
+                f"target_channel {self.target_channel!r} is a derived channel; "
+                "HoldSetpoint requires a device-backed channel"
+            )
         device = resolved.binding.device
 
         cmd = ctx.authorization.issue(

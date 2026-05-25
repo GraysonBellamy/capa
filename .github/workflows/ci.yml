@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: "1"
+  UV_FROZEN: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  lint:
+    name: Lint + format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install dependencies
+        run: uv sync --group lint
+      - name: Ruff check
+        run: uv run ruff check --output-format=github
+      - name: Ruff format check
+        run: uv run ruff format --check
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Install dependencies
+        # mypy needs the runtime deps to resolve imports under --strict;
+        # the `test` group brings pytest in so test fixtures typecheck too.
+        run: uv sync --group type --group test
+      - name: mypy
+        run: uv run mypy
+
+  test:
+    name: Tests (py${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # capa supports Windows (primary) and Linux. macOS is not targeted.
+        # Python pinned to 3.13 — pyproject.toml requires `>=3.13,<3.14`.
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Pin Python ${{ matrix.python-version }}
+        run: uv python pin ${{ matrix.python-version }}
+      - name: Install Qt runtime libs (Linux)
+        # PySide6 + pytest-qt need an offscreen platform plugin and the EGL
+        # / xkbcommon libs Qt links against. Windows ships the equivalents.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 \
+            libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xkb1 libxkbfile1
+      - name: Install dependencies
+        # `test` group + runtime deps. Skip --extra flir: the FLIR adapter
+        # resolves capa-flir from a sibling path (../capa-flir), which CI
+        # does not have. Skip --group docs: not needed for the test suite.
+        run: uv sync --group test
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest

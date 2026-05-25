@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Literal, cast
 
 import pytest
 
+from capa.devices.adapter import CommandResult, DeviceCommand
 from capa.devices.camera.base import (
+    Camera,
     CameraCapability,
     CameraEvent,
     CameraHealth,
@@ -47,7 +50,7 @@ class _BaseFakeCamera:
 
     def __init__(self, spec: CameraSpec, *, capabilities: frozenset[CameraCapability]) -> None:
         self.spec = spec
-        self.kind = "ir"
+        self.kind: Literal["visible", "ir"] = "ir"
         self.resource_id = f"fake:{spec.name}"
         self.capabilities = capabilities
         self._opened = False
@@ -80,7 +83,7 @@ class _BaseFakeCamera:
     def event_stream(self) -> AsyncIterator[CameraEvent]:
         raise NotImplementedError
 
-    async def command(self, cmd: object) -> object:
+    async def command(self, cmd: DeviceCommand) -> CommandResult:
         raise NotImplementedError
 
 
@@ -119,7 +122,9 @@ def _make_bridge(name: str = "preview") -> ThreadBridge[PreviewFrame]:
 
 
 def _make_wrapper(camera: _BaseFakeCamera) -> CameraDeviceAdapter:
-    return CameraDeviceAdapter(camera=camera, spec=camera.spec, clock_proxy=_ClockProxy())
+    return CameraDeviceAdapter(
+        camera=cast(Camera, camera), spec=camera.spec, clock_proxy=_ClockProxy()
+    )
 
 
 class TestStartPreviewChannel:
@@ -128,7 +133,7 @@ class TestStartPreviewChannel:
         wrapper = _make_wrapper(cam)
         bridge = _make_bridge()
         await wrapper.start_preview_channel(bridge)
-        assert wrapper._channel_task is None  # type: ignore[attr-defined]
+        assert wrapper._channel_task is None
         # Stop is a no-op too.
         await wrapper.stop_preview_channel()
 
@@ -137,20 +142,20 @@ class TestStartPreviewChannel:
         wrapper = _make_wrapper(cam)
         bridge = _make_bridge()
         await wrapper.start_preview_channel(bridge)
-        assert wrapper._channel_task is not None  # type: ignore[attr-defined]
+        assert wrapper._channel_task is not None
         await wrapper.stop_preview_channel()
-        assert wrapper._channel_task is None  # type: ignore[attr-defined]
+        assert wrapper._channel_task is None
 
     async def test_second_start_is_noop_when_already_running(self) -> None:
         cam = _PumplessFakeCamera(_spec())
         wrapper = _make_wrapper(cam)
         bridge = _make_bridge()
         await wrapper.start_preview_channel(bridge)
-        first_task = wrapper._channel_task  # type: ignore[attr-defined]
+        first_task = wrapper._channel_task
         # Second start: would normally trigger bridge.attach_producer
         # again (which would raise). The idempotency guard prevents that.
         await wrapper.start_preview_channel(bridge)
-        assert wrapper._channel_task is first_task  # type: ignore[attr-defined]
+        assert wrapper._channel_task is first_task
         await wrapper.stop_preview_channel()
 
 

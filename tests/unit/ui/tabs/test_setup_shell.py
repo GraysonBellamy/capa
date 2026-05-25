@@ -195,9 +195,9 @@ def test_strip_frozen_when_run_active(qtbot: Any) -> None:
 
     assert tab._connection_strip.state is ConnectionState.IDLE
     controller.state_changed.emit(RunUiState.RUNNING)
-    assert tab._connection_strip.state is ConnectionState.FROZEN
+    assert getattr(tab._connection_strip, "state") is ConnectionState.FROZEN  # noqa: B009
     controller.state_changed.emit(RunUiState.IDLE)
-    assert tab._connection_strip.state is ConnectionState.IDLE
+    assert getattr(tab._connection_strip, "state") is ConnectionState.IDLE  # noqa: B009
 
 
 @pytest.mark.parametrize(

@@ -276,7 +276,7 @@ def test_panel_holding_phase_survives_stale_transition(qtbot: Any) -> None:
     payload["phase"] = "holding"
     panel.update_from_tick(payload)
 
-    assert panel._stale is False
+    assert getattr(panel, "_stale") is False  # noqa: B009
     assert "#2c8e3f" in panel._phase_value.styleSheet()
     # And the rest of the labels are un-dimmed.
     assert "#999" not in panel._flux_value.styleSheet()
@@ -318,7 +318,7 @@ def test_panel_fresh_tick_clears_stale(qtbot: Any) -> None:
     panel.mark_stale()
     assert panel._stale is True
     panel.update_from_tick(_full_payload())
-    assert panel._stale is False
+    assert getattr(panel, "_stale") is False  # noqa: B009
     assert "#999" not in panel._flux_value.styleSheet()
 
 

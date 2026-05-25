@@ -90,11 +90,17 @@ For changes that touch device adapters, run the corresponding [hardware smoke te
 
 ---
 
-## CI gating today — and what's missing
+## CI gating today
 
-The only configured workflow today is [.github/workflows/docs.yml](../../.github/workflows/docs.yml). It runs `uv run zensical build --clean` on push and pull-request, and deploys the rendered site to GitHub Pages on push to `main`.
+Two workflows run on every PR:
 
-**There is no Python CI workflow.** `ruff check`, `mypy`, and `pytest` are not run automatically on pull requests. This is a known gap in pre-alpha; contributors are responsible for running them locally before pushing:
+- [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) — three jobs in parallel:
+  - **lint**: `ruff check` + `ruff format --check` (Ubuntu).
+  - **typecheck**: `mypy` (Ubuntu).
+  - **test**: `pytest` against the full non-hardware suite, on Ubuntu and Windows, Python 3.13. Linux runners install the Qt runtime libs that PySide6 needs; tests run under `QT_QPA_PLATFORM=offscreen`.
+- [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml) — `uv run zensical build --clean` on push and pull-request, and deploys to GitHub Pages on push to `main`.
+
+The same four gates can (and should) be run locally before pushing:
 
 ```powershell
 uv run ruff format --check
@@ -103,9 +109,9 @@ uv run mypy
 uv run pytest
 ```
 
-If a PR lands with any of these failing on `main`, that's a process miss, not a CI miss. Until the Python CI workflow exists, document in the PR's test plan which of these you ran.
+The repo's [`.pre-commit-config.yaml`](../../.pre-commit-config.yaml) automates the linters and codespell at commit-time and `mypy` at push-time — install it once with `uv run pre-commit install` (and `uv run pre-commit install --hook-type pre-push` for the mypy gate). See [dev setup](dev-setup.md#pre-commit-hooks) for what runs when.
 
-The plan is to add a Python CI workflow in the same family as `docs.yml` — `actions/checkout`, `astral-sh/setup-uv`, `uv sync --extra dev`, then run the four gates. If you want to take that on as a separate PR, it's welcome; coordinate with the maintainer first to agree on the matrix (Python version, OS).
+**What CI does not cover yet:** hardware-marked tests (`CAPA_HARDWARE_TESTS=1`, see [hardware tests](hardware-tests.md)), the FLIR IR adapter (requires the sibling `capa-flir` checkout, which CI does not clone), and macOS (not a targeted platform — see [installation](../installation.md#supported-platforms)).
 
 ---
 

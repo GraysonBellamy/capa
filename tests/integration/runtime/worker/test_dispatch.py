@@ -12,7 +12,9 @@ only verify routing and exception propagation, not the shield.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -39,8 +41,8 @@ def make_runner(request: pytest.FixtureRequest) -> Callable[[str], WorkerRunner]
     return _factory
 
 
-async def _wait(fut: object) -> object:
-    return await asyncio.wrap_future(fut)  # type: ignore[arg-type]
+async def _wait(fut: concurrent.futures.Future[Any]) -> Any:
+    return await asyncio.wrap_future(fut)
 
 
 class TestDispatchAllowedStates:
@@ -73,6 +75,7 @@ class TestDispatchAllowedStates:
         try:
             await worker.async_arm(make_run_context())
             result = await _wait(worker.dispatch("a", fake_command()))
+            assert isinstance(result, CommandResult)
             assert result.accepted is True
         finally:
             await worker.async_disarm(grace_s=1.0)

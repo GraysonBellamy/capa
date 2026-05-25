@@ -159,7 +159,7 @@ def test_check_connection_strip_state(qtbot: Any) -> None:
     # (the controller stub doesn't expose a live pool).
     assert tab._connection_strip.state in (ConnectionState.UNAPPLIED, ConnectionState.CONNECTED)
     tab._begin_check()
-    assert tab._connection_strip.state is ConnectionState.CHECKING
+    assert getattr(tab._connection_strip, "state") is ConnectionState.CHECKING  # noqa: B009
     tab._finish_check([])
     # Returns to whatever the underlying inputs say (no in-flight verify).
     assert tab._connection_strip.state in (ConnectionState.UNAPPLIED, ConnectionState.CONNECTED)

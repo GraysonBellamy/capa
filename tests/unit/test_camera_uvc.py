@@ -149,7 +149,7 @@ class _FakeDeviceCapabilities:
         wrapper's new probe loop passes those enums through unchanged. The
         existing _get_property_range path passes a string from
         ``getattr(CamProp, name)``. Normalize both to the string name."""
-        return prop_enum.name if hasattr(prop_enum, "name") else prop_enum
+        return str(prop_enum.name) if hasattr(prop_enum, "name") else str(prop_enum)
 
     def get_camera_capability(self, prop_enum: Any) -> _FakePropertyCapability | None:
         key = self._prop_key(prop_enum)

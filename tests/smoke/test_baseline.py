@@ -144,14 +144,14 @@ async def test_pool_open_close_with_sim_adapters() -> None:
     assert pool.state is PoolState.CLOSED
     await pool.open()
     try:
-        assert pool.state is PoolState.OPEN
+        assert getattr(pool, "state") is PoolState.OPEN  # noqa: B009
         for worker in pool.workers.values():
             assert worker.state is WorkerState.IDLE
         assert a1.open_calls == 1
         assert a2.open_calls == 1
     finally:
         result = await pool.close()
-    assert pool.state is PoolState.CLOSED
+    assert getattr(pool, "state") is PoolState.CLOSED  # noqa: B009
     assert result.clean is True
     for wr in result.worker_results:
         assert wr.adapter_close_errors == ()

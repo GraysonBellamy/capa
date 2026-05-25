@@ -21,6 +21,8 @@ import asyncio
 
 import pytest
 
+from capa.runtime.bridge import ThreadBridge
+from capa.runtime.emissions import WorkerEmission
 from capa.runtime.lifecycle import WorkerState
 from capa.runtime.metrics import DisarmResult
 from capa.runtime.runner import ThreadedRunner
@@ -31,7 +33,7 @@ from tests.integration.runtime.fakes import (
 )
 
 
-async def _start_sampling(worker: Worker) -> object:
+async def _start_sampling(worker: Worker) -> ThreadBridge[WorkerEmission]:
     """Helper: drive a worker to SAMPLING and return its bridge with the
     consumer attached on the test's loop."""
     await worker.async_start()
@@ -55,9 +57,9 @@ class TestBeginSampling:
             assert worker.state is WorkerState.ARMED
             bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             try:
-                assert worker.state is WorkerState.SAMPLING
+                assert getattr(worker, "state") is WorkerState.SAMPLING  # noqa: B009
                 assert adapter.start_calls == 1
-                assert bridge.name.startswith("worker-")  # type: ignore[union-attr]
+                assert bridge.name.startswith("worker-")
             finally:
                 await worker.async_disarm(grace_s=1.0)
         finally:
@@ -123,19 +125,23 @@ class TestEmissionFlow:
             # Drain the bridge for the five emissions.
             received = []
             for _ in range(5):
-                emission = await bridge.get()  # type: ignore[union-attr]
+                emission = await bridge.get()
                 assert emission is not None
                 received.append(emission)
 
             assert len(received) == 5
             # Each emission is a DeviceSnapshot from FakeAdapter; sequence
             # numbers (in .fields["seq"]) should be monotonic.
-            seqs = [int(e.fields["seq"]) for e in received]  # type: ignore[union-attr]
+            from capa.devices.records import DeviceSnapshot
+
+            snapshots = [e for e in received if isinstance(e, DeviceSnapshot)]
+            assert len(snapshots) == 5
+            seqs = [int(str(s.fields["seq"])) for s in snapshots]
             assert seqs == sorted(seqs)
             assert len(set(seqs)) == 5  # no duplicates
 
             # Bridge latency metric incremented.
-            assert bridge.metrics.dequeued_total == 5  # type: ignore[union-attr]
+            assert bridge.metrics.dequeued_total == 5
         finally:
             await worker.async_disarm(grace_s=2.0)
             await worker.async_close(grace_s=1.0)
@@ -151,7 +157,7 @@ class TestEmissionFlow:
         try:
             bridge = await _start_sampling(worker)
             for _ in range(10):
-                await bridge.get()  # type: ignore[union-attr]
+                await bridge.get()
         finally:
             await worker.async_disarm(grace_s=2.0)
             await worker.async_close(grace_s=1.0)
@@ -170,8 +176,8 @@ class TestDisarm:
         try:
             bridge = await _start_sampling(worker)
             # Drain the two emissions.
-            await bridge.get()  # type: ignore[union-attr]
-            await bridge.get()  # type: ignore[union-attr]
+            await bridge.get()
+            await bridge.get()
 
             result = await worker.async_disarm(grace_s=2.0)
             assert result is DisarmResult.OK
@@ -179,7 +185,7 @@ class TestDisarm:
             assert adapter.stop_calls == 1
 
             # Bridge closed: get() yields None (sentinel EOF).
-            assert await bridge.get() is None  # type: ignore[union-attr]
+            assert await bridge.get() is None
         finally:
             await worker.async_close(grace_s=1.0)
 
@@ -197,7 +203,7 @@ class TestDisarm:
         try:
             bridge = await _start_sampling(worker)
             # Wait for first emission so stream_task is parked in sleep.
-            first = await bridge.get()  # type: ignore[union-attr]
+            first = await bridge.get()
             assert first is not None
 
             # Grace is shorter than tick_period_s (5s) — the stream task is
@@ -223,7 +229,7 @@ class TestDisarm:
             # Don't drain — let the producer fill some, then disarm.
             await asyncio.sleep(0.05)
             await worker.async_disarm(grace_s=2.0)
-            assert bridge.closed is True  # type: ignore[union-attr]
+            assert bridge.closed is True
         finally:
             await worker.async_close(grace_s=1.0)
 

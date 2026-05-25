@@ -119,9 +119,9 @@ def test_apply_succeeded_flips_banner_and_clears_unapplied(qtbot: Any) -> None:
     assert setup._apply_in_flight is True
 
     controller.config_load_finished.emit(_make_progress(ConfigLoadState.READY))
-    assert setup._apply_in_flight is False
+    assert getattr(setup, "_apply_in_flight") is False  # noqa: B009
     assert setup._draft.unapplied is False
-    assert setup._connection_strip.state is ConnectionState.CONNECTED
+    assert getattr(setup._connection_strip, "state") is ConnectionState.CONNECTED  # noqa: B009
     # Apply button is grey now — nothing to apply.
     assert not setup._action_apply.isEnabled()
 
@@ -209,7 +209,7 @@ def test_apply_ok_banner_clears_on_next_edit(qtbot: Any) -> None:
     assert setup._connected_detail == ""
     # The new edit also marked the section dirty → unapplied true → banner UNAPPLIED.
     assert setup._draft.unapplied is True
-    assert setup._connection_strip.state is ConnectionState.UNAPPLIED
+    assert getattr(setup._connection_strip, "state") is ConnectionState.UNAPPLIED  # noqa: B009
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +225,7 @@ def test_frozen_banner_trumps_applying(qtbot: Any) -> None:
     setup._on_apply_to_rig()
     assert setup._connection_strip.state is ConnectionState.CONNECTING
     controller.state_changed.emit(RunUiState.RUNNING)
-    assert setup._connection_strip.state is ConnectionState.FROZEN
+    assert getattr(setup._connection_strip, "state") is ConnectionState.FROZEN  # noqa: B009
 
 
 def test_apply_enabled_only_when_unapplied_and_no_errors(qtbot: Any) -> None:

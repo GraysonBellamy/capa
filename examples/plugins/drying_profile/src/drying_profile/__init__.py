@@ -1,6 +1,6 @@
 """Example domain-profile plugin — see `profile.py`."""
 
-from drying_profile.profile import (
+from .profile import (
     PREFLIGHT_CHECKS,
     PROFILE_ID,
     REQUIRED_CHANNEL_GROUPS,

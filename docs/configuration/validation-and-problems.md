@@ -14,4 +14,3 @@
 - ``capa validate`` from the CLI
 
 *See also:* [capa validate CLI](../cli/capa-validate.md).
-

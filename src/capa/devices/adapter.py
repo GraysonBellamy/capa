@@ -180,29 +180,35 @@ class DeviceAdapter(Protocol):
     wrap their respective library Manager.
     """
 
-    name: str
-    """Adapter-assigned device name. Used as the key in
-    :class:`~capa.experiment.config.HardwareProfile` and as
-    :attr:`SourceBinding.device`."""
+    @property
+    def name(self) -> str:
+        """Adapter-assigned device name. Used as the key in
+        :class:`~capa.experiment.config.HardwareProfile` and as
+        :attr:`SourceBinding.device`."""
+        ...
 
-    capabilities: frozenset[Capability]
-    """The set of :class:`Capability` flags this adapter declares."""
+    @property
+    def capabilities(self) -> frozenset[Capability]:
+        """The set of :class:`Capability` flags this adapter declares."""
+        ...
 
-    resource_id: str
-    """Stable identifier for the underlying hardware contention domain.
+    @property
+    def resource_id(self) -> str:
+        """Stable identifier for the underlying hardware contention domain.
 
-    Per-resource worker contract: two adapters that share a physical
-    resource (a serial port on an RS-485 multi-drop bus, a DAQmx chassis,
-    a single camera handle) MUST expose the same ``resource_id`` so that
-    ``build_workers`` groups them into one worker thread. Two adapters
-    that do not share a resource MUST expose different ``resource_id``\\ s.
+        Per-resource worker contract: two adapters that share a physical
+        resource (a serial port on an RS-485 multi-drop bus, a DAQmx chassis,
+        a single camera handle) MUST expose the same ``resource_id`` so that
+        ``build_workers`` groups them into one worker thread. Two adapters
+        that do not share a resource MUST expose different ``resource_id``\\ s.
 
-    Format is ``<scheme>:<body>`` where ``scheme`` is one of:
-    ``serial``, ``daqmx``, ``webcam``, ``sim``. The body is whatever
-    identifies the resource within that scheme (port name, device/chassis
-    name, serial number). The string is stable across calls and computed
-    from constructor inputs without I/O — it must be safe to read before
-    :meth:`open` has been called."""
+        Format is ``<scheme>:<body>`` where ``scheme`` is one of:
+        ``serial``, ``daqmx``, ``webcam``, ``sim``. The body is whatever
+        identifies the resource within that scheme (port name, device/chassis
+        name, serial number). The string is stable across calls and computed
+        from constructor inputs without I/O — it must be safe to read before
+        :meth:`open` has been called."""
+        ...
 
     async def open(self) -> None:
         """Establish the connection (open serial port, query identity).

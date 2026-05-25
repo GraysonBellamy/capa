@@ -67,7 +67,7 @@ class TestOpenClose:
 
         await pool.open()
         try:
-            assert pool.state is PoolState.OPEN
+            assert getattr(pool, "state") is PoolState.OPEN  # noqa: B009
             for worker in pool.workers.values():
                 assert worker.state is WorkerState.IDLE
             for adapter in adapters:

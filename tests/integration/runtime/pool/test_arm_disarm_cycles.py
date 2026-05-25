@@ -21,13 +21,14 @@ from capa.runtime.pool import WorkerPool
 from capa.runtime.runner import ThreadedRunner
 from capa.runtime.worker import Worker
 from tests.integration.runtime.fakes import (
+    FakeAdapter,
     fake_command,
     make_fake_adapter,
     make_run_context,
 )
 
 
-def _build_pool(n_devices: int = 3) -> tuple[WorkerPool, list]:
+def _build_pool(n_devices: int = 3) -> tuple[WorkerPool, list[FakeAdapter]]:
     adapters = [
         make_fake_adapter(f"dev{i}", resource_id=f"sim:dev{i}", tick_period_s=0.01, emit_limit=2)
         for i in range(n_devices)
@@ -140,4 +141,4 @@ class TestPoolStateAcrossRuns:
             assert pool.state is PoolState.OPEN
         finally:
             await pool.close()
-        assert pool.state is PoolState.CLOSED
+        assert getattr(pool, "state") is PoolState.CLOSED  # noqa: B009

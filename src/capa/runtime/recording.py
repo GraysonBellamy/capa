@@ -36,13 +36,25 @@ Filtering happens at two enforcement points:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from capa.experiment.config import HardwareProfile, RecordingPolicy
+    from capa.experiment.config import RecordingPolicy
     from capa.experiment.procedures.base import Procedure
+
+
+class _HardwareNames(Protocol):
+    """Surface :func:`default_recording_plan` reads from the rig.
+
+    The full :class:`~capa.experiment.config.HardwareProfile` satisfies
+    this; test stubs only need to expose these two readers.
+    """
+
+    def channel_names(self) -> tuple[str, ...]: ...
+
+    def camera_names(self) -> tuple[str, ...]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +129,7 @@ class ResolvedRecordingPlan(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def default_recording_plan(hardware: HardwareProfile) -> ResolvedRecordingPlan:
+def default_recording_plan(hardware: _HardwareNames) -> ResolvedRecordingPlan:
     """Build the "record everything declared in the rig" plan.
 
     The procedure's :meth:`plan_capture` receives this as the starting
@@ -136,7 +148,7 @@ def default_recording_plan(hardware: HardwareProfile) -> ResolvedRecordingPlan:
 
 def resolve_recording_plan(
     *,
-    hardware: HardwareProfile,
+    hardware: _HardwareNames,
     procedure: Procedure | None,
     policy: RecordingPolicy,
 ) -> ResolvedRecordingPlan:

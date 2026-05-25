@@ -129,7 +129,7 @@ def parse_manifest_lines(data: bytes | str) -> dict[str, str]:
 def write_manifest_sha256(
     bundle_root: Path, digests: dict[str, str] | None = None
 ) -> dict[str, str]:
-    """Compute (or re-use) digests and atomically write
+    """Compute (or reuse) digests and atomically write
     ``<bundle_root>/manifest.sha256``.
 
     Returns the digest dict. Atomic write is via ``.tmp`` + rename so a reader

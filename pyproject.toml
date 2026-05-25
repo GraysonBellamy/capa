@@ -72,20 +72,39 @@ capa = "capa.cli:main"
 "capa.profiles.cone_calorimeter" = "capa.experiment.profiles.cone_calorimeter"
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.3",
-    "pytest-anyio>=0.0.0; python_version < '0'",
-    "pytest-qt>=4.4",
-    "anyio[trio]>=4.6",
-    "ruff>=0.6",
-    "mypy>=1.11",
-]
+# Install-time opt-ins for downstream users. Anything in this table can be
+# selected at install time (`pip install capa[flir]`) and ships with the
+# wheel metadata. Dev-only tooling belongs in [dependency-groups], not here.
 flir = ["capa-flir"]
 
 [dependency-groups]
+# PEP 735 dependency groups — local development only, never shipped with
+# the wheel. The `dev` group is the union convenience target; CI installs
+# the narrower groups (`lint`, `type`, `test`) directly.
+#
+# Note: we deliberately do NOT depend on pytest-anyio. AnyIO ships its own
+# pytest plugin (configured via `pytest_plugins = ("anyio",)` in
+# tests/conftest.py); pytest-anyio is a separate, conflicting plugin.
+lint = [
+    "ruff>=0.6",
+]
+type = [
+    "mypy>=1.11",
+]
+test = [
+    "pytest>=8.3",
+    "pytest-qt>=4.4",
+    "anyio[trio]>=4.6",
+]
 docs = [
     "zensical>=0.0.33",
     "mkdocstrings-python>=1.12",
+]
+dev = [
+    { include-group = "lint" },
+    { include-group = "type" },
+    { include-group = "test" },
+    "pre-commit>=4.0",
 ]
 
 [tool.hatch.version]
@@ -239,4 +258,3 @@ markers = [
     "hardware: requires real hardware (skipped unless CAPA_HARDWARE_TESTS=1)",
     "smoke: thin behavioral baseline re-run after focused cleanup work",
 ]
-

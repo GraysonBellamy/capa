@@ -3,7 +3,7 @@
 A common operator task is "I just
 characterised one thermocouple; copy that curve to the other five".
 The dialog lists every channel in the draft other than the source,
-with the same-kind siblings pre-selected. Channels whose
+with the same-kind siblings preselected. Channels whose
 ``raw_unit`` is dimensionally incompatible with the source
 calibration's ``input_unit`` are shown disabled with a tooltip.
 
@@ -76,7 +76,7 @@ class ApplyCalibrationDialog(QDialog):
 
         instructions = QLabel(
             "Tick the channels that should receive this calibration."
-            " Same-kind siblings are pre-selected; disabled rows have"
+            " Same-kind siblings are preselected; disabled rows have"
             " an incompatible raw unit.",
             self,
         )

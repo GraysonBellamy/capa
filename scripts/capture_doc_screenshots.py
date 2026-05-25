@@ -93,7 +93,8 @@ class Probe:
         if params:
             url += "?" + urllib.parse.urlencode(params)
         with urllib.request.urlopen(url, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            payload: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
+            return payload
 
     def post(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         data = json.dumps(body or {}).encode("utf-8")
@@ -104,7 +105,8 @@ class Probe:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            payload: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
+            return payload
 
     def screenshot(self, target: str, out_path: Path) -> dict[str, Any]:
         return self.post("/screenshot", {"target": target, "out": str(out_path)})
@@ -593,6 +595,7 @@ def compose_run_badge_states() -> None:
     canvas_h = len(grabs) * row_h + (len(grabs) + 1) * pad
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (32, 32, 32, 255))
     draw = ImageDraw.Draw(canvas)
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont
     try:
         font = ImageFont.truetype("arial.ttf", 14)
     except OSError:

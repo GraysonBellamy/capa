@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from capa.core.clock import RunClock
+from capa.devices.adapter import DeviceAdapter
 from capa.devices.camera.base import (
     CameraEvent,
     CameraSpec,
@@ -99,24 +101,24 @@ class TestCameraWorkerLifecycle:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec(fps=20))
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-cycle"),
         )
         await worker.async_start()
         try:
             assert worker.state is WorkerState.IDLE
             await worker.async_arm(_ctx(tmp_path))
-            assert worker.state is WorkerState.ARMED
+            assert getattr(worker, "state") is WorkerState.ARMED  # noqa: B009
             bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             try:
-                assert worker.state is WorkerState.SAMPLING
+                assert getattr(worker, "state") is WorkerState.SAMPLING  # noqa: B009
                 # Sample at least one frame off the bridge — proves
                 # adapter.start was called with the full ctx (otherwise
                 # start_recording would have failed without a path).
                 frames_seen = 0
                 events_seen = 0
                 for _ in range(20):
-                    emission = await asyncio.wait_for(bridge.get(), timeout=2.0)  # type: ignore[union-attr]
+                    emission = await asyncio.wait_for(bridge.get(), timeout=2.0)
                     assert emission is not None
                     if isinstance(emission, FrameReceipt):
                         frames_seen += 1
@@ -146,7 +148,7 @@ class TestCameraWorkerLifecycle:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec(fps=30))
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-disarm"),
         )
         await worker.async_start()
@@ -156,7 +158,7 @@ class TestCameraWorkerLifecycle:
             bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             # Drain a few frames so the sim writes some data
             for _ in range(5):
-                await asyncio.wait_for(bridge.get(), timeout=2.0)  # type: ignore[union-attr]
+                await asyncio.wait_for(bridge.get(), timeout=2.0)
             await worker.async_disarm(grace_s=3.0)
 
             csq_path = tmp_path / "video" / "ir_cam0.csq"
@@ -179,7 +181,7 @@ class TestCameraWorkerLifecycle:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec(fps=20))
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-multi-run"),
         )
         await worker.async_start()
@@ -192,13 +194,13 @@ class TestCameraWorkerLifecycle:
                 bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
                 # Drain a couple of frames
                 for _ in range(3):
-                    await asyncio.wait_for(bridge.get(), timeout=2.0)  # type: ignore[union-attr]
+                    await asyncio.wait_for(bridge.get(), timeout=2.0)
                 await worker.async_disarm(grace_s=3.0)
                 # Each run produced its own .csq
                 assert (run_root / "video" / "ir_cam0.csq").exists()
             # Camera was opened exactly once (worker.start ran open(),
             # subsequent arms reuse the open handle).
-            assert wrapper.camera._open is True
+            assert cast(FlirIrSim, wrapper.camera)._open is True
         finally:
             await worker.async_close(grace_s=2.0)
 
@@ -209,7 +211,7 @@ class TestCameraEmissionTypes:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=spec)
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-name-attr"),
         )
         await worker.async_start()
@@ -218,7 +220,7 @@ class TestCameraEmissionTypes:
             bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             # Find the first FrameReceipt
             for _ in range(20):
-                emission = await asyncio.wait_for(bridge.get(), timeout=2.0)  # type: ignore[union-attr]
+                emission = await asyncio.wait_for(bridge.get(), timeout=2.0)
                 if isinstance(emission, FrameReceipt):
                     assert emission.name == "thermal_top_view"
                     break
@@ -236,7 +238,7 @@ class TestCameraEmissionTypes:
         wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec(fps=15))
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-event-type"),
         )
         await worker.async_start()
@@ -244,7 +246,7 @@ class TestCameraEmissionTypes:
             await worker.async_arm(_ctx(tmp_path))
             bridge = await worker.async_begin_sampling(consumer_loop=asyncio.get_running_loop())
             for _ in range(20):
-                emission = await asyncio.wait_for(bridge.get(), timeout=2.0)  # type: ignore[union-attr]
+                emission = await asyncio.wait_for(bridge.get(), timeout=2.0)
                 if isinstance(emission, CameraEvent):
                     assert emission.kind == "recording_started"
                     break

@@ -83,8 +83,10 @@ def test_dispatcher_picks_discriminated_union_widget(qtbot: Any) -> None:
 def test_cross_variant_value_preservation(qtbot: Any) -> None:
     form = build_form(_Holder)
     qtbot.addWidget(form)
-    widget: _DiscriminatedUnionField = form._fields["value"]
+    widget = form._fields["value"]
+    assert isinstance(widget, _DiscriminatedUnionField)
     # Initial variant is A; set common_field via the subform.
+    assert widget._current_form is not None
     widget._current_form.set_values({"common_field": "operator-typed"})
     # Flip variant to B.
     combo: QComboBox = widget._combo
@@ -104,7 +106,9 @@ def test_non_overlapping_fields_drop_silently(qtbot: Any) -> None:
     fields are silently dropped from the buffer view."""
     form = build_form(_Holder)
     qtbot.addWidget(form)
-    widget: _DiscriminatedUnionField = form._fields["value"]
+    widget = form._fields["value"]
+    assert isinstance(widget, _DiscriminatedUnionField)
+    assert widget._current_form is not None
     widget._current_form.set_values({"a_only": 42, "common_field": "x"})
     # Now flip to variant B which has no a_only field.
     for i in range(widget._combo.count()):
@@ -126,13 +130,16 @@ def test_non_overlapping_fields_drop_silently(qtbot: Any) -> None:
 class _ChannelLike(BaseModel):
     """Holder model: mirrors the discriminator pattern from ChannelSpec."""
 
-    calibration: Calibration = Field(default_factory=Identity)
+    calibration: Calibration = Field(
+        default_factory=lambda: Identity(input_unit="degC", output_unit="degC")
+    )
 
 
 def test_calibration_identity_round_trip(qtbot: Any) -> None:
     form = build_form(_ChannelLike)
     qtbot.addWidget(form)
-    widget: _DiscriminatedUnionField = form._fields["calibration"]
+    widget = form._fields["calibration"]
+    assert isinstance(widget, _DiscriminatedUnionField)
     instance = Identity(input_unit="degC", output_unit="degC")
     widget.set_value(instance)
     out = widget.value()
@@ -146,7 +153,8 @@ def test_calibration_identity_round_trip(qtbot: Any) -> None:
 def test_calibration_linear_two_point_round_trip(qtbot: Any) -> None:
     form = build_form(_ChannelLike)
     qtbot.addWidget(form)
-    widget: _DiscriminatedUnionField = form._fields["calibration"]
+    widget = form._fields["calibration"]
+    assert isinstance(widget, _DiscriminatedUnionField)
     instance = LinearTwoPoint(
         input_unit="V",
         output_unit="degC",
@@ -167,7 +175,8 @@ def test_calibration_variant_switch_preserves_units(qtbot: Any) -> None:
     """Flipping Identity → LinearTwoPoint preserves ``input_unit``."""
     form = build_form(_ChannelLike)
     qtbot.addWidget(form)
-    widget: _DiscriminatedUnionField = form._fields["calibration"]
+    widget = form._fields["calibration"]
+    assert isinstance(widget, _DiscriminatedUnionField)
     widget.set_value(Identity(input_unit="degC", output_unit="degC"))
     # Flip to linear_two_point.
     for i in range(widget._combo.count()):
@@ -188,9 +197,11 @@ def test_calibration_variant_switch_preserves_units(qtbot: Any) -> None:
 def test_discriminator_field_not_rendered_in_subform(qtbot: Any) -> None:
     form = build_form(_Holder)
     qtbot.addWidget(form)
-    widget: _DiscriminatedUnionField = form._fields["value"]
+    widget = form._fields["value"]
+    assert isinstance(widget, _DiscriminatedUnionField)
     # The subform must not have a widget for "kind" — the variant combo
     # above owns that responsibility.
+    assert widget._current_form is not None
     assert "kind" not in widget._current_form._fields
     # Common fields are still there.
     assert "common_field" in widget._current_form._fields

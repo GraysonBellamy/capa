@@ -11,10 +11,11 @@ CLOSED.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 
 import pytest
 
+from capa.devices.adapter import Capability
 from capa.devices.camera.metadata import UvcRangeMetadata, WebcamMetadata
 from capa.runtime.errors import UnknownDeviceError
 from capa.runtime.runner import InlineRunner, ThreadedRunner, WorkerRunner
@@ -51,7 +52,7 @@ class _AdapterWithMetadata:
         self.name = name
         self.resource_id = f"fake:{name}"
         self._metadata = metadata
-        self.capabilities = frozenset()
+        self.capabilities: frozenset[Capability] = frozenset()
 
     async def open(self) -> None:
         pass
@@ -65,9 +66,13 @@ class _AdapterWithMetadata:
     async def stop(self) -> None:
         pass
 
-    async def stream(self):  # pragma: no cover — never iterated in this suite
-        if False:
-            yield None
+    def stream(self) -> AsyncIterator[object]:  # pragma: no cover
+        async def _gen() -> AsyncIterator[object]:
+            empty: tuple[object, ...] = ()
+            for item in empty:
+                yield item
+
+        return _gen()
 
     async def snapshot(self) -> object:
         raise NotImplementedError

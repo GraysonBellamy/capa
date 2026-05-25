@@ -157,7 +157,7 @@ done
 uv run capa catalog list --runs-root ./sweep-runs --json > sweep-summary.json
 ```
 
-Each `capa run` invocation re-opens adapters; for high-throughput sweeps where adapter open is expensive (Sartorius), batch many configs into a single experiment YAML and let the [batch procedure](../procedures/builtin-batch.md) re-use the pool across children.
+Each `capa run` invocation re-opens adapters; for high-throughput sweeps where adapter open is expensive (Sartorius), batch many configs into a single experiment YAML and let the [batch procedure](../procedures/builtin-batch.md) reuse the pool across children.
 
 ---
 

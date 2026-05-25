@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future
 
 import pytest
@@ -95,7 +95,7 @@ class _ProducerThread:
 
 
 @pytest.fixture
-def producer() -> _ProducerThread:
+def producer() -> Iterator[_ProducerThread]:
     p = _ProducerThread()
     p.start()
     yield p
@@ -260,8 +260,9 @@ async def test_bridge_block_policy_throttles_producer(
     await asyncio.wrap_future(push_fut)
 
     # After the unblock, blocked_since_ms is None and blocked_total_ms > 0.
-    assert bridge.metrics.blocked_since_ms is None
-    assert bridge.metrics.blocked_total_ms > 0
+    metrics = bridge.metrics
+    assert metrics.blocked_since_ms is None
+    assert metrics.blocked_total_ms > 0
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +413,7 @@ async def test_bridge_attach_producer_on_wrong_loop_raises(
     # loop reference — must raise.
     fake_loop = asyncio.new_event_loop()
     try:
-        fut = producer.call_sync(lambda: bridge.attach_producer(fake_loop))  # type: ignore[arg-type]
+        fut = producer.call_sync(lambda: bridge.attach_producer(fake_loop))
         with pytest.raises(RuntimeError, match="producer loop"):
             await asyncio.wrap_future(fut)
     finally:

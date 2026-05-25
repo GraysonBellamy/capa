@@ -187,7 +187,7 @@ class ProcedureRunner:
     async def preflight(self, ctx: RunContext, bus: DataBus) -> None:
         """Conductor preflight hook.
 
-        Constructs the :class:`ProcedureContext` once (re-used in
+        Constructs the :class:`ProcedureContext` once (reused in
         :meth:`run`), runs the active domain profile's declared checks,
         then invokes :meth:`Procedure.preflight`. Blocking problems
         (from either layer) raise :class:`ProcedureError`; non-blocking
@@ -289,7 +289,7 @@ class ProcedureRunner:
     async def run(self, ctx: RunContext, bus: DataBus) -> None:
         """Conductor run hook.
 
-        Re-uses the :class:`ProcedureContext` built in :meth:`preflight`;
+        Reuses the :class:`ProcedureContext` built in :meth:`preflight`;
         falls back to a fresh build if preflight wasn't called (defensive,
         but the conductor always calls preflight first).
 

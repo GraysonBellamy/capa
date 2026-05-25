@@ -118,6 +118,7 @@ def test_capa_profile_change_mapping_updates_channel_metadata(qtbot: Any) -> Non
 
 def test_capa_profile_specimen_pane_round_trips(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
+    assert section._specimen_form is not None
     section._specimen_form.set_values(
         {
             "id": "pmma_disk_S073-001",
@@ -129,7 +130,9 @@ def test_capa_profile_specimen_pane_round_trips(qtbot: Any) -> None:
         }
     )
     payload = section.payload()
-    metadata = payload["domain_profile"]["metadata"]
+    domain_profile = payload["domain_profile"]
+    assert isinstance(domain_profile, dict)
+    metadata = domain_profile["metadata"]
     assert metadata["specimen"]["id"] == "pmma_disk_S073-001"
     assert metadata["specimen"]["material"] == "PMMA"
     assert metadata["specimen"]["mass_g"] == 25.0
@@ -161,7 +164,7 @@ def test_capa_profile_compose_preserves_unmanaged_capa_group(qtbot: Any) -> None
 # ---------------------------------------------------------------------------
 
 
-def _make_artifact(*, points: list[tuple[float, float]]):
+def _make_artifact(*, points: list[tuple[float, float]]) -> Any:
     """Construct an artifact with the given (target, setpoint) pairs."""
     from datetime import UTC, datetime
 
@@ -203,6 +206,7 @@ def test_apply_artifact_in_bracket_writes_setpoint_and_ref(qtbot: Any) -> None:
     ``heater_setpoint_c`` (linearly interpolated) and
     ``flux_calibration_ref`` (the artifact id) back into the form."""
     section, _ = _make_section(qtbot)
+    assert section._heater_form is not None
     section._heater_form.set_values({"target_heat_flux_kw_m2": 50.0})
     artifact = _make_artifact(points=[(25.0, 450.0), (75.0, 750.0)])
 
@@ -220,6 +224,7 @@ def test_apply_artifact_out_of_bracket_leaves_form_alone(qtbot: Any, monkeypatch
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     section, _ = _make_section(qtbot)
+    assert section._heater_form is not None
     section._heater_form.set_values(
         {"target_heat_flux_kw_m2": 100.0, "heater_setpoint_c": 600.0, "flux_calibration_ref": ""}
     )
@@ -241,6 +246,7 @@ def test_apply_artifact_no_target_prompts_operator(qtbot: Any, monkeypatch: Any)
     called: list[tuple[Any, ...]] = []
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: called.append(args))
     section, _ = _make_section(qtbot)
+    assert section._heater_form is not None
     section._heater_form.set_values({"target_heat_flux_kw_m2": 0.0})
     artifact = _make_artifact(points=[(25.0, 450.0), (75.0, 700.0)])
 
@@ -251,6 +257,7 @@ def test_apply_artifact_no_target_prompts_operator(qtbot: Any, monkeypatch: Any)
 
 def test_clear_tune_ref_clears_ref_only(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
+    assert section._heater_form is not None
     section._heater_form.set_values(
         {
             "target_heat_flux_kw_m2": 50.0,
@@ -305,6 +312,7 @@ def test_holding_tick_applies_setpoint_to_heater_form(qtbot: Any, monkeypatch: A
     drive headlessly, but the apply logic is the contract worth
     pinning."""
     section, _ = _make_section(qtbot)
+    assert section._heater_form is not None
     monkeypatch.setattr(
         section,
         "_prompt_apply_hold",

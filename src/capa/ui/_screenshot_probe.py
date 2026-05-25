@@ -486,7 +486,7 @@ def _call(method: str, *args: tuple[type, Any]) -> str:
     return str(
         QMetaObject.invokeMethod(
             _probe,
-            method.encode(),
+            method,
             Qt.ConnectionType.BlockingQueuedConnection,
             Q_RETURN_ARG(str),
             *q_args,

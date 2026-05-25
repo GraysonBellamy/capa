@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from capa.core.clock import RunClock
+from capa.devices.adapter import DeviceAdapter
 from capa.devices.camera.base import CameraSpec
 from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.runtime.bridge import BridgePolicy, ThreadBridge
@@ -102,7 +104,7 @@ class TestWorkerPreviewLifecycle:
         bridge = _make_preview_bridge(wrapper.name)
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-preview-lifecycle"),
             preview_bridges={wrapper.name: bridge},
         )
@@ -146,7 +148,7 @@ class TestWorkerPreviewLifecycle:
         bridge = _make_preview_bridge(wrapper.name)
         worker = Worker(
             resource_id=wrapper.resource_id,
-            adapters=[wrapper],
+            adapters=[cast(DeviceAdapter, wrapper)],
             runner=ThreadedRunner(name="cam-preview-close"),
             preview_bridges={wrapper.name: bridge},
         )

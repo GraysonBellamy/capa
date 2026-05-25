@@ -1167,7 +1167,7 @@ class TestUnitDrift:
         await adapter.start(make_start_ctx())
         await _drain(adapter, max_records=2)
         # Mismatch is now recorded in the adapter's quarantine set.
-        assert "heater.pv" in adapter._drift_skipped_channels  # type: ignore[attr-defined]
+        assert "heater.pv" in adapter._drift_skipped_channels
         await adapter.close()
 
         # Re-open to call set_display_units (the stream loop has finished).
@@ -1177,5 +1177,5 @@ class TestUnitDrift:
             issued_by="abr",
             authorization_id="run-1",
         )
-        assert adapter._drift_skipped_channels == set()  # type: ignore[attr-defined]
+        assert adapter._drift_skipped_channels == set()
         await adapter.close()

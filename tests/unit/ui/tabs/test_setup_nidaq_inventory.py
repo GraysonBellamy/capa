@@ -58,8 +58,8 @@ def test_update_nidaq_inventory_drops_malformed_rows(qtbot: Any) -> None:
     qtbot.addWidget(tab)
     tab.update_nidaq_inventory(
         [
-            None,  # type: ignore[list-item]
-            "not a dict",  # type: ignore[list-item]
+            None,
+            "not a dict",
             {"adapter": "nidaq"},  # missing device
             {"device": ""},  # empty name
             {"device": "good", "adapter": "nidaq", "ai_channels": ["x/ai0"]},

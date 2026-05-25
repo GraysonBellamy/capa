@@ -9,8 +9,10 @@ recording-filter feature.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 from capa.experiment.config import RecordingPolicy
+from capa.experiment.procedures.base import Procedure
 from capa.experiment.procedures.builtin.heat_flux_tune.controller import HeatFluxTune
 from capa.runtime.recording import (
     ResolvedRecordingPlan,
@@ -102,7 +104,7 @@ class TestResolveRecordingPlan:
         proc = _PlanCaptureProcedure(narrowed)
         plan = resolve_recording_plan(
             hardware=hw,
-            procedure=proc,
+            procedure=cast(Procedure, proc),
             policy=RecordingPolicy(mode="record_all"),
         )
         assert plan.channel_mode == "all"
@@ -119,7 +121,7 @@ class TestResolveRecordingPlan:
         )
         plan = resolve_recording_plan(
             hardware=hw,
-            procedure=_PlanCaptureProcedure(narrowed),
+            procedure=cast(Procedure, _PlanCaptureProcedure(narrowed)),
             policy=RecordingPolicy(),
         )
         assert plan == narrowed
@@ -128,7 +130,7 @@ class TestResolveRecordingPlan:
         hw = _FakeHardware(channels=("a",), cameras=("ir",))
         plan = resolve_recording_plan(
             hardware=hw,
-            procedure=_PlanCaptureProcedure(None),
+            procedure=cast(Procedure, _PlanCaptureProcedure(None)),
             policy=RecordingPolicy(),
         )
         assert plan == default_recording_plan(hw)
@@ -138,7 +140,7 @@ class TestResolveRecordingPlan:
         hw = _FakeHardware(channels=("a",), cameras=("ir",))
         plan = resolve_recording_plan(
             hardware=hw,
-            procedure=_NoOverrideProcedure(),
+            procedure=cast(Procedure, _NoOverrideProcedure()),
             policy=RecordingPolicy(),
         )
         assert plan == default_recording_plan(hw)

@@ -838,10 +838,10 @@ def test_handle_operator_command_pause_sets_paused() -> None:
 
     assert proc._paused is False
     proc._handle_operator_command(ctx, OperatorCommand(kind="pause"))
-    assert proc._paused is True
+    assert getattr(proc, "_paused") is True  # noqa: B009
     # And resume clears it
     proc._handle_operator_command(ctx, OperatorCommand(kind="resume"))
-    assert proc._paused is False
+    assert getattr(proc, "_paused") is False  # noqa: B009
 
 
 def test_handle_operator_command_accept_current_sets_oneshot_flag() -> None:

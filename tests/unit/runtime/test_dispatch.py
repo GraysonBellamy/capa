@@ -9,13 +9,14 @@ adapter.stop().
 
 from __future__ import annotations
 
+import concurrent.futures as cf
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from capa.devices.adapter import CommandResult, DeviceCommand
+from capa.devices.adapter import CommandResult, DeviceAdapter, DeviceCommand
 from capa.runtime.dispatch import (
     AdapterDispatcher,
     CommandDispatcher,
@@ -25,6 +26,10 @@ from capa.runtime.dispatch import (
 )
 from capa.runtime.errors import UnknownDeviceError
 from capa.runtime.state import ConductorState
+
+if TYPE_CHECKING:
+    from capa.runtime.conductor import Conductor
+    from capa.runtime.pool import WorkerPool
 
 pytestmark = pytest.mark.anyio
 
@@ -69,14 +74,14 @@ class TestAdapterDispatcher:
 
     async def test_routes_to_named_adapter(self) -> None:
         a = _FakeAdapter()
-        d = AdapterDispatcher({"heater": a})
+        d = AdapterDispatcher({"heater": cast(DeviceAdapter, a)})
         cmd = _cmd()
         result = await d.dispatch("heater", cmd)
         assert result.accepted
         assert a.commands == [cmd]
 
     async def test_unknown_device_raises(self) -> None:
-        d = AdapterDispatcher({"heater": _FakeAdapter()})
+        d = AdapterDispatcher({"heater": cast(DeviceAdapter, _FakeAdapter())})
         with pytest.raises(UnknownDeviceError) as exc_info:
             await d.dispatch("balance", _cmd())
         assert exc_info.value.name == "balance"
@@ -84,7 +89,7 @@ class TestAdapterDispatcher:
 
     async def test_propagates_adapter_errors(self) -> None:
         a = _FakeAdapter(raises=RuntimeError("serial timeout"))
-        d = AdapterDispatcher({"heater": a})
+        d = AdapterDispatcher({"heater": cast(DeviceAdapter, a)})
         with pytest.raises(RuntimeError, match="serial timeout"):
             await d.dispatch("heater", _cmd())
 
@@ -97,16 +102,14 @@ class TestAdapterDispatcher:
 class _FakePoolFuture:
     """Resolve a concurrent.futures.Future inline for tests."""
 
-    def __init__(self, result: CommandResult | BaseException) -> None:
-        import concurrent.futures as cf
-
-        self._fut: cf.Future[CommandResult] = cf.Future()
+    def __init__(self, result: Any) -> None:
+        self._fut: cf.Future[Any] = cf.Future()
         if isinstance(result, BaseException):
             self._fut.set_exception(result)
         else:
             self._fut.set_result(result)
 
-    def future(self):
+    def future(self) -> cf.Future[Any]:
         return self._fut
 
 
@@ -118,7 +121,7 @@ class _FakePool:
     results: dict[str, CommandResult | BaseException] = field(default_factory=dict)
     seen: list[tuple[str, DeviceCommand]] = field(default_factory=list)
 
-    def dispatch(self, device: str, cmd: DeviceCommand):
+    def dispatch(self, device: str, cmd: DeviceCommand) -> cf.Future[Any]:
         self.seen.append((device, cmd))
         if device not in self.results:
             raise KeyError(device)
@@ -127,26 +130,26 @@ class _FakePool:
 
 class TestPoolDispatcher:
     def test_satisfies_protocol(self) -> None:
-        d = PoolDispatcher(pool=_FakePool())  # type: ignore[arg-type]
+        d = PoolDispatcher(pool=cast("WorkerPool", _FakePool()))
         assert isinstance(d, CommandDispatcher)
 
     async def test_routes_through_pool_and_returns_result(self) -> None:
         result = _ok()
         pool = _FakePool(results={"heater": result})
-        d = PoolDispatcher(pool=pool)  # type: ignore[arg-type]
+        d = PoolDispatcher(pool=cast("WorkerPool", pool))
         out = await d.dispatch("heater", _cmd())
         assert out is result
         assert pool.seen[0][0] == "heater"
 
     async def test_unknown_device_raises(self) -> None:
         pool = _FakePool(results={})
-        d = PoolDispatcher(pool=pool)  # type: ignore[arg-type]
+        d = PoolDispatcher(pool=cast("WorkerPool", pool))
         with pytest.raises(UnknownDeviceError):
             await d.dispatch("missing", _cmd())
 
     async def test_propagates_pool_side_errors(self) -> None:
         pool = _FakePool(results={"heater": RuntimeError("worker dead")})
-        d = PoolDispatcher(pool=pool)  # type: ignore[arg-type]
+        d = PoolDispatcher(pool=cast("WorkerPool", pool))
         with pytest.raises(RuntimeError, match="worker dead"):
             await d.dispatch("heater", _cmd())
 
@@ -164,7 +167,7 @@ class _FakeConductor:
         self._pool_results = pool_results
         self.dispatch_calls: list[tuple[str, DeviceCommand]] = []
 
-    def dispatch(self, device: str, cmd: DeviceCommand):
+    def dispatch(self, device: str, cmd: DeviceCommand) -> cf.Future[Any]:
         self.dispatch_calls.append((device, cmd))
         if device not in self._pool_results:
             raise KeyError(device)
@@ -174,16 +177,16 @@ class _FakeConductor:
 class TestConductorDispatcher:
     def test_satisfies_protocol(self) -> None:
         c = _FakeConductor(state=ConductorState.RUNNING, pool_results={})
-        d = ConductorDispatcher(conductor=c)  # type: ignore[arg-type]
+        d = ConductorDispatcher(conductor=cast("Conductor", c))
         assert isinstance(d, CommandDispatcher)
 
     @pytest.mark.parametrize(
         "state",
         [ConductorState.PREPARING, ConductorState.RUNNING],
     )
-    async def test_dispatch_permitted_in_active_states(self, state) -> None:
+    async def test_dispatch_permitted_in_active_states(self, state: ConductorState) -> None:
         c = _FakeConductor(state=state, pool_results={"heater": _ok()})
-        d = ConductorDispatcher(conductor=c)  # type: ignore[arg-type]
+        d = ConductorDispatcher(conductor=cast("Conductor", c))
         result = await d.dispatch("heater", _cmd())
         assert result.accepted
         assert len(c.dispatch_calls) == 1
@@ -197,11 +200,11 @@ class TestConductorDispatcher:
             ConductorState.FAILED,
         ],
     )
-    async def test_dispatch_refused_outside_active_states(self, state) -> None:
+    async def test_dispatch_refused_outside_active_states(self, state: ConductorState) -> None:
         from capa.runtime.errors import ConductorStateError
 
         c = _FakeConductor(state=state, pool_results={"heater": _ok()})
-        d = ConductorDispatcher(conductor=c)  # type: ignore[arg-type]
+        d = ConductorDispatcher(conductor=cast("Conductor", c))
         with pytest.raises(ConductorStateError):
             await d.dispatch("heater", _cmd())
         # And we don't even reach the conductor's dispatch method.
@@ -209,7 +212,7 @@ class TestConductorDispatcher:
 
     async def test_unknown_device_in_running_state_raises(self) -> None:
         c = _FakeConductor(state=ConductorState.RUNNING, pool_results={})
-        d = ConductorDispatcher(conductor=c)  # type: ignore[arg-type]
+        d = ConductorDispatcher(conductor=cast("Conductor", c))
         with pytest.raises(UnknownDeviceError):
             await d.dispatch("missing", _cmd())
 
@@ -249,7 +252,7 @@ class _FakePoolWithCameras(_FakePool):
 class TestManualClient:
     async def test_routes_to_pool_when_no_run_armed(self) -> None:
         pool = _FakePool(results={"heater": _ok()})
-        client = ManualClient(pool=pool, conductor_provider=lambda: None)  # type: ignore[arg-type]
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
         result = await client.dispatch("heater", _cmd())
         assert result.accepted
         assert pool.seen[0][0] == "heater"
@@ -257,7 +260,10 @@ class TestManualClient:
     async def test_routes_to_conductor_when_run_armed(self) -> None:
         pool = _FakePool(results={"heater": _ok()})  # would be a fallback
         cond = _FakeConductor(state=ConductorState.RUNNING, pool_results={"heater": _ok()})
-        client = ManualClient(pool=pool, conductor_provider=lambda: cond)  # type: ignore[arg-type]
+        client = ManualClient(
+            pool=cast("WorkerPool", pool),
+            conductor_provider=lambda: cast("Conductor", cond),
+        )
         result = await client.dispatch("heater", _cmd())
         assert result.accepted
         # Pool never saw the dispatch because the conductor handled it.
@@ -273,13 +279,18 @@ class TestManualClient:
             ConductorState.FAILED,
         ],
     )
-    async def test_falls_through_to_pool_when_conductor_not_dispatchable(self, state) -> None:
+    async def test_falls_through_to_pool_when_conductor_not_dispatchable(
+        self, state: ConductorState
+    ) -> None:
         # During DRAINING / FINALIZING / SEALED / FAILED the previous run's
         # conductor is "on the way out" — between-runs manual commands must
         # land on the pool, not on a refusing conductor.
         pool = _FakePool(results={"heater": _ok()})
         cond = _FakeConductor(state=state, pool_results={})
-        client = ManualClient(pool=pool, conductor_provider=lambda: cond)  # type: ignore[arg-type]
+        client = ManualClient(
+            pool=cast("WorkerPool", pool),
+            conductor_provider=lambda: cast("Conductor", cond),
+        )
         result = await client.dispatch("heater", _cmd())
         assert result.accepted
         assert pool.seen[0][0] == "heater"
@@ -287,14 +298,17 @@ class TestManualClient:
 
     async def test_unknown_device_raises_via_pool_path(self) -> None:
         pool = _FakePool(results={})
-        client = ManualClient(pool=pool, conductor_provider=lambda: None)  # type: ignore[arg-type]
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
         with pytest.raises(UnknownDeviceError):
             await client.dispatch("missing", _cmd())
 
     async def test_unknown_device_raises_via_conductor_path(self) -> None:
         pool = _FakePool(results={})
         cond = _FakeConductor(state=ConductorState.RUNNING, pool_results={})
-        client = ManualClient(pool=pool, conductor_provider=lambda: cond)  # type: ignore[arg-type]
+        client = ManualClient(
+            pool=cast("WorkerPool", pool),
+            conductor_provider=lambda: cast("Conductor", cond),
+        )
         with pytest.raises(UnknownDeviceError):
             await client.dispatch("missing", _cmd())
 
@@ -313,23 +327,23 @@ class TestManualClient:
 
         # Extend the fake pool with a snapshot method that returns a future.
         class _PoolWithSnap(_FakePool):
-            def snapshot(self, device: str):
+            def snapshot(self, device: str) -> cf.Future[Any]:
                 return _FakePoolFuture(snap).future()
 
         pool = _PoolWithSnap()
-        client = ManualClient(pool=pool, conductor_provider=lambda: None)  # type: ignore[arg-type]
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
         out = await client.snapshot("heater")
         assert out is snap
 
     def test_camera_lookup_returns_none_for_unknown_device(self) -> None:
         pool = _FakePoolWithCameras()
-        client = ManualClient(pool=pool, conductor_provider=lambda: None)  # type: ignore[arg-type]
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
         assert client.camera("missing") is None
 
     def test_camera_lookup_returns_none_for_non_camera_adapter(self) -> None:
         worker = _FakeWorkerForCamera(adapters={"heater": _FakeAdapter()})
         pool = _FakePoolWithCameras(workers_by_device={"heater": worker})
-        client = ManualClient(pool=pool, conductor_provider=lambda: None)  # type: ignore[arg-type]
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
         assert client.camera("heater") is None
 
     async def test_camera_metadata_routes_through_pool(self) -> None:
@@ -346,16 +360,14 @@ class TestManualClient:
                 self._payload = payload
                 self.metadata_calls: list[str] = []
 
-            def camera_metadata(self, device: str):
-                import concurrent.futures as cf
-
+            def camera_metadata(self, device: str) -> cf.Future[WebcamMetadata | None]:
                 self.metadata_calls.append(device)
                 fut: cf.Future[WebcamMetadata | None] = cf.Future()
                 fut.set_result(self._payload)
                 return fut
 
         pool = _PoolWithMeta(payload=meta)
-        client = ManualClient(pool=pool, conductor_provider=lambda: None)  # type: ignore[arg-type]
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
         out = await client.camera_metadata("visible_cam0")
         assert out is meta
         assert pool.metadata_calls == ["visible_cam0"]
@@ -364,15 +376,13 @@ class TestManualClient:
         # Worker resolves the name but the adapter has no snapshot — Pool
         # returns None and the client passes it through transparently.
         class _PoolReturningNone(_FakePool):
-            def camera_metadata(self, device: str):
-                import concurrent.futures as cf
-
+            def camera_metadata(self, device: str) -> cf.Future[Any]:
                 fut: cf.Future[Any] = cf.Future()
                 fut.set_result(None)
                 return fut
 
         pool = _PoolReturningNone()
-        client = ManualClient(pool=pool, conductor_provider=lambda: None)  # type: ignore[arg-type]
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
         assert await client.camera_metadata("ir_cam0") is None
 
     async def test_camera_metadata_unknown_device_raises(self) -> None:
@@ -382,10 +392,10 @@ class TestManualClient:
         # before they reach the UI, but the public API stays consistent
         # with dispatch / snapshot.
         class _PoolRaising(_FakePool):
-            def camera_metadata(self, device: str):
+            def camera_metadata(self, device: str) -> cf.Future[Any]:
                 raise KeyError(device)
 
         pool = _PoolRaising()
-        client = ManualClient(pool=pool, conductor_provider=lambda: None)  # type: ignore[arg-type]
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
         with pytest.raises(UnknownDeviceError):
             await client.camera_metadata("missing")

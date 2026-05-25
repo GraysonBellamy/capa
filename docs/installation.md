@@ -41,16 +41,16 @@ From the `capa/` directory:
 
 ```sh
 # Baseline install — runtime, GUI, all four device libs, dev tooling
-uv sync --extra dev
+uv sync --group dev
 
 # With FLIR IR camera support
-uv sync --extra dev --extra flir
+uv sync --group dev --extra flir
 
 # Docs tooling (zensical, mkdocstrings)
-uv sync --extra dev --group docs
+uv sync --group dev --group docs
 ```
 
-`uv sync` creates `.venv/` in the project root and installs everything into it. The `--extra dev` group pulls in pytest, pytest-qt, ruff, and mypy.
+`uv sync` creates `.venv/` in the project root and installs everything into it. The `dev` group pulls in pytest, pytest-qt, anyio[trio], ruff, mypy, and pre-commit. CI installs the narrower `lint`, `type`, and `test` groups directly; see [pyproject.toml](https://github.com/GraysonBellamy/capa/blob/main/pyproject.toml)'s `[dependency-groups]` for the breakdown.
 
 ### The vendored `duvc-ctl` wheel (Windows only)
 

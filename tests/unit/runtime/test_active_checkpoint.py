@@ -279,7 +279,7 @@ def _write_running_manifest(
         python=PythonBlock(version="3.13", implementation="CPython", executable="py"),
         platform=PlatformBlock(os="test", machine="test", node="test"),
         lockfile=LockfileBlock(path=None, sha256=None),
-        run_status=run_status,  # type: ignore[arg-type]
-        bundle_status=bundle_status,  # type: ignore[arg-type]
+        run_status=run_status,
+        bundle_status=bundle_status,
     )
     manifest.write(bundle / "manifest.json")
