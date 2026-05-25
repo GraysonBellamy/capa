@@ -181,11 +181,11 @@ class RunUiResult:
     run_status: str
     """One of ``"completed"`` / ``"aborted"`` / ``"crashed"``."""
     bundle_status: str
-    """``"sealed"`` / ``"open"`` / ``"verification_failed"`` (read off the
-    bundle manifest), or ``"unknown"`` if the manifest can't be read."""
+    """Bundle lifecycle status read from the manifest, or ``"unknown"`` if
+    the manifest can't be read."""
     integrity_status: str
-    """``"ok"`` / ``"verification_failed"`` / ``"unknown"`` — mirrors the
-    manifest's ``integrity.status`` field."""
+    """``"unknown"`` / ``"ok"`` / ``"mismatch"`` / ``"partial"`` — mirrors
+    the manifest's ``integrity.status`` field."""
     exit_reason: str | None = None
 
 
@@ -826,9 +826,9 @@ class RunController(QObject):
         when the conductor doesn't exist yet.
 
         ``mode`` is recorded in the run's ``exit_reason`` for audit
-        purposes (``"safe_shutdown"`` vs ``"immediate"``); the conductor
-        treats both the same way — its ``SafeShutdownStep`` runs
-        unconditionally before disarm.
+        purposes (``"safe_shutdown"`` vs ``"immediate"``). The conductor
+        treats both the same way; procedure-specific cleanup is responsible
+        for any explicit cooldown command.
 
         Behavior:
 

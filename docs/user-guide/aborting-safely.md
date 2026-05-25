@@ -16,8 +16,8 @@ and [shutdown sequence](../safety/shutdown-sequence.md).
 
 | Path | Surface | What it asks the conductor to do | Recorded `exit_reason` |
 |---|---|---|---|
-| **Stop run** | Run-tab button | Graceful shutdown: run `SafeShutdownStep` setpoints, allow cooldown wait, disarm workers, finalize bundle. | `operator_safe_shutdown` |
-| **Emergency stop** | Run-tab hold-to-confirm button (1 s hold) | Immediate shutdown: same disarm + finalize path, but no expectation that the cooldown wait will run to completion. | `operator_immediate` |
+| **Stop run** | Run-tab button | Graceful shutdown request: set `external_stop`, let the active procedure unwind, disarm workers, finalize bundle. | `operator_safe_shutdown` |
+| **Emergency stop** | Run-tab hold-to-confirm button (1 s hold) | Same conductor shutdown path, stamped as the fast/immediate operator request. | `operator_immediate` |
 | **Force-cancel** | OS-level process kill (Task Manager, `kill -9`) — not a UI button | Cuts the conductor mid-anything. Bundle may not seal; recovery is best-effort on next launch. | n/a (no run-end event recorded) |
 
 The first two are the operator's normal escape hatches. The third is a
@@ -32,20 +32,20 @@ Single click on **Stop run** during `RUNNING`. The conductor:
 
 1. Stops admitting new method steps (the executor checks
    `external_stop` between steps and returns when set).
-2. Runs the method's `SafeShutdownStep` if one is defined — commands
-   every `cool_target` setpoint, then waits `duration_s` (or until
-   `external_stop` short-circuits the wait).
-3. **For free runs (no method)**, there's no explicit `SafeShutdownStep`
-   — the worker pool disarms at its standard cadence and any heater /
-   MFC keeps its last commanded setpoint. If you want a cooldown in
-   free-run mode, drive the setpoint to a safe value via
-   [manual controls](manual-controls.md) before clicking Stop.
-4. Disarms all workers via `pool.disarm_all(grace_s=...)`. The
+2. Lets the active procedure observe `external_stop` and run any cleanup
+   it implements. A trailing method `SafeShutdownStep` is **not**
+   automatically jumped to when a method is interrupted mid-step.
+3. Disarms all workers via `pool.disarm_all(grace_s=...)`. The
    conductor's `shutdown_grace_s` defaults to **5 seconds**; on grace
    expiry a worker is hard-stopped and the run is marked degraded.
-5. Finalizes the bundle (writer flush, two-stage Parquet rewrite,
+4. Finalizes the bundle (writer flush, two-stage Parquet rewrite,
    manifest seal).
-6. Run-tab badge moves through `DRAINING` → `FINALIZING` → `SEALED`.
+5. Run-tab badge moves through `DRAINING` → `FINALIZING` → `SEALED`.
+
+For method runs, put safe cooldown commands in the method or in a
+procedure `finally` block if they must run on abort. For free runs, drive
+the setpoint to a safe value via [manual controls](manual-controls.md)
+before clicking Stop if the adapter itself does not do that in `stop()`.
 
 ![Run tab in DRAINING state: badge `Draining…` (amber), Start disabled, Stop/Emergency still enabled. Manual cards show `run draining — manual writes disabled`.](../_snippets/images/abort-draining.png)
 
@@ -65,19 +65,9 @@ a misclick by releasing.
 On confirm, the conductor receives the same `stop()` call as Stop run.
 The difference is the recorded `exit_reason` — `operator_immediate`
 vs. `operator_safe_shutdown` — which downstream tooling can read off
-the manifest to know which path the operator took.
-
-The cooldown wait inside `SafeShutdownStep` short-circuits on
-`external_stop`, so an Emergency stop won't sit for 60 seconds of
-cooldown before moving on to disarm. The setpoints themselves still get
-commanded.
-
-> **The current implementation commands SafeShutdownStep setpoints under
-> both modes.** The button tooltip historically said Emergency "skips
-> the safe-shutdown step" — that's stale. The actual difference today
-> is the hold-to-confirm UX and the recorded reason. If you need a
-> behaviour that truly bypasses cooldown, kill the process (see Force-
-> cancel).
+the manifest to know which path the operator took. The conductor itself
+does not run a different shutdown routine for the two buttons; any
+mode-specific cleanup must come from the active procedure.
 
 ---
 
@@ -146,9 +136,9 @@ inspect these fields without opening the bundle in the app.
 
 | Situation | Click | Why |
 |---|---|---|
-| Run is on schedule, you just want to end it early | **Stop run** | Cleanest path; cooldown runs to completion. |
+| Run is on schedule, you just want to end it early | **Stop run** | Cleanest path; procedure cleanup gets a chance to run. |
 | Something looks wrong but the rig is responding | **Stop run** | Capture the data through the moment of concern; investigate from the sealed bundle. |
-| Heater is overshooting hard, or a leak is suspected | **Emergency stop** | Skip the cooldown wait; commanded setpoints still drop. |
+| Heater is overshooting hard, or a leak is suspected | **Emergency stop** | Fast operator-request path; still disarms and seals. |
 | GUI has hung; buttons don't respond | **Kill the process** | Last resort. Restart capa, finalize-on-startup will recover the bundle. |
 | Something is actively dangerous and you don't trust software at all | **Hit the physical e-stop on the rig**, then kill the process | The physical e-stop is outside capa's control path and is what you trust. |
 

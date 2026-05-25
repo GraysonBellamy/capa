@@ -85,7 +85,7 @@ in this list.
 | [`wait`](#wait) | no | duration or condition | dwell |
 | [`prompt`](#prompt) | no | until operator clears | "ignite specimen, then Continue" |
 | [`acquire`](#acquire) | no | duration | record without changing outputs |
-| [`safe_shutdown`](#safe_shutdown) | yes | duration | cooldown step (also invoked by safety) |
+| [`safe_shutdown`](#safe_shutdown) | yes | duration | explicit cooldown step |
 | [`custom`](#custom) | plugin-defined | plugin-defined | dispatch to a registered handler |
 
 Common fields available on every variant:
@@ -93,7 +93,7 @@ Common fields available on every variant:
 | Field | Notes |
 |---|---|
 | `notes` | Free-text comment carried into events / bundle. |
-| `safety_overrides` | Array of `AlarmOverride` tables. Per-step alarm band tweaks. |
+| `safety_overrides` | Array of `AlarmOverride` tables. Parsed and preserved today; active enforcement is reserved for the safety monitor path. |
 
 ### `hold`
 
@@ -130,9 +130,10 @@ Operators: `>`, `>=`, `<`, `<=`, `==`.
 
 ### `ramp`
 
-Drive a setpoint linearly. Either `rate_per_second` + `end_value` or
-`duration_s` + `end_value` must be set — capa derives the other from
-endpoints.
+Drive a setpoint linearly. At least one of `rate_per_second` or
+`duration_s` must be set. If both are present, `duration_s` controls
+execution; if `duration_s` is absent, capa derives it from
+`rate_per_second` and the endpoints.
 
 ```toml
 [[steps]]
@@ -148,8 +149,8 @@ name = "heater.setpoint"
 | `target.name` | yes | Channel to command. |
 | `start_value` | no | `None` = start from the current setpoint. |
 | `end_value` | yes | Target setpoint. |
-| `rate_per_second` | conditional | Set this **or** `duration_s`. |
-| `duration_s` | conditional | Set this **or** `rate_per_second`. |
+| `rate_per_second` | conditional | Used when `duration_s` is unset. |
+| `duration_s` | conditional | Execution duration. Takes precedence when both fields are present. |
 
 ### `setpoint`
 
@@ -229,8 +230,9 @@ duration_s = 600.0
 
 ### `safe_shutdown`
 
-Reusable cooldown step. Also invoked by the safety system when a rule
-with `action = "safe_shutdown"` fires. `cool_target` is a map of
+Reusable cooldown step. Procedures can include it directly or run it
+from their own cleanup path with `MethodExecutor.run_segment(...)`.
+`cool_target` is a map of
 `channel_name → setpoint` to drive during shutdown.
 
 ```toml
@@ -247,10 +249,9 @@ duration_s = 0.0
 | `cool_target` | no | Channel → setpoint map. Defaults to `{}`. |
 | `duration_s` | no | Cooldown dwell after commanding `cool_target`. |
 
-When the safety system invokes a safe shutdown mid-method, the same
-step type runs but the conductor sources `cool_target` from the
-configured shutdown policy. See [Shutdown
-sequence](../safety/shutdown-sequence.md).
+External stops do not automatically skip to a trailing `safe_shutdown`
+step. If a procedure needs that behavior, it must invoke the cleanup
+step explicitly. See [Shutdown sequence](../safety/shutdown-sequence.md).
 
 ### `custom`
 
@@ -271,11 +272,13 @@ window_s = 10.0
 See [Custom method steps](../extending/custom-method-steps.md) for
 writing one.
 
-## `safety_overrides` — per-step alarm tweaks
+## `safety_overrides` — reserved alarm tweaks
 
 Every step accepts a `safety_overrides` array of `AlarmOverride`
-tables. The common case is widening an alarm band during a spike at
-the start of a fresh setpoint:
+tables. The schema exists so methods can carry intended per-step alarm
+tweaks, but the current runtime does not yet apply these fields to an
+active safety monitor. The intended future use is widening an alarm band
+during a spike at the start of a fresh setpoint:
 
 ```toml
 [[steps]]
@@ -292,9 +295,9 @@ threshold = 850.0   # widen from default 820 for this step
 
 | Field | Required | Notes |
 |---|:-:|---|
-| `alarm_id` | yes | Must reference an alarm band declared on a channel. |
+| `alarm_id` | yes | Alarm identifier to override when the safety monitor path lands. |
 | `threshold` | no | Override value. |
-| `disable` | no | When `true`, disable the band for the duration of this step. |
+| `disable` | no | Intended to disable the band for the duration of this step. |
 
 ## `total_duration_s` — when it's known
 

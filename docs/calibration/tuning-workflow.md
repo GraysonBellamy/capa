@@ -135,14 +135,13 @@ After an Abort, the procedure's `finally` block drives the heater to `t_safe_c` 
 
 ## Where the artifact lands
 
-Two copies are written on success:
+One artifact file is written when `persist_dir` is configured:
 
 | Path | Purpose |
 |---|---|
 | `configs/calibrations/flux/<id>.toml` (default `persist_dir`) | Operational copy. Read by the next tune session's `lookup` prior and by the CAPA profile UI. |
-| `<bundle>/...` (inside the run bundle) | Self-describing run record. Always written — even when `persist_dir` is null. |
 
-The id is `<artifact_id_prefix>_<YYYY-MM-DD>` (default prefix `capa_flux`, so `capa_flux_2026-05-24.toml`). `latest.toml` is repointed at the new id; the previous target is copied to `<previous-id>.toml.bak-<today>` first. Details in [Tune artifacts](tune-artifacts.md#on-disk-layout).
+The id is `<artifact_id_prefix>_<YYYY-MM-DD>` (default prefix `capa_flux`, so `capa_flux_2026-05-24.toml`). `latest.toml` is repointed at the new id; the previous target is copied to `<previous-id>.toml.bak-<today>` first. If `persist_dir` is null, artifact-file persistence is skipped. The tune run's bundle records config and audit events, but it does not currently include an automatic artifact sidecar. Details in [Tune artifacts](tune-artifacts.md#on-disk-layout).
 
 ---
 

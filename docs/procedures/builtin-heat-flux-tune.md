@@ -23,7 +23,7 @@ The Schmidt-Boelter gauge is **removed before the specimen run**. The tune is a 
 | Module | [src/capa/experiment/procedures/builtin/heat_flux_tune/](https://github.com/GraysonBellamy/capa/tree/main/src/capa/experiment/procedures/builtin/heat_flux_tune) |
 | `uses_method` | `False` — the Method tab is hidden when this procedure is selected |
 | Required channels | `heat_flux_gauge`, `heater.setpoint`, `heater.pv` (rebindable in config) |
-| Bundle shape | One bundle + one `*.flux.toml` artifact in `configs/calibrations/flux/` |
+| Bundle shape | One bundle; one operational tune artifact in `configs/calibrations/flux/` when `persist_dir` is set |
 | Cameras / extra channels | Suppressed by `plan_capture` — the bundle records only the three required channels |
 
 ---
@@ -112,7 +112,7 @@ Defaults to a damped secant with a ±25 °C clamp. The `n_iter_max` default of 1
 
 | Field | Default | Notes |
 |---|---|---|
-| `persist_dir` | `configs/calibrations/flux` | Directory to write the artifact into. Set to blank/`None` to skip on-disk persistence — the artifact still lands in the bundle. |
+| `persist_dir` | `configs/calibrations/flux` | Directory to write the artifact into. Set to blank/`None` to skip artifact-file persistence for this tune session. |
 | `geometry` | `40 mm below heater, centerline` | Free-text gauge-placement description recorded in the artifact. |
 | `gauge_calibration_ref` | `None` | Link to the gauge's V→kW/m² calibration cert. A later analyst can detect a calibration change by comparing this across artifacts. |
 | `artifact_id_prefix` | `capa_flux` | Artifact id is `<prefix>_<YYYY-MM-DD>` — one artifact per day per rig. |

@@ -194,8 +194,8 @@ message = "Heater PV above ceiling"
 
 Actions: `warn`, `pause_method`, `abort_run`, `safe_shutdown`.
 `debounce_s` is the continuous-true window before firing — catches
-single-sample spikes. The evaluator lives in the safety system; this
-config just ships the schema.
+single-sample spikes. The current runtime parses and preserves this
+schema; the dedicated safety-rule evaluator is planned but not active.
 
 ## `[[cameras]]`
 

@@ -124,7 +124,7 @@ sealed bundle. To inspect it:
   browser.
 - For a queryable view across the day's runs, use the
   [capa catalog CLI](../cli/capa-catalog.md) — it reads the
-  `capa.catalog.sqlite` index that every Apply / run writes into.
+  `runs.sqlite` index that every run writes into.
 
 There's no in-app sealed-bundle browser. See
 [reviewing a run](../user-guide/reviewing-a-run.md) for the external

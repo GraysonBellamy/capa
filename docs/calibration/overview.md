@@ -16,7 +16,7 @@ capa has **two** subsystems whose names both contain "calibration." They share a
 | Lives on disk as | `configs/calibrations/<name>.toml` | `configs/calibrations/flux/<id>.toml` |
 | Python model | [`CalibrationSet`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/calibration.py) of [`Calibration`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/calibration.py) curves | [`HeatFluxTuneArtifact`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/calibration/tune_artifact.py) of [`HeatFluxTunePoint`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/calibration/tune_artifact.py) rows |
 | Created by | Operator authoring; lab calibration procedure against a reference instrument | The [`capa.builtin.heat_flux_tune`](../procedures/builtin-heat-flux-tune.md) procedure |
-| Bundle state today | `calibration.json` records the selected set's `name` and `revision`; full resolved-curve snapshots are planned | A sidecar TOML referenced from the manifest |
+| Bundle state today | `calibration.json` records the selected set's `name` and `revision`; full resolved-curve snapshots are planned | Tune-session config and audit events are in the bundle; the artifact TOML is currently an operational file under `persist_dir` |
 | Code lives in | [`src/capa/channels/calibration.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/calibration.py) | [`src/capa/calibration/tune_artifact.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/calibration/tune_artifact.py) |
 | Reference page | [Calibration sets](calibration-sets.md) | [Tune artifacts](tune-artifacts.md) |
 
@@ -87,9 +87,14 @@ referenced from experiment YAML as HeaterProgram.flux_calibration_ref
 
 The artifact is rig-specific (`rig`, `heater_device`, `flux_channel`, `gauge_calibration_ref`, `geometry`) so a downstream consumer can refuse to apply an artifact made on a different rig. The setpoints don't transfer between rigs — they describe one specific rig's heater↔gauge geometry on one specific day.
 
-### Snapshotted into bundles, *also*
+### Operational artifact today
 
-Like channel calibration sets, the tune artifact is **snapshotted into the bundle** (alongside the operational copy under `configs/calibrations/flux/`). The bundle copy is what makes a specimen run self-describing five years out. The operational copy is what the next tune session and the CAPA profile UI read at arm time.
+The tune artifact is currently persisted as an operational copy under
+`configs/calibrations/flux/` (or the configured `persist_dir`). The tune
+run's bundle still records the procedure config and audit events, but it
+does not yet embed a tune-artifact TOML sidecar. For long-term study
+archives, keep the operational artifact with the bundle or cite its id in
+the subsequent specimen run's `flux_calibration_ref`.
 
 ---
 

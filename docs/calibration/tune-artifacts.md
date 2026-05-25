@@ -1,7 +1,7 @@
 # Tune artifacts
 
 **Audience:** calibration authors, downstream tools, anyone parsing `configs/calibrations/flux/*.toml`.
-**Scope:** the [`HeatFluxTuneArtifact`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/calibration/tune_artifact.py) schema, the file/pointer protocol under `configs/calibrations/flux/`, the partial-save discipline, the two interpolation helpers, and how an artifact lands in the bundle.
+**Scope:** the [`HeatFluxTuneArtifact`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/calibration/tune_artifact.py) schema, the file/pointer protocol under `configs/calibrations/flux/`, the partial-save discipline, the two interpolation helpers, and what the current runtime does and does not persist.
 
 A tune artifact is **not** a channel calibration. It records a heater-setpoint↔delivered-flux mapping for one rig on one day; it does not transform raw samples into engineering units. The orthogonal channel-level calibration system is documented under [Calibration sets](calibration-sets.md) — the two subsystems share a directory tree but no other implementation. See [Calibration overview](overview.md) for the split.
 
@@ -169,15 +169,22 @@ The tune procedure uses this as the iteration-1 Jacobian prior — the `df_dt_so
 
 ---
 
-## How an artifact lands in the bundle
+## Where the artifact is persisted
 
-Two paths produce the same file:
+The heat-flux tune procedure writes the operational copy under
+`persist_dir` (default `configs/calibrations/flux/`). Future tune
+sessions with `initial_guess="lookup"`, the CAPA profile UI, and
+external audit tools read that directory.
 
-1. **On-disk under `persist_dir`** (default `configs/calibrations/flux/`) — readable by future tune sessions, by the CAPA profile UI's lookup workflow, and by any external tool that scans the calibration directory. This is the *operational* copy.
+Current behavior is intentionally simple:
 
-2. **Inside the run bundle** as a sidecar — every tune-procedure run includes the final artifact in the bundle so the run record is self-describing. Five years from now, opening the bundle reveals the artifact even if the operational copy has been pruned or moved.
+- If `persist_dir` is set, each accepted point triggers a save to `<persist_dir>/<id>.toml` and updates `latest.toml`.
+- If `persist_dir = null`, artifact-file persistence is skipped for that session.
+- The run bundle records the tune session's config and audit events, but it does **not** currently include an automatic tune-artifact sidecar.
 
-`persist_dir=null` in the config skips path 1 (the on-disk copy) but never skips path 2. The bundle copy is mandatory.
+If you need a tune artifact to travel with an archived study today,
+archive the operational `*.toml` alongside the bundle or cite its id in
+the subsequent specimen run's `flux_calibration_ref`.
 
 ---
 

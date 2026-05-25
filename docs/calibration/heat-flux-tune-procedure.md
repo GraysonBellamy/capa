@@ -203,7 +203,7 @@ Five conditions raise `HeatFluxTuneError` and trigger the abort path. The error 
 
 ### External stop
 
-`ctx.external_stop` fires from the operator's Stop button, the Run-tab Abort, or an upstream safety system. Caught at the top of every poll loop; raises immediately. The accumulated artifact is preserved and the heater cools to `t_safe_c`.
+`ctx.external_stop` fires from the operator's Stop button, the Run-tab Abort, or supervising code. Caught at the top of every poll loop; raises immediately. The accumulated artifact is preserved and the procedure's `finally` block commands the heater to `t_safe_c`.
 
 ### Wall-clock exhaustion
 

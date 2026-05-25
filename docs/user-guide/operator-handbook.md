@@ -86,8 +86,8 @@ If anything goes yellow or red:
 | Button | Click | What happens |
 |---|---|---|
 | **Start** | Once | New run begins. Disabled until pool is open. |
-| **Stop run** | Once | Graceful: SafeShutdownStep → disarm → seal. Bundle is `aborted` + `sealed`. |
-| **⛔ Emergency stop** | **Hold 1 s** | Skip cooldown wait → disarm → seal. Bundle is `aborted` + `sealed`. |
+| **Stop run** | Once | Graceful abort request → procedure cleanup → disarm → seal. Bundle is `aborted` + `sealed`. |
+| **⛔ Emergency stop** | **Hold 1 s** | Immediate abort request → disarm → seal. Bundle is `aborted` + `sealed`. |
 
 Both abort modes seal the bundle. Neither loses recorded data. See
 [aborting safely](aborting-safely.md).

@@ -17,9 +17,10 @@ The monitor watches two signals:
 
 If either condition holds for ``deadline_s``, the run is sealed as
 ``crashed_but_sealed`` via the supplied callback. Hardware does not stay
-in an inconsistent state because the conductor's normal disarm still runs
-each adapter's ``stop()`` (which calls safe-shutdown for state-bearing
-devices).
+owned by a wedged worker because the conductor's normal disarm still runs
+each adapter's ``stop()``. Adapter ``stop()`` is not a universal
+safe-setpoint command; procedure-level cleanup remains responsible for
+explicit safe writes.
 
 The monitor is intentionally **read-only**. It signals; it does not stop
 anything itself. Pulling the run apart is the conductor's job: the monitor

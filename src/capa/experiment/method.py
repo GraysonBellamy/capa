@@ -39,7 +39,9 @@ class AlarmOverride(BaseModel):
     """Per-step alarm-band override.
 
     A ``hold`` step at 800°C might temporarily widen the high-temp band to
-    avoid spurious aborts during the spike of a fresh setpoint.
+    avoid spurious aborts during the spike of a fresh setpoint. The schema
+    is parsed today; active rule enforcement is reserved for the safety
+    monitor path.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -102,8 +104,8 @@ class RampStep(_StepBase):
         default=None,
         json_schema_extra={
             "capa_help": (
-                "Rate of change per second. Set this OR duration_s — capa "
-                "derives the other from the endpoints."
+                "Rate of change per second. Used when duration_s is unset; "
+                "if both are present, duration_s controls the execution schedule."
             ),
         },
     )
@@ -113,8 +115,8 @@ class RampStep(_StepBase):
         json_schema_extra={
             "capa_unit": "s",
             "capa_help": (
-                "Total ramp duration. Set this OR rate_per_second — capa "
-                "derives the other from the endpoints."
+                "Total ramp duration. Used directly by the executor; "
+                "rate_per_second is only used when duration_s is unset."
             ),
         },
     )
@@ -192,8 +194,11 @@ class AcquireStep(_StepBase):
 
 
 class SafeShutdownStep(_StepBase):
-    """Reusable cooldown step. Also invoked by the safety system on
-    ``safe_shutdown`` faults."""
+    """Reusable cooldown step.
+
+    Procedures may run this explicitly in a method or call it via
+    :meth:`MethodExecutor.run_segment` during their own cleanup path.
+    """
 
     kind: Literal["safe_shutdown"] = "safe_shutdown"
     cool_target: dict[str, float] = Field(default_factory=dict)

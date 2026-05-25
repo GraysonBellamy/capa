@@ -227,7 +227,9 @@ storage:
 
 ## `safety:`
 
-Safety policy — declarative rules plus the abort-mode default.
+Safety policy — declarative rules plus the abort-mode default. The schema
+is saved and surfaced in the UI today; rule evaluation by a dedicated
+`SafetyMonitor` is planned but not active in the current runtime.
 
 ```yaml
 safety:
@@ -246,16 +248,18 @@ safety:
       action: warn
 ```
 
-Rule `kind` values: `max_temperature`, `max_ramp_rate`,
+Reserved rule `kind` values: `max_temperature`, `max_ramp_rate`,
 `missing_data_timeout`, `disk_space_low`, `writer_lag`,
 `camera_recording_failure`, … See [Safety
 principles](../safety/principles.md) for the full set.
 
-Actions: `warn`, `pause_method`, `abort_run`, `safe_shutdown`.
+Reserved actions: `warn`, `pause_method`, `abort_run`, `safe_shutdown`.
 
-`default_abort` selects what the UI's red button does by default —
-`safe_shutdown` runs the cooldown step, `abort_run` is an immediate
-cancel.
+`default_abort` is a stored policy preference exposed by the Setup tab.
+The current Run-tab buttons use fixed modes: Stop records
+`operator_safe_shutdown`, Emergency records `operator_immediate`. Any
+explicit cooldown behavior belongs to the active procedure. See
+[Shutdown sequence](../safety/shutdown-sequence.md).
 
 ## `runtime:`
 

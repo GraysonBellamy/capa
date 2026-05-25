@@ -98,8 +98,8 @@ producers write here:
   latches);
 - the procedure (`free_run.started`, `recipe.step_complete`,
   operator prompts, abort reasons);
-- the safety system (alarm-band trips, authorization-gate
-  rejections).
+- runtime safety paths (saturation-deadline trips, authorization-gate
+  rejections; alarm-band events are reserved for the future safety monitor).
 
 The schema is documented in [Events SQLite](events-sqlite.md).
 

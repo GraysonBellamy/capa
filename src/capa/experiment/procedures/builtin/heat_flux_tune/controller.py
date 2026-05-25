@@ -1161,9 +1161,8 @@ class HeatFluxTune(Procedure):
         """Best-effort drive to ``t_safe_c`` on shutdown.
 
         A setpoint failure here is logged but not re-raised — the run
-        is already winding down. If the external-stop event was set by
-        an upstream safety system, the engine's :class:`SafeShutdownStep`
-        discipline takes over.
+        is already winding down. This is procedure-local cleanup; the
+        conductor still disarms workers and finalizes the bundle afterward.
         """
         try:
             await self._issue_setpoint(ctx, self.cfg.t_safe_c)

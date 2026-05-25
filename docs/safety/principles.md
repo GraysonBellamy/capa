@@ -42,7 +42,7 @@ The result: failure modes that take out the procedure (an unhandled exception, a
 When CAPA detects an unrecoverable condition — a saturation deadline trip, an unhandled exception in the procedure, a writer-thread fault — the conductor's first responsibility is **not** to continue acquiring data or to keep the procedure running. It is to:
 
 1. Disarm authorization so no further procedure-issued commands can leave the system.
-2. Call `adapter.stop()` on every worker — which for state-bearing devices (Watlow, Alicat) means invoking that adapter's safe-shutdown path.
+2. Call `adapter.stop()` on every worker so streaming exits and resources close. Adapter `stop()` is not a universal hardware-safe-state command; procedures must drive explicit safe setpoints when needed.
 3. Seal the bundle with a `RunOutcome` that names the failure cause.
 
 "Best-effort continue" is not a CAPA failure mode. The conductor recognises four outcomes ([`RunOutcome`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/conductor.py)):
@@ -73,8 +73,8 @@ CAPA orchestrates devices, records what they emit, and provides an authorization
 What this means in practice:
 
 - **Do not put hard-real-time logic in a `CustomStep`.** If a procedure step needs to "react within 50 ms," put that reaction in the device firmware (Watlow OUT4 alarm, Alicat flow setpoint with hardware ramp). The CAPA loop will not honor it reliably.
-- **Do not treat the absence of a CAPA command as "safe."** If CAPA crashes mid-run, the heater stays at its last setpoint until either CAPA's safe-shutdown reaches it or the Watlow's own alarm trips. Configure Watlow alarms accordingly.
-- **Do not rely on CAPA for emergency stop.** The big red button on the rig is the emergency stop. The UI's [hold-to-confirm Emergency Stop](destructive-operations.md) is the *graceful* stop — it requests a clean shutdown through the normal disarm-drain-seal sequence.
+- **Do not treat the absence of a CAPA command as "safe."** If CAPA crashes mid-run, the heater can stay at its last setpoint until a procedure-level cleanup reaches it, an adapter-specific stop hook drives it safe, or the Watlow's own alarm trips. Configure Watlow alarms accordingly.
+- **Do not rely on CAPA for emergency stop.** The big red button on the rig is the emergency stop. The UI's [hold-to-confirm Emergency Stop](destructive-operations.md) is a software abort request — it still goes through the normal disarm-drain-seal sequence.
 
 CAPA's job is reproducibility, attribution, and clean sealing. Hardware safety is the hardware's job, by design.
 

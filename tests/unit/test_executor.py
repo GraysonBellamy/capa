@@ -307,6 +307,9 @@ async def test_prompt_step_confirmed_via_metadata_flag() -> None:
         await MethodExecutor(ctx=ctx).run_to_completion(method)
     kinds = [e["kind"] for e in writer.events]
     assert "method.prompt.shown" in kinds
+    assert "method.prompt.acknowledged" in kinds
+    ack = next(e for e in writer.events if e["kind"] == "method.prompt.acknowledged")
+    assert ack["metadata"] == {"by": "operator"}
     # No timeout / unanswered event
     assert "method.prompt.unanswered" not in kinds
 

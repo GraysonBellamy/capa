@@ -25,7 +25,7 @@ Every step also accepts two `_StepBase` fields:
 | Field | Notes |
 |---|---|
 | `notes` | Free-text. Not rendered anywhere today; recorded in `method.step.entered` events for analysts. |
-| `safety_overrides` | Tuple of [`AlarmOverride`](#alarmoverride) — per-step alarm-band relaxations. |
+| `safety_overrides` | Tuple of [`AlarmOverride`](#alarmoverride). Parsed and preserved today; active safety-rule enforcement is reserved for the safety monitor path. |
 
 The discriminator is the `kind` field. Pydantic dispatches on it at deserialisation, so an unknown `kind` fails fast with a clear error message rather than silently mis-parsing.
 
@@ -97,7 +97,7 @@ name = "heater.setpoint"
 | `rate_per_second` | one-of | Slope. |
 | `duration_s` | one-of | Total ramp time. > 0. |
 
-**At least one of `rate_per_second` and `duration_s` must be set** — validated at model construction. When both are present they must agree (the executor doesn't re-validate, but the duration is derived from the slope and endpoints if not given).
+**At least one of `rate_per_second` and `duration_s` must be set** — validated at model construction. If both are present, `duration_s` controls execution and `rate_per_second` is retained as method metadata; the executor does not validate that they agree. If `duration_s` is absent, the executor derives it from `rate_per_second` and the endpoints.
 
 Execution details:
 
@@ -156,7 +156,7 @@ The semantics of `duration_s` vs `timeout_s`:
 - `duration_s` is the wait *itself* — when this elapses, the wait exits normally (no `method.wait.timeout` event).
 - `timeout_s` is the **deadline** — if the wait hasn't exited by then, the executor writes a `method.wait.timeout` event and applies `on_timeout`.
 
-The end-condition watcher polls the databus subscription at `DEFAULT_WAIT_POLL_HZ = 20 Hz`. A condition that becomes true exits the wait within ~50 ms.
+The end-condition watcher subscribes to the databus and evaluates each sample for the target channel. A condition exits the wait as soon as a matching sample arrives.
 
 `on_timeout` policies:
 
@@ -164,7 +164,7 @@ The end-condition watcher polls the databus subscription at `DEFAULT_WAIT_POLL_H
 |---|---|
 | `"warn"` | Write a `severity=warning` timeout event; continue to next step. |
 | `"abort"` | Write a `severity=error` event; raise `MethodExecutorError`, crashing the run (bundle is still sealed). |
-| `"safe_shutdown"` | Write a warning event; set `external_stop`, triggering the engine's shutdown sequence. |
+| `"safe_shutdown"` | Write a warning event; set `external_stop`, requesting the procedure/conductor shutdown path. |
 
 ---
 
@@ -224,7 +224,7 @@ Useful as an explicit "this is a tagged measurement window" marker. The `method.
 
 ## `safe_shutdown`
 
-Drive channels to safe values and (optionally) wait. Also invoked by the safety system on `safe_shutdown` faults — reusable across the explicit and the safety-triggered paths.
+Drive channels to safe values and (optionally) wait. Procedures can include this explicitly in a method, or run it from their own cleanup path via `MethodExecutor.run_segment(...)`.
 
 ```toml
 [[steps]]
@@ -243,7 +243,7 @@ duration_s = 30.0
 
 Semantics that are easy to miss:
 
-- A missing channel during cooldown **logs a warning but does not abort** the rest of the cooldown. The other targets still receive their safe values. This is by design: when the safety system invokes this step, we want best-effort coverage rather than first-failure-stops-everything.
+- A missing channel during cooldown **logs a warning but does not abort** the rest of the cooldown. The other targets still receive their safe values. This is by design: cleanup should be best-effort rather than first-failure-stops-everything.
 - The post-command wait is breakable by `external_stop`. A second Abort during cooldown wakes the step immediately.
 - `duration_s` defaulting to `None` skips the wait entirely — the step issues the commands and returns.
 
@@ -318,7 +318,7 @@ threshold = 850.0     # widen during a hot step
 | `threshold` | New threshold value. Optional. |
 | `disable` | Boolean. When `true`, the alarm is suppressed entirely for this step. Default `false`. |
 
-Per-step alarm-band overrides. A `hold` step at 800 °C might widen the high-temp band to avoid spurious aborts during the spike of a fresh setpoint. The override applies only for the duration of that one step; the alarm returns to its default threshold at `method.step.exited`.
+Per-step alarm-band overrides are parsed and preserved, but the current runtime does not yet apply them to an active safety monitor. A future `SafetyMonitor` can use these fields to widen a high-temp band during one hot step and restore the default threshold at `method.step.exited`.
 
 ---
 
@@ -335,7 +335,7 @@ Three named constants from [executor.py](https://github.com/GraysonBellamy/capa/
 | Constant | Default | Where used |
 |---|---|---|
 | `DEFAULT_RAMP_TICK_HZ` | 10.0 | Setpoint-update cadence for `ramp` steps. |
-| `DEFAULT_WAIT_POLL_HZ` | 20.0 | Channel-condition evaluation rate inside `_run_wait`. |
+| `DEFAULT_WAIT_POLL_HZ` | 20.0 | Legacy/exported compatibility constant. Current waits are databus-event driven. |
 | `PROMPT_HEADLESS_DEFAULT_TIMEOUT_S` | 30.0 | Soft default when a headless run hits a `prompt` step without `auto_acknowledge_prompts`. |
 
 ---

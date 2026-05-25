@@ -262,8 +262,8 @@ re-rooting onto a fast drive.
 ### Recording → Safety
 
 Per-channel alarm bands and the per-fault disposition (`warn` / `abort` /
-`safe_shutdown`). The safety system reads this on every sample; getting
-it wrong is a real-money mistake on a real rig.
+`safe_shutdown`). These fields are schema/UI placeholders today; the
+dedicated rule evaluator is planned but not active in the current runtime.
 
 ### Recording → Calibration
 

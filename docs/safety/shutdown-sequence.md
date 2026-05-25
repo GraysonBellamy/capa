@@ -68,7 +68,7 @@ The 1-second hold on Emergency Stop is enforced by [`HoldToConfirmButton`](https
 
 **For method-based procedures (RecipeRunner):** the [`MethodExecutor`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/executor.py)'s main step loop checks `external_stop.is_set()` between every step and returns immediately when it fires. **A `SafeShutdownStep` at the end of the method does not automatically run when external_stop fires mid-method.** The procedure must invoke it explicitly via `MethodExecutor.run_segment(step)` in its `finally` clause — that's what `run_segment` exists for.
 
-The default `default_abort` configured in [`SafetyPolicy`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/config.py) is `"safe_shutdown"`, which gives the operator one click for the safer mode and reserves the hold-to-confirm for the explicit "skip cleanup" path.
+`SafetyPolicy.default_abort` stores the lab's preferred abort mode in the config/UI. The current Run-tab buttons are fixed: Stop uses `"safe_shutdown"` and Emergency uses `"immediate"`.
 
 ---
 

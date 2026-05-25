@@ -436,7 +436,7 @@ class HeatFluxTuneConfig(BaseModel):
         json_schema_extra={
             "capa_help": (
                 "Directory to write the tune artifact into. Set to blank/None to "
-                "skip on-disk persistence (the artifact still lands in the bundle)."
+                "skip artifact-file persistence for this tune session."
             ),
             "capa_group": "artifact",
             "capa_group_subtitle": "Artifact metadata (advanced)",

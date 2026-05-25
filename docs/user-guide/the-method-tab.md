@@ -90,7 +90,7 @@ The Add Step menu offers eight kinds:
 | **Wait** | Idle / wait for a condition (no control changes). | **one of** `duration_s` or `end_condition` |
 | **Prompt** | Pause until the operator clicks the prompt dialog. | `message` |
 | **Acquire** | Record without commanding anything; useful for "just sit and capture data for *N* seconds." | `duration_s` |
-| **Safe shutdown** | Drive named channels to safe values (cooldown). Also invoked by the safety system on faults. | `cool_target` (`{channel_name: setpoint}` dict) |
+| **Safe shutdown** | Drive named channels to safe values (cooldown). Procedures may also invoke it explicitly during cleanup. | `cool_target` (`{channel_name: setpoint}` dict) |
 | **Custom** | Hand control to a plugin-registered handler. | `handler_id` |
 
 Each Add inserts a row *after* the current selection with sane defaults

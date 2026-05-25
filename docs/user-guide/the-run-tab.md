@@ -113,9 +113,11 @@ run is in flight.
 ### Stop run
 
 Single click. Requests a graceful abort —
-`controller.request_abort(mode="safe_shutdown")`. The conductor runs the
-method's `SafeShutdownStep` (or a sensible cooldown for free runs),
-disarms workers, finalizes the bundle.
+`controller.request_abort(mode="safe_shutdown")`. The conductor records
+`exit_reason="operator_safe_shutdown"`, signals the active procedure to
+unwind, disarms workers, and finalizes the bundle. A trailing method
+`SafeShutdownStep` only runs if normal method execution reaches it or a
+procedure explicitly invokes it during cleanup.
 
 Always available during `RUNNING`. See
 [aborting safely](aborting-safely.md) for the full behaviour.

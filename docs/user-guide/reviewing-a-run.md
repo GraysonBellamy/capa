@@ -37,7 +37,7 @@ recent-bundles list today — bundles live on disk, indexed by their
 `<run_id>` directory name (e.g. `runs/2026-05-24T143012Z_A12/`).
 
 If you want a queryable index of runs across days, the runs root holds
-a SQLite catalogue (`capa.catalog.sqlite`) that the `capa catalog`
+a SQLite catalog (`runs.sqlite`) that the `capa catalog`
 CLI subcommand reads — see [capa catalog](../cli/capa-catalog.md).
 
 ---
@@ -104,8 +104,8 @@ for the full status combination matrix.
 
 The manifest also captures every piece of provenance the run needs to
 be reproducible years later: capa version + git sha, Python version,
-the full experiment / hardware / method / calibration snapshots, the
-operator id, the equipment manifest with adapter handles. See
+the full experiment / hardware / method snapshot, the calibration-set
+reference, the operator id, the equipment manifest with adapter handles. See
 [manifest and schema](../bundles/manifest-and-schema.md).
 
 ---
@@ -173,8 +173,12 @@ channel samples at ms granularity. See [video](../bundles/video.md).
 bundle copied off the rig:
 
 ```sh
-uv run capa validate runs/2026-05-24T143012Z_A12/
+uv run capa catalog verify 2026-05-24T143012Z_A12
 ```
+
+If the copy lives outside the default runs root, pass
+`--runs-root /path/to/runs`. From inside the bundle directory, standard
+checksum tools can also read `manifest.sha256` directly.
 
 See [integrity and sealing](../bundles/integrity-and-sealing.md) for
 the protocol.
@@ -186,7 +190,7 @@ the protocol.
 | Manifest reads | What to do |
 |---|---|
 | `bundle_status: sealed`, `integrity.status: ok` | Use the bundle normally. |
-| `bundle_status: sealed`, `integrity.status: verification_failed` | The data is probably intact but the hash chain doesn't match — treat as suspect, investigate disk health. |
+| `bundle_status: verification_failed`, `integrity.status: mismatch` or `partial` | The data is probably intact but the hash chain doesn't match — treat as suspect, investigate disk health. |
 | `bundle_status: finalizing` | The process died mid-rewrite. Launch capa; finalize-on-startup will pick this up and re-seal. |
 | `bundle_status: open` | The owning process is still alive, or it died without writing any final state. See [crash recovery](../troubleshooting/crash-recovery.md). |
 

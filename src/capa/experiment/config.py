@@ -235,7 +235,8 @@ class StoragePolicy(BaseModel):
 class SafetyRuleConfig(BaseModel):
     """Declarative safety-rule entry inside :class:`SafetyPolicy`.
 
-    declarative safety rule entry.
+    The schema is captured in configs and manifests today; the rule-based
+    safety monitor that enforces these entries is not active yet.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -258,8 +259,13 @@ class SafetyPolicy(BaseModel):
 
     rules: tuple[SafetyRuleConfig, ...] = Field(default_factory=tuple)
     default_abort: str = "safe_shutdown"
-    """What the UI's red button does by default. ``"safe_shutdown"`` runs
-    the cooldown step; ``"abort_run"`` is immediate cancel."""
+    """Stored default abort mode preference.
+
+    The Setup tab exposes this field for policy/audit. Current Run-tab
+    buttons use fixed modes (Stop -> ``safe_shutdown``, Emergency ->
+    ``immediate``); actual cleanup depends on the active procedure honoring
+    the recorded mode.
+    """
 
 
 class SampleInfo(BaseModel):

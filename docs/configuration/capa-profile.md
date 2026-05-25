@@ -91,7 +91,7 @@ Controls the gas atmosphere the specimen sees during the run.
 
 | Field | Type | Notes |
 |---|---|---|
-| `mode` | `inert` \| `oxidative` \| `reducing` \| `reactive_blend` | Coarse classification. Drives the `capa.atmosphere_consistency` preflight — an `inert` run that declares a `reactive` gas, or an `oxidative` run that doesn't, is a config error. |
+| `mode` | `inert` \| `oxidative` \| `reducing` \| `reactive_blend` | Coarse classification. Drives the `capa.atmosphere_consistency` preflight for modes that need a reactive-gas flow channel. |
 | `purge` | `PurgeGas` | The inert/sweep gas spec. Always required. |
 | `reactive` | `ReactiveGas` \| `None` | Optional secondary gas for partial-oxidation or doped-purge experiments. `None` for pure-inert runs. |
 | `purge_duration_s` | s | How long the reactor is swept with purge gas before heating begins. Captured so downstream analysis knows the pre-run sweep duration. |

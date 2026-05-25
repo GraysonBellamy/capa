@@ -566,10 +566,7 @@ def _seed_camera_entry(
     if spec.output_root is not None:
         # Keep this in sync with CameraDeviceAdapter._resolve_output_path().
         external = str(
-            Path(spec.output_root).expanduser()
-            / run_id
-            / VIDEO_DIRNAME
-            / f"{spec.name}{ext}"
+            Path(spec.output_root).expanduser() / run_id / VIDEO_DIRNAME / f"{spec.name}{ext}"
         )
     else:
         external = None

@@ -83,9 +83,11 @@ capa just drips setpoints. 10 Hz is plenty for a 2 K/s ramp on a controller
 with a 1 s integration window."""
 
 DEFAULT_WAIT_POLL_HZ: float = 20.0
-"""Channel-condition evaluation rate inside :meth:`_run_wait`. Faster than
-the typical 1–10 Hz scientific channel so a step exits within ~50 ms of the
-condition becoming true."""
+"""Legacy wait-poll cadence kept as a public constant for compatibility.
+
+Current waits subscribe to the data bus and evaluate conditions when
+channel samples arrive; no fixed-rate polling loop is used.
+"""
 
 PROMPT_HEADLESS_DEFAULT_TIMEOUT_S: float = 30.0
 """Soft default when a headless run hits a ``prompt`` step without
@@ -150,8 +152,10 @@ class MethodExecutor:
         await self._run_range(method, start=start, stop=step_id)
 
     async def run_segment(self, step: Step) -> None:
-        """Run a single step. Useful for one-off invocation of
-        ``safe_shutdown`` from a fault handler.
+        """Run a single step.
+
+        Procedures can use this for cleanup phases, including explicit
+        ``safe_shutdown`` steps in a ``finally`` block.
         """
         await self._dispatch(step, index=-1)
 
@@ -224,10 +228,11 @@ class MethodExecutor:
         ``start_value`` to ``end_value``.
 
         ``rate_per_second`` and ``duration_s`` are alternative ways of
-        specifying the slope; if both are given they must agree (Pydantic
-        validates this on the model). ``start_value=None`` means "start
-        from the current setpoint" — we read it from the latest data-bus
-        value if available, otherwise we issue end_value immediately.
+        specifying the trajectory. When both are given, ``duration_s`` is
+        the execution schedule and ``rate_per_second`` is retained as
+        method metadata. ``start_value=None`` means "start from the current
+        setpoint" — we read it from the latest data-bus value if available,
+        otherwise we issue ``end_value`` immediately.
         """
         end = step.end_value
         start = step.start_value
@@ -316,6 +321,15 @@ class MethodExecutor:
             while not self.ctx.external_stop.is_set():
                 if self._prompt_was_confirmed():
                     confirmed = True
+                    self.ctx.bundle_writer.write_event(
+                        kind="method.prompt.acknowledged",
+                        message=f"ack: {step.message}",
+                        severity="info",
+                        source="method_executor",
+                        t_mono_ns=self.ctx.clock.t_mono_ns(),
+                        t_utc=datetime.now(UTC),
+                        metadata={"by": "operator"},
+                    )
                     return
                 await anyio.sleep(0.1)
         if not confirmed:
@@ -454,9 +468,9 @@ class MethodExecutor:
 
         * Both ``None`` is a no-op (model validation prevents this for the
           ``wait``/``hold`` step kinds).
-        * ``end_condition`` alone: poll the latest databus value at
-          :data:`DEFAULT_WAIT_POLL_HZ`. ``timeout_s`` (if set) bounds the
-          maximum wait.
+        * ``end_condition`` alone: subscribe to the data bus and evaluate
+          each matching :class:`ChannelSample`. ``timeout_s`` (if set)
+          bounds the maximum wait.
         * ``duration_s`` alone: sleep, breakable by external_stop.
         * Both: whichever fires first wins."""
         if duration_s is None and end_condition is None:
@@ -557,6 +571,8 @@ class MethodExecutor:
             "step_index": index,
             "step_kind": step.kind,
         }
+        if step.notes is not None:
+            meta["notes"] = step.notes
         target = getattr(step, "target", None)
         if target is not None:
             meta["target"] = target.name

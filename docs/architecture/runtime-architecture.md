@@ -278,8 +278,8 @@ Graceful disarm
 2. Conductor calls pool.disarm_all(grace_s=5.0)
 3. For each worker (in parallel):
      a. Worker transitions SAMPLING → DRAINING
-     b. adapter.stop() called in worker loop (issues safe-shutdown command first
-        for adapters with state-bearing hardware — e.g. heater)
+     b. adapter.stop() called in worker loop (adapter-specific cleanup;
+        not guaranteed to drive a safe setpoint)
      c. adapter.stream() exits naturally
      d. Outbound bridge drained, then closed (sentinel)
 4. Conductor's drain tasks see sentinel → exit
@@ -307,7 +307,7 @@ Drain and exit
 7. WorkerPool remains alive — next run can be started against it
 ```
 
-**Force-cancel never leaves the heater hot.** The procedure executor's `SafeShutdownStep` ([`executor.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/executor.py)) still runs *before* graceful disarm begins; for adapters with hard safety requirements, the adapter's own `stop()` also issues a safe-shutdown command in the worker's loop before signalling stream exit.
+**Force-cancel does not guarantee a safe heater state.** The hard path is observable and still tries to disarm workers, but a method's trailing `SafeShutdownStep` is not automatically jumped to after `external_stop`, and current state-bearing adapters may only stop streaming. Procedures that require safe setpoints must issue them explicitly before or during cleanup; hardware interlocks remain the final safety boundary.
 
 **Forced stop is observable.** Any time the engine takes the hard path, the bundle records it with a stack trace. Hard-stop attempts are not silent, and leaked threads are not pretended-away.
 
@@ -322,7 +322,7 @@ The Conductor enforces an end-to-end durable-output deadline. Per-channel backpr
 1. Log the saturation cause and per-bridge / inbox metrics.
 2. Write a `saturation_deadline` event into the bundle.
 3. Mark the run outcome `crashed_but_sealed`.
-4. Trigger normal graceful shutdown — workers `disarm()` still runs `adapter.stop()`'s safe-shutdown path, so hardware does not stay in an inconsistent state.
+4. Trigger normal graceful shutdown — workers `disarm()` still runs `adapter.stop()`, but explicit safe setpoints remain procedure- or adapter-specific.
 
 ---
 
@@ -722,7 +722,7 @@ advisory metadata. Default: `"abort"`.
 
 The camera-spec field of the same name
 ([`CameraSpec.on_failure`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/camera/base.py)) is a
-*separate* policy: it layers on the camera/safety system, not the
+*separate* policy: it layers on the camera recording path, not the
 runtime failure-policy metadata. The two enums are deliberately kept
 distinct until a real case for unifying them appears.
 

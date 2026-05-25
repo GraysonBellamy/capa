@@ -33,7 +33,7 @@ class FailurePolicy(StrEnum):
     type without `experiment → devices → experiment` import cycles.
 
     Distinct from :data:`~capa.devices.camera.base.CameraOnFailure`,
-    which layers on top of the camera/safety system rather than the
+    which layers on top of the camera recording path rather than the
     runtime failure-policy metadata. Two values, not three: ``WARN``
     covers "log and continue." Add ``IGNORE`` only when a real case
     demands it.

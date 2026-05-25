@@ -353,7 +353,7 @@ class Method(BaseModel):
 | `wait`          | Wait on a channel condition, event, or operator action, with optional timeout. |
 | `prompt`        | Block until the operator acknowledges (used for "ignite sample," etc.).         |
 | `acquire`       | Record without changing any control outputs.                                    |
-| `safe_shutdown` | Reusable cooldown phase; also invoked by the safety system.                     |
+| `safe_shutdown` | Reusable cooldown phase; procedures may invoke it explicitly during cleanup.    |
 | `custom`        | Plugin-defined; dispatched to a registered handler keyed by `target`.           |
 
 Editor presents this as table + graph (each pane edits the other live).
@@ -424,9 +424,9 @@ class Calibration(BaseModel):
     coefficients: ...                        # variant-specific
 ```
 
-A `CalibrationSet` (collection of curves keyed by channel name) is loaded from disk at run-start and **a snapshot is written into the bundle** as `calibration.json`. This means the bundle is self-sufficient: re-deriving engineering values from raw counts five years later does not depend on whatever cal table happened to be in effect today.
+A `CalibrationSet` (collection of curves keyed by channel name) is loaded from disk at run-start. The current bundle records the selected set's `name` and `revision` in `calibration.json`; full resolved-curve snapshots are planned.
 
-**Uncertainty is part of the contract, not bolted on.** Every Calibration carries an `UncertaintySpec` (or an explicit `None` declaring "unmeasured" — never silent). Derived channels propagate uncertainty through their transform (analytical for linear, Monte Carlo via configured budget for nonlinear). The uncertainty is *snapshotted into the bundle alongside the calibration* — an analyzer five years later can quote the calibration's documented k=2 expanded uncertainty without guessing.
+**Uncertainty is part of the contract, not bolted on.** Every Calibration carries an `UncertaintySpec` (or an explicit `None` declaring "unmeasured" — never silent). Derived channels propagate uncertainty through their transform (analytical for linear, Monte Carlo via configured budget for nonlinear). Once full calibration snapshots land, the uncertainty payload will travel with the resolved curves instead of relying on the referenced source file.
 
 Calibration *routines* (e.g., "calibrate the heat-flux gauge against the reference") are themselves Procedure plugins that produce a new Calibration object — including a fitted uncertainty estimate from the reference comparison — on completion, and offer to write it into the active set behind an explicit operator approval gate. The fit metadata records *which* version of the calibration procedure produced the curve (procedure id + capa git SHA), so a curve's pedigree is recoverable.
 
@@ -876,7 +876,7 @@ The action is part of the rule, not the verdict — the same fault should always
 
 ### 9.3 Two abort modes
 
-`safe_shutdown()` is itself a Procedure phase: it ramps heaters to a configured cool target, closes flow setpoints to zero, marks the run as aborted, and waits for thermal verification before finalizing the bundle. The UI's red button defaults to safe-shutdown; an "Emergency abort" submenu offers the immediate cancel path.
+`safe_shutdown()` is modeled as an explicit Procedure or MethodExecutor phase: it can ramp heaters to a configured cool target, close flow setpoints to zero, mark the run as aborted, and wait for thermal verification before finalizing the bundle. Current Run-tab buttons stamp fixed modes (`operator_safe_shutdown` for Stop, `operator_immediate` for Emergency); procedures decide how much cleanup to honor.
 
 Hardware-enforced safety (over-temp relays, gas interlocks) lives outside Python and is not replaced by this layer. SafetyMonitor — once implemented — will be the *application-level* monitor, never the only line of defense.
 
@@ -1176,7 +1176,7 @@ Crash logs from before run-start (config errors, plugin load failures) go to `~/
 - **Typed errors.** Each library already exposes a typed exception hierarchy (`SartoriusError`, `WatlowError`, ...). Adapters re-raise into a `capa.devices.AdapterError` that adds the channel/device context. UI error toasts read from these.
 - **Watchdog.** Each producer task reports last-sample time; the per-worker watchdog state is the canonical "is this producer alive" view, and writes `device_silent` events. The planned `SafetyMonitor` (§9.2) will consume this view to apply configured actions.
 - **Task-group unwrap.** anyio 4.x wraps in-task-group exceptions in a `BaseExceptionGroup`; the Conductor's `try/except` chain unwraps single-exception groups so `ProcedureError` (from preflight) and `BackpressureAbortError` route to the same `run_status="aborted"` / `run_status="crashed"` paths that pre-task-group raises do.
-- **Abort vs. safe-shutdown.** Abort = immediate cancel + finalize. Safe-shutdown = run a configured cooldown phase first (heaters to safe temp, flows to zero, hold) and *then* finalize. The UI's red button defaults to safe-shutdown; an "Emergency abort" submenu offers the immediate option.
+- **Abort vs. safe-shutdown.** Abort = immediate cancel request + finalize. Safe-shutdown = a procedure honors a configured cooldown phase first (heaters to safe temp, flows to zero, hold) and *then* finalizes. The current UI exposes Stop and hold-to-confirm Emergency buttons with fixed audit reasons.
 
 ### 13.3 Crash recovery and finalize-in-place
 

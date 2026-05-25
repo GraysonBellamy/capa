@@ -232,8 +232,8 @@ The Run tab's run-identity line now reads:
 
 > run: 2026-05-24T143012Z_A12  (completed)
 
-If it says `(aborted)`, that means you (or the safety system) stopped
-the run — expected after Stop / Emergency. If it says `(crashed)`,
+If it says `(aborted)`, that means you or supervising code stopped the
+run — expected after Stop / Emergency. If it says `(crashed)`,
 something abnormal happened; see
 [crash recovery](../troubleshooting/crash-recovery.md).
 
