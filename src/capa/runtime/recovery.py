@@ -242,7 +242,7 @@ def _pid_is_alive_windows(pid: int) -> bool:
     import ctypes  # noqa: PLC0415 — Windows-only path
     from ctypes import wintypes  # noqa: PLC0415
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
