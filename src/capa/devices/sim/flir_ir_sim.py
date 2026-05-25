@@ -284,10 +284,12 @@ class FlirIrSim:
 
     @property
     def spec(self) -> CameraSpec:
+        """The :class:`CameraSpec` (or device spec) this adapter was built from."""
         return self._spec
 
     @property
     def info(self) -> CameraInfo:
+        """Library-side device-info struct populated after :meth:`open`."""
         return self._info
 
     @property
@@ -303,9 +305,11 @@ class FlirIrSim:
     # ----------------------------------------------------------- protocol API
 
     async def discover(self) -> tuple[CameraInfo, ...]:
+        """Enumerate cameras of this family on the local host."""
         return (self._info,)
 
     async def open(self) -> CameraInfo:
+        """Open the underlying connection. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         if self._open:
             return self._info
         self._select_camera()
@@ -313,6 +317,7 @@ class FlirIrSim:
         return self._info
 
     async def close(self) -> None:
+        """Close the underlying connection. Idempotent."""
         if self._recording:
             await self.stop_recording()
         # Close send sides so consumers iterating frame/preview/event streams
@@ -324,6 +329,7 @@ class FlirIrSim:
         self._open = False
 
     async def start_recording(self, output_path: Path) -> None:
+        """Begin recording to ``output_path``. See :class:`~capa.devices.camera.base.Camera`."""
         if not self._open:
             raise AdapterError("FlirIrSim.start_recording requires open()")
         if self._recording:
@@ -348,6 +354,7 @@ class FlirIrSim:
         )
 
     async def stop_recording(self) -> None:
+        """Stop the active recording. Idempotent."""
         if not self._recording:
             return
         self._recording = False
@@ -369,6 +376,7 @@ class FlirIrSim:
         )
 
     async def snapshot(self) -> CameraHealth:
+        """Return a health/status snapshot. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return CameraHealth(
             name=self._spec.name,
             t_mono_ns=self._clock.t_mono_ns(),
@@ -381,12 +389,15 @@ class FlirIrSim:
         )
 
     def frame_stream(self) -> AsyncIterator[FrameReceipt]:
+        """Yield recorded frames while recording is active."""
         return _drain_stream(self._frame_recv)
 
     def preview_stream(self) -> AsyncIterator[bytes]:
+        """Yield preview frames for the live UI tile (separate from the recorded stream)."""
         return _drain_stream(self._preview_recv)
 
     def event_stream(self) -> AsyncIterator[CameraEvent]:
+        """Yield structured camera events (open / start / stop / error)."""
         return _drain_stream(self._event_recv)
 
     # ----------------------------------------------------------- command surface

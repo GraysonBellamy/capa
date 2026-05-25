@@ -178,6 +178,7 @@ class HeatFluxTune(Procedure):
 
     @classmethod
     def from_config(cls, raw: dict[str, object] | None) -> HeatFluxTune:
+        """Build this procedure plugin from the experiment's frozen :class:`~capa.experiment.config.ExperimentConfig`."""
         cfg = HeatFluxTuneConfig.model_validate(raw or {})
         return cls(cfg=cfg)
 
@@ -207,6 +208,7 @@ class HeatFluxTune(Procedure):
     # ----------------------------------------------------------------- preflight
 
     async def preflight(self, ctx: ProcedureContext) -> list[Problem]:
+        """Procedure preflight. See :class:`~capa.experiment.procedures.base.Procedure`."""
         problems: list[Problem] = []
         for required in (
             self.cfg.flux_channel,
@@ -245,6 +247,7 @@ class HeatFluxTune(Procedure):
     # ----------------------------------------------------------------- run
 
     async def run(self, ctx: ProcedureContext) -> None:
+        """Procedure main loop. See :class:`~capa.experiment.procedures.base.Procedure`."""
         self._run_start_ns = ctx.clock.t_mono_ns()
         ctx.logger.info(
             "heat_flux_tune.start",

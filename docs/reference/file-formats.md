@@ -45,7 +45,7 @@ bundle](../bundles/what-is-a-bundle.md).
 | TOML | `profiles/<short_id>.toml` | Frozen domain-profile metadata. | [CAPA profile fields](../configuration/capa-profile.md) |
 | TOML | `equipment.toml` | What was actually opened (firmware, serial #s). | [What's in a bundle](../bundles/what-is-a-bundle.md#equipmenttoml) |
 | JSON | `calibration.json` | CalibrationSet reference snapshot. | [Calibrations on disk](../configuration/calibrations.md) |
-| TOML | `env/uv.lock` | Verbatim copy of the lockfile at run-start. Hash recorded in `manifest.lockfile.sha256`. | [What's in a bundle](../bundles/what-is-a-bundle.md#env) |
+| TOML | `env/uv.lock` | Verbatim copy of the lockfile at run-start. Hash recorded in `manifest.json` under `lockfile.sha256`. | [What's in a bundle](../bundles/what-is-a-bundle.md#env) |
 | JSON | `env/packages.json` | Installed distribution metadata gathered by `gather_provenance`. | [What's in a bundle](../bundles/what-is-a-bundle.md#env) |
 
 ## In-flight (transient) artifacts

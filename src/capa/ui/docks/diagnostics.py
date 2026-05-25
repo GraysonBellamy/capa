@@ -70,6 +70,7 @@ class _RowLabels:
     age: QLabel
 
     def set_idle(self) -> None:
+        """Reset the dock to its idle / no-run display."""
         css = f"color: {COLOR_IDLE.name()};"
         self.device.setStyleSheet(css)
         for lbl in (self.rate, self.p50, self.jitter, self.age):
@@ -77,6 +78,7 @@ class _RowLabels:
             lbl.setStyleSheet(css)
 
     def update(self, w: dict[str, float], *, loop_lag_warn_ms: float) -> None:
+        """Refresh this widget from the latest model data."""
         polls = int(w.get("polls_emitted", 0.0))
         rate_hz = w.get("poll_rate_hz", 0.0)
         p50 = w.get("poll_period_p50_ms", 0.0)
@@ -199,10 +201,12 @@ class DiagnosticsDock(QDockWidget):
     # ------------------------------------------------------------------ control
 
     def start(self) -> None:
+        """Begin periodic updates / animation for this widget."""
         if not self._timer.isActive():
             self._timer.start()
 
     def stop(self) -> None:
+        """Stop periodic updates / animation for this widget."""
         self._timer.stop()
 
     # ------------------------------------------------------------------ internal

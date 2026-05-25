@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class Constant:
+    """Constant signal: ``f(t) = value`` regardless of ``t``."""
+
     value: float
     kind: str = "constant"
 

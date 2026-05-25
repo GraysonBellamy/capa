@@ -31,7 +31,7 @@ CREATE INDEX idx_events_t_mono_ns ON events (t_mono_ns);
 CREATE INDEX idx_events_kind      ON events (kind);
 ```
 
-`t_mono_ns` is the [RunClock](../glossary.md#runclock) monotonic timestamp; this is the column you join against the [parquet sample files](../bundles/parquet-channel-samples.md). `t_utc` is wall-clock and may drift, jump, or skew if the host clock is adjusted mid-run — never use it as a join key.
+`t_mono_ns` is the run's monotonic timestamp from the `RunClock`; this is the column you join against the [parquet sample files](../bundles/parquet-channel-samples.md). `t_utc` is wall-clock and may drift, jump, or skew if the host clock is adjusted mid-run — never use it as a join key.
 
 Schema and writer in [`events_sink.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/storage/events_sink.py).
 
@@ -90,7 +90,7 @@ WHERE kind = 'saturation_deadline';
 
 ### Cross-referencing with samples
 
-`t_mono_ns` is the same monotonic clock that stamps every row in `channel_samples.parquet` and every per-device records parquet. Find the channel values around an alarm:
+`t_mono_ns` is the same monotonic clock that stamps every row in `scalars.parquet` and every per-device records parquet. Find the channel values around an alarm:
 
 ```python
 import polars as pl
@@ -106,7 +106,7 @@ t0 = anchor[0]
 
 # Pull a ±10 s window of samples around it
 samples = (
-    pl.scan_parquet("channel_samples.parquet")
+    pl.scan_parquet("scalars.parquet")
     .filter(pl.col("t_mono_ns").is_between(t0 - 10_000_000_000, t0 + 10_000_000_000))
     .collect()
 )
@@ -124,7 +124,7 @@ Every line is one self-contained JSON object — same schema as a structlog dict
 |---|---|
 | `timestamp` | ISO-8601 UTC. Wall-clock; not monotonic. |
 | `level` | `DEBUG` / `INFO` / `WARNING` / `ERROR`. |
-| `event` | The structlog event name, e.g. `worker.stream.exit` or `conductor.saturation.tripped`. |
+| `event` | The structlog event name, e.g. `worker.stream.exit`, `saturation_monitor.deadline_exceeded`, or `conductor.saturation_escalation`. |
 | `run_id` | Bound at run start; present on every line that originated under the run's context-var scope. |
 | `procedure_id`, `step_id`, `operator_id` | Bound as the run progresses. May be absent on lines that fired outside a step. |
 | (everything else) | Free-form kwargs from the call site. |
@@ -137,8 +137,8 @@ Configuration: [`capa/core/logging.py`](https://github.com/GraysonBellamy/capa/b
 # Every error and warning, pretty
 jq -c 'select(.level | IN("WARNING","ERROR"))' run.log
 
-# Loop-lag warnings only
-jq -c 'select(.event == "conductor.loop_lag.warn")' run.log
+# Saturation escalation details
+jq -c 'select(.event | IN("saturation_monitor.deadline_exceeded","conductor.saturation_escalation"))' run.log
 
 # One worker's lifecycle, top-to-bottom
 jq -c 'select(.event | startswith("worker.")) | select(.resource_id == "serial:COM6")' run.log
@@ -164,7 +164,7 @@ Three failure modes worth knowing about:
 | You want to know… | Start in |
 |---|---|
 | What the procedure was doing at time T | `events.sqlite` (`method.step.*`, procedure-specific events) |
-| Why a run was sealed `crashed_but_sealed` | `events.sqlite` (`kind = 'saturation_deadline'`), then `run.log` (`event ~ "conductor.saturation."`) |
+| Why a run was sealed `crashed_but_sealed` | `events.sqlite` (`kind = 'saturation_deadline'`), then `run.log` (`saturation_monitor.deadline_exceeded`, `conductor.saturation_escalation`) |
 | Which adapter raised what | `events.sqlite` (`kind = 'worker_adapter_error'`), then `run.log` filtered to that `resource_id` |
 | Whether a manual command actually reached the device | `events.sqlite` (adapter command kinds, `method.command.issued`) |
 | Detailed internal state at an exact moment | `run.log` |

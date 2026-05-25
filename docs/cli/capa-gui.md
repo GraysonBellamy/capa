@@ -15,7 +15,7 @@ Arguments:
 
 Options:
   --runs-root    PATH  Where to write bundles. Default: $CAPA_RUNS_ROOT or ./runs.
-  --plugins-lock PATH  Optional plugins.lock to record into the manifest.
+  --plugins-lock PATH  plugins.lock for procedure trust; mirrored into the manifest.
   --help               Show this message and exit.
 ```
 
@@ -66,7 +66,8 @@ The GUI returns the underlying Qt exit code:
 | Code | Meaning |
 |---|---|
 | 0 | Clean shutdown via the window close button or **File → Quit**. |
-| non-zero | An uncaught Qt or runtime error. Check the log. |
+| 2 | Initial config refused at launch. |
+| other non-zero | An uncaught Qt or runtime error. Check the log. |
 
 The headless exit-code table from [`capa run`](capa-run.md) does **not** apply here — the GUI does not collapse a run outcome into a process exit code, because the operator can run many sessions in one launch. Use [`capa catalog list`](capa-catalog.md) to inspect outcomes after the fact.
 

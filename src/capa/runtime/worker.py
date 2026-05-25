@@ -177,10 +177,12 @@ class Worker:
 
     @property
     def resource_id(self) -> str:
+        """Resource identifier this worker owns (e.g. ``"watlow:COM3"``)."""
         return self._resource_id
 
     @property
     def adapter_names(self) -> tuple[str, ...]:
+        """Names of every device adapter hosted by this worker."""
         return tuple(self._adapters)
 
     @property
@@ -209,6 +211,7 @@ class Worker:
 
     @property
     def metrics(self) -> WorkerMetrics:
+        """Live :class:`WorkerMetrics` — emission counters, percentile rings, lag."""
         return self._metrics
 
     @property

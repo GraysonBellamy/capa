@@ -52,6 +52,7 @@ class LogSink:
 
     @property
     def path(self) -> Path:
+        """Path to the bundle's ``run.log`` JSON-lines file."""
         return self._path
 
     def write_line(self, line: str) -> None:
@@ -80,11 +81,13 @@ class LogSink:
         self._handle.write(line)
 
     def flush(self) -> None:
+        """Flush the underlying file handle. Silent no-op once closed."""
         if self._closed or self._handle is None:
             return
         self._handle.flush()
 
     def close(self) -> None:
+        """Flush and close the log file handle. Idempotent."""
         if self._closed:
             return
         self._closed = True

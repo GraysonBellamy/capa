@@ -49,15 +49,16 @@ class WriterThreadRef:
     makes it safe to share the same instance across threads without locks
     (the underlying :class:`WriterThread` is thread-safe by design).
 
-    :param writer_thread: The per-run writer thread the conductor started.
-    :param clock: Run-authoritative monotonic clock — used to stamp events.
-    :param source: Attribution string copied verbatim into every event's
-        ``source`` field. Conductor convention: ``"worker"`` for worker
-        contexts, ``"conductor"`` for the conductor's own use.
-    :param severity: Default severity for events recorded through this ref.
-        The protocol doesn't expose severity, but most worker-recorded
-        events are informational (``"info"``) and adapter-error events
-        re-record themselves at ``"error"`` via a separate path if needed.
+    Attributes:
+        writer_thread: The per-run writer thread the conductor started.
+        clock: Run-authoritative monotonic clock — used to stamp events.
+        source: Attribution string copied verbatim into every event's
+            ``source`` field. Conductor convention: ``"worker"`` for
+            worker contexts, ``"conductor"`` for the conductor's own use.
+        severity: Default severity for events recorded through this ref.
+            The protocol doesn't expose severity, but most worker-recorded
+            events are informational (``"info"``); adapter-error events
+            re-record themselves at ``"error"`` via a separate path.
     """
 
     writer_thread: WriterThread

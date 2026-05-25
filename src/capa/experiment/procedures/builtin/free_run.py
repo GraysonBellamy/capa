@@ -71,6 +71,7 @@ class FreeRun(Procedure):
 
     @classmethod
     def from_config(cls, raw: dict[str, object] | None) -> FreeRun:
+        """Build this procedure plugin from the experiment's frozen :class:`~capa.experiment.config.ExperimentConfig`."""
         cfg = FreeRunConfig.model_validate(raw or {})
         return cls(duration_s=cfg.duration_s)
 
@@ -83,6 +84,7 @@ class FreeRun(Procedure):
         return []
 
     async def run(self, ctx: ProcedureContext) -> None:
+        """Procedure main loop. See :class:`~capa.experiment.procedures.base.Procedure`."""
         clock = ctx.clock
         ctx.logger.info(
             "free_run.start",

@@ -323,6 +323,7 @@ class MethodTab(QWidget):
             return None
 
     def load_method(self, method: Method, *, path: Path | None = None) -> None:
+        """Load a method into the table from the given source."""
         self._method_name = method.name
         self._method_description = method.description
         self._method_path = path

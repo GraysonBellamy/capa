@@ -214,10 +214,12 @@ class RealRunSession:
 
     @property
     def run_id(self) -> str:
+        """Stable identifier assigned to this run at session construction."""
         return self._run_id
 
     @property
     def bundle_path(self) -> Path | None:
+        """Bundle directory on disk. ``None`` before :meth:`open` succeeds."""
         return self._bundle_path
 
     @property

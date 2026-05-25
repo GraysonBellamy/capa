@@ -107,9 +107,11 @@ class CollapsibleGroup(QWidget):
     # ------------------------------------------------------------------ API
 
     def is_open(self) -> bool:
+        """``True`` if this collapsible section is expanded."""
         return self._is_open
 
     def set_open(self, open_: bool) -> None:
+        """Expand or collapse this collapsible section."""
         open_ = bool(open_)
         if open_ == self._is_open:
             return

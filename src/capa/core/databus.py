@@ -489,6 +489,7 @@ class DataBus:
 
     @property
     def subscription_names(self) -> tuple[str, ...]:
+        """Names of every active subscription across all selectors. Snapshot, in no guaranteed order."""
         names: list[str] = []
         for bucket in self._by_channel.values():
             names.extend(sub.name for sub in bucket)

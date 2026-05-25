@@ -88,7 +88,7 @@ OK: configs/experiments/sim_freerun.yaml (no domain_profile)
 The earlier stub for this page listed two commands that have not been implemented: `describe`, `dump <bundle>`.
 
 - **`describe`** — print the profile's expected field schema. Workaround: look at the profile's metadata model (`CapaPyrolysisMetadata` and similar) or read [CAPA profile fields](../configuration/capa-profile.md).
-- **`dump <bundle>`** — extract the profile block from a sealed bundle's manifest. Workaround: the bundle's `manifest.json` carries the full `domain_profile` block — `jq '.domain_profile' <bundle>/manifest.json` is one line.
+- **`dump <bundle>`** — extract the profile snapshot from a sealed bundle. Workaround: `jq '.domain_profile' <bundle>/manifest.json` gives the active id and `standard_refs`; the full metadata snapshot lives under `<bundle>/profiles/<short_id>.toml`.
 
 If either of these would be load-bearing in your workflow (e.g., a tool that needs structured profile output), open an issue.
 

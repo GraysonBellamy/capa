@@ -98,6 +98,7 @@ class EventsDock(QDockWidget):
         self._view.scrollToBottom()
 
     def clear(self) -> None:
+        """Clear the widget's contents in place."""
         self._model.clear()
 
 

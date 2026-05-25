@@ -100,11 +100,13 @@ class ResolvedRecordingPlan(BaseModel):
     why a ``device_records/watlow.parquet`` exists in a tune bundle."""
 
     def allows_channel(self, name: str) -> bool:
+        """``True`` if channel ``name`` is in scope for this run's recording plan."""
         if self.channel_mode == "all":
             return True
         return name in self.recorded_channels
 
     def allows_camera(self, name: str) -> bool:
+        """``True`` if camera ``name`` is recorded under this run's plan."""
         if self.camera_mode == "all":
             return True
         return name in self.recorded_cameras

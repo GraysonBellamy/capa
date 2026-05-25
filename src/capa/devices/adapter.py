@@ -292,25 +292,35 @@ class AdapterLifecycle:
 
     @property
     def state(self) -> AdapterState:
+        """Current lifecycle state: ``"closed"``, ``"open"``, or ``"running"``."""
         return self._state
 
     def assert_can_open(self) -> bool:
+        """``True`` iff this lifecycle is in the ``"closed"`` state."""
         return self._state == "closed"
 
     def open(self) -> None:
+        """Transition to ``"open"``. No-op if already open or running (idempotent)."""
         if self._state in ("open", "running"):
             return  # idempotent
         self._state = "open"
 
     def close(self) -> None:
+        """Transition unconditionally to ``"closed"``."""
         self._state = "closed"
 
     def start(self) -> None:
+        """Transition from ``"open"`` to ``"running"``.
+
+        Raises:
+            RuntimeError: ``start`` was called before ``open``.
+        """
         if self._state == "closed":
             raise RuntimeError("adapter must be open before start()")
         self._state = "running"
 
     def stop(self) -> None:
+        """Transition from ``"running"`` back to ``"open"``. No-op if not running."""
         if self._state != "running":
             return
         self._state = "open"

@@ -69,6 +69,8 @@ union when a future reason (e.g. ``"device_failed"``) is added."""
 
 
 class OperatorBlock(BaseModel):
+    """Operator-identity block in :class:`BundleManifest` (``manifest.operator``)."""
+
     model_config = ConfigDict(extra="forbid")
     id: str
     display_name: str | None = None
@@ -87,12 +89,16 @@ class SampleBlock(BaseModel):
 
 
 class ProcedureBlock(BaseModel):
+    """Procedure-identity block (``manifest.procedure``) — id plus optional plugin version."""
+
     model_config = ConfigDict(extra="forbid")
     id: str
     version: str | None = None
 
 
 class DomainProfileBlock(BaseModel):
+    """Active domain profile (``manifest.domain_profile``) — id plus standard refs."""
+
     model_config = ConfigDict(extra="forbid")
     id: str
     standard_refs: tuple[str, ...] = Field(default_factory=tuple)
@@ -113,6 +119,8 @@ class CapaBlock(BaseModel):
 
 
 class PythonBlock(BaseModel):
+    """Interpreter provenance (``manifest.python``)."""
+
     model_config = ConfigDict(extra="forbid")
     version: str
     implementation: str
@@ -120,6 +128,8 @@ class PythonBlock(BaseModel):
 
 
 class PlatformBlock(BaseModel):
+    """Host platform provenance (``manifest.platform``)."""
+
     model_config = ConfigDict(extra="forbid")
     os: str
     machine: str
@@ -137,6 +147,8 @@ class LockfileBlock(BaseModel):
 
 
 class PluginEntryBlock(BaseModel):
+    """One entry in ``manifest.plugins`` — a resolved plugin from the lockfile."""
+
     model_config = ConfigDict(extra="forbid")
     id: str
     version: str
@@ -155,6 +167,8 @@ class DataShapeRecord(BaseModel):
 
 
 class DataShapeChannelSamples(BaseModel):
+    """``data_shape.channel_samples`` entry — locks the long-table parquet layout tag."""
+
     model_config = ConfigDict(extra="forbid")
     path: str
     layout: Literal["normalized_long"] = "normalized_long"

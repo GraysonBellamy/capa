@@ -98,6 +98,7 @@ class SaveAsDialog(QDialog):
     # -- API ----------------------------------------------------------------
 
     def chosen_layout(self) -> SourceLayout | None:
+        """The save-layout option the operator selected (inline vs external)."""
         return self._chosen_layout
 
     # -- internals ----------------------------------------------------------

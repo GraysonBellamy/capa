@@ -128,6 +128,7 @@ def render_problems(
 async def collect_discovery_rows(
     descriptors: list[AdapterDescriptor],
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    """Run discovery for each descriptor; return ``(rows, notes)`` for CLI rendering."""
     rows: list[dict[str, Any]] = []
     notes: list[str] = []
     for descriptor in descriptors:
@@ -147,6 +148,7 @@ def emit_discovery_rows(
     *,
     json_out: bool,
 ) -> None:
+    """Render discovery rows to stdout as a grouped table or as a JSON document."""
     if json_out:
         typer.echo(json.dumps({"devices": rows, "notes": notes}, indent=2, default=str))
         return

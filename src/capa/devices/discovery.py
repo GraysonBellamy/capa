@@ -25,6 +25,7 @@ class DiscoveryResult:
 
     @property
     def ok(self) -> bool:
+        """Whether the discovery probe completed successfully."""
         return self.error is None
 
 

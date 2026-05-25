@@ -137,18 +137,22 @@ class RunBundleWriter:
 
     @property
     def bundle_path(self) -> Path:
+        """Bundle directory on disk. Stable for the writer's lifetime."""
         return self._bundle_path
 
     @property
     def run_id(self) -> str:
+        """Run identifier (matches the conductor's view of ``run_id``)."""
         return self._run_id
 
     @property
     def is_open(self) -> bool:
+        """``True`` once :meth:`open` has materialized the bundle directory and sinks."""
         return self._opened
 
     @property
     def is_finalized(self) -> bool:
+        """``True`` once :meth:`finalize` has sealed the bundle."""
         return self._finalized
 
     @property
@@ -162,6 +166,7 @@ class RunBundleWriter:
 
     @property
     def config(self) -> ExperimentConfig:
+        """Frozen :class:`ExperimentConfig` snapshot captured at writer construction."""
         return self._config
 
     # ------------------------------------------------------------------ open
@@ -271,21 +276,41 @@ class RunBundleWriter:
     # ------------------------------------------------------------------ record
 
     def record_sample(self, sample: ChannelSample) -> None:
+        """Append a :class:`ChannelSample` to the ``scalars`` sink.
+
+        Raises:
+            BundleWriterError: The writer has not been opened.
+        """
         if not self._opened or self._sinks is None:
             raise BundleWriterError("record_sample() requires open()")
         self._sinks.channel_samples.write(sample)
 
     def record_source(self, record: SourceRecord) -> None:
+        """Append a :class:`SourceRecord` to the matching ``device_records/<family>.parquet``.
+
+        Raises:
+            BundleWriterError: The writer has not been opened.
+        """
         if not self._opened or self._sinks is None:
             raise BundleWriterError("record_source() requires open()")
         self._sinks.device_records.write(record)
 
     def record_event(self, event: DeviceEvent) -> None:
+        """Append a :class:`DeviceEvent` to ``events.sqlite``.
+
+        Raises:
+            BundleWriterError: The writer has not been opened.
+        """
         if not self._opened or self._sinks is None:
             raise BundleWriterError("record_event() requires open()")
         self._sinks.events.write_device_event(event)
 
     def record_snapshot(self, snapshot: DeviceSnapshot) -> None:
+        """Append a :class:`DeviceSnapshot` to ``status.sqlite``.
+
+        Raises:
+            BundleWriterError: The writer has not been opened.
+        """
         if not self._opened or self._sinks is None:
             raise BundleWriterError("record_snapshot() requires open()")
         self._sinks.status.write(snapshot)

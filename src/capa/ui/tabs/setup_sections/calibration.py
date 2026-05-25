@@ -96,10 +96,12 @@ class CalibrationSection(SectionWidget):
     # -- SectionWidget API --------------------------------------------------
 
     def set_draft(self, draft: SetupDraft) -> None:
+        """Replace the in-progress draft."""
         self._draft = draft
         self.refresh()
 
     def refresh(self) -> None:
+        """Recompute the form from the current draft."""
         self._table.setRowCount(0)
         if self._draft is None:
             return

@@ -82,6 +82,7 @@ class _QtLogHandler(logging.Handler):
         self._bridge = bridge
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Qt signal emit / logging emit — see the parent class."""
         try:
             text = self.format(record)
         except Exception:
@@ -107,6 +108,7 @@ class _PlainFormatter(logging.Formatter):
     _ANSI_RE = None  # lazy
 
     def format(self, record: logging.LogRecord) -> str:
+        """Format a log record for display. See :class:`logging.Formatter`."""
         if _PlainFormatter._ANSI_RE is None:
             _PlainFormatter._ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
         ts = self.formatTime(record, datefmt="%H:%M:%S")
@@ -204,15 +206,18 @@ class LogDock(QDockWidget):
             root.setLevel(min(root.level if root.level else level, level))
 
     def clear(self) -> None:
+        """Clear the widget's contents in place."""
         self._model.clear()
 
     # ------------------------------------------------------------------ teardown
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         self._detach_handler()
         super().closeEvent(event)
 
     def deleteLater(self) -> None:
+        """Schedule this object for deletion via Qt's event loop."""
         self._detach_handler()
         super().deleteLater()
 

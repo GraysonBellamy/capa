@@ -13,7 +13,7 @@ The status bar's pills do not fail independently. A wedged writer thread reliabl
 
 **The pill that goes red *first* is the most diagnostic.** By the time the cascade is in full swing, three pills are red and they all look like the cause. If you're watching live, write down which pill turned colour first.
 
-For after-the-fact triage on a sealed bundle: open `events.sqlite` and walk the events in time order — a `saturation_deadline` event with a `blocked_s` in its metadata identifies which signal tripped first, and the matching `run.log` `conductor.loop_lag.*` lines indicate whether loop-lag warnings preceded the trip.
+For after-the-fact triage on a sealed bundle: open `events.sqlite` and walk the events in time order — a `saturation_deadline` event with a `blocked_s` in its metadata identifies which signal tripped first. The matching `run.log` saturation entries (`saturation_monitor.deadline_exceeded`, `conductor.saturation_escalation`) carry the raw source details. Loop-lag values themselves are live diagnostics and final `manifest.queue_health` fields, not dedicated event rows.
 
 ---
 
@@ -35,9 +35,6 @@ For after-the-fact triage on a sealed bundle: open `events.sqlite` and walk the 
 **Search the bundle.**
 
 ```sql
--- run.log, filtered for conductor loop-lag warnings
--- jq 'select(.event | startswith("conductor.loop_lag"))' run.log
-
 -- events.sqlite: did saturation trip too?
 SELECT t_utc, kind, message, metadata_json
 FROM events
@@ -81,7 +78,7 @@ The `metadata_json` field typically contains `resource_id`, `blocked_s`, and `de
 **What to do.**
 
 - **Disk-related:** free space, switch `runs_root` to a faster volume, or pause antivirus on the runs directory.
-- **Encode-related:** edit the camera params in your [hardware.toml](../configuration/hardware-toml.md) to `encoder = "h264_qsv"` (or `_nvenc` / `mjpeg`) and reload. See [cameras-webcam.md](../devices/cameras-webcam.md) and [cameras-flir.md](../devices/cameras-flir.md).
+- **Encode-related:** edit the camera params in your [hardware.toml](../configuration/hardware-toml.md) to `codec = "h264_qsv"` (or `h264_nvenc` / `mjpeg`) and reload. See [cameras-webcam.md](../devices/cameras-webcam.md) and [cameras-flir.md](../devices/cameras-flir.md).
 - **Subscriber-related:** identify the plugin via `capa plugins list`, audit its `DataBus.subscribe` calls. A `BLOCK` policy on a subscriber that does anything CPU-heavy is a bug.
 
 The full mechanics live in [Saturation and deadlines](../safety/saturation-and-deadlines.md).

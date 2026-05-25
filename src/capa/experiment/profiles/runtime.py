@@ -108,6 +108,7 @@ def get_category(check_id: str) -> Category | None:
 
 
 def registered_ids() -> tuple[str, ...]:
+    """Tuple of profile ids the runtime registry currently knows about."""
     return tuple(sorted(_REGISTRY.keys()))
 
 

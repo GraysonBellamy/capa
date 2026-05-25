@@ -324,10 +324,12 @@ class RunController(QObject):
 
     @property
     def state(self) -> RunUiState:
+        """Current UI state — see :class:`~capa.ui.state.UiState`."""
         return self._ui_state
 
     @property
     def last_result(self) -> RunUiResult | None:
+        """Most recent :class:`RunResult`, or ``None`` if no run has completed yet."""
         return self._last_result
 
     @property
@@ -356,6 +358,7 @@ class RunController(QObject):
 
     @property
     def config_load_state(self) -> ConfigLoadState:
+        """Current state of the config-loading state machine."""
         return self._config_load_state
 
     @property
@@ -366,6 +369,7 @@ class RunController(QObject):
 
     @property
     def active_config(self) -> ExperimentConfig | None:
+        """The currently-loaded :class:`ExperimentConfig`, or ``None``."""
         return self._active_config
 
     @property

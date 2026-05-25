@@ -185,19 +185,23 @@ class ChannelTableModel(QAbstractTableModel):
         self._row_issues: dict[int, str] = {}
 
     def channels(self) -> list[dict[str, Any]]:
+        """Tuple of channel entries managed by this section."""
         return [dict(row) for row in self._rows]
 
     def set_channels(self, channels: list[dict[str, Any]]) -> None:
+        """Replace the section's channel list."""
         self.beginResetModel()
         self._rows = [dict(row) for row in channels]
         self.endResetModel()
 
     def channel_at(self, row: int) -> dict[str, Any] | None:
+        """Return the channel entry at the given row."""
         if 0 <= row < len(self._rows):
             return dict(self._rows[row])
         return None
 
     def update_channel(self, row: int, channel: dict[str, Any]) -> None:
+        """Apply a partial update to one channel entry."""
         if not (0 <= row < len(self._rows)):
             return
         self._rows[row] = dict(channel)
@@ -207,6 +211,7 @@ class ChannelTableModel(QAbstractTableModel):
         self.channelsChanged.emit()
 
     def add_channel(self, channel: dict[str, Any]) -> int:
+        """Append a new channel entry to the section."""
         row = len(self._rows)
         self.beginInsertRows(QModelIndex(), row, row)
         self._rows.append(dict(channel))
@@ -215,6 +220,7 @@ class ChannelTableModel(QAbstractTableModel):
         return row
 
     def remove_channel(self, row: int) -> None:
+        """Remove the channel entry at the given row."""
         if not (0 <= row < len(self._rows)):
             return
         self.beginRemoveRows(QModelIndex(), row, row)
@@ -225,11 +231,13 @@ class ChannelTableModel(QAbstractTableModel):
     # -- QAbstractTableModel -----------------------------------------------
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of rows in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self._rows)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of columns in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self.HEADERS)
@@ -240,11 +248,13 @@ class ChannelTableModel(QAbstractTableModel):
         orientation: Qt.Orientation,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> object:
+        """Header label for the given section / orientation. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         return horizontal_header(self.HEADERS, section, orientation, role)
 
     def data(  # type: ignore[override]
         self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> object:
+        """Return the value at ``index`` for ``role``. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         if not index.isValid():
             return None
         row = index.row()
@@ -465,6 +475,7 @@ class _SourceBindingEditor(QWidget):
         return out
 
     def set_value(self, source: dict[str, Any]) -> None:
+        """Set this widget's value from a model-side value."""
         self._suppress = True
         try:
             self._current = dict(source or {})
@@ -885,10 +896,12 @@ class ChannelsSection(SectionWidget):
     # -- SectionWidget API --------------------------------------------------
 
     def set_draft(self, draft: SetupDraft) -> None:
+        """Replace the in-progress draft."""
         self._draft = draft
         self.refresh()
 
     def refresh(self) -> None:
+        """Recompute the form from the current draft."""
         if self._draft is None:
             return
         hw = self._draft.document.hardware_payload
@@ -913,6 +926,7 @@ class ChannelsSection(SectionWidget):
         self._refresh_row_issues()
 
     def payload(self) -> dict[str, object]:
+        """Build the section's serialized payload from current widget state."""
         return {"channels": self._model.channels()}
 
     def _update_table_height(self) -> None:

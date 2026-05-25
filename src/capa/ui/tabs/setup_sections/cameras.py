@@ -71,19 +71,23 @@ class CameraTableModel(QAbstractTableModel):
         self._rows: list[dict[str, Any]] = []
 
     def cameras(self) -> list[dict[str, Any]]:
+        """Tuple of camera entries managed by this section."""
         return [dict(row) for row in self._rows]
 
     def set_cameras(self, cameras: list[dict[str, Any]]) -> None:
+        """Replace the section's camera list."""
         self.beginResetModel()
         self._rows = [dict(row) for row in cameras]
         self.endResetModel()
 
     def camera_at(self, row: int) -> dict[str, Any] | None:
+        """Return the camera entry at the given row."""
         if 0 <= row < len(self._rows):
             return dict(self._rows[row])
         return None
 
     def update_camera(self, row: int, camera: dict[str, Any]) -> None:
+        """Apply a partial update to one camera entry."""
         if not (0 <= row < len(self._rows)):
             return
         self._rows[row] = dict(camera)
@@ -93,6 +97,7 @@ class CameraTableModel(QAbstractTableModel):
         self.camerasChanged.emit()
 
     def add_camera(self, camera: dict[str, Any]) -> int:
+        """Append a new camera entry to the section."""
         row = len(self._rows)
         self.beginInsertRows(QModelIndex(), row, row)
         self._rows.append(dict(camera))
@@ -101,6 +106,7 @@ class CameraTableModel(QAbstractTableModel):
         return row
 
     def remove_camera(self, row: int) -> None:
+        """Remove the camera entry at the given row."""
         if not (0 <= row < len(self._rows)):
             return
         self.beginRemoveRows(QModelIndex(), row, row)
@@ -111,11 +117,13 @@ class CameraTableModel(QAbstractTableModel):
     # -- QAbstractTableModel -----------------------------------------------
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of rows in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self._rows)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of columns in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self.HEADERS)
@@ -126,11 +134,13 @@ class CameraTableModel(QAbstractTableModel):
         orientation: Qt.Orientation,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> object:
+        """Header label for the given section / orientation. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         return horizontal_header(self.HEADERS, section, orientation, role)
 
     def data(  # type: ignore[override]
         self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> object:
+        """Return the value at ``index`` for ``role``. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
             return None
         row = index.row()
@@ -312,10 +322,12 @@ class CamerasSection(SectionWidget):
     # -- SectionWidget API --------------------------------------------------
 
     def set_draft(self, draft: SetupDraft) -> None:
+        """Replace the in-progress draft."""
         self._draft = draft
         self.refresh()
 
     def refresh(self) -> None:
+        """Recompute the form from the current draft."""
         if self._draft is None:
             return
         hw = self._draft.document.hardware_payload
@@ -333,6 +345,7 @@ class CamerasSection(SectionWidget):
         self._reset_detail()
 
     def payload(self) -> dict[str, object]:
+        """Build the section's serialized payload from current widget state."""
         return {"cameras": self._model.cameras()}
 
     def _update_table_height(self) -> None:

@@ -15,7 +15,7 @@ Arguments:
 Options:
   --headless / --gui   Headless mode (no GUI).  [default: headless]
   --runs-root    PATH  Where to write the bundle. Default: $CAPA_RUNS_ROOT or ./runs.
-  --plugins-lock PATH  Optional plugins.lock to record into the manifest.
+  --plugins-lock PATH  plugins.lock for procedure trust; mirrored into the manifest.
   --help               Show this message and exit.
 ```
 

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hello-procedure"
+version = "0.1.0"
+description = "Worked example: a minimal capa procedure plugin."
+requires-python = ">=3.13,<3.14"
+license = "MIT"
+authors = [{ name = "capa contributors" }]
+dependencies = [
+    "capa",
+    "pydantic>=2.9",
+    "anyio>=4.6",
+]
+
+# Entry point: the engine walks the `capa.procedures` group at startup and
+# loads every class registered here. The left-hand string is the plugin id;
+# the right-hand string is `module.path:ClassName`.
+[project.entry-points."capa.procedures"]
+"hello.procedure.hold_setpoint" = "hello_procedure.procedure:HoldSetpoint"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hello_procedure"]

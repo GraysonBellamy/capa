@@ -172,6 +172,13 @@ the right model on deserialization.
 
 
 class AlarmAction(StrEnum):
+    """Escalation policy attached to a declarative :class:`AlarmBand` rule.
+
+    Determines what the safety monitor does when this band trips: log a
+    warning, pause the running method, abort the run, or trigger the full
+    safe-shutdown sequence.
+    """
+
     WARN = "warn"
     PAUSE_METHOD = "pause_method"
     ABORT_RUN = "abort_run"

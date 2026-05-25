@@ -122,6 +122,7 @@ class CalibrationSetDiffDialog(QDialog):
         return dialog.selected_targets()
 
     def selected_targets(self) -> set[str]:
+        """Tuple of selected target identifiers."""
         out: set[str] = set()
         for idx, entry in enumerate(self._entries):
             if not entry.actionable:

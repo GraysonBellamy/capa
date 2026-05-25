@@ -44,6 +44,7 @@ class _Reservoir:
     _rng: random.Random = field(default_factory=lambda: random.Random(0xCA9A))
 
     def observe(self, value: float) -> None:
+        """Record a new observation using Algorithm R for fixed-memory percentile estimation."""
         self._n_seen += 1
         if len(self._items) < self.capacity:
             self._items.append(value)
@@ -72,6 +73,7 @@ class _Reservoir:
 
     @property
     def count(self) -> int:
+        """Total number of observations seen (including those replaced via reservoir sampling)."""
         return self._n_seen
 
 
@@ -92,6 +94,7 @@ class QueueMetrics:
     lag_s_max: float = 0.0
 
     def observe_depth(self, depth: int) -> None:
+        """Record one queue-depth observation; tracks both reservoir samples and max."""
         self._depth_samples.observe(float(depth))
         if depth > self.depth_max:
             self.depth_max = depth
@@ -138,6 +141,7 @@ class WriterMetrics:
         return _WriterTimer(self)
 
     def observe_write(self, elapsed_s: float) -> None:
+        """Record one write-latency observation (in seconds)."""
         self._samples.observe(elapsed_s)
         self.write_count += 1
         self.last_write_mono = time.monotonic()
@@ -145,6 +149,7 @@ class WriterMetrics:
             self.write_s_max = elapsed_s
 
     def snapshot(self) -> dict[str, float]:
+        """Return the dict shape :attr:`BundleManifest.queue_health` accepts for this writer."""
         return {
             "write_p50_s": self._samples.percentile(0.5),
             "write_p99_s": self._samples.percentile(0.99),
@@ -189,6 +194,7 @@ class MetricsRegistry:
         return m
 
     def writer(self, name: str) -> WriterMetrics:
+        """Get-or-create a :class:`WriterMetrics` keyed by ``name``."""
         m = self.writers.get(name)
         if m is None:
             m = WriterMetrics(name=name)

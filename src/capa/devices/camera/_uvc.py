@@ -216,6 +216,7 @@ class UvcController:
 
     @property
     def device_name(self) -> str:
+        """Operating-system identifier for the underlying device handle."""
         return self._device_name
 
     @classmethod

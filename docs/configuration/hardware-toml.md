@@ -59,7 +59,7 @@ The `adapter` value is one of:
 | Sartorius | `capa.devices.sartorius` | `capa.devices.sim.sartorius_sim` |
 | NI-DAQ (polled) | `capa.devices.nidaq` | `capa.devices.sim.nidaq_polled_sim` |
 | NI-DAQ (hardware-clocked) | `capa.devices.nidaq` | `capa.devices.sim.nidaq_block_sim` |
-| Plugin adapters | resolved via `capa.devices` entry-point group | — |
+| Plugin adapter descriptors | resolved via `capa.adapters` / `capa.cameras` descriptor entry points (Setup/discovery) or dotted module-path adapter ids (runtime-safe path) | — |
 
 ### `params` per family
 
@@ -207,7 +207,7 @@ model because they own their output container instead of emitting
 | Field | Type | Required | Notes |
 |---|---|:-:|---|
 | `name` | str | yes | Used as the manifest entry id and the frame-index parquet basename. |
-| `adapter` | str | yes | Module path or `capa.cameras` entry-point id (e.g. `flir_ir`). |
+| `adapter` | str | yes | Module path, or a `capa.cameras` descriptor id after the registry has been loaded by Setup/discovery (e.g. `flir_ir`). For unattended headless runs, prefer a dotted module path. |
 | `kind` | str | yes | `"visible"` or `"ir"`. Picks file extension and UI grouping. |
 | `model_hint` | str | no | Preferred model (`"FLIR E85"`, `"Logitech C920"`). |
 | `serial` | str | no | Exact-match selector. |

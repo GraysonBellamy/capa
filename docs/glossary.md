@@ -277,14 +277,14 @@ distinction is only in operator-visible latency. See
 
 ## Plugin lockfile
 
-A `plugins.lock` TOML file that pins every trusted plugin's id,
+A `plugins.lock` TOML file that pins every trusted procedure plugin's id,
 package, version, entry point, and distribution hash. capa looks for
 the lockfile at, in order: the project root `./plugins.lock`,
 `$XDG_CONFIG_HOME/capa/plugins.lock`, or
-`~/.config/capa/plugins.lock`. At run start the conductor refuses any
-plugin whose hash or version differs from the lock — the operator must
+`~/.config/capa/plugins.lock`. In production mode, run startup refuses any
+procedure plugin whose hash or version differs from the lock — the operator must
 run `capa plugins trust ...` to update the entry first. The lockfile
 snapshot is copied into every bundle and mirrored into
-`manifest.json.plugins`, so a sealed bundle records exactly which
-plugin code produced it. See
+`manifest.json.plugins`, so a sealed bundle records the active trust set.
+It is not proof that every listed plugin was used by that run. See
 [`plugins_lock.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/core/plugins_lock.py).

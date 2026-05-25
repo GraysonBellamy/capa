@@ -86,6 +86,14 @@ class HeadlessResult:
     exit_reason: str | None = None
 
     def exit_code(self) -> int:
+        """Map the outcome to the documented process exit code.
+
+        Returns:
+            ``0`` on a clean sealed run, ``1`` on operator abort, ``2``
+            on procedure / runtime crash, ``3`` on post-seal verification
+            failure, ``5`` otherwise (unknown / partial). See
+            [Exit codes](../../docs/reference/exit-codes.md).
+        """
         if self.bundle_status == "verification_failed":
             return 3
         if self.run_status == "completed" and self.bundle_status == "sealed":

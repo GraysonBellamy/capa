@@ -59,9 +59,11 @@ class _NestedModelField(FieldWidget):
         self._inner.valuesChanged.connect(self.valueChanged)
 
     def value(self) -> dict[str, Any]:
+        """Current value held by this widget, coerced to the model-side type."""
         return self._inner.values()
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         self._inner.set_values(v if v is not None else {})
 
 
@@ -236,6 +238,7 @@ class _DiscriminatedUnionField(FieldWidget):
     # -- FieldWidget API ---------------------------------------------------
 
     def value(self) -> dict[str, Any]:
+        """Current value held by this widget, coerced to the model-side type."""
         out: dict[str, Any] = {}
         if self._current_form is not None:
             out.update(self._current_form.values())
@@ -245,6 +248,7 @@ class _DiscriminatedUnionField(FieldWidget):
         return out
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         if isinstance(v, BaseModel):
             v = v.model_dump()
         if not isinstance(v, dict):

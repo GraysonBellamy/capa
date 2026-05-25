@@ -258,6 +258,7 @@ class ShutdownCoordinator(QObject):
 
     @property
     def current_stage(self) -> ShutdownStage:
+        """Current shutdown-coordinator stage label."""
         return self._state.stage
 
     @property

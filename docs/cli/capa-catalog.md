@@ -137,7 +137,7 @@ $ uv run capa catalog verify --all
 20260524T141055-3c19: ok
 20260523T185940-0b88: mismatch
   parquet: device_records/balance_sim.parquet
-  parquet: channels/scalars.parquet
+  parquet: scalars.parquet
 ```
 
 ### Exit codes

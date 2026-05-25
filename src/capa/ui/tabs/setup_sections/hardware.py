@@ -52,16 +52,19 @@ class _SummaryTableModel(QAbstractTableModel):
         self._rows: list[dict[str, str]] = []
 
     def set_rows(self, rows: list[dict[str, str]]) -> None:
+        """Replace the table's rows."""
         self.beginResetModel()
         self._rows = [dict(r) for r in rows]
         self.endResetModel()
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of rows in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self._rows)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of columns in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self._headers)
@@ -72,11 +75,13 @@ class _SummaryTableModel(QAbstractTableModel):
         orientation: Qt.Orientation,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> object:
+        """Header label for the given section / orientation. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         return horizontal_header(self._headers, section, orientation, role)
 
     def data(  # type: ignore[override]
         self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> object:
+        """Return the value at ``index`` for ``role``. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
             return None
         row = self._rows[index.row()] if 0 <= index.row() < len(self._rows) else None
@@ -158,10 +163,12 @@ class HardwareGlanceSection(SectionWidget):
     # -- SectionWidget API --------------------------------------------------
 
     def set_draft(self, draft: SetupDraft) -> None:
+        """Replace the in-progress draft."""
         self._draft = draft
         self.refresh()
 
     def refresh(self) -> None:
+        """Recompute the form from the current draft."""
         if self._draft is None:
             self._devices_model.set_rows([])
             self._channels_model.set_rows([])

@@ -89,8 +89,16 @@ _MODIFIER_MAP = {
 }
 
 
-def _visible_top_levels() -> list[QWidget]:
+def _app() -> QApplication | None:
+    # QApplication.instance() is typed as QCoreApplication | None, but at
+    # runtime in a GUI process it's always a QApplication. The isinstance
+    # check narrows the type for mypy.
     app = QApplication.instance()
+    return app if isinstance(app, QApplication) else None
+
+
+def _visible_top_levels() -> list[QWidget]:
+    app = _app()
     if app is None:
         return []
     return [w for w in app.topLevelWidgets() if w.isVisible()]
@@ -120,7 +128,7 @@ def _active_dialog() -> QWidget | None:
     # Heuristic: prefer the topmost-stacked window (last in stacking order is
     # frontmost on most platforms). Qt doesn't expose stacking order directly,
     # so use the active window first then fall back to the last visible top-level.
-    app = QApplication.instance()
+    app = _app()
     if app is not None:
         active = app.activeWindow()
         if active is not None and active is not main and active in candidates:
@@ -129,7 +137,7 @@ def _active_dialog() -> QWidget | None:
 
 
 def _find_by_name(target: str) -> QWidget | None:
-    app = QApplication.instance()
+    app = _app()
     if app is None:
         return None
     for w in app.allWidgets():
@@ -144,7 +152,7 @@ def _resolve_target(target: str) -> QWidget | None:
     if target == "active_dialog":
         return _active_dialog()
     if target == "focused":
-        app = QApplication.instance()
+        app = _app()
         return app.focusWidget() if app is not None else None
     return _find_by_name(target)
 
@@ -173,7 +181,7 @@ def _compose_screen() -> QPixmap | None:
     if not tops:
         return None
     main = _main_window()
-    app = QApplication.instance()
+    app = _app()
     active = app.activeWindow() if app is not None else None
     # Paint order: main first, then dialogs (non-main), with the
     # active window last so it ends up on top.
@@ -228,7 +236,7 @@ class _Probe(QObject):
 
     @Slot(result=str)
     def list_widgets(self) -> str:
-        app = QApplication.instance()
+        app = _app()
         if app is None:
             return json.dumps([])
         out: list[dict[str, Any]] = [
@@ -254,7 +262,7 @@ class _Probe(QObject):
 
     @Slot(result=str)
     def list_actions(self) -> str:
-        app = QApplication.instance()
+        app = _app()
         if app is None:
             return json.dumps([])
         seen: set[int] = set()
@@ -368,7 +376,7 @@ class _Probe(QObject):
 
     @Slot(str, result=str)
     def trigger_action(self, action_text: str) -> str:
-        app = QApplication.instance()
+        app = _app()
         if app is None:
             return json.dumps({"ok": False, "error": "no QApplication"})
         wanted = action_text.strip()
@@ -455,7 +463,7 @@ class _Probe(QObject):
         """Single condition check; the HTTP-side loop drives polling."""
         widget = _resolve_target(target)
         exists = widget is not None
-        visible = exists and widget.isVisible()
+        visible = widget is not None and widget.isVisible()
         result = {
             "visible": visible,
             "hidden": exists and not visible,
@@ -478,7 +486,7 @@ def _call(method: str, *args: tuple[type, Any]) -> str:
     return str(
         QMetaObject.invokeMethod(
             _probe,
-            method,
+            method.encode(),
             Qt.ConnectionType.BlockingQueuedConnection,
             Q_RETURN_ARG(str),
             *q_args,
@@ -673,7 +681,7 @@ def install() -> None:
     invocations, so a parallel HTTP request can still drive the GUI thread
     out of the modal block.
     """
-    global _probe, _server, _interactive
+    global _probe, _server, _interactive  # noqa: PLW0603 — module-level singleton init
     if _server is not None:
         return
     _interactive = bool(os.environ.get("CAPA_SCREENSHOT_PROBE_INTERACTIVE"))

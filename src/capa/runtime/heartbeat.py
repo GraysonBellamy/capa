@@ -5,9 +5,9 @@ one :func:`heartbeat_task` in the background. The task re-targets every
 ``period_s`` seconds and observes the actual wake-up time vs the target;
 the difference is loop lag.
 
-``loop_lag.p99 > 50 ms`` is the smoke alarm. The manifest's
-``diagnostics.runtime`` block records the p99 per thread; the UI status
-bar flashes when any loop exceeds threshold.
+``loop_lag.p99 > 50 ms`` is the smoke alarm. The final
+``manifest.queue_health`` snapshot records runtime loop-lag diagnostics;
+the UI status bar flashes when any loop exceeds threshold.
 
 The :class:`LoopLagMetric` shares the same percentile-ring implementation
 as :class:`~capa.runtime.bridge.ThreadBridgeMetrics` (lifted from there)
@@ -52,6 +52,7 @@ class LoopLagMetric:
     _ring: _PercentileRing = field(default_factory=_PercentileRing)
 
     def observe(self, lag_ms: float) -> None:
+        """Record a single heartbeat lag observation (in milliseconds)."""
         self._ring.observe(lag_ms)
         self.samples_total += 1
         if lag_ms > self.max_lag_ms:
@@ -59,10 +60,12 @@ class LoopLagMetric:
 
     @property
     def p50_ms(self) -> float:
+        """Median observed lag in milliseconds."""
         return self._ring.p50
 
     @property
     def p99_ms(self) -> float:
+        """99th-percentile observed lag in milliseconds."""
         return self._ring.p99
 
 

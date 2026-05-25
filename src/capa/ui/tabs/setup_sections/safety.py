@@ -65,19 +65,23 @@ class SafetyRuleTableModel(QAbstractTableModel):
         self._rules: list[dict[str, Any]] = []
 
     def rules(self) -> list[dict[str, Any]]:
+        """Tuple of safety rule entries managed by this section."""
         return [dict(row) for row in self._rules]
 
     def set_rules(self, rules: list[dict[str, Any]]) -> None:
+        """Replace the section's safety-rule list."""
         self.beginResetModel()
         self._rules = [dict(row) for row in rules]
         self.endResetModel()
 
     def rule_at(self, row: int) -> dict[str, Any] | None:
+        """Return the safety rule at the given row."""
         if 0 <= row < len(self._rules):
             return dict(self._rules[row])
         return None
 
     def update_rule(self, row: int, rule: dict[str, Any]) -> None:
+        """Apply a partial update to one safety rule."""
         if not (0 <= row < len(self._rules)):
             return
         self._rules[row] = dict(rule)
@@ -87,6 +91,7 @@ class SafetyRuleTableModel(QAbstractTableModel):
         self.rulesChanged.emit()
 
     def add_rule(self, rule: dict[str, Any]) -> int:
+        """Append a new safety rule to the section."""
         row = len(self._rules)
         self.beginInsertRows(QModelIndex(), row, row)
         self._rules.append(dict(rule))
@@ -95,6 +100,7 @@ class SafetyRuleTableModel(QAbstractTableModel):
         return row
 
     def remove_rule(self, row: int) -> None:
+        """Remove the safety rule at the given row."""
         if not (0 <= row < len(self._rules)):
             return
         self.beginRemoveRows(QModelIndex(), row, row)
@@ -105,11 +111,13 @@ class SafetyRuleTableModel(QAbstractTableModel):
     # -- QAbstractTableModel ------------------------------------------------
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of rows in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self._rules)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of columns in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self.HEADERS)
@@ -120,11 +128,13 @@ class SafetyRuleTableModel(QAbstractTableModel):
         orientation: Qt.Orientation,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> object:
+        """Header label for the given section / orientation. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         return horizontal_header(self.HEADERS, section, orientation, role)
 
     def data(  # type: ignore[override]
         self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> object:
+        """Return the value at ``index`` for ``role``. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
             return None
         rule = self.rule_at(index.row())
@@ -241,10 +251,12 @@ class SafetySection(SectionWidget):
     # -- SectionWidget API --------------------------------------------------
 
     def set_draft(self, draft: SetupDraft) -> None:
+        """Replace the in-progress draft."""
         self._draft = draft
         self.refresh()
 
     def refresh(self) -> None:
+        """Recompute the form from the current draft."""
         if self._draft is None:
             return
         safety = self._draft.document.experiment_payload.get("safety")
@@ -264,6 +276,7 @@ class SafetySection(SectionWidget):
         self._reset_detail()
 
     def payload(self) -> dict[str, object]:
+        """Build the section's serialized payload from current widget state."""
         return {
             "safety": {
                 "rules": self._model.rules(),

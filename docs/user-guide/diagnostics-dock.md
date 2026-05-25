@@ -11,7 +11,7 @@ See [`docks/diagnostics.py`](https://github.com/GraysonBellamy/capa/blob/main/sr
 
 ## Layout
 
-One row per worker (one [resource_id](../glossary.md#resource-id)). On the full real config that is six rows — one each for the heater, purge MFC, balance, NI-DAQ chassis, visible camera, and IR camera.
+One row per worker (one `resource_id`). On the full real config that is six rows — one each for the heater, purge MFC, balance, NI-DAQ chassis, visible camera, and IR camera.
 
 | Column | What it shows |
 |---|---|
@@ -85,7 +85,7 @@ The [status bar](status-bar-guide.md) is an aggregated view: one `sat` pill summ
 
 - **No latency / inbox / fsync metrics.** Writer-thread health is observable only through the `sat` pill and the downstream effect on every worker's Age. The diagnostics dock is producer-side.
 - **No per-channel rates.** A worker may host multiple channels (a Watlow heater emits both PV and setpoint as channels under one poll). The dock measures the poll cadence, not the channel emission count.
-- **No history beyond the percentile ring.** Closing and reopening the run resets every row; the dock is a live view, not a recording. The bundle's [`manifest.json` `diagnostics.runtime` block](../bundles/manifest-and-schema.md) captures the final snapshot on seal — that is the post-run archival source.
+- **No history beyond the percentile ring.** Closing and reopening the run resets every row; the dock is a live view, not a recording. The bundle's [`manifest.json` `queue_health` block](../bundles/manifest-and-schema.md#queue-health) captures the final snapshot on seal — that is the post-run archival source.
 
 ---
 

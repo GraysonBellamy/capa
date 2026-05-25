@@ -187,9 +187,11 @@ Both fields may be `null` when no lockfile was found at snapshot time
 ]
 ```
 
-Verbatim mirror of `plugins.lock` at run-start. The conductor refuses
-to arm with a plugin whose installed hash differs from this snapshot.
-See [Plugin lockfile](../extending/plugin-lockfile.md).
+Verbatim mirror of the `plugins.lock` entries handed to the run. In
+production mode those entries gate procedure discovery before the run
+arms; in the manifest they are an archival trust-set snapshot, not proof
+that every listed plugin was used by the procedure. See [Plugin
+lockfile](../extending/plugin-lockfile.md).
 
 ### Data shape
 

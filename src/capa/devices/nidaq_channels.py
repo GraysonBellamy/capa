@@ -49,6 +49,7 @@ def _enum_name_validator(enum_cls: Any) -> Callable[[object], str]:
     valid_names = tuple(m.name for m in enum_cls)
 
     def coerce(value: object) -> str:
+        """Coerce a value into this NI-DAQ channel's native dtype."""
         if isinstance(value, str):
             if value not in valid_names:
                 raise ValueError(

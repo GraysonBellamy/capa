@@ -236,6 +236,7 @@ class PlotPane(QWidget):
         self._reposition_overlays()
 
     def clear(self) -> None:
+        """Clear the widget's contents in place."""
         for name, curve in self._curves.items():
             curve.setData([], [])
             self._last_kept[name] = -1
@@ -267,6 +268,7 @@ class PlotPane(QWidget):
                 overlay.hide()
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         super().resizeEvent(event)
         self._reposition_overlays()
 
@@ -278,6 +280,7 @@ class PlotPane(QWidget):
             overlay.move(max(x, 0), max(y, 0))
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         super().showEvent(event)
         self._reposition_overlays()
 

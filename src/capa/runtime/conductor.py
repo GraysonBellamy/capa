@@ -219,17 +219,23 @@ class NoOpRunner:
     """
 
     def __init__(self, *, run_for_s: float | None = None) -> None:
-        """:param run_for_s: If set, the runner returns normally after this
-        many seconds (simulates a procedure that finishes on its own). If
-        ``None``, blocks until cancelled."""
+        """Construct the no-op runner.
+
+        Args:
+            run_for_s: If set, the runner returns normally after this
+                many seconds (simulates a procedure that finishes on
+                its own). If ``None``, blocks until cancelled.
+        """
         self._run_for_s = run_for_s
         self.preflight_calls = 0
         self.run_calls = 0
 
     async def preflight(self, ctx: RunContext, bus: DataBus) -> None:
+        """Record the call; no real preflight work."""
         self.preflight_calls += 1
 
     async def run(self, ctx: RunContext, bus: DataBus) -> None:
+        """Park (or sleep for ``run_for_s``) so the conductor can drive lifecycle."""
         self.run_calls += 1
         if self._run_for_s is None:
             # Park forever; the conductor's task group cancel scope ends us.
@@ -1272,6 +1278,7 @@ class _ConductorProcedureUiSink:
     conductor: Conductor
 
     def publish(self, tick: ProcedureTick) -> None:
+        """Forward ``tick`` onto the conductor's UI bridge (soft-fails on a closed bridge)."""
         self.conductor._publish_ui(tick)
 
 

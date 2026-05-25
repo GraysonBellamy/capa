@@ -379,6 +379,7 @@ class SetupTab(QWidget):
 
     @property
     def draft(self) -> SetupDraft:
+        """Current in-progress :class:`ExperimentConfig` draft."""
         return self._draft
 
     def set_document_coordinator(self, coordinator: DocumentCoordinator) -> None:
@@ -1761,9 +1762,11 @@ class _PlaceholderSection(SectionWidget):
 
     def set_draft(self, draft: SetupDraft) -> None:
         # Placeholder has no payload; nothing to do.
+        """Replace the in-progress draft."""
         pass
 
     def refresh(self) -> None:
+        """Recompute the form from the current draft."""
         pass
 
 

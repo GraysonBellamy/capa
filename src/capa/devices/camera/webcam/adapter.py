@@ -243,10 +243,12 @@ class WebcamAdapter:
 
     @property
     def spec(self) -> CameraSpec:
+        """The :class:`CameraSpec` (or device spec) this adapter was built from."""
         return self._spec
 
     @property
     def info(self) -> CameraInfo:
+        """Library-side device-info struct populated after :meth:`open`."""
         return self._info
 
     @property
@@ -351,6 +353,7 @@ class WebcamAdapter:
         return (self._info,)
 
     async def open(self) -> CameraInfo:
+        """Open the underlying connection. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         if self._open:
             return self._info
         if sys.platform == "linux" and self._input_format == "v4l2":
@@ -412,6 +415,7 @@ class WebcamAdapter:
         return self._info
 
     async def close(self) -> None:
+        """Close the underlying connection. Idempotent."""
         if self._recording:
             await self.stop_recording()
         await self.stop_input_pump()
@@ -424,6 +428,7 @@ class WebcamAdapter:
         self._open = False
 
     async def start_recording(self, output_path: Path) -> None:
+        """Begin recording to ``output_path``. See :class:`~capa.devices.camera.base.Camera`."""
         if not self._open:
             raise AdapterError("WebcamAdapter.start_recording requires open()")
         if self._recording:
@@ -455,6 +460,7 @@ class WebcamAdapter:
         )
 
     async def stop_recording(self) -> None:
+        """Stop the active recording. Idempotent."""
         if not self._recording:
             return
         self._recording = False
@@ -472,6 +478,7 @@ class WebcamAdapter:
         )
 
     async def snapshot(self) -> CameraHealth:
+        """Return a health/status snapshot. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return CameraHealth(
             name=self._spec.name,
             t_mono_ns=self._clock.t_mono_ns(),
@@ -485,12 +492,15 @@ class WebcamAdapter:
         )
 
     def frame_stream(self) -> AsyncIterator[FrameReceipt]:
+        """Yield recorded frames while recording is active."""
         return _drain_stream(self._frame_recv)
 
     def preview_stream(self) -> AsyncIterator[bytes]:
+        """Yield preview frames for the live UI tile (separate from the recorded stream)."""
         return _drain_stream(self._preview_recv)
 
     def event_stream(self) -> AsyncIterator[CameraEvent]:
+        """Yield structured camera events (open / start / stop / error)."""
         return _drain_stream(self._event_recv)
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:

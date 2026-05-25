@@ -194,6 +194,7 @@ class ThreadedRunner:
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
+        """The runner's event loop. Raises if :meth:`start` hasn't been called."""
         if self._loop is None:
             raise RunnerStateError(
                 f"ThreadedRunner {self._name!r}: loop not constructed; call start() first"
@@ -202,9 +203,15 @@ class ThreadedRunner:
 
     @property
     def thread_ident(self) -> int | None:
+        """The runner thread's OS identifier, or ``None`` before :meth:`start`."""
         return self._thread.ident if self._thread is not None else None
 
     def start(self) -> Future[None]:
+        """Spawn the runner thread and return a future that resolves when the loop is ready.
+
+        Raises:
+            RunnerStateError: :meth:`start` has already been called.
+        """
         if self._started:
             raise RunnerStateError(f"ThreadedRunner {self._name!r}: start() called twice")
         self._started = True
@@ -217,6 +224,15 @@ class ThreadedRunner:
         return self._loop_ready
 
     def submit(self, coro_factory: Callable[[], Coroutine[Any, Any, T]]) -> Future[T]:
+        """Schedule ``coro_factory()`` on the runner's loop and return its result future.
+
+        ``coro_factory`` is called on the runner loop so any loop-affine
+        primitives (queues, semaphores) bind to the right loop.
+
+        Raises:
+            RunnerStateError: The runner has not been started, has already
+                stopped, or has not yet finished initializing its loop.
+        """
         if not self._started:
             raise RunnerStateError(f"ThreadedRunner {self._name!r}: submit() before start()")
         if self._stopped:
@@ -245,6 +261,13 @@ class ThreadedRunner:
         return out
 
     def stop(self, *, grace_s: float = 5.0) -> Future[RunnerStopResult]:
+        """Stop the loop and join the runner thread within ``grace_s`` seconds.
+
+        Idempotent; subsequent calls resolve immediately with ``joined=True``.
+
+        Raises:
+            RunnerStateError: :meth:`start` has not been called yet.
+        """
         if not self._started:
             raise RunnerStateError(f"ThreadedRunner {self._name!r}: stop() before start()")
         out: Future[RunnerStopResult] = Future()
@@ -356,6 +379,7 @@ class InlineRunner:
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
+        """The captured caller-loop. Raises if :meth:`start` hasn't been called."""
         if self._loop is None:
             raise RunnerStateError(
                 f"InlineRunner {self._name!r}: loop not captured; call start() first"
@@ -364,10 +388,17 @@ class InlineRunner:
 
     @property
     def thread_ident(self) -> int | None:
+        """Always ``None`` — the inline runner shares the caller's thread."""
         # Same thread as the caller; stack capture would be self-referential.
         return None
 
     def start(self) -> Future[None]:
+        """Capture the running loop and return an already-resolved future.
+
+        Raises:
+            RunnerStateError: :meth:`start` has been called already, or
+                no asyncio loop is currently running.
+        """
         if self._started:
             raise RunnerStateError(f"InlineRunner {self._name!r}: start() called twice")
         self._started = True
@@ -383,6 +414,12 @@ class InlineRunner:
         return out
 
     def submit(self, coro_factory: Callable[[], Coroutine[Any, Any, T]]) -> Future[T]:
+        """Schedule ``coro_factory()`` on the captured loop and return its result future.
+
+        Raises:
+            RunnerStateError: The runner has not been started or has
+                already been stopped.
+        """
         if not self._started:
             raise RunnerStateError(f"InlineRunner {self._name!r}: submit() before start()")
         if self._stopped:
@@ -406,6 +443,14 @@ class InlineRunner:
         return out
 
     def stop(self, *, grace_s: float = 5.0) -> Future[RunnerStopResult]:
+        """No-op stop for the inline runner. Returns an already-resolved future.
+
+        ``grace_s`` is accepted for protocol compatibility with
+        :class:`ThreadedRunner` but is unused — there is no thread to join.
+
+        Raises:
+            RunnerStateError: :meth:`start` has not been called yet.
+        """
         if not self._started:
             raise RunnerStateError(f"InlineRunner {self._name!r}: stop() before start()")
         out: Future[RunnerStopResult] = Future()

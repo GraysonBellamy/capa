@@ -111,10 +111,12 @@ class ProcedureSection(SectionWidget):
     # -- SectionWidget API --------------------------------------------------
 
     def set_draft(self, draft: SetupDraft) -> None:
+        """Replace the in-progress draft."""
         self._draft = draft
         self.refresh()
 
     def refresh(self) -> None:
+        """Recompute the form from the current draft."""
         if self._draft is None:
             return
         proc = self._draft.document.experiment_payload.get("procedure")
@@ -132,6 +134,7 @@ class ProcedureSection(SectionWidget):
         self._update_description(proc_id)
 
     def payload(self) -> dict[str, object]:
+        """Build the section's serialized payload from current widget state."""
         return {"procedure": self._current_procedure_dict()}
 
     # -- internals ----------------------------------------------------------

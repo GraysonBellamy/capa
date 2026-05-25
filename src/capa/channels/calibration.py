@@ -93,6 +93,10 @@ class _CalibrationBase(BaseModel):
     fit_metadata: FitMetadata | None = None
 
     def evaluate(self, raw: float) -> float:  # pragma: no cover - overridden
+        """Convert a raw input value to its calibrated output value.
+
+        Concrete subclasses override; the base class is not callable.
+        """
         raise NotImplementedError
 
     def evaluate_with_uncertainty(self, raw: float) -> tuple[float, float | None]:
@@ -130,6 +134,7 @@ class Identity(_CalibrationBase):
         return self
 
     def evaluate(self, raw: float) -> float:
+        """Identity calibration: ``output = raw``."""
         return raw
 
 
@@ -155,13 +160,16 @@ class LinearTwoPoint(_CalibrationBase):
 
     @property
     def slope(self) -> float:
+        """Slope of the two-point linear fit."""
         return (self.ref_high_value - self.ref_low_value) / (self.ref_high_raw - self.ref_low_raw)
 
     @property
     def intercept(self) -> float:
+        """Intercept of the two-point linear fit."""
         return self.ref_low_value - self.slope * self.ref_low_raw
 
     def evaluate(self, raw: float) -> float:
+        """Apply the two-point linear calibration: ``slope * raw + intercept``."""
         return self.slope * raw + self.intercept
 
     def invert(self, value: float) -> float:
@@ -179,6 +187,7 @@ class Polynomial(_CalibrationBase):
     coefficients: tuple[float, ...] = Field(min_length=1)
 
     def evaluate(self, raw: float) -> float:
+        """Apply the polynomial via Horner evaluation."""
         # Horner evaluation
         result = 0.0
         for coef in reversed(self.coefficients):
@@ -210,6 +219,7 @@ class Lookup(_CalibrationBase):
         return value
 
     def evaluate(self, raw: float) -> float:
+        """Linear-interpolate through the lookup table. Clamps at the table extremes."""
         raws = [pair[0] for pair in self.table]
         values = [pair[1] for pair in self.table]
         if raw <= raws[0]:
@@ -239,6 +249,7 @@ class PiecewiseSegment(BaseModel):
     coefficients: tuple[float, ...] = Field(min_length=1)
 
     def evaluate(self, raw: float) -> float:
+        """Apply this segment's polynomial coefficients via Horner evaluation."""
         result = 0.0
         for coef in reversed(self.coefficients):
             result = result * raw + coef
@@ -268,6 +279,7 @@ class Piecewise(_CalibrationBase):
         return self
 
     def evaluate(self, raw: float) -> float:
+        """Find the segment whose ``raw_min <= raw <= raw_max`` and apply it; clamp at edges."""
         # First segment whose raw_min <= raw <= raw_max wins; clamp at edges.
         if raw <= self.segments[0].raw_min:
             return self.segments[0].evaluate(self.segments[0].raw_min)
@@ -327,6 +339,12 @@ class CustomCallable(_CalibrationBase):
         return value
 
     def evaluate(self, raw: float) -> float:
+        """Always raises — :class:`CustomCallable` must be resolved through the plugin runtime.
+
+        Raises:
+            CalibrationError: This model only carries the *reference*; the
+                runtime resolves the entry point and invokes the callable.
+        """
         raise CalibrationError("CustomCallable.evaluate() requires the plugin runtime.")
 
 
@@ -355,6 +373,11 @@ class CalibrationSet(BaseModel):
     curves: dict[str, Calibration]
 
     def get(self, channel_name: str) -> Calibration:
+        """Return the :class:`Calibration` curve registered for ``channel_name``.
+
+        Raises:
+            CalibrationError: ``channel_name`` is not in this set.
+        """
         try:
             return self.curves[channel_name]
         except KeyError as exc:

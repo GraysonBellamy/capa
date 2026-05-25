@@ -100,6 +100,11 @@ class AdapterDispatcher:
         self._adapters = adapters
 
     async def dispatch(self, device: str, cmd: DeviceCommand) -> CommandResult:
+        """Call ``adapter.command(cmd)`` directly on the adapter's own loop.
+
+        Raises:
+            UnknownDeviceError: ``device`` is not in the adapter map.
+        """
         try:
             adapter = self._adapters[device]
         except KeyError as exc:
@@ -133,6 +138,12 @@ class PoolDispatcher:
         self._pool = pool
 
     async def dispatch(self, device: str, cmd: DeviceCommand) -> CommandResult:
+        """Submit through the worker pool and await the worker's result.
+
+        Raises:
+            UnknownDeviceError: ``device`` is not owned by any worker in
+                the pool.
+        """
         try:
             fut = self._pool.dispatch(device, cmd)
         except KeyError as exc:
@@ -169,6 +180,13 @@ class ConductorDispatcher:
         self._conductor = conductor
 
     async def dispatch(self, device: str, cmd: DeviceCommand) -> CommandResult:
+        """Submit through the conductor, gated by conductor state.
+
+        Raises:
+            ConductorStateError: The conductor is not in a state that
+                permits dispatch (i.e. not in PREPARING or RUNNING).
+            UnknownDeviceError: ``device`` is not owned by any worker.
+        """
         # Early-fail: conductor.dispatch ALSO checks, but we want the
         # ConductorStateError to surface here before incurring a cross-thread
         # round-trip.

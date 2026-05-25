@@ -115,7 +115,7 @@ Every worker, the conductor, and the UI loop run a [`heartbeat_task`](https://gi
 
 When debugging a stutter the first question is "which loop?" — read `loop_lag` per thread before guessing. A red conductor loop with green workers points at the procedure or a saturated databus subscriber; a red worker loop points at an adapter not wrapping a blocking call in `anyio.to_thread.run_sync`.
 
-Per-thread CPU is polled at 1 Hz from inside the conductor via `psutil.Process().threads()` and lands in `diagnostics.runtime` in the bundle manifest.
+At seal time, the conductor snapshots loop, bridge, worker, runtime, and writer-inbox diagnostics into `manifest.queue_health`. That is the archival copy of the same numbers the status bar and diagnostics dock display live.
 
 ---
 

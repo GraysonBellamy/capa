@@ -143,6 +143,7 @@ class _Buffer:
         return len(self.t_mono_ns)
 
     def clear(self) -> None:
+        """Discard every buffered column. Called after a successful flush."""
         self.t_mono_ns.clear()
         self.t_mono_s.clear()
         self.channel.clear()
@@ -158,6 +159,7 @@ class _Buffer:
         self.source_field.clear()
 
     def to_table(self, schema: pa.Schema) -> pa.Table:
+        """Materialize buffered columns as a :class:`pyarrow.Table` matching ``schema``."""
         return pa.table(
             {
                 "t_mono_ns": pa.array(self.t_mono_ns, type=pa.int64()),

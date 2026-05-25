@@ -134,6 +134,7 @@ def gather_capa(
 
 
 def gather_python() -> PythonBlock:
+    """Snapshot the running interpreter as a :class:`PythonBlock`."""
     return PythonBlock(
         version=_platform.python_version(),
         implementation=_platform.python_implementation(),
@@ -142,6 +143,7 @@ def gather_python() -> PythonBlock:
 
 
 def gather_platform() -> PlatformBlock:
+    """Snapshot the host platform as a :class:`PlatformBlock`."""
     return PlatformBlock(
         os=_platform.platform(aliased=False, terse=False),
         machine=_platform.machine() or "unknown",

@@ -224,6 +224,7 @@ def require_descriptor(adapter_id: str) -> AdapterDescriptor:
 
 
 def all_for_family(family: AdapterFamily) -> tuple[AdapterDescriptor, ...]:
+    """Iterate every registered adapter descriptor for ``family``."""
     return tuple(d for d in ADAPTERS.values() if d.family == family)
 
 

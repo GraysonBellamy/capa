@@ -512,7 +512,7 @@ When two adapters share a `resource_id`, they share a Worker and their I/O seria
 1. **Serial port uniqueness.** Same port → same `resource_id`.
 2. **DAQmx physical-channel uniqueness.** No two adapters claim the same channel. The default `resource_id` is keyed on the physical chassis (e.g. `daqmx:chassis:cDAQ1`) because tasks on the same chassis share timing engines — DAQmx will throw `-50103 resource reserved` if they're armed without coordination.
 3. **Webcam handle uniqueness.** Same `webcam:N` may not be claimed by two adapters.
-4. **Global SDK singletons documented.** NI-DAQmx system handle, PyAV format registration, FLIR Spinnaker `System.GetInstance()` are process-singletons regardless of `resource_id`. The pool writes these into `diagnostics.runtime.global_sdk_constraints`; resource grouping does **not** isolate them. SubprocessWorker (§11) is the only structural isolation.
+4. **Global SDK singletons documented.** NI-DAQmx system handle, PyAV format registration, FLIR Spinnaker `System.GetInstance()` are process-singletons regardless of `resource_id`. Materialization logs these as `devices.materialize.global_sdk_constraints` in the structlog stream; resource grouping does **not** isolate them. SubprocessWorker (§11) is the only structural isolation.
 
 Validation failures raise `ResourceConflict`; pool open aborts before any hardware is touched.
 
@@ -560,7 +560,7 @@ The risk surface is `CustomStep`: plugin authors can register arbitrary handlers
 
 ## 14. Observability
 
-Every loop and every bridge is measured. The bundle's manifest gains a `diagnostics.runtime` block with per-thread, per-bridge, per-worker numbers.
+Every loop and every bridge is measured. The bundle's manifest gains a `queue_health` block with loop, bridge, worker, runtime, and writer-inbox diagnostics.
 
 **Per-loop heartbeat** (every worker + conductor + UI), via [`heartbeat.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/heartbeat.py):
 
@@ -602,7 +602,7 @@ class WorkerMetrics:
 `WorkerMetrics` as metadata; runtime enforcement for stream silence or
 per-device fatal-error escalation is not implemented today.
 
-**Per-thread CPU usage** is polled at 1 Hz inside the Conductor via `psutil.Process().threads()`.
+**Archival snapshot:** before seal, the conductor hands `runtime_diagnostics()` to the run session, which folds it into `manifest.queue_health` alongside the writer and metrics-registry snapshots.
 
 **Logging:** every worker thread sets a contextvar-bound `structlog` context at thread entry (`thread="worker"`, `resource_id`, `adapters`). Conductor and UI similarly bind. Every log line in a run identifies which thread emitted it.
 
@@ -695,8 +695,8 @@ All have sensible defaults. The corresponding schema type is
   An adapter that declines to declare a rate contributes nothing.
 - `saturation_deadline_s` and `saturation_poll_period_s` — live on
   `ConductorConfig` (see [§6.3](#63-saturation-deadline)) but are
-  internal timing knobs. The headless CLI exposes
-  `saturation_deadline_s` as a flag for diagnostic runs.
+  internal timing knobs. The Python `run_headless(...)` helper accepts a
+  diagnostic override; the `capa run` CLI does not expose a flag today.
 - The five adapter-grace timers (`adapter_start_grace_s`,
   `adapter_stop_grace_s`, `adapter_close_grace_s`, `stream_cancel_grace_s`,
   `runner_stop_grace_s`) — live on

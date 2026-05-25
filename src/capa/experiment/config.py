@@ -108,9 +108,11 @@ class HardwareProfile(BaseModel):
         return self
 
     def channel_names(self) -> tuple[str, ...]:
+        """Tuple of channel names declared by this section of the config."""
         return tuple(c.name for c in self.channels)
 
     def camera_names(self) -> tuple[str, ...]:
+        """Tuple of camera names declared by this section of the config."""
         return tuple(c.name for c in self.cameras)
 
 
@@ -292,6 +294,8 @@ class SampleInfo(BaseModel):
 
 
 class OperatorRef(BaseModel):
+    """Operator identity attached to an experiment — id plus optional display name."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
     id: str
     display_name: str | None = None
@@ -453,6 +457,7 @@ class ExperimentConfig(BaseModel):
         return self
 
     def channel_names(self) -> tuple[str, ...]:
+        """Tuple of channel names declared by this section of the config."""
         return self.hardware.channel_names()
 
     @classmethod

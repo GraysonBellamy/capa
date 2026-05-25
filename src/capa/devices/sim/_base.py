@@ -60,6 +60,7 @@ def synth_timing(
 
 
 def now_utc() -> datetime:
+    """Current UTC wall-clock time. Overridable seam for deterministic sim tests."""
     return datetime.now(UTC)
 
 

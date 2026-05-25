@@ -90,6 +90,7 @@ class _StartingPointPage(QWizardPage):
         layout.addStretch(1)
 
     def validatePage(self) -> bool:
+        """Qt wizard hook — validate this wizard page before allowing Next."""
         idx = self._group.checkedId()
         if idx < 0:
             return False
@@ -146,6 +147,7 @@ class _LayoutPage(QWizardPage):
         layout.addStretch(1)
 
     def validatePage(self) -> bool:
+        """Qt wizard hook — validate this wizard page before allowing Next."""
         idx = self._group.checkedId()
         if idx < 0:
             return False
@@ -204,6 +206,7 @@ class _MethodPage(QWizardPage):
         self._path_edit.setEnabled(choice == "attach")
 
     def validatePage(self) -> bool:
+        """Qt wizard hook — validate this wizard page before allowing Next."""
         idx = self._group.checkedId()
         if idx < 0:
             return False
@@ -261,6 +264,7 @@ class _SavePage(QWizardPage):
         self._path_edit.setEnabled(save_now)
 
     def validatePage(self) -> bool:
+        """Qt wizard hook — validate this wizard page before allowing Next."""
         self._spec.save_now = self._save_now_btn.isChecked()
         if self._spec.save_now:
             text = self._path_edit.text().strip()

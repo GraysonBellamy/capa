@@ -77,32 +77,37 @@ class ProcedureRunner:
     conductor. State carried across runs would be a bug; the procedure
     plugin layer already has its own per-instance lifecycle.
 
-    :param procedure: The resolved procedure plugin instance.
-    :param config: The frozen run recipe.
-    :param channel_registry: Frozen channel registry the procedure resolves
-        names against.
-    :param dispatcher: Command-dispatch surface (typically a
-        :class:`~capa.runtime.dispatch.ConductorDispatcher` for runs through
-        the conductor; an :class:`AdapterDispatcher` for engine-path tests).
-    :param authorization: Run-arm authorization handle.
-    :param adapters: Adapter handles keyed by device name (introspection
-        only — the dispatcher does the commanding).
-    :param external_stop: Procedures that loop poll this; the conductor
-        sets it during shutdown so blocking procedures exit promptly.
-    :param bundle_writer: For procedure-side event recording (via
-        ``ctx.bundle_writer.write_event(...)``). The conductor's drain
-        tasks own all *data* writes — procedures only record structured
-        events.
-    :param method_executor: Optional. Procedures that walk a method (recipe
-        runner, etc.) get the executor preconstructed against the same
-        context.
-    :param ui_sink: Optional UI-only telemetry sink — when wired, the
-        procedure can publish :class:`~capa.runtime.emissions.ProcedureTick`
-        payloads through ``ctx.ui_sink.publish(tick)`` and they land
-        on the UI bridge without touching the writer or the data bus.
-        ``None`` for headless / test paths; the conductor's
-        :meth:`~capa.runtime.conductor.Conductor.procedure_ui_sink`
-        is the production source.
+    Args:
+        procedure: The resolved procedure plugin instance.
+        config: The frozen run recipe.
+        channel_registry: Frozen channel registry the procedure resolves
+            names against.
+        dispatcher: Command-dispatch surface (typically a
+            :class:`~capa.runtime.dispatch.ConductorDispatcher` for runs
+            through the conductor; an :class:`AdapterDispatcher` for
+            engine-path tests).
+        authorization: Run-arm authorization handle.
+        adapters: Adapter handles keyed by device name (introspection
+            only — the dispatcher does the commanding).
+        bundle_writer: For procedure-side event recording (via
+            ``ctx.bundle_writer.write_event(...)``). The conductor's drain
+            tasks own all *data* writes — procedures only record structured
+            events.
+        method_executor: Optional. Procedures that walk a method (recipe
+            runner, etc.) get the executor preconstructed against the same
+            context.
+        stop_signal: The conductor's loop-local completion event; the
+            procedure's view of cooperative shutdown is the
+            ``anyio.Event`` published via ``ctx.external_stop``, which
+            is bridged to this signal.
+        ui_sink: Optional UI-only telemetry sink — when wired, the
+            procedure can publish
+            :class:`~capa.runtime.emissions.ProcedureTick` payloads
+            through ``ctx.ui_sink.publish(tick)`` and they land on the
+            UI bridge without touching the writer or the data bus.
+            ``None`` for headless / test paths; the conductor's
+            :meth:`~capa.runtime.conductor.Conductor.procedure_ui_sink`
+            is the production source.
     """
 
     __slots__ = (

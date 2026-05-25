@@ -178,7 +178,7 @@ is enough to re-locate the source on disk.
 Exact Python dependency tree at run-start. Two files:
 
 - `uv.lock` — verbatim copy of the lockfile found at run start.
-  Hashed into `BundleManifest.lockfile.sha256`.
+  Hashed into the `manifest.json` `lockfile.sha256` field.
 - `packages.json` — installed distribution metadata (name, version,
   dist-info hash) gathered by `gather_provenance`.
 

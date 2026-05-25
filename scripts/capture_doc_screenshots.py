@@ -59,7 +59,7 @@ import time
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -239,10 +239,8 @@ def gui(
         time.sleep(1.0)
         yield probe
     finally:
-        try:
+        with suppress(Exception):
             Probe().post("/trigger", {"action": "Quit"})
-        except Exception:
-            pass
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
@@ -489,10 +487,8 @@ def shot_method_validate_error(probe: Probe) -> None:
     time.sleep(0.4)
 
     def _fire() -> None:
-        try:
+        with suppress(Exception):
             Probe().post("/trigger", {"action": "Validate method"})
-        except Exception:
-            pass
 
     t = threading.Thread(target=_fire, daemon=True)
     t.start()
@@ -545,10 +541,8 @@ def shot_manual_confirm_dialog(probe: Probe) -> None:
     time.sleep(0.3)
 
     def _fire() -> None:
-        try:
+        with suppress(Exception):
             Probe().post("/click", {"target": "heater_cool_to_safe_button"})
-        except Exception:
-            pass
 
     t = threading.Thread(target=_fire, daemon=True)
     t.start()
@@ -659,10 +653,8 @@ def shot_setup_wizard(probe: Probe) -> None:
     time.sleep(0.3)
 
     def _fire() -> None:
-        try:
+        with suppress(Exception):
             Probe().post("/trigger", {"action": "New from template…"})
-        except Exception:
-            pass
 
     t = threading.Thread(target=_fire, daemon=True)
     t.start()

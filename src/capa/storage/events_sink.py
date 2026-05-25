@@ -81,6 +81,7 @@ class EventsSink:
 
     @property
     def path(self) -> Path:
+        """Path to the ``events.sqlite`` database backing this sink."""
         return self._path
 
     def write(
@@ -138,6 +139,7 @@ class EventsSink:
         )
 
     def close(self) -> None:
+        """Checkpoint the WAL and close the connection. Idempotent."""
         if self._closed:
             return
         self._closed = True

@@ -64,6 +64,7 @@ class SetupDraft:
 
     @property
     def is_dirty(self) -> bool:
+        """``True`` if the draft has unsaved changes relative to the loaded config."""
         return bool(self.dirty_sections)
 
     @property
@@ -81,6 +82,7 @@ class SetupDraft:
 
     @property
     def has_errors(self) -> bool:
+        """``True`` if validation produced at least one error-severity problem."""
         return any(p.severity == "error" for p in self.problems)
 
     # -- validation ---------------------------------------------------------

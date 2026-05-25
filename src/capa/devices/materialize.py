@@ -358,8 +358,8 @@ def collect_resource_problems(
        throw ``-50103 resource reserved`` if attempted.
     2. **Webcam handle uniqueness.** Same ``webcam:<id>`` may not appear
        in two adapters.
-    3. **Global SDK singletons** are recorded into a side log for the
-       conductor to include in the bundle manifest.
+    3. **Global SDK singletons** are recorded into the structlog stream
+       for post-run diagnostics.
 
     Never raises — every conflict yields a :class:`ConfigProblem`. The
     raising boundary lives at
@@ -433,9 +433,8 @@ def _record_global_sdk_constraints(resolved: Sequence[ResolvedAdapter], hardware
     """Note global-SDK singletons in the structlog stream.
 
     NI-DAQmx, PyAV, FLIR Spinnaker have process-singleton state that
-    ``resource_id`` cannot isolate. We don't raise here — the bundle's
-    ``diagnostics.runtime.global_sdk_constraints`` map records these so
-    an operator triaging a crash can see at a glance whether
+    ``resource_id`` cannot isolate. We don't raise here; we emit a
+    structured log event so an operator triaging a crash can see whether
     process-singleton state was involved.
     """
     constraints: list[dict[str, Any]] = []

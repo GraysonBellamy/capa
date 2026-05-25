@@ -61,9 +61,15 @@ class StatusSink:
 
     @property
     def path(self) -> Path:
+        """Path to the bundle's ``status.sqlite`` database."""
         return self._path
 
     def write(self, snapshot: DeviceSnapshot) -> None:
+        """Insert one :class:`DeviceSnapshot` row into ``status.sqlite``.
+
+        Raises:
+            StatusSinkError: ``write`` was called after :meth:`close`.
+        """
         if self._closed:
             raise StatusSinkError("write() after close()")
         fields_json = json.dumps(dict(snapshot.fields)) if snapshot.fields else None
@@ -84,6 +90,7 @@ class StatusSink:
         )
 
     def close(self) -> None:
+        """Checkpoint the WAL and close the connection. Idempotent."""
         if self._closed:
             return
         self._closed = True

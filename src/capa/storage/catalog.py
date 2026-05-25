@@ -145,15 +145,18 @@ class RunCatalog:
 
     @property
     def path(self) -> Path:
+        """Path to the SQLite catalog database on disk."""
         return self._path
 
     @property
     def runs_root(self) -> Path:
+        """Root directory under which bundle paths in this catalog are recorded."""
         return self._runs_root
 
     # ------------------------------------------------------------------ inserts
 
     def upsert_operator(self, operator_id: str, display_name: str | None) -> None:
+        """Insert or refresh the operator row, marking it active."""
         self._conn.execute(
             """
             INSERT INTO operators (id, display_name, active)
@@ -253,6 +256,7 @@ class RunCatalog:
     # ------------------------------------------------------------------ list / get
 
     def get(self, run_id: str) -> CatalogRow | None:
+        """Return the catalog row for ``run_id``, or ``None`` if no such run exists."""
         cursor = self._conn.execute("SELECT * FROM runs WHERE run_id = ?;", (run_id,))
         row = cursor.fetchone()
         return None if row is None else _row_to_catalog(row)
@@ -264,6 +268,7 @@ class RunCatalog:
         bundle_status: BundleStatus | None = None,
         since: datetime | None = None,
     ) -> list[CatalogRow]:
+        """Return catalog rows filtered by status and optional ``since`` timestamp."""
         clauses: list[str] = []
         params: list[Any] = []
         if run_status is not None:
@@ -356,6 +361,7 @@ class RunCatalog:
     # ------------------------------------------------------------------ misc
 
     def close(self) -> None:
+        """Checkpoint the WAL and close the SQLite connection. Idempotent."""
         if self._closed:
             return
         self._closed = True

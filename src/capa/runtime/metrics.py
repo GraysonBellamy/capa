@@ -1,8 +1,8 @@
 """:class:`WorkerMetrics`, :class:`DisarmResult` — per-worker telemetry surface.
 
 The per-worker metrics block is consumed by the bundle's
-``diagnostics.runtime`` manifest entry and by the UI status bar's
-per-loop lag badge.
+``manifest.queue_health`` snapshot and by the UI status bar's per-loop
+lag badge.
 
 Why a dataclass on top of free-standing fields:
 
@@ -182,9 +182,12 @@ class WorkerMetrics:
             self.commands_failed += 1
 
     def observe_sample_emitted(self) -> None:
+        """Increment the per-sample emission counter. Called once per
+        :class:`~capa.runtime.emissions.WorkerEmission` the worker fans out."""
         self.samples_emitted += 1
 
     def observe_tick_duration(self, dt_ms: float) -> None:
+        """Record the duration of one worker tick (poll+emit) for percentile tracking."""
         self.tick_duration_ms.observe(dt_ms)
 
     def observe_poll_emitted(self, *, t_mono_s: float) -> None:
@@ -207,18 +210,22 @@ class WorkerMetrics:
 
     @property
     def tick_duration_p50_ms(self) -> float:
+        """Median worker-tick duration in milliseconds."""
         return self.tick_duration_ms.p50
 
     @property
     def tick_duration_p99_ms(self) -> float:
+        """99th-percentile worker-tick duration in milliseconds."""
         return self.tick_duration_ms.p99
 
     @property
     def poll_period_p50_ms(self) -> float:
+        """Median observed inter-poll period in milliseconds."""
         return self.poll_period_ms.p50
 
     @property
     def poll_period_p99_ms(self) -> float:
+        """99th-percentile observed inter-poll period in milliseconds."""
         return self.poll_period_ms.p99
 
     @property
@@ -243,6 +250,7 @@ class WorkerMetrics:
 
     @property
     def loop_lag_ms_p99(self) -> float:
+        """99th-percentile worker-loop heartbeat lag in milliseconds."""
         return self.loop_lag.p99_ms
 
 

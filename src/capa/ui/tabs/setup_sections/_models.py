@@ -17,6 +17,7 @@ def horizontal_header(
     orientation: Qt.Orientation,
     role: int,
 ) -> object:
+    """Column-header labels for this table model."""
     if role != Qt.ItemDataRole.DisplayRole:
         return None
     if orientation == Qt.Orientation.Horizontal and 0 <= section < len(headers):
@@ -25,6 +26,7 @@ def horizontal_header(
 
 
 def unique_name(existing: Iterable[str], base: str) -> str:
+    """Generate a unique name that does not collide with the section's existing entries."""
     used = set(existing)
     if base not in used:
         return base

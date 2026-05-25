@@ -198,6 +198,7 @@ class WatlowAdapterParams(BaseModel):
         )
 
     def protocol_kind(self) -> ProtocolKind:
+        """Wire protocol family (e.g. ``"sbi"``, ``"sbi-pid"``) for this controller."""
         return _PROTOCOL_BY_NAME[self.protocol]
 
 
@@ -350,10 +351,12 @@ class WatlowAdapter:
     @property
     def expected_emission_rate_hz(self) -> float:
         # One SourceRecord + one ChannelSample per bound channel per poll.
+        """Emission rate hint for queue sizing. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return self.params.rate_hz * (1 + len(self._channels))
 
     @property
     def resource_id(self) -> str:
+        """Stable contention-domain identifier. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return serial_resource_id(self.params.port)
 
     @property
@@ -671,6 +674,7 @@ class WatlowAdapter:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
+        """Set the controller setpoint. Authorization rules match :meth:`command`."""
         return await self.command(
             DeviceCommand(
                 kind="set_setpoint",
@@ -692,6 +696,7 @@ class WatlowAdapter:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
+        """Write a typed device parameter. Authorization rules match :meth:`command`."""
         return await self.command(
             DeviceCommand(
                 kind="write_parameter",

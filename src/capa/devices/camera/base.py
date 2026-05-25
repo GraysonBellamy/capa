@@ -129,11 +129,12 @@ class CameraSpec(BaseModel):
     """Per-camera configuration entry inside
     :class:`~capa.experiment.config.HardwareProfile`.
 
-    ``adapter`` is the importable adapter class — either a built-in
-    (``capa.devices.camera.webcam``, ``capa.devices.sim.flir_ir_sim``) or a
-    plugin id resolved through the ``capa.cameras`` entry-point group
-    (``capa-flir``'s ``flir_ir``). The same dispatch rules as
-    :class:`~capa.experiment.config.DeviceConfig` apply.
+    ``adapter`` is the importable adapter descriptor id — either a built-in
+    dotted module path (``capa.devices.camera.webcam``,
+    ``capa.devices.sim.flir_ir_sim``) or a short id registered through the
+    ``capa.cameras`` entry-point group after the descriptor registry has been
+    loaded (``capa-flir``'s ``flir_ir``). For unattended headless runs, dotted
+    module paths are the safest form because they can be imported lazily.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

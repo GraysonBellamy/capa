@@ -160,6 +160,7 @@ class WorkerPool:
 
     @property
     def state(self) -> PoolState:
+        """Current :class:`PoolState` — ``IDLE``, ``OPEN``, or ``DRAINING``."""
         return self._state
 
     @property
@@ -169,6 +170,7 @@ class WorkerPool:
 
     @property
     def device_names(self) -> tuple[str, ...]:
+        """All device names owned by any worker in the pool, in registration order."""
         return tuple(self._device_to_resource)
 
     def preview_bridges(self) -> Mapping[str, ThreadBridge[PreviewFrame]]:

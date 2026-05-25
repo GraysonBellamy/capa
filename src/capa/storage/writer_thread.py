@@ -172,6 +172,7 @@ class WriterThread:
 
     @property
     def capacity(self) -> int:
+        """Maximum inbox capacity (the writer's backpressure threshold)."""
         return self._capacity
 
     @property
@@ -217,14 +218,17 @@ class WriterThread:
 
     @property
     def is_alive(self) -> bool:
+        """``True`` if the drain thread has been spawned and has not yet exited."""
         return self._thread is not None and self._thread.is_alive()
 
     @property
     def started(self) -> bool:
+        """``True`` once :meth:`start` has been called."""
         return self._started
 
     @property
     def closed(self) -> bool:
+        """``True`` once :meth:`close` has been called."""
         return self._closed
 
     # ------------------------------------------------------------------ lifecycle
@@ -326,18 +330,23 @@ class WriterThread:
     # ------------------------------------------------------------------ async record helpers
 
     async def record_sample(self, sample: ChannelSample) -> None:
+        """Submit a :class:`ChannelSample` to the writer thread."""
         await self.submit(sample)
 
     async def record_source(self, record: SourceRecord) -> None:
+        """Submit a :class:`SourceRecord` to the writer thread."""
         await self.submit(record)
 
     async def record_event(self, event: DeviceEvent) -> None:
+        """Submit a :class:`DeviceEvent` to the writer thread."""
         await self.submit(event)
 
     async def record_snapshot(self, snapshot: DeviceSnapshot) -> None:
+        """Submit a :class:`DeviceSnapshot` to the writer thread."""
         await self.submit(snapshot)
 
     async def record_frame(self, receipt: FrameReceipt) -> None:
+        """Submit a :class:`FrameReceipt` (wrapped as a :class:`FrameItem`)."""
         await self.submit(FrameItem(receipt=receipt))
 
     async def write_event(
@@ -351,6 +360,7 @@ class WriterThread:
         t_utc: datetime,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        """Construct and submit a runtime-side :class:`WriteEventItem`."""
         await self.submit(
             WriteEventItem(
                 kind=kind,

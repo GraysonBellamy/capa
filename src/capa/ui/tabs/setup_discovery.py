@@ -381,11 +381,13 @@ class DiscoveryDialog(QDialog):
         super().closeEvent(event)
 
     def reject(self) -> None:
+        """Qt dialog reject slot — close the dialog with a rejected result."""
         self._closed = True
         self._cancel_pending_scans()
         super().reject()
 
     def accept(self) -> None:
+        """Qt dialog accept slot — close the dialog with a positive result."""
         self._closed = True
         self._cancel_pending_scans()
         super().accept()
@@ -514,6 +516,7 @@ class DiscoveryDialog(QDialog):
             )
 
     def set_existing_names(self, names: set[str]) -> None:
+        """Update the set of names this dialog should treat as duplicates."""
         self._existing_names = set(names)
 
     def mark_scan_complete(

@@ -196,6 +196,7 @@ class RunTab(QWidget):
         self._start_btn.setEnabled(self.can_start())
 
     def can_start(self) -> bool:
+        """``True`` if the Run tab's preconditions are satisfied."""
         if self._config is None or self._controller.is_active:
             return False
         if not bool(getattr(self._controller, "hardware_ready", True)):

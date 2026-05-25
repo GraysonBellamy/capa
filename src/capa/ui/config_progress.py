@@ -48,10 +48,12 @@ class ConfigLoadProgress:
 
     @property
     def total(self) -> int:
+        """Total count this widget tracks (e.g. progress denominator)."""
         return len(self.devices)
 
     @property
     def completed(self) -> int:
+        """Count of completed items so far."""
         return sum(
             1
             for row in self.devices
@@ -179,12 +181,14 @@ class HardwareInitDialog(QDialog):
             QTimer.singleShot(650, self.accept)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         if self._terminal:
             super().closeEvent(event)
         else:
             event.ignore()
 
     def reject(self) -> None:
+        """Qt dialog reject slot — close the dialog with a rejected result."""
         if self._terminal:
             super().reject()
 

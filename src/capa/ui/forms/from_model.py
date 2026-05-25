@@ -93,6 +93,7 @@ class _HelpButton(QLabel):
         self.setCursor(Qt.CursorShape.WhatsThisCursor)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         QToolTip.showText(self.mapToGlobal(self.rect().bottomLeft()), self._help_text, self)
 
 

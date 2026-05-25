@@ -41,9 +41,11 @@ class _LineEditField(FieldWidget):
         self._edit.textChanged.connect(self.valueChanged)
 
     def value(self) -> str:
+        """Current value held by this widget, coerced to the model-side type."""
         return self._edit.text()
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._edit):
             self._edit.setText("" if v is None else str(v))
 
@@ -75,9 +77,11 @@ class _SpinBoxField(FieldWidget):
         self._spin.valueChanged.connect(self.valueChanged)
 
     def value(self) -> int:
+        """Current value held by this widget, coerced to the model-side type."""
         return int(self._spin.value())
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._spin):
             self._spin.setValue(int(v) if v is not None else 0)
 
@@ -117,9 +121,11 @@ class _DoubleSpinBoxField(FieldWidget):
         self._spin.valueChanged.connect(self.valueChanged)
 
     def value(self) -> float:
+        """Current value held by this widget, coerced to the model-side type."""
         return float(self._spin.value())
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._spin):
             self._spin.setValue(float(v) if v is not None else 0.0)
 
@@ -134,9 +140,11 @@ class _CheckBoxField(FieldWidget):
         self._check.toggled.connect(self.valueChanged)
 
     def value(self) -> bool:
+        """Current value held by this widget, coerced to the model-side type."""
         return self._check.isChecked()
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._check):
             self._check.setChecked(bool(v))
 
@@ -154,10 +162,12 @@ class _ComboBoxField(FieldWidget):
         self._combo.currentIndexChanged.connect(self.valueChanged)
 
     def value(self) -> Any:
+        """Current value held by this widget, coerced to the model-side type."""
         idx = self._combo.currentIndex()
         return self._choices[idx] if 0 <= idx < len(self._choices) else None
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._combo):
             for i, choice in enumerate(self._choices):
                 if choice == v:
@@ -177,9 +187,11 @@ class _DateTimeField(FieldWidget):
         self._edit.dateTimeChanged.connect(self.valueChanged)
 
     def value(self) -> datetime:
+        """Current value held by this widget, coerced to the model-side type."""
         return cast(datetime, self._edit.dateTime().toPython())
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         from PySide6.QtCore import QDate, QDateTime, QTime  # noqa: PLC0415
 
         def _to_qdatetime(dt: datetime) -> QDateTime:
@@ -223,9 +235,11 @@ class _PathField(FieldWidget):
         self._browse.clicked.connect(self._on_browse)
 
     def value(self) -> Path:
+        """Current value held by this widget, coerced to the model-side type."""
         return Path(self._edit.text())
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._edit):
             self._edit.setText(str(v) if v is not None else "")
 
@@ -265,9 +279,11 @@ class _OptionalField(FieldWidget):
         self._inner.setEnabled(checked)
 
     def value(self) -> Any:
+        """Current value held by this widget, coerced to the model-side type."""
         return self._inner.value() if self._enable.isChecked() else None
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._enable):
             self._enable.setChecked(v is not None)
         self._inner.setEnabled(v is not None)

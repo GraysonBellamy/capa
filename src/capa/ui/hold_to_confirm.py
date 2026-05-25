@@ -63,6 +63,7 @@ class HoldToConfirmButton(QPushButton):
     # -- mouse handling -----------------------------------------------------
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         if not self.isEnabled():
             return
         self._held = True
@@ -71,10 +72,12 @@ class HoldToConfirmButton(QPushButton):
         self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         if self._held:
             self._cancel()
 
     def leaveEvent(self, event: QEvent) -> None:  # noqa: N802
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         if self._held:
             self._cancel()
 
@@ -106,6 +109,7 @@ class HoldToConfirmButton(QPushButton):
     # -- paint --------------------------------------------------------------
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         super().paintEvent(event)
         if not self._held:
             return

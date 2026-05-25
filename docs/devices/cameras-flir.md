@@ -31,8 +31,9 @@ separately — supplies:
 - Entry-point registration: `capa-flir` advertises
   `flir_ir = "capa_flir:DESCRIPTOR"` in the `capa.cameras` entry-point
   group, so once installed it appears under the short id `flir_ir` in
-  the Setup tab's adapter picker. Configs may use either the short id
-  or the full module path `capa_flir.flir_ir`.
+  the Setup tab's adapter picker. For unattended headless runs, prefer
+  the full module path `capa_flir.flir_ir`; the short id depends on the
+  descriptor registry having been loaded by Setup/discovery.
 
 If `capa-flir` is not installed, a config referencing `capa_flir.flir_ir`
 fails fast at load with an import error — capa core does not silently

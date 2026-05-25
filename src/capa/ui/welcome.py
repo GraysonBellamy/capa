@@ -82,6 +82,7 @@ class _ActionCard(QFrame):
         layout.addStretch(1)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
@@ -230,6 +231,7 @@ class _RecentRow(QWidget):
         layout.addStretch(1)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         if event.button() == Qt.MouseButton.LeftButton:
             self._on_click(self._entry.path)
         super().mousePressEvent(event)

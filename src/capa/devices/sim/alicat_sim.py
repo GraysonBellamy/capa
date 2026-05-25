@@ -113,33 +113,41 @@ class AlicatSim:
         )
 
     def configure_channels(self, specs: list[ChannelSpec]) -> None:
+        """Bind this adapter to the channel specs that target it."""
         self._channels = channels_for_device(
             specs, device=self.name, binding_source="alicat_frame_field"
         )
 
     @property
     def expected_emission_rate_hz(self) -> float:
+        """Emission rate hint for queue sizing. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         rate = 1.0 / self.tick_period_s if self.tick_period_s > 0 else 0.0
         return rate * (1 + len(self._channels))
 
     @property
     def resource_id(self) -> str:
+        """Stable contention-domain identifier. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return f"sim:{self.name}"
 
     async def open(self) -> None:
+        """Open the underlying connection. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         self._lifecycle.open()
 
     async def close(self) -> None:
+        """Close the underlying connection. Idempotent."""
         self._lifecycle.close()
 
     async def start(self, ctx: AdapterStartContext) -> None:
+        """Begin sampling. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         self._lifecycle.start()
         self._clock = ctx.clock
 
     async def stop(self) -> None:
+        """Stop sampling without closing the connection."""
         self._lifecycle.stop()
 
     async def snapshot(self) -> DeviceSnapshot:
+        """Return a health/status snapshot. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         clock = self._clock or RunClock.now()
         return DeviceSnapshot(
             adapter=ADAPTER_ID,
@@ -155,6 +163,7 @@ class AlicatSim:
         )
 
     async def stream(self) -> AsyncIterator[DeviceEmission]:
+        """Yield emissions while sampling. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         if self._clock is None:
             raise AdapterError("alicat_sim.stream() requires start() first")
         while self._lifecycle.state == "running":
@@ -229,6 +238,7 @@ class AlicatSim:
         return emissions
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
+        """Dispatch a generic :class:`DeviceCommand`. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         clock = self._clock or RunClock.now()
         rejection = reject_unless_authorized(
             cmd, adapter_id=ADAPTER_ID, device_name=self.name, clock=clock
@@ -244,6 +254,7 @@ class AlicatSim:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
+        """Test seam: set the simulated controller flow setpoint directly."""
         return await self.command(
             DeviceCommand(
                 kind="set_flow_setpoint",

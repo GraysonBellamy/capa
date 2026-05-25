@@ -69,6 +69,7 @@ class RecipeRunner(Procedure):
 
     @classmethod
     def from_config(cls, raw: dict[str, object] | None) -> RecipeRunner:
+        """Build this procedure plugin from the experiment's frozen :class:`~capa.experiment.config.ExperimentConfig`."""
         cfg = RecipeRunnerConfig.model_validate(raw or {})
         return cls(
             auto_acknowledge_prompts=cfg.auto_acknowledge_prompts,
@@ -76,6 +77,7 @@ class RecipeRunner(Procedure):
         )
 
     async def preflight(self, ctx: ProcedureContext) -> list[Problem]:
+        """Procedure preflight. See :class:`~capa.experiment.procedures.base.Procedure`."""
         problems: list[Problem] = []
         if ctx.config.method is None:
             raise ProcedureError(
@@ -94,6 +96,7 @@ class RecipeRunner(Procedure):
         return problems
 
     async def run(self, ctx: ProcedureContext) -> None:
+        """Procedure main loop. See :class:`~capa.experiment.procedures.base.Procedure`."""
         assert ctx.config.method is not None  # guaranteed by preflight
         executor: MethodExecutor = ctx.method_executor  # type: ignore[assignment]
         executor.auto_acknowledge_prompts = self.auto_acknowledge_prompts

@@ -60,6 +60,7 @@ RELEVANT_CAPABILITIES: Final[tuple[Capability, ...]] = (
 
 
 def is_alicat_device(spec: DeviceConfig) -> bool:
+    """Filter predicate: ``True`` if ``device`` is an Alicat MFC/MFM."""
     return "alicat" in spec.adapter.lower()
 
 

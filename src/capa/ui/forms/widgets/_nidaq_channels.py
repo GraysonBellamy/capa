@@ -482,6 +482,7 @@ class NIDAQChannelsField(FieldWidget):
         return [{k: v for k, v in row.items() if v not in (None, "")} for row in self._rows]
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         rows: list[dict[str, Any]] = []
         if isinstance(v, Iterable):
             for entry in v:

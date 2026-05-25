@@ -193,11 +193,13 @@ def write_toml_hardware(payload: Mapping[str, Any], path: Path) -> None:
 
 
 def write_toml_string_experiment(payload: Mapping[str, Any]) -> bytes:
+    """Canonicalize and serialize an experiment payload to UTF-8 TOML bytes."""
     canonical = canonicalise_experiment_payload(payload)
     return tomli_w.dumps(canonical).encode("utf-8")
 
 
 def write_toml_string_hardware(payload: Mapping[str, Any]) -> bytes:
+    """Canonicalize and serialize a hardware-profile payload to UTF-8 TOML bytes."""
     canonical = canonicalise_hardware_payload(payload)
     return tomli_w.dumps(canonical).encode("utf-8")
 

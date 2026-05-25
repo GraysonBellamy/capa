@@ -36,9 +36,9 @@ experiment YAML  ────────────────►  hardware T
        │
        ├──► calibration_set        (by name; resolved against configs/calibrations/)
        │
-       ├──► procedure.id           (plugin id, matched against plugins.lock)
+       ├──► procedure.id           (procedure plugin id; production uses plugins.lock)
        │
-       └──► domain_profile.id      (plugin id; CAPA-pyrolysis is the default)
+       └──► domain_profile.id      (profile id; CAPA-pyrolysis is the default)
 ```
 
 YAML is the recommended format for experiment files because the nested
@@ -151,7 +151,7 @@ The runtime distinguishes config changes that require tearing down the
 | Change a device's `resource_id` | no — rebuild | resource grouping changes |
 | Add / remove / rename a channel | no — rebuild | channel registry is constructed at apply |
 | Change a channel's calibration | yes — hot | calibrations are applied per-sample |
-| Change a channel's `alarms` | yes — hot | safety reads alarms at evaluation |
+| Change a channel's `alarms` | yes — hot | schema is preserved today; the runtime safety evaluator is planned |
 | Change a channel's `plot_group` | yes — hot | UI-only metadata |
 | Change anything under `domain_profile.metadata` | yes — hot | profile metadata is read at arm |
 | Change the procedure id or config | yes — hot | procedure is constructed at arm |

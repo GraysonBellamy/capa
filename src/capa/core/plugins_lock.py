@@ -103,6 +103,7 @@ class PluginsLock(BaseModel):
         return cls.model_validate(data)
 
     def get(self, plugin_id: str) -> PluginEntry | None:
+        """Return the locked :class:`PluginEntry` for ``plugin_id``, or ``None`` if absent."""
         for entry in self.plugins:
             if entry.id == plugin_id:
                 return entry

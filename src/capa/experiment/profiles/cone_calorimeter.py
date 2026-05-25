@@ -20,8 +20,9 @@ The profile contributes:
   recency, disk projection, balance stability, heat-flux gauge presence,
   required channel mappings
 
-The profile snapshot lands in ``profiles/cone_calorimeter.toml`` and is
-referenced from ``manifest.json.domain_profile``.
+The profile snapshot lands in ``profiles/cone_calorimeter.toml``. The
+manifest's ``domain_profile`` block records the active id and standard
+references.
 """
 
 from __future__ import annotations

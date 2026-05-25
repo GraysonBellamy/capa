@@ -40,7 +40,7 @@ def run(
         Path | None,
         typer.Option(
             "--plugins-lock",
-            help="Optional plugins.lock to record into the manifest.",
+            help="plugins.lock for procedure trust; mirrored into the manifest.",
         ),
     ] = None,
 ) -> None:
@@ -51,8 +51,9 @@ def run(
     catalog row tracks ``run_status`` / ``bundle_status`` /
     ``integrity_status``.
 
-    Exit codes: 0 = completed + sealed, 1 = aborted, 2 = crashed,
-    3 = verification_failed, 4 = preflight refusal.
+    Exit codes: 0 = completed + sealed, 1 = aborted (includes preflight
+    refusal — the preflight path emits ``run_status="aborted"``), 2 = crashed
+    (or config load failed before the engine started), 3 = verification_failed.
     """
     root = resolve_runs_root(runs_root)
     root.mkdir(parents=True, exist_ok=True)
@@ -134,7 +135,7 @@ def gui(
         Path | None,
         typer.Option(
             "--plugins-lock",
-            help="Optional plugins.lock to record into the manifest.",
+            help="plugins.lock for procedure trust; mirrored into the manifest.",
         ),
     ] = None,
 ) -> None:

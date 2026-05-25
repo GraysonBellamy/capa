@@ -60,6 +60,7 @@ class ProblemsTableModel(QAbstractTableModel):
         self._problems: list[ConfigProblem] = []
 
     def set_problems(self, problems: list[ConfigProblem]) -> None:
+        """Replace the problems shown by this widget."""
         self.beginResetModel()
         self._problems = sorted(
             problems, key=lambda p: (_SEVERITY_ORDER.get(p.severity, 99), p.section)
@@ -67,6 +68,7 @@ class ProblemsTableModel(QAbstractTableModel):
         self.endResetModel()
 
     def problem_at(self, row: int) -> ConfigProblem | None:
+        """Return the :class:`ConfigProblem` at the given row."""
         if 0 <= row < len(self._problems):
             return self._problems[row]
         return None
@@ -78,11 +80,13 @@ class ProblemsTableModel(QAbstractTableModel):
     # -- QAbstractTableModel ------------------------------------------------
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of rows in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self._problems)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of columns in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(_HEADERS)
@@ -93,11 +97,13 @@ class ProblemsTableModel(QAbstractTableModel):
         orientation: Qt.Orientation,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> object:
+        """Header label for the given section / orientation. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         return horizontal_header(_HEADERS, section, orientation, role)
 
     def data(  # type: ignore[override]
         self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> object:
+        """Return the value at ``index`` for ``role``. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         if not index.isValid():
             return None
         row = index.row()
@@ -135,6 +141,7 @@ class _WordWrapDelegate(QStyledItemDelegate):
     def initStyleOption(
         self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
     ) -> None:
+        """Qt delegate hook — see :class:`PySide6.QtWidgets.QStyledItemDelegate`."""
         super().initStyleOption(option, index)
         option.features |= QStyleOptionViewItem.ViewItemFeature.WrapText
         option.textElideMode = Qt.TextElideMode.ElideNone
@@ -195,6 +202,7 @@ class SetupProblems(QWidget):
     # -- API ----------------------------------------------------------------
 
     def set_problems(self, problems: list[ConfigProblem]) -> None:
+        """Replace the problems shown by this widget."""
         self._model.set_problems(problems)
         errs = sum(1 for p in problems if p.severity == "error")
         warns = sum(1 for p in problems if p.severity == "warning")

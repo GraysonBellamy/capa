@@ -100,12 +100,14 @@ class MethodTableModel(QAbstractTableModel):
         self,
         parent: QModelIndex | QPersistentModelIndex | None = None,
     ) -> int:
+        """Number of rows in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         return 0 if parent is not None and parent.isValid() else len(self._steps)
 
     def columnCount(  # noqa: N802 - Qt
         self,
         parent: QModelIndex | QPersistentModelIndex | None = None,
     ) -> int:
+        """Number of columns in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         return 0 if parent is not None and parent.isValid() else len(_HEADERS)
 
     def data(
@@ -113,6 +115,7 @@ class MethodTableModel(QAbstractTableModel):
         index: QModelIndex | QPersistentModelIndex,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> Any:
+        """Return the value at ``index`` for ``role``. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
             return None
         row = index.row()
@@ -136,6 +139,7 @@ class MethodTableModel(QAbstractTableModel):
         orientation: Qt.Orientation,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> Any:
+        """Header label for the given section / orientation. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         if orientation == Qt.Orientation.Horizontal and 0 <= section < len(_HEADERS):
@@ -149,11 +153,13 @@ class MethodTableModel(QAbstractTableModel):
         return tuple(self._steps)
 
     def step_at(self, row: int) -> Step | None:
+        """Return the method step at the given row index."""
         if 0 <= row < len(self._steps):
             return self._steps[row]
         return None
 
     def set_steps(self, steps: tuple[Step, ...]) -> None:
+        """Replace the table's step list."""
         self.beginResetModel()
         self._steps = list(steps)
         self.endResetModel()
@@ -178,6 +184,7 @@ class MethodTableModel(QAbstractTableModel):
         self.endInsertRows()
 
     def remove_step(self, row: int) -> None:
+        """Remove the step at the given row."""
         if not 0 <= row < len(self._steps):
             return
         self.beginRemoveRows(QModelIndex(), row, row)

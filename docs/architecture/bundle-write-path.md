@@ -104,9 +104,9 @@ When the conductor signals end-of-run, the writer thread:
      - Write to `<name>.parquet.tmp` with row-group size 256k, zstd:6, Parquet data page v2.
      - `os.replace(tmp, final)` — atomic rename.
    - Torn / unreadable in-flight files are logged to `manifest.custom["finalize_warnings"]` and removed.
-   - Update manifest: `ended_utc`, `run_status`, `data_shape`.
-   - Compute `manifest.sha256` and write it.
-3. **Stamps `bundle_status`** through `finalizing → finalized_unverified → sealed | verification_failed` along the way.
+   - Update manifest: `ended_utc`, `run_status`, `data_shape`, `bundle_status="sealed"`, and `integrity.status="ok"`.
+   - Compute `manifest.sha256`, write it, then verify the bundle against it.
+3. **Leaves or revises `bundle_status`.** A clean integrity walk leaves the manifest at `sealed`; a non-`ok` verification result rewrites it to `verification_failed`. `finalized_unverified` is an enum value for data-complete bundles that still lack a digest; the normal finalize path does not pause there.
 
 `finalize_in_place` is **idempotent**: running it on an already-sealed bundle is a no-op (same digest, manifest unchanged). Running it on a bundle whose in-flight files are missing but final files exist behaves as "verify and seal." This is the property that lets `capa finalize` work as crash-recovery (see below).
 
@@ -155,7 +155,7 @@ The metrics exposed for diagnosis (all on `WriterThread`):
 - `submit_blocked_count` — how many times `submit` had to wait for inbox space.
 - `last_accept_monotonic_ns` — when the drain loop last popped successfully.
 
-These land in the bundle manifest's `diagnostics.runtime` block and the status bar's pills. See [Reading status-bar symptoms](../troubleshooting/status-bar-symptoms.md).
+These land in the bundle manifest's `queue_health` block and the status bar's pills. See [Reading status-bar symptoms](../troubleshooting/status-bar-symptoms.md).
 
 ---
 

@@ -56,6 +56,7 @@ class ChannelRegistry:
 
     @classmethod
     def from_specs(cls, specs: list[ChannelSpec]) -> ChannelRegistry:
+        """Build a registry by registering every spec in ``specs`` in order."""
         registry = cls()
         for spec in specs:
             registry.register(spec)
@@ -63,9 +64,16 @@ class ChannelRegistry:
 
     @property
     def is_frozen(self) -> bool:
+        """``True`` once :meth:`freeze` has been called; further registrations raise."""
         return self._frozen
 
     def register(self, spec: ChannelSpec) -> None:
+        """Register a new :class:`ChannelSpec`.
+
+        Raises:
+            ConfigError: The registry has been frozen, or ``spec.name``
+                duplicates an already-registered channel.
+        """
         if self._frozen:
             raise ConfigError(f"ChannelRegistry is frozen; cannot register {spec.name!r}")
         if spec.name in self._channels:
@@ -83,12 +91,18 @@ class ChannelRegistry:
         self._frozen = True
 
     def resolve(self, name: str) -> ResolvedChannel:
+        """Return the :class:`ResolvedChannel` registered for ``name``.
+
+        Raises:
+            ConfigError: ``name`` is not in the registry.
+        """
         try:
             return self._channels[name]
         except KeyError as exc:
             raise ConfigError(f"channel {name!r} is not registered") from exc
 
     def names(self) -> tuple[str, ...]:
+        """All registered channel names, in registration order."""
         return tuple(self._channels.keys())
 
     def __contains__(self, name: object) -> bool:

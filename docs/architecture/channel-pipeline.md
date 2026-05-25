@@ -186,7 +186,7 @@ Concurrency: single-producer (the UI-side drain) / single-consumer (the plot tim
 Two related concerns deliberately live elsewhere:
 
 - **Derived channels.** The `DerivedBinding` variant + topological-sort derivation registry lands in a future PR; the binding schema is stable, the evaluator is not yet wired. The `derived` discriminant is reserved so YAML files written today don't have to migrate later.
-- **Alarms.** `AlarmBand` rules are declared on `ChannelSpec` today but the evaluator ships with the planned `SafetyMonitor` (see [`capa-plan.md`](capa-plan.md) §9.2). For now, alarms are recorded into the manifest but do not gate execution.
+- **Alarms.** `AlarmBand` rules are declared on `ChannelSpec` today but the evaluator ships with the planned `SafetyMonitor` (see [`capa-plan.md`](capa-plan.md) §9.2). For now, alarms are preserved in the snapshotted config but do not gate execution.
 
 Both are flagged here so a reader who saw the YAML field doesn't wonder where the runtime code is.
 

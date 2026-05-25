@@ -247,17 +247,25 @@ class _PerFamilyWriter:
 
     @property
     def path(self) -> Path:
+        """Path to this writer's in-flight Arrow IPC stream."""
         return self._path
 
     @property
     def layout(self) -> RecordShape:
+        """The :class:`RecordShape` this writer locked on first flush."""
         return self._layout
 
     @property
     def has_data(self) -> bool:
+        """``True`` if the writer has either flushed rows or buffered rows pending flush."""
         return self._writer is not None or bool(self._buf)
 
     def write(self, record: SourceRecord) -> None:
+        """Append a :class:`SourceRecord` to the buffer; auto-flush at ``flush_rows``.
+
+        Raises:
+            DeviceRecordsSinkError: ``write`` was called after :meth:`close`.
+        """
         if self._closed:
             raise DeviceRecordsSinkError("write() after close()")
         self._buf.append(_record_to_row(record))
@@ -265,6 +273,11 @@ class _PerFamilyWriter:
             self.flush()
 
     def flush(self) -> None:
+        """Materialize the buffer to the Arrow IPC stream; no-op when empty.
+
+        Raises:
+            DeviceRecordsSinkError: ``flush`` was called after :meth:`close`.
+        """
         if self._closed:
             raise DeviceRecordsSinkError("flush() after close()")
         if not self._buf:
@@ -294,6 +307,7 @@ class _PerFamilyWriter:
         self._buf.clear()
 
     def close(self) -> None:
+        """Flush any pending rows and close the writer. Idempotent."""
         if self._closed:
             return
         try:
@@ -392,6 +406,7 @@ class DeviceRecordsSink:
 
     @property
     def directory(self) -> Path:
+        """Path to ``<bundle_root>/device_records/`` — where per-adapter sidecars land."""
         return self._dirpath
 
     @property
@@ -411,6 +426,15 @@ class DeviceRecordsSink:
         return dict(self._skipped_blocks)
 
     def write(self, record: SourceRecord) -> None:
+        """Route ``record`` to its per-family writer.
+
+        Records with ``shape="block"`` are counted but not written — block
+        sidecars are landed via TDMS, not through this sink.
+
+        Raises:
+            DeviceRecordsSinkError: The sink has already been closed.
+            SchemaDriftError: An adapter changed its record shape mid-run.
+        """
         if self._closed:
             raise DeviceRecordsSinkError("write() after close()")
         if record.shape == "block":
@@ -432,12 +456,18 @@ class DeviceRecordsSink:
         writer.write(record)
 
     def flush(self) -> None:
+        """Flush every per-family writer.
+
+        Raises:
+            DeviceRecordsSinkError: The sink has already been closed.
+        """
         if self._closed:
             raise DeviceRecordsSinkError("flush() after close()")
         for writer in self._writers.values():
             writer.flush()
 
     def close(self) -> None:
+        """Close every per-family writer. Idempotent."""
         if self._closed:
             return
         try:

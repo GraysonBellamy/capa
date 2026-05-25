@@ -291,7 +291,7 @@ capa_pkg = next(p for p in pkgs if p["name"] == "capa")
 print(capa_pkg["version"])
 ```
 
-The bundle also includes `env/uv.lock` (a snapshot of the project lockfile at run-open), and `manifest.lockfile.sha256` records the hash of that file as embedded — so a downstream tool can detect if the lockfile in the bundle was swapped after sealing without going through `verify()`.
+The bundle also includes `env/uv.lock` (a snapshot of the project lockfile at run-open), and `manifest.json` records the hash in `lockfile.sha256` — so a downstream tool can detect if the lockfile in the bundle was swapped after sealing without going through `verify()`.
 
 ---
 

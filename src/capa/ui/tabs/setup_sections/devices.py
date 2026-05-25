@@ -71,20 +71,24 @@ class DeviceTableModel(QAbstractTableModel):
         self._status: dict[int, str] = {}
 
     def devices(self) -> list[dict[str, Any]]:
+        """Tuple of device entries managed by this section."""
         return [dict(row) for row in self._rows]
 
     def set_devices(self, devices: list[dict[str, Any]]) -> None:
+        """Replace the section's device list."""
         self.beginResetModel()
         self._rows = [dict(row) for row in devices]
         self._status.clear()
         self.endResetModel()
 
     def device_at(self, row: int) -> dict[str, Any] | None:
+        """Return the device entry at the given row."""
         if 0 <= row < len(self._rows):
             return dict(self._rows[row])
         return None
 
     def update_device(self, row: int, device: dict[str, Any]) -> None:
+        """Apply a partial update to one device entry."""
         if not (0 <= row < len(self._rows)):
             return
         self._rows[row] = dict(device)
@@ -94,6 +98,7 @@ class DeviceTableModel(QAbstractTableModel):
         self.devicesChanged.emit()
 
     def add_device(self, device: dict[str, Any]) -> int:
+        """Append a new device entry to the section."""
         row = len(self._rows)
         self.beginInsertRows(QModelIndex(), row, row)
         self._rows.append(dict(device))
@@ -102,6 +107,7 @@ class DeviceTableModel(QAbstractTableModel):
         return row
 
     def remove_device(self, row: int) -> None:
+        """Remove the device entry at the given row."""
         if not (0 <= row < len(self._rows)):
             return
         self.beginRemoveRows(QModelIndex(), row, row)
@@ -111,6 +117,7 @@ class DeviceTableModel(QAbstractTableModel):
         self.devicesChanged.emit()
 
     def set_status(self, row: int, status: str) -> None:
+        """Update the row's status indicator."""
         if not (0 <= row < len(self._rows)):
             return
         self._status[row] = status
@@ -120,11 +127,13 @@ class DeviceTableModel(QAbstractTableModel):
     # -- QAbstractTableModel -----------------------------------------------
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of rows in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self._rows)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        """Number of columns in the model. See :class:`PySide6.QtCore.QAbstractTableModel`."""
         if parent.isValid():
             return 0
         return len(self.HEADERS)
@@ -135,11 +144,13 @@ class DeviceTableModel(QAbstractTableModel):
         orientation: Qt.Orientation,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> object:
+        """Header label for the given section / orientation. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         return horizontal_header(self.HEADERS, section, orientation, role)
 
     def data(  # type: ignore[override]
         self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> object:
+        """Return the value at ``index`` for ``role``. See :class:`PySide6.QtCore.QAbstractItemModel`."""
         if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
             return None
         row = index.row()
@@ -327,10 +338,12 @@ class DevicesSection(SectionWidget):
     # -- SectionWidget API --------------------------------------------------
 
     def set_draft(self, draft: SetupDraft) -> None:
+        """Replace the in-progress draft."""
         self._draft = draft
         self.refresh()
 
     def refresh(self) -> None:
+        """Recompute the form from the current draft."""
         if self._draft is None:
             return
         hw = self._draft.document.hardware_payload
@@ -348,6 +361,7 @@ class DevicesSection(SectionWidget):
         self._reset_detail()
 
     def payload(self) -> dict[str, object]:
+        """Build the section's serialized payload from current widget state."""
         return {"devices": self._model.devices()}
 
     def _update_table_height(self) -> None:

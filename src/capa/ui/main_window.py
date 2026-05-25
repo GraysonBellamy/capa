@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from capa.core.errors import CapaError
 from capa.experiment.config import ExperimentConfig
 from capa.experiment.procedures.base import procedure_uses_method
+from capa.runtime.shutdown import PoolCloseResult
 from capa.storage.catalog import RunCatalog
 from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState, HardwareInitDialog
 from capa.ui.docks.camera_preview import CameraPreviewDock
@@ -104,6 +105,9 @@ class MainWindow(QMainWindow):
         self._config_loading: bool = False
         self._open_config_action: QAction | None = None
         self._hardware_dialog: HardwareInitDialog | None = None
+        # Reference to the fire-and-forget pool-close task from
+        # _on_close_config; held to prevent premature garbage collection.
+        self._close_pool_task: asyncio.Future[PoolCloseResult | None] | None = None
         # Default window state captured before the first restore so the
         # View → Reset window layout action has something to restore to.
         self._default_window_state: QByteArray | None = None
@@ -412,12 +416,10 @@ class MainWindow(QMainWindow):
         # loop. The strip already shows IDLE the moment the draft is
         # cleared (has_config priority sits above hardware_ready), so
         # the operator's visual ack doesn't wait on the pool close.
-        try:
-            asyncio.ensure_future(self._controller.aclose_pool())
-        except RuntimeError:
-            # No running loop (test harness); the synchronous draft
-            # clear above is enough for the screenshot path.
-            pass
+        # No running loop (test harness) → synchronous draft clear above
+        # is enough for the screenshot path.
+        with contextlib.suppress(RuntimeError):
+            self._close_pool_task = asyncio.ensure_future(self._controller.aclose_pool())
         self.setWindowTitle("capa")
         _logger.info("ui.config_closed")
 
@@ -930,6 +932,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ window state
 
     def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802 — Qt override
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
         if event is None:
             return
         # Second pass: coordinator finished and re-triggered close().
@@ -1038,34 +1041,42 @@ class MainWindow(QMainWindow):
 
     @property
     def controller(self) -> RunController:
+        """The :class:`RunController` driving this view."""
         return self._controller
 
     @property
     def run_tab(self) -> RunTab:
+        """The Run tab widget instance."""
         return self._run_tab
 
     @property
     def setup_tab(self) -> SetupTab:
+        """The Setup tab widget instance."""
         return self._setup_tab
 
     @property
     def method_tab(self) -> MethodTab:
+        """The Method tab widget instance."""
         return self._method_tab
 
     @property
     def events_dock(self) -> EventsDock:
+        """The Events dock widget instance."""
         return self._events_dock
 
     @property
     def log_dock(self) -> LogDock:
+        """The Log dock widget instance."""
         return self._log_dock
 
     @property
     def numerics_dock(self) -> NumericsDock | None:
+        """The Numerics dock widget instance."""
         return self._numerics_dock
 
     @property
     def camera_preview_dock(self) -> CameraPreviewDock | None:
+        """The Camera-preview dock widget instance."""
         return self._camera_preview_dock
 
 

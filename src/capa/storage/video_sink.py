@@ -63,10 +63,12 @@ FRAMES_SCHEMA: pa.Schema = _arrow_schema()
 
 
 def in_flight_path(bundle_root: Path, camera_name: str) -> Path:
+    """Path to the per-camera in-flight frame-index Arrow IPC stream."""
     return Path(bundle_root) / VIDEO_DIRNAME / f"{camera_name}{INFLIGHT_SUFFIX}"
 
 
 def final_path(bundle_root: Path, camera_name: str) -> Path:
+    """Path to the per-camera finalized frame-index Parquet file."""
     return Path(bundle_root) / VIDEO_DIRNAME / f"{camera_name}{FINAL_SUFFIX}"
 
 
@@ -86,6 +88,7 @@ class _Buffer:
         return len(self.frame_idx)
 
     def clear(self) -> None:
+        """Discard every buffered column. Called after a successful flush."""
         self.frame_idx.clear()
         self.t_mono_ns.clear()
         self.t_utc.clear()
@@ -93,6 +96,7 @@ class _Buffer:
         self.camera.clear()
 
     def to_table(self, schema: pa.Schema) -> pa.Table:
+        """Materialize buffered frame-index columns as a :class:`pyarrow.Table`."""
         return pa.table(
             {
                 "frame_idx": pa.array(self.frame_idx, type=pa.int64()),
@@ -132,13 +136,21 @@ class FramesSink:
 
     @property
     def path(self) -> Path:
+        """Path to the in-flight frame-index Arrow IPC stream for this camera."""
         return self._path
 
     @property
     def camera(self) -> str:
+        """Camera name this sink writes for."""
         return self._camera
 
     def write(self, receipt: FrameReceipt) -> None:
+        """Append a :class:`FrameReceipt` to the buffer; auto-flush at ``flush_rows``.
+
+        Raises:
+            VideoSinkError: ``write`` after close, or the receipt's camera
+                name does not match this sink's camera.
+        """
         if self._closed:
             raise VideoSinkError("write() after close()")
         if receipt.name != self._camera:
@@ -154,6 +166,11 @@ class FramesSink:
             self.flush()
 
     def flush(self) -> None:
+        """Materialize buffered rows to the Arrow IPC stream; no-op when empty.
+
+        Raises:
+            VideoSinkError: ``flush`` was called after :meth:`close`.
+        """
         if self._closed:
             raise VideoSinkError("flush() after close()")
         if not self._buf:
@@ -162,6 +179,7 @@ class FramesSink:
         self._buf.clear()
 
     def close(self) -> None:
+        """Flush any pending rows and close the writer. Idempotent."""
         if self._closed:
             return
         try:

@@ -308,7 +308,7 @@ def test_holding_tick_applies_setpoint_to_heater_form(qtbot: Any, monkeypatch: A
     monkeypatch.setattr(
         section,
         "_prompt_apply_hold",
-        lambda t, s: section._apply_held_values(t, s),
+        section._apply_held_values,
     )
 
     section._on_procedure_tick(_holding_tick(target_kw_m2=25.0, setpoint_c=520.0))

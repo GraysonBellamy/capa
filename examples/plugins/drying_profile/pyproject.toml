@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "drying-profile"
+version = "0.1.0"
+description = "Worked example: a minimal capa domain profile plugin."
+requires-python = ">=3.13,<3.14"
+license = "MIT"
+authors = [{ name = "capa contributors" }]
+dependencies = [
+    "capa",
+    "pydantic>=2.9",
+]
+
+# A profile entry point points at a *module*, not a class. The module's
+# top-level attributes (`id`, `metadata_model`, `required_channel_groups`,
+# `preflight_checks`, `standard_refs`) populate the profile contract.
+[project.entry-points."capa.profiles"]
+"drying.profile" = "drying_profile.profile"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/drying_profile"]

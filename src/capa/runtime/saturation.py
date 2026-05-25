@@ -63,10 +63,14 @@ class WriterSaturationSource(Protocol):
     """
 
     @property
-    def last_accept_monotonic_ns(self) -> int: ...
+    def last_accept_monotonic_ns(self) -> int:
+        """Monotonic ns when the writer last accepted an item from its inbox."""
+        ...
 
     @property
-    def depth(self) -> int: ...
+    def depth(self) -> int:
+        """Current writer inbox depth (items queued, not yet drained)."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,20 +100,21 @@ class SaturationMonitor:
     when ``stop_event`` fires or when the first trip escalates (the monitor
     only fires once per run — the conductor handles shutdown thereafter).
 
-    :param bridges: ``resource_id`` → outbound :class:`ThreadBridge`. The
-        monitor reads ``bridge.metrics.blocked_since_ms`` on each tick; the
-        bridges themselves are immutable through the monitor's lens.
-    :param writer: Source of the writer-thread saturation signal. Pass
-        ``None`` for tests that only want to exercise the bridge path.
-    :param on_saturated: Callback invoked exactly once when a deadline
-        trips. Awaited by the monitor — make it cheap; the conductor's
-        completion-event-set should be the last meaningful action.
-    :param deadline_s: How long a signal must stay tripped before escalating.
-    :param poll_period_s: Recheck cadence.
-    :param stop_event: Set this to retire the monitor cooperatively (e.g.
-        when the run completes normally without saturation).
-    :param clock_monotonic_ns: Time source (injection for tests; defaults
-        to :func:`time.monotonic_ns`).
+    Args:
+        bridges: ``resource_id`` → outbound :class:`ThreadBridge`. The
+            monitor reads ``bridge.metrics.blocked_since_ms`` on each tick;
+            the bridges themselves are immutable through the monitor's lens.
+        writer: Source of the writer-thread saturation signal. Pass
+            ``None`` for tests that only want to exercise the bridge path.
+        on_saturated: Callback invoked exactly once when a deadline trips.
+            Awaited by the monitor — make it cheap; the conductor's
+            completion-event-set should be the last meaningful action.
+        deadline_s: How long a signal must stay tripped before escalating.
+        poll_period_s: Recheck cadence.
+        stop_event: Set this to retire the monitor cooperatively (e.g.
+            when the run completes normally without saturation).
+        clock_monotonic_ns: Time source (injection for tests; defaults to
+            :func:`time.monotonic_ns`).
     """
 
     __slots__ = (

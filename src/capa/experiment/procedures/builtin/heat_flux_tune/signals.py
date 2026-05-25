@@ -94,6 +94,7 @@ class RollingWindow:
     _samples: deque[tuple[float, float]] = field(default_factory=deque)
 
     def push(self, t_s: float, value: float) -> None:
+        """Append a new sample to the ring (overwrites oldest slot when full)."""
         if not math.isfinite(value):
             return
         self._samples.append((t_s, value))
@@ -102,6 +103,7 @@ class RollingWindow:
             self._samples.popleft()
 
     def count(self) -> int:
+        """Number of samples currently held by the ring / counter."""
         return len(self._samples)
 
     def clear(self) -> None:
@@ -113,6 +115,7 @@ class RollingWindow:
         self._samples.clear()
 
     def span_s(self) -> float:
+        """Time span (s) covered by the oldest and newest samples in the ring."""
         if len(self._samples) < 2:
             return 0.0
         return self._samples[-1][0] - self._samples[0][0]
@@ -143,18 +146,21 @@ class RollingWindow:
         return [pair for pair, keep in zip(pairs, mask, strict=True) if keep]
 
     def mean(self) -> float:
+        """Arithmetic mean of the held samples (``0.0`` when empty)."""
         pairs = self._keep_pairs()
         if not pairs:
             return 0.0
         return statistics.fmean(v for _, v in pairs)
 
     def std(self) -> float:
+        """Standard deviation of the held samples (``0.0`` when fewer than 2 samples)."""
         pairs = self._keep_pairs()
         if len(pairs) < 2:
             return 0.0
         return statistics.pstdev(v for _, v in pairs)
 
     def slope_per_min(self) -> float:
+        """Linear-fit slope of the held samples in units per minute."""
         return linear_slope_per_min(self._keep_pairs())
 
 
@@ -205,6 +211,7 @@ class SteadyStatePredicate:
         flux_slope_kw_per_min: float,
         window_full: bool,
     ) -> None:
+        """Evaluate this guard against the latest ring contents and return whether it fires."""
         if not window_full:
             self._hold_start_s = None
             self._last_reason = "window-not-full"
@@ -230,18 +237,22 @@ class SteadyStatePredicate:
         self._last_reason = "holding"
 
     def fired(self, now_s: float) -> bool:
+        """``True`` once the guard's dwell window has elapsed in a tripped state."""
         return self._hold_start_s is not None and (now_s - self._hold_start_s) >= self.t_stable_s
 
     def dwell_s(self, now_s: float) -> float:
+        """How long the guard has been in a tripped state, in seconds."""
         if self._hold_start_s is None:
             return 0.0
         return now_s - self._hold_start_s
 
     @property
     def last_reason(self) -> str:
+        """Free-form description of why the guard last fired (or ``None``)."""
         return self._last_reason
 
     def reset(self) -> None:
+        """Clear the guard's tripped state. Idempotent."""
         self._hold_start_s = None
         self._last_reason = "reset"
 
@@ -290,6 +301,7 @@ class RunawayDetector:
     _count: int = 0
 
     def record(self, *, err_kw_m2: float, delta_t_c: float) -> None:
+        """Add an observation to the rolling tally."""
         if err_kw_m2 == 0.0 or delta_t_c == 0.0:
             self._count = 0
             return
@@ -301,7 +313,9 @@ class RunawayDetector:
 
     @property
     def count(self) -> int:
+        """Number of samples currently held by the ring / counter."""
         return self._count
 
     def tripped(self) -> bool:
+        """``True`` if the tally currently exceeds its trigger threshold."""
         return self._count >= self.trip_threshold

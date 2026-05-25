@@ -3,7 +3,7 @@
 **Audience:** operators (so you know what hitting Stop will do), plugin authors writing procedures (so your procedure honours the stop contract), contributors debugging "why didn't the rig cool down?"
 **Scope:** the four paths from `RUNNING` to a sealed bundle — graceful Stop, Emergency Stop, saturation-deadline trip, and process crash. What runs in each, in what order, and what's guaranteed vs. best-effort.
 
-The defining property of CAPA's shutdown is [safety principle 3](principles.md#invariant-3-fail-loud-seal-the-bundle): **every path ends in a sealed bundle.** There is no code path that exits without going through disarm and seal. If the host *process* dies, the next CAPA invocation seals the orphaned bundle on startup.
+The defining property of CAPA's shutdown is [safety principle 3](principles.md#invariant-3-fail-loud-seal-the-bundle): in-process exits go through disarm and finalize, and a host process death leaves a recoverable bundle for `capa finalize`. A clean recovery seals the orphaned bundle; an integrity mismatch is recorded as `verification_failed` rather than silently blessed.
 
 ---
 
@@ -49,7 +49,7 @@ After `stop()` returns, the conductor's main coroutine observes the completion e
 1. **Procedure unwinds.** Whatever it was doing — running a method step, sleeping, waiting on a databus subscription — is interrupted by `external_stop`. The procedure's `finally` blocks run.
 2. **Authorization disarms.** `auth.disarm()` is called in the conductor's `finally`. After this, no further procedure-issued commands can leave the system. See [authorization gates](authorization-gates.md#lifecycle).
 3. **Pool drains.** Each [worker](../glossary.md#worker) is asked to wind down via `pool.disarm_all(grace_s=shutdown_grace_s)`, which calls each adapter's `stop()`. Workers transition `SAMPLING → DRAINING → IDLE`. The [`grace_s`](../glossary.md#grace_s-shutdown-grace) timeout bounds this phase.
-4. **Bundle finalizes and seals.** Sinks close, `.in-flight.arrows` files are rewritten to `.parquet`, the manifest gets `ended_utc` and `run_status`, the manifest's SHA256 is computed and written. The bundle's [status](../glossary.md#bundlestatus) progresses `open → finalizing → finalized_unverified → sealed`.
+4. **Bundle finalizes and seals.** Sinks close, `.in-flight.arrows` files are rewritten to `.parquet`, the manifest gets `ended_utc` and `run_status`, the manifest's SHA256 is computed and written. The bundle's [status](../glossary.md#bundlestatus) progresses `open → finalizing → sealed` on success, or `verification_failed` if the integrity walk reports a mismatch.
 
 ---
 
@@ -149,7 +149,7 @@ The conductor's [`RunOutcome`](https://github.com/GraysonBellamy/capa/blob/main/
 |---|---|---|---|
 | `COMPLETED` | `completed` | `sealed` | Trust everything |
 | `ABORTED` | `aborted` | `sealed` | Trust everything; run is shorter than the method would imply |
-| `CRASHED` | `crashed` | `sealed` (or `finalized_unverified` if hashing failed) | Trust the data; check the event log for the exception |
+| `CRASHED` | `crashed` | `sealed` (or `verification_failed` if integrity failed) | Trust the data only after inspection; check the event log for the exception |
 | `CRASHED_BUT_SEALED` | `crashed` | `sealed` | Trust the data up to the `saturation_deadline` event |
 
 Every reader downstream — analysis notebooks, `capa validate`, the bundle catalog — can branch on these two strings to decide how to treat the bundle.

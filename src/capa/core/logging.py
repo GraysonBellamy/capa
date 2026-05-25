@@ -82,12 +82,14 @@ class _StructlogJSONLineHandler(logging.Handler):
         self._sink = sink
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Format ``record`` and append it to the bundle's :class:`LogSink`."""
         try:
             self._sink.write_line(self.format(record))
         except Exception:
             self.handleError(record)
 
     def close(self) -> None:
+        """Flush the sink and tear down the logging handler. Idempotent."""
         with contextlib.suppress(Exception):
             self._sink.flush()
         super().close()

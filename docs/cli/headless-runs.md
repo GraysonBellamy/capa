@@ -55,7 +55,7 @@ This is the same constraint that applies to most asyncio-based Python applicatio
 |---|---|---|
 | Run bundle directory | `./runs/<run_id>/` | `--runs-root` or `$CAPA_RUNS_ROOT` |
 | Run catalog (sqlite) | `./runs/runs.sqlite` | derived from runs root |
-| Pre-run log output | stderr (structured JSON via structlog) | configure via logging env |
+| Pre-run log output | stderr and `~/.capa/logs/capa-YYYYMMDD.log` | no env override today |
 | Bundle manifest | `<run_id>/manifest.json` | n/a — fixed |
 | Bundle checksums | `<run_id>/manifest.sha256` | n/a — fixed |
 

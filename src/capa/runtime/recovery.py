@@ -71,6 +71,7 @@ class ActiveCheckpoint:
     last_update_utc: datetime
 
     def to_json(self) -> str:
+        """Serialize to the on-disk JSON layout (indented, stable key order)."""
         return json.dumps(
             {
                 "pid": self.pid,
@@ -85,6 +86,7 @@ class ActiveCheckpoint:
 
     @classmethod
     def from_json(cls, payload: str) -> ActiveCheckpoint:
+        """Parse a checkpoint from its JSON serialization. Inverse of :meth:`to_json`."""
         data = json.loads(payload)
         config_raw = data.get("config_path")
         return cls(

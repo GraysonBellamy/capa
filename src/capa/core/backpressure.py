@@ -90,6 +90,7 @@ class BoundedQueue[T]:
 
     @property
     def depth(self) -> int:
+        """Current number of items in the queue."""
         return len(self._items)
 
     def _record_enqueue(self) -> None:
@@ -195,6 +196,7 @@ class BoundedQueue[T]:
         return item
 
     def get_nowait(self) -> T | None:
+        """Pop the oldest item, or return ``None`` if the queue is empty."""
         if not self._items:
             return None
         item = self._items.popleft()

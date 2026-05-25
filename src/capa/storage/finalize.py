@@ -8,9 +8,10 @@ Walks a bundle directory and:
    logged to ``manifest.custom["finalize_warnings"]`` and removed.
 2. Updates :class:`~capa.storage.manifest.BundleManifest` ``ended_utc``,
    ``run_status``, and ``data_shape``.
-3. Computes ``manifest.sha256`` and writes it.
-4. Stamps ``bundle_status`` (``finalizing`` → ``finalized_unverified`` →
-   ``sealed`` or ``verification_failed``) and ``integrity.status`` along the way.
+3. Stamps ``bundle_status="sealed"`` with ``integrity.status="ok"``,
+   computes ``manifest.sha256``, and verifies it.
+4. Leaves the bundle ``sealed`` after a clean verify, or rewrites the
+   manifest as ``verification_failed`` if verification reports a mismatch.
 
 Idempotent: running on an already-sealed bundle is a no-op (same digest;
 manifest unchanged). Running on a bundle whose in-flight files are missing

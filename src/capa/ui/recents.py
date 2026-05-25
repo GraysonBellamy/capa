@@ -28,6 +28,8 @@ _logger = structlog.get_logger("capa.ui.recents")
 
 @dataclass(frozen=True, slots=True)
 class RecentEntry:
+    """One row in the Welcome screen's "Recents" list — a config path and its last-opened timestamp."""
+
     path: Path
     opened_at: datetime
 

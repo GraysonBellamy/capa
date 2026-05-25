@@ -15,7 +15,7 @@ A bundle is **sealed** when `manifest.sha256` exists at the bundle root. That si
 |---|---|---|
 | `open` | Sinks may still be mid-write. In-flight Arrow IPC streams (`*.in-flight.arrows`) are live on disk. | Acquisition is active, or the process exited before finalize ran. |
 | `finalizing` | Sinks closed, two-stage rewrite is in progress. | A reader catching the bundle mid-rewrite; should be transient (seconds to a minute). |
-| `finalized_unverified` | Data files are readable, but `manifest.sha256` has not been written yet. | Transitional — observed if a reader peeks between the manifest write and the hash write, or after a failure between those two stages. |
+| `finalized_unverified` | Data files are readable, but `manifest.sha256` has not been written yet. | Legal recovery state for data-complete bundles that still lack a digest. The normal finalize path writes `sealed` before creating `manifest.sha256`, so it does not pause here. |
 | `sealed` | `manifest.sha256` present and verified. Safe to copy, archive, or hand to an analysis tool. | The normal terminal state. |
 | `verification_failed` | The bundle finished finalizing, but the integrity walk found a mismatch (or threw). Data may still be inspectable; the seal is not trustworthy. | After a finalize where hashing succeeded but the verdict was not `ok`, or where the hash step itself raised. |
 
@@ -118,7 +118,7 @@ bundle-root integrity walk; verify those paths separately when archiving.
 | `running` | anything else | **no** — caught by `is_legal_finalize_combination` |
 | `completed` / `aborted` / `crashed` | `open` | yes — process exited before finalize ran; recoverable via `capa finalize` |
 | `completed` / `aborted` / `crashed` | `finalizing` | yes — observed mid-rewrite |
-| `completed` / `aborted` / `crashed` | `finalized_unverified` | yes — observed between manifest write and hash write |
+| `completed` / `aborted` / `crashed` | `finalized_unverified` | yes — data-complete but not sealed; possible after interrupted or hand-authored recovery, not a normal-path pause |
 | `completed` / `aborted` / `crashed` | `sealed` | yes — the normal terminal pairing |
 | `completed` / `aborted` / `crashed` | `verification_failed` | yes — bundle was inspectable but the seal failed |
 

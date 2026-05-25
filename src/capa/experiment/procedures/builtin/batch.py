@@ -126,6 +126,7 @@ class Batch(Procedure):
 
     @classmethod
     def from_config(cls, raw: dict[str, object] | None) -> Batch:
+        """Build this procedure plugin from the experiment's frozen :class:`~capa.experiment.config.ExperimentConfig`."""
         cfg = BatchConfig.model_validate(raw or {})
         return cls(
             iterations=cfg.iterations,
@@ -137,6 +138,7 @@ class Batch(Procedure):
 
     @property
     def batch_id(self) -> str:
+        """Identifier the batch procedure stamps onto every sub-run's manifest."""
         return self._batch_id
 
     def configure_runs_root(self, runs_root: Path) -> None:
@@ -148,6 +150,7 @@ class Batch(Procedure):
         self._runs_root = runs_root
 
     async def preflight(self, ctx: ProcedureContext) -> list[Problem]:
+        """Procedure preflight. See :class:`~capa.experiment.procedures.base.Procedure`."""
         problems: list[Problem] = []
         if self.iterations < 1:
             raise ProcedureError(f"Batch.iterations must be >=1; got {self.iterations}")
@@ -168,6 +171,7 @@ class Batch(Procedure):
         # Lazy import: avoids a circular dependency between
         # capa.runtime.headless (which imports procedures.base) and Batch
         # (which spawns child runs through the headless entry point).
+        """Procedure main loop. See :class:`~capa.experiment.procedures.base.Procedure`."""
         from capa.runtime.headless import run_headless  # noqa: PLC0415
         from capa.runtime.session import make_run_id  # noqa: PLC0415
 

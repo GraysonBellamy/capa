@@ -128,6 +128,7 @@ class DeviceCard(QGroupBox):
 
     @property
     def device_name(self) -> str:
+        """Display name of the device this manual card targets."""
         return self._name
 
     def set_subtitle(self, text: str) -> None:

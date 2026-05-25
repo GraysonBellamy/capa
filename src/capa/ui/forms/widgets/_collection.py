@@ -68,10 +68,12 @@ class _StrTupleField(FieldWidget):
         self.valueChanged.emit()
 
     def value(self) -> tuple[str, ...]:
+        """Current value held by this widget, coerced to the model-side type."""
         items = (self._list.item(i) for i in range(self._list.count()))
         return tuple(item.text() for item in items if item is not None)
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._list):
             self._list.clear()
             for entry in v or ():
@@ -146,9 +148,11 @@ class _FloatTupleField(FieldWidget):
         self.valueChanged.emit()
 
     def value(self) -> list[float]:
+        """Current value held by this widget, coerced to the model-side type."""
         return [float(spin.value()) for spin in self._spins]
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         for spin in self._spins:
             widget = spin.parentWidget()
             if widget is not None:
@@ -216,10 +220,12 @@ class _DictStrFloatField(FieldWidget):
         self.valueChanged.emit()
 
     def value(self) -> dict[str, float]:
+        """Current value held by this widget, coerced to the model-side type."""
         return {k.text(): float(v.value()) for k, v in self._rows if k.text()}
 
     def set_value(self, v: Any) -> None:
         # Reset the rows list and lay out new ones.
+        """Set this widget's value from a model-side value."""
         for key_edit, _ in self._rows:
             widget = key_edit.parentWidget()
             if widget is not None:
@@ -246,6 +252,7 @@ class _JsonFallbackField(FieldWidget):
         self._edit.textChanged.connect(self.valueChanged)
 
     def value(self) -> Any:
+        """Current value held by this widget, coerced to the model-side type."""
         text = self._edit.text().strip()
         if not text:
             return None
@@ -255,6 +262,7 @@ class _JsonFallbackField(FieldWidget):
             return text  # let validation surface the error
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._edit):
             self._edit.setText("" if v is None else json.dumps(v))
 
@@ -309,9 +317,11 @@ class _ModelTupleField(FieldWidget):
         self.valueChanged.emit()
 
     def value(self) -> list[dict[str, Any]]:
+        """Current value held by this widget, coerced to the model-side type."""
         return [form.values() for form in self._rows]
 
     def set_value(self, v: Any) -> None:
+        """Set this widget's value from a model-side value."""
         for form in self._rows:
             form.deleteLater()
         self._rows.clear()

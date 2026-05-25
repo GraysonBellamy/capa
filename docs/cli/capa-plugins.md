@@ -35,7 +35,7 @@ Options:
   --plugin-mode   TEXT  dev|production; overrides $CAPA_PLUGIN_MODE.
 ```
 
-Walks `capa.procedures` entry-points, runs the load-time contract check on each, and in production mode gates them against `plugins.lock`. Three buckets are reported: **loaded**, **rejected**, and **drifts** (lockfile entries whose metadata no longer matches the installed package).
+Walks `capa.procedures` entry-points, runs the load-time contract check on each, and in production mode gates them against `plugins.lock` when a lockfile is loaded. Three buckets are reported: **loaded**, **rejected**, and **drifts** (lockfile entries whose metadata no longer matches the installed package). If no lockfile is found, this inspection command prints that production mode requires one but still exits `0`.
 
 ```bash
 # Inspect what's loadable with the current settings
@@ -44,8 +44,9 @@ uv run capa plugins list
 # Try resolving against a non-default lockfile
 uv run capa plugins list --plugins-lock /etc/capa/plugins.lock
 
-# Force production-mode behavior even if $CAPA_PLUGIN_MODE is unset
-uv run capa plugins list --plugin-mode production
+# Force production-mode behavior even if $CAPA_PLUGIN_MODE is unset.
+# Pass a lockfile to see MISSING_FROM_LOCK / HASH_MISMATCH rejections.
+uv run capa plugins list --plugin-mode production --plugins-lock ./plugins.lock
 ```
 
 ### Output
@@ -68,11 +69,11 @@ Drift vs plugins.lock:
   capa.contrib.my_procedure: version (expected='0.3.0', actual='0.3.1')
 ```
 
-**Plugin mode**: `dev` allows anything that passes the contract check; `production` allows only entries listed in `plugins.lock` (and rejects drift).
+**Plugin mode**: `dev` allows anything that passes the contract check; `production` allows only entries listed in the loaded `plugins.lock` (and rejects drift). The `run` and `gui` commands fail fast in production if no lockfile is found; `plugins list` reports the missing lock but remains an inspection command.
 
 **Rejected** lists plugins that did not survive the contract check or that failed lockfile gating, with a one-line reason per plugin.
 
-**Drift vs plugins.lock** reports plugins where the lockfile expected one version/hash and the installed package presents another. Drift is *not* an automatic rejection in this output — it is shown so you can decide whether to refresh the lockfile (via `capa plugins trust`) or to roll back the package.
+**Drift vs plugins.lock** reports plugins where the lockfile expected one version/hash and the installed package presents another. In `dev` mode, drift is informational. In `production` mode with a loaded lockfile, blocking drift also keeps that procedure out of the loaded set.
 
 ### Exit codes
 

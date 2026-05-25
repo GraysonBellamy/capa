@@ -140,22 +140,28 @@ class _ClockProxy:
 
     @property
     def started_mono_ns(self) -> int:
+        """Forward to the inner clock — see :class:`RunClock`."""
         return self._inner.started_mono_ns
 
     @property
     def started_utc(self) -> datetime:
+        """Forward to the inner clock — see :class:`RunClock`."""
         return self._inner.started_utc
 
     def t_mono(self) -> float:
+        """Forward to the inner clock — see :meth:`RunClock.t_mono`."""
         return self._inner.t_mono()
 
     def t_mono_ns(self) -> int:
+        """Forward to the inner clock — see :meth:`RunClock.t_mono_ns`."""
         return self._inner.t_mono_ns()
 
     def to_wall(self, t_mono_s: float) -> datetime:
+        """Forward to the inner clock — see :meth:`RunClock.to_wall`."""
         return self._inner.to_wall(t_mono_s)
 
     def to_wall_ns(self, t_mono_ns: int) -> datetime:
+        """Forward to the inner clock — see :meth:`RunClock.to_wall_ns`."""
         return self._inner.to_wall_ns(t_mono_ns)
 
 
@@ -232,13 +238,14 @@ class CameraDeviceAdapter:
     ) -> None:
         """Build a wrapper around an already-constructed :class:`Camera`.
 
-        :param camera: The underlying camera instance. Must have been
-            constructed with ``clock=clock_proxy`` so rebinding works.
-        :param spec: The :class:`CameraSpec` (carries name, kind,
-            output_root, on_failure, params). Held for output-path
-            computation and bundle attribution.
-        :param clock_proxy: The same proxy the camera was constructed
-            with. The wrapper rebinds this on :meth:`start`.
+        Args:
+            camera: The underlying camera instance. Must have been
+                constructed with ``clock=clock_proxy`` so rebinding works.
+            spec: The :class:`CameraSpec` (carries name, kind,
+                output_root, on_failure, params). Held for output-path
+                computation and bundle attribution.
+            clock_proxy: The same proxy the camera was constructed with.
+                The wrapper rebinds this on :meth:`start`.
         """
         self._camera = camera
         self._spec = spec
@@ -368,12 +375,15 @@ class CameraDeviceAdapter:
         the operator's monitor; :meth:`stream` short-circuits and
         :meth:`stop` is a no-op for the suppressed case.
 
-        :param ctx: The per-run :class:`AdapterStartContext`. Carries the
-            authoritative clock, the run id, and the bundle root used to
-            compute the recording's output path.
+        Args:
+            ctx: The per-run :class:`AdapterStartContext`. Carries the
+                authoritative clock, the run id, and the bundle root used
+                to compute the recording's output path.
 
-        Raises if recording is already active — the worker state
-        machine guarantees ``start`` only runs on ARMED→SAMPLING.
+        Raises:
+            RuntimeError: If recording is already active. The worker
+                state machine guarantees ``start`` only runs on
+                ARMED→SAMPLING, so this indicates a logic bug.
         """
         if self._recording:
             raise RuntimeError(

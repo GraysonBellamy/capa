@@ -58,6 +58,7 @@ class ConductorState(enum.StrEnum):
         return self in (ConductorState.PREPARING, ConductorState.RUNNING)
 
     def is_terminal(self) -> bool:
+        """``True`` if the conductor has reached a terminal state (``SEALED`` or ``FAILED``)."""
         return self in (ConductorState.SEALED, ConductorState.FAILED)
 
 

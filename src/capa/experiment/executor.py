@@ -126,6 +126,7 @@ class MethodExecutor:
 
     @property
     def current_step_index(self) -> int | None:
+        """Index of the method step currently being executed, ``None`` outside of a step."""
         return self._current_step_index
 
     async def run_to_completion(self, method: Method) -> None:
@@ -486,6 +487,7 @@ class MethodExecutor:
             sub = None
 
         async def watch_condition() -> None:
+            """Wait for the step's predicate condition to become satisfied."""
             assert sub is not None
             assert end_condition is not None
             async for emission in sub:
@@ -496,11 +498,13 @@ class MethodExecutor:
                     return
 
         async def watch_duration() -> None:
+            """Wait for the step's wall-clock duration to elapse."""
             assert duration_s is not None
             await anyio.sleep(duration_s)
             condition_event.set()
 
         async def watch_external() -> None:
+            """Wait for an external-trigger event from the operator or another procedure."""
             await self.ctx.external_stop.wait()
             condition_event.set()
 
@@ -516,6 +520,7 @@ class MethodExecutor:
                 if timeout_s is not None and timeout_s > 0:
 
                     async def watch_timeout() -> None:
+                        """Wait until the step's optional timeout fires (used as a safety bound on other waiters)."""
                         nonlocal timeout_fired
                         await anyio.sleep(timeout_s)
                         timeout_fired = True

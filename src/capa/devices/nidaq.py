@@ -141,6 +141,7 @@ class NIDAQTimingParams(BaseModel):
     active_edge: Literal["rising", "falling"] = "rising"
 
     def to_library(self) -> Timing:
+        """Build the library-native settings object this adapter passes to its Manager."""
         from nidaqlib.tasks.spec import Edge  # noqa: PLC0415
 
         return Timing(
@@ -229,6 +230,7 @@ class NIDAQAdapterParams(BaseModel):
         return ADAPTER_ID_BLOCK if self.is_block_mode() else ADAPTER_ID_POLLED
 
     def overflow_policy(self) -> OverflowPolicy:
+        """Translate the user-facing ``overflow`` string to a library :class:`OverflowPolicy`."""
         return OverflowPolicy.BLOCK if self.overflow == "block" else OverflowPolicy.DROP_NEWEST
 
     def build_task_spec(self) -> TaskSpec:
@@ -334,6 +336,7 @@ class NIDAQAdapter:
 
     @property
     def expected_emission_rate_hz(self) -> float:
+        """Emission rate hint for queue sizing. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         bound = len(self._channels)
         if self.params.is_block_mode():
             assert self.params.timing is not None
@@ -347,6 +350,7 @@ class NIDAQAdapter:
 
     @property
     def resource_id(self) -> str:
+        """Stable contention-domain identifier. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return daqmx_resource_id_from_channels(ch.physical_channel for ch in self.params.channels)
 
     @property

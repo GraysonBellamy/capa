@@ -81,6 +81,7 @@ class _PercentileRing:
         self._lock = threading.Lock()
 
     def observe(self, value: float) -> None:
+        """Record a new sample into the ring (overwrites the oldest slot)."""
         with self._lock:
             self._buf[self._idx] = value
             self._idx = (self._idx + 1) % self._cap
@@ -88,6 +89,7 @@ class _PercentileRing:
                 self._count += 1
 
     def percentile(self, p: float) -> float:
+        """Return the ``p``-th percentile of recorded samples (0.0 if empty)."""
         with self._lock:
             if self._count == 0:
                 return 0.0
@@ -98,10 +100,12 @@ class _PercentileRing:
 
     @property
     def p50(self) -> float:
+        """Median sample value."""
         return self.percentile(0.5)
 
     @property
     def p99(self) -> float:
+        """99th-percentile sample value."""
         return self.percentile(0.99)
 
 
@@ -143,10 +147,12 @@ class ThreadBridgeMetrics:
 
     @property
     def latency_p50_ms(self) -> float:
+        """Median enqueue→dequeue latency in milliseconds."""
         return self._latency_ring.p50
 
     @property
     def latency_p99_ms(self) -> float:
+        """99th-percentile enqueue→dequeue latency in milliseconds."""
         return self._latency_ring.p99
 
 
@@ -203,22 +209,27 @@ class ThreadBridge[T]:
 
     @property
     def name(self) -> str:
+        """Stable identifier used in logs, events, and bridge metric keys."""
         return self._name
 
     @property
     def capacity(self) -> int:
+        """Maximum number of in-flight items (the queue's bound)."""
         return self._capacity
 
     @property
     def policy(self) -> BridgePolicy:
+        """Backpressure policy: ``BLOCK``, ``DROP_NEWEST``, or ``DROP_OLDEST``."""
         return self._policy
 
     @property
     def closed(self) -> bool:
+        """``True`` once :meth:`close` has been called on either side."""
         return self._closed
 
     @property
     def metrics(self) -> ThreadBridgeMetrics:
+        """Live :class:`ThreadBridgeMetrics` for this bridge."""
         return self._metrics
 
     # --------------------------------------------------------- lifecycle

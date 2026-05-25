@@ -145,6 +145,7 @@ class ApplyCalibrationDialog(QDialog):
         return dialog.selected_targets()
 
     def selected_targets(self) -> set[str]:
+        """Tuple of selected target identifiers."""
         out: set[str] = set()
         for idx in range(self._list.count()):
             item = self._list.item(idx)

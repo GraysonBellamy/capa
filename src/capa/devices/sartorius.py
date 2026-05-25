@@ -144,9 +144,11 @@ class SartoriusAdapterParams(BaseModel):
         return SerialSettings(port=self.port, baudrate=self.baudrate)
 
     def protocol_kind(self) -> ProtocolKind:
+        """Wire protocol family (e.g. ``"sbi"``, ``"sbi-pid"``) for this controller."""
         return _PROTOCOL_BY_NAME[self.protocol]
 
     def overflow_policy(self) -> OverflowPolicy:
+        """Translate the user-facing ``overflow`` string to a library :class:`OverflowPolicy`."""
         return OverflowPolicy.BLOCK if self.overflow == "block" else OverflowPolicy.DROP_NEWEST
 
 
@@ -241,10 +243,12 @@ class SartoriusAdapter:
     @property
     def expected_emission_rate_hz(self) -> float:
         # One SourceRecord + one ChannelSample per bound channel per poll.
+        """Emission rate hint for queue sizing. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return self.params.rate_hz * (1 + len(self._channels))
 
     @property
     def resource_id(self) -> str:
+        """Stable contention-domain identifier. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return serial_resource_id(self.params.port)
 
     @property
@@ -493,6 +497,7 @@ class SartoriusAdapter:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
+        """Tare the balance to zero. Authorization rules match :meth:`command`."""
         return await self.command(
             DeviceCommand(
                 kind="tare",
@@ -510,6 +515,7 @@ class SartoriusAdapter:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
+        """Re-zero the balance (distinct from tare). Authorization rules match :meth:`command`."""
         return await self.command(
             DeviceCommand(
                 kind="zero",

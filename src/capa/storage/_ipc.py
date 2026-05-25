@@ -89,6 +89,7 @@ class IpcStreamSink:
 
     @property
     def path(self) -> Path:
+        """Path to the in-flight Arrow IPC stream this writer is appending to."""
         return self._path
 
     @property

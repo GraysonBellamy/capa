@@ -84,7 +84,7 @@ procedure:
 
 | Field | Required | Notes |
 |---|:-:|---|
-| `id` | yes | Plugin id. Matched against `plugins.lock`. |
+| `id` | yes | Procedure plugin id. In production mode, third-party procedure ids must match `plugins.lock`; built-ins are always trusted. |
 | `version` | no | PEP 440 specifier. `None` = any installed version (pin in production). |
 | `config` | no | Plugin-specific config blob. Validated by the procedure's `config_model` at load. |
 
@@ -124,7 +124,7 @@ domain_profile:
 
 | Field | Required | Notes |
 |---|:-:|---|
-| `id` | yes | Profile plugin id. `capa.profiles.capa_pyrolysis` is the default. |
+| `id` | yes | Profile id. `capa.profiles.capa_pyrolysis` is the default; third-party profile entry-point loading is still experimental. |
 | `standard_refs` | no | Standard editions (`"ASTM E1354-25"`, `"ISO 5660-1:2015"`). Recorded into manifest. |
 | `metadata` | no | Profile-specific metadata. Validated by the profile's `metadata_model`. |
 

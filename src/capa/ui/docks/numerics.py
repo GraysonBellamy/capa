@@ -56,6 +56,7 @@ class _NumericTile(QWidget):
         layout.setColumnStretch(0, 1)
 
     def update_value(self, value: float | None) -> None:
+        """Update one displayed numeric value."""
         if value is None:
             self._value_label.setText("—")
         else:
@@ -114,13 +115,16 @@ class NumericsDock(QDockWidget):
     # ------------------------------------------------------------------ control
 
     def start(self) -> None:
+        """Begin periodic updates / animation for this widget."""
         if not self._timer.isActive():
             self._timer.start()
 
     def stop(self) -> None:
+        """Stop periodic updates / animation for this widget."""
         self._timer.stop()
 
     def set_registry(self, registry: RingBufferRegistry) -> None:
+        """Bind this widget to a ring-buffer registry."""
         self._registry = registry
         for tile in self._tiles.values():
             tile.update_value(None)

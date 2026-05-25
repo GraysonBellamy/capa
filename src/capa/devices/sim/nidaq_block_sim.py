@@ -95,9 +95,11 @@ class NIDAQBlockSim:
 
     @property
     def block_period_s(self) -> float:
+        """Block period (s) for the polled NI-DAQ simulator."""
         return self.block_size / self.sample_rate_hz
 
     def configure_channels(self, specs: list[ChannelSpec]) -> None:
+        """Bind this adapter to the channel specs that target it."""
         self._channels = channels_for_device(
             specs, device=self.name, binding_source="nidaq_block_channel"
         )
@@ -106,19 +108,24 @@ class NIDAQBlockSim:
     def expected_emission_rate_hz(self) -> float:
         # Per-sample ChannelSamples dominate; the per-block SourceRecord
         # adds a negligible blocks/s term.
+        """Emission rate hint for queue sizing. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return self.sample_rate_hz * len(self._channels)
 
     @property
     def resource_id(self) -> str:
+        """Stable contention-domain identifier. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return f"sim:{self.name}"
 
     async def open(self) -> None:
+        """Open the underlying connection. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         self._lifecycle.open()
 
     async def close(self) -> None:
+        """Close the underlying connection. Idempotent."""
         self._lifecycle.close()
 
     async def start(self, ctx: AdapterStartContext) -> None:
+        """Begin sampling. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         self._lifecycle.start()
         self._clock = ctx.clock
         self._block_index = 0
@@ -126,9 +133,11 @@ class NIDAQBlockSim:
         self._task_started_at_utc = self._clock.started_utc
 
     async def stop(self) -> None:
+        """Stop sampling without closing the connection."""
         self._lifecycle.stop()
 
     async def snapshot(self) -> DeviceSnapshot:
+        """Return a health/status snapshot. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         clock = self._clock or RunClock.now()
         return DeviceSnapshot(
             adapter=ADAPTER_ID,
@@ -147,6 +156,7 @@ class NIDAQBlockSim:
         )
 
     async def stream(self) -> AsyncIterator[DeviceEmission]:
+        """Yield emissions while sampling. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         if self._clock is None:
             raise AdapterError("nidaq_block_sim.stream() requires start() first")
         while self._lifecycle.state == "running":
@@ -247,6 +257,7 @@ class NIDAQBlockSim:
         return list(self._blocks)
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
+        """Dispatch a generic :class:`DeviceCommand`. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         clock = self._clock or RunClock.now()
         rejection = reject_unless_authorized(
             cmd, adapter_id=ADAPTER_ID, device_name=self.name, clock=clock

@@ -355,9 +355,11 @@ class OperatorIdProvider:
         self._value: str = initial
 
     def current_operator_id(self) -> str:
+        """Operator id currently shown in the status bar (or ``None``)."""
         return self._value
 
     def set_operator_id(self, value: str) -> None:
+        """Update the status-bar operator id."""
         self._value = value
 
 

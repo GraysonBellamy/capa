@@ -33,8 +33,8 @@ Given a run id (the bundle directory name — *not* a path), the command:
    - `completed` stays `completed` (re-running on a sealed bundle is a no-op).
    - `running` or `crashed` becomes `crashed`.
    - Anything else passes through.
-4. If `manifest.ended_utc` is missing, marks it as `inferred_ended_utc=True` and uses the file system mtime of the last touched artifact.
-5. Calls [`finalize_in_place`](../../src/capa/storage/finalize.py): rewrites any in-flight Arrow IPC streams into final Parquet files, recomputes `manifest.sha256` against every artifact on disk, and writes the final manifest.
+4. If `manifest.ended_utc` is missing, marks it as `inferred_ended_utc=True` and uses the current UTC time as the recovered end timestamp.
+5. Calls [`finalize_in_place`](../../src/capa/storage/finalize.py): rewrites any in-flight Arrow IPC streams into final Parquet files, stamps the manifest, writes `manifest.sha256` against every artifact on disk, and verifies the result.
 6. Re-inserts the run into the catalog (`runs.sqlite`) — upserting the operator, inserting the open-row, and updating the finalize-row. If the catalog is locked or otherwise unhappy, the bundle still seals; only the catalog update is skipped (with a yellow warning).
 
 The argument is a **run id** (directory name like `20260524T143200-7f3a`), not a path. The bundle is resolved via `--runs-root` / `$CAPA_RUNS_ROOT` / `./runs`. This mirrors how the rest of the CLI thinks about runs.

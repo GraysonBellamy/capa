@@ -128,6 +128,7 @@ class AlicatAdapterParams(BaseModel):
         return SerialSettings(port=self.port, baudrate=self.baudrate)
 
     def overflow_policy(self) -> OverflowPolicy:
+        """Translate the user-facing ``overflow`` string to an alicatlib :class:`OverflowPolicy`."""
         return OverflowPolicy.BLOCK if self.overflow == "block" else OverflowPolicy.DROP_NEWEST
 
 
@@ -238,11 +239,13 @@ class AlicatAdapter:
 
     @property
     def expected_emission_rate_hz(self) -> float:
+        """Emission rate estimate for queue sizing (see :class:`DeviceAdapter`)."""
         # One SourceRecord + one ChannelSample per bound channel per poll.
         return self.params.rate_hz * (1 + len(self._channels))
 
     @property
     def resource_id(self) -> str:
+        """``serial:<port>`` — Alicat devices contend at the COM-port level."""
         return serial_resource_id(self.params.port)
 
     def update_capabilities_from_device(self, device: AlicatDevice) -> None:
@@ -676,6 +679,12 @@ class AlicatAdapter:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
+        """Set the controller's flow setpoint to ``value`` (in ``unit`` if given).
+
+        Controller-only; meters reject the command. Authorization rules
+        match :meth:`command` — supply either ``authorization_id`` (run-armed)
+        or ``confirmed_by`` (manual override).
+        """
         return await self.command(
             DeviceCommand(
                 kind="set_setpoint",
@@ -695,6 +704,12 @@ class AlicatAdapter:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
+        """Select the gas (or gas mix) the device reports flow against.
+
+        ``gas`` must be one of the gases the device firmware recognizes
+        (use :meth:`read_gas_list` to enumerate). Authorization rules
+        match :meth:`command`.
+        """
         return await self.command(
             DeviceCommand(
                 kind="set_gas",
@@ -713,6 +728,10 @@ class AlicatAdapter:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
+        """Tare the flow reading to zero. Issue with the bus at no-flow.
+
+        Authorization rules match :meth:`command`.
+        """
         return await self.command(
             DeviceCommand(
                 kind="tare_flow",

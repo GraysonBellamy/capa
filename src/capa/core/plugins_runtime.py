@@ -3,9 +3,9 @@
 The lock parser + drift detector live in
 :mod:`capa.core.plugins_lock`. This module is the runtime side:
 
-1. **Discovery.** Walk ``importlib.metadata.entry_points(group="capa.procedures")``
-   and (when dev mode is enabled) any ``Procedure`` subclasses under a local
-   ``plugins/`` folder.
+1. **Discovery.** Walk ``importlib.metadata.entry_points(group="capa.procedures")``.
+   Test and embedding callers can also opt into a local ``plugins/`` folder
+   with ``enable_local_plugins_dir=True``; the CLI does not enable that path.
 2. **Contract enforcement at load time.** Every loaded plugin is checked
    against the :class:`~capa.experiment.procedures.base.Procedure` Protocol:
    ``id`` / ``name`` / ``version`` / ``config_model`` are all present, the
@@ -23,9 +23,10 @@ running engine's own distribution. They never need an entry in
 ``plugins.lock``, but they may be listed there for completeness.
 
 The runtime is intentionally permissive in dev mode (``mode="dev"``): it
-loads everything that passes the contract check, ignoring trust drift. The
-engine selects the mode based on ``CAPA_PLUGIN_MODE`` env var (default
-``"dev"`` for now; ``capa run --plugin-mode production`` switches).
+loads everything that passes the contract check, ignoring trust drift.
+``capa run`` and ``capa gui`` select the mode from ``CAPA_PLUGIN_MODE``
+(default ``"dev"``). ``capa plugins list --plugin-mode production`` can
+override the environment for inspection.
 """
 
 from __future__ import annotations
@@ -435,20 +436,24 @@ class ProcedureRegistry:
 
     @classmethod
     def discover(cls, **kwargs: Any) -> ProcedureRegistry:
+        """Discover procedure plugins via entry points and return a populated registry."""
         report = discover_procedures(**kwargs)
         return cls(report.loaded, report=report)
 
     @property
     def report(self) -> DiscoveryReport | None:
+        """The :class:`DiscoveryReport` from the most recent discovery, or ``None``."""
         return self._report
 
     def __contains__(self, plugin_id: object) -> bool:
         return isinstance(plugin_id, str) and plugin_id in self._by_id
 
     def get(self, plugin_id: str) -> LoadedProcedure | None:
+        """Return the :class:`LoadedProcedure` for ``plugin_id``, or ``None``."""
         return self._by_id.get(plugin_id)
 
     def ids(self) -> tuple[str, ...]:
+        """Tuple of every registered procedure plugin id, in registration order."""
         return tuple(self._by_id.keys())
 
     def instantiate(self, plugin_id: str, raw_config: dict[str, Any] | None) -> Procedure:

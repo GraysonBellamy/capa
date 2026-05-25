@@ -146,11 +146,13 @@ class WatlowSim:
 
     @property
     def expected_emission_rate_hz(self) -> float:
+        """Emission rate hint for queue sizing. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         rate = 1.0 / self.tick_period_s if self.tick_period_s > 0 else 0.0
         return rate * (1 + len(self._channels))
 
     @property
     def resource_id(self) -> str:
+        """Stable contention-domain identifier. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         return f"sim:{self.name}"
 
     async def open(self) -> None:
@@ -158,6 +160,7 @@ class WatlowSim:
         # can hold the connection strip in its brief CONNECTING state or
         # force it into FAILED state, neither of which happens naturally
         # under a clean sim apply.
+        """Open the underlying connection. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         import os  # noqa: PLC0415
 
         delay_ms = int(os.environ.get("CAPA_SIM_OPEN_DELAY_MS", "0") or "0")
@@ -168,16 +171,20 @@ class WatlowSim:
         self._lifecycle.open()
 
     async def close(self) -> None:
+        """Close the underlying connection. Idempotent."""
         self._lifecycle.close()
 
     async def start(self, ctx: AdapterStartContext) -> None:
+        """Begin sampling. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         self._lifecycle.start()
         self._clock = ctx.clock
 
     async def stop(self) -> None:
+        """Stop sampling without closing the connection."""
         self._lifecycle.stop()
 
     async def snapshot(self) -> DeviceSnapshot:
+        """Return a health/status snapshot. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         clock = self._clock or RunClock.now()
         return DeviceSnapshot(
             adapter=ADAPTER_ID,
@@ -285,6 +292,7 @@ class WatlowSim:
 
     async def command(self, cmd: DeviceCommand) -> CommandResult:
         # Sim always accepts authorized commands. Real adapter writes to the device.
+        """Dispatch a generic :class:`DeviceCommand`. See :class:`~capa.devices.adapter.DeviceAdapter`."""
         clock = self._clock or RunClock.now()
         rejection = reject_unless_authorized(
             cmd, adapter_id=ADAPTER_ID, device_name=self.name, clock=clock
@@ -303,6 +311,7 @@ class WatlowSim:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
+        """Set the controller setpoint. Authorization rules match :meth:`command`."""
         return await self.command(
             DeviceCommand(
                 kind="set_setpoint",

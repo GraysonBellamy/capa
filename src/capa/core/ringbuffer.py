@@ -107,6 +107,7 @@ class ChannelRingBuffer:
 
     @property
     def capacity(self) -> int:
+        """Maximum number of samples this ring can hold."""
         return self._cap
 
     @property
@@ -116,14 +117,17 @@ class ChannelRingBuffer:
 
     @property
     def dropped_decimation(self) -> int:
+        """Number of samples dropped because they arrived faster than ``decimate_to_hz``."""
         return self._dropped_decimation
 
     @property
     def dropped_overflow(self) -> int:
+        """Number of samples evicted because the ring was at capacity."""
         return self._dropped_overflow
 
     @property
     def total_dropped(self) -> int:
+        """Sum of :attr:`dropped_decimation` and :attr:`dropped_overflow`."""
         return self._dropped_decimation + self._dropped_overflow
 
     @property
@@ -258,6 +262,7 @@ class RingBufferRegistry:
         return buf
 
     def get(self, channel: str) -> ChannelRingBuffer | None:
+        """Return the buffer registered for ``channel``, or ``None`` if unregistered."""
         return self._buffers.get(channel)
 
     def push(self, sample: ChannelSample) -> bool:
@@ -270,6 +275,7 @@ class RingBufferRegistry:
         return buf.push(sample)
 
     def channels(self) -> tuple[str, ...]:
+        """Tuple of every channel name with a registered ring buffer."""
         return tuple(self._buffers.keys())
 
     def total_dropped(self) -> int:
@@ -306,6 +312,7 @@ class RingBufferRegistry:
         }
 
     def clear_all(self) -> None:
+        """Clear every registered buffer in place. Does not unregister channels."""
         for buf in self._buffers.values():
             buf.clear()
 
