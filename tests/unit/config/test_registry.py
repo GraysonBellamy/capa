@@ -12,6 +12,12 @@ from capa.devices.registry import (
     all_for_family,
     get_descriptor,
 )
+from tests.conftest import NIDAQMX_AVAILABLE
+
+requires_nidaqmx = pytest.mark.skipif(
+    not NIDAQMX_AVAILABLE,
+    reason="NI-DAQmx driver not installed",
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -19,6 +25,7 @@ def _ensure_builtins_loaded() -> None:
     _import_builtins()
 
 
+@requires_nidaqmx
 def test_builtin_adapter_descriptors_registered() -> None:
     """Every adapter under capa.devices.* must register a descriptor.
 
@@ -51,6 +58,7 @@ def test_real_watlow_descriptor_shape() -> None:
     assert any(c.name == "HAS_SETPOINT" for c in d.capabilities)
 
 
+@requires_nidaqmx
 def test_channel_templates_canonical_set() -> None:
     """built-in templates cover the 90% case."""
     template_ids: set[str] = set()
@@ -67,6 +75,7 @@ def test_channel_templates_canonical_set() -> None:
     assert expected.issubset(template_ids)
 
 
+@requires_nidaqmx
 def test_nidaq_thermocouple_template_defaults_match_nidaq_units() -> None:
     """NIDAQ_THERMOCOUPLE must default to degC to match NIDAQThermocoupleConfig.
 
