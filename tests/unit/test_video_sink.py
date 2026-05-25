@@ -144,6 +144,27 @@ class TestRunBundleWriterCameras:
 
         writer.close_sinks()
 
+    def test_output_root_manifest_uses_runtime_layout(self, tmp_path: Path) -> None:
+        output_root = tmp_path / "external-video"
+        spec_payload = _ir_spec("ir_cam0").model_dump()
+        spec_payload["output_root"] = str(output_root)
+        config = _config(CameraSpec.model_validate(spec_payload))
+        runs_root = tmp_path / "runs"
+        runs_root.mkdir()
+        writer = RunBundleWriter(config, runs_root=runs_root, run_id="run-output-root")
+        repo_root = Path(__file__).resolve().parents[2]
+        writer.open(repo_root=repo_root, lockfile_source=repo_root / "uv.lock")
+
+        manifest = BundleManifest.read(writer.bundle_path / "manifest.json")
+        cam = manifest.cameras[0]
+        assert cam.output_path == "video/ir_cam0.csq"
+        assert cam.output_path_external is not None
+        assert Path(cam.output_path_external) == (
+            output_root / "run-output-root" / "video" / "ir_cam0.csq"
+        )
+
+        writer.close_sinks()
+
     def test_record_frame_creates_per_camera_sink(self, tmp_path: Path) -> None:
         config = _config(_ir_spec(), _vis_spec())
         runs_root = tmp_path / "runs"

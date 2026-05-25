@@ -285,9 +285,9 @@ class ConductorConfig:
         """Build a :class:`ConductorConfig` from the user-facing
         :class:`RuntimeConfig`.
 
-        Saturation parameters remain code defaults — overridable here
-        only because the headless CLI currently exposes
-        ``saturation_deadline_s`` as a top-level flag.
+        Saturation parameters remain code defaults. Tests and embedding
+        code can override them here for diagnostics; the shipped CLI does
+        not expose them as user-facing flags today.
         """
         return cls(
             saturation_deadline_s=saturation_deadline_s,
@@ -854,6 +854,14 @@ class Conductor:
 
             # 9. Drain — disarm workers in parallel.
             self._transition(ConductorState.DRAINING)
+            # CAPA_DRAINING_DELAY_S exists so doc-tooling can hold the run
+            # in its brief DRAINING state long enough to screenshot the
+            # status badge. Sim disarms otherwise return in milliseconds.
+            import os  # noqa: PLC0415
+
+            _draining_delay = float(os.environ.get("CAPA_DRAINING_DELAY_S", "0") or "0")
+            if _draining_delay > 0:
+                await asyncio.sleep(_draining_delay)
             disarm_results = await self._pool.disarm_all(grace_s=self._config.shutdown_grace_s)
             self._pool_armed = False
             for rid, dr in disarm_results.items():

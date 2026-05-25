@@ -295,6 +295,7 @@ class SetupWizard(QWizard):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("setup_wizard")
         self.setWindowTitle("New Setup")
         self.setMinimumSize(600, 420)
         # AeroStyle (Qt's default on Windows) renders the page area as a

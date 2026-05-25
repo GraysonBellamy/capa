@@ -135,6 +135,11 @@ def run_gui(
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
+    if os.environ.get("CAPA_SCREENSHOT_PROBE"):
+        from capa.ui._screenshot_probe import install as _install_screenshot_probe
+
+        _install_screenshot_probe()
+
     # Engine's catalog usage is per-run; the window holds one catalog handle
     # for the lifetime of the GUI so every run inserts/updates against it.
     catalog = RunCatalog(runs_root)

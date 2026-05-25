@@ -155,13 +155,19 @@ class MethodTab(QWidget):
         self._toolbar = QToolBar("Method", self)
         self._toolbar.setMovable(False)
         self._toolbar.addAction("Open", self._on_open)
-        self._toolbar.addAction("Save", self._on_save)
-        self._toolbar.addAction("Save As", self._on_save_as)
-        self._toolbar.addAction("Validate", self._on_validate)
+        # Action text is "Save method" / "Validate method" (rather than
+        # plain "Save" / "Validate") so the screenshot-probe and any other
+        # text-based action lookup can distinguish them from the Setup
+        # tab's identically-named toolbar actions.
+        self._toolbar.addAction("Save method", self._on_save)
+        self._toolbar.addAction("Save method as…", self._on_save_as)
+        self._toolbar.addAction("Validate method", self._on_validate)
         self._toolbar.addSeparator()
 
         self._add_button = QPushButton("Add Step", self)
+        self._add_button.setObjectName("method_add_step_button")
         self._add_menu = QMenu(self._add_button)
+        self._add_menu.setObjectName("method_add_step_menu")
         for label, _cls, factory in _STEP_FACTORIES:
             self._add_menu.addAction(label, lambda f=factory: self._on_add_step(f()))
         self._add_button.setMenu(self._add_menu)

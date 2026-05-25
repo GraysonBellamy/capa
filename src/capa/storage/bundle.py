@@ -244,9 +244,9 @@ class RunBundleWriter:
             tomli_w.dumps(equipment_stub), encoding="utf-8"
         )
 
-        # calibration.json — verbatim CalibrationSet snapshot.
-        # Records the *reference* (name + revision); the resolved curves
-        # snapshot lands when the calibration runtime is wired in.
+        # calibration.json — current reference snapshot. Records the
+        # calibration-set name + revision; the resolved curves snapshot
+        # lands when the calibration runtime is wired in.
         calibration_block = {
             "name": self._config.calibration_set.name,
             "revision": self._config.calibration_set.revision,
@@ -534,7 +534,9 @@ class RunBundleWriter:
             platform=self._provenance.platform,
             lockfile=self._provenance.lockfile,
             plugins=self._provenance.plugins,
-            cameras=tuple(_seed_camera_entry(c) for c in self._config.hardware.cameras),
+            cameras=tuple(
+                _seed_camera_entry(c, run_id=self._run_id) for c in self._config.hardware.cameras
+            ),
         )
         manifest.write(self._bundle_path / "manifest.json")
 
@@ -544,7 +546,12 @@ class RunBundleWriter:
 # ---------------------------------------------------------------------------
 
 
-def _seed_camera_entry(spec: CameraSpec, *, recorded: bool = True) -> CameraEntry:
+def _seed_camera_entry(
+    spec: CameraSpec,
+    *,
+    run_id: str,
+    recorded: bool = True,
+) -> CameraEntry:
     """Build a :class:`CameraEntry` from a :class:`CameraSpec` at arm-time.
 
     Counts and frames-path are filled in at finalize; the seed entry only
@@ -555,12 +562,16 @@ def _seed_camera_entry(spec: CameraSpec, *, recorded: bool = True) -> CameraEntr
     that's the intended outcome, not a failure."
     """
     ext = ".csq" if spec.kind == "ir" else ".mkv"
+    bundle_rel = f"{VIDEO_DIRNAME}/{spec.name}{ext}"
     if spec.output_root is not None:
-        # escape hatch: output lives outside the bundle.
-        bundle_rel = f"{VIDEO_DIRNAME}/{spec.name}{ext}"
-        external = f"{spec.output_root.rstrip('/')}/{spec.name}{ext}"
+        # Keep this in sync with CameraDeviceAdapter._resolve_output_path().
+        external = str(
+            Path(spec.output_root).expanduser()
+            / run_id
+            / VIDEO_DIRNAME
+            / f"{spec.name}{ext}"
+        )
     else:
-        bundle_rel = f"{VIDEO_DIRNAME}/{spec.name}{ext}"
         external = None
     return CameraEntry(
         name=spec.name,

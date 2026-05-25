@@ -1,0 +1,6241 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Control and DAQ application for a custom cone-calorimeter-class lab instrument.">
+      
+      
+      
+        <link rel="canonical" href="https://GraysonBellamy.github.io/capa/architecture/runtime-architecture/">
+      
+      
+        <link rel="prev" href="../capa-plan/">
+      
+      
+        <link rel="next" href="../data-flow/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="zensical-0.0.43">
+    
+    
+      
+        <title>CAPA runtime architecture - capa</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/classic/main.a2001754.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/classic/palette.7dc9a0ad.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,500,500i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="orange" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#capa-runtime-architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="capa" class="md-header__button md-logo" aria-label="capa" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            capa
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CAPA runtime architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="orange" data-md-color-accent="deep-orange"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="orange" data-md-color-accent="deep-orange"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/GraysonBellamy/capa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GraysonBellamy/capa
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="capa" class="md-nav__button md-logo" aria-label="capa" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    capa
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/GraysonBellamy/capa" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GraysonBellamy/capa
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Quick start (simulator)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-real-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Your first real run
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/daily-workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Daily operator workflow
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/simulator-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The simulator profile
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  User guide
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  User guide
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/operator-handbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Operator handbook
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/the-setup-tab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The Setup tab
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/the-run-tab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The Run tab
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/the-method-tab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The Method tab
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/manual-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual controls
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/status-bar-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Status bar
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/diagnostics-dock/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics dock
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/camera-preview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Camera preview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/aborting-safely/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Aborting safely
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/reviewing-a-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reviewing a run
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Configuration
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/experiment-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Experiment YAML
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/hardware-toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Hardware TOML
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/method-toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Method TOML
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/channel-bindings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Channel bindings
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/calibrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Calibrations on disk
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/capa-profile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CAPA profile fields
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/validation-and-problems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Validation and problems
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/workspace-layout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Workspace layout
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Procedures
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Procedures
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../procedures/what-is-a-procedure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  What is a procedure
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../procedures/builtin-free-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Free run
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../procedures/builtin-recipe-runner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Recipe runner
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../procedures/builtin-batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Batch
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../procedures/builtin-heat-flux-tune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Heat-flux tune
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../procedures/method-steps-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Method step reference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Devices
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Devices
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/watlow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Watlow heaters
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/alicat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Alicat mass-flow
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/sartorius/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sartorius balance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/nidaq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  NI-DAQ
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/cameras-webcam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  USB webcams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/cameras-flir/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  FLIR IR cameras
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/simulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Simulators
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/discovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Discovery
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Run bundles
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Run bundles
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../bundles/what-is-a-bundle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  What's in a bundle
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../bundles/manifest-and-schema/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manifest and schema
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../bundles/parquet-channel-samples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Channel samples (parquet)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../bundles/parquet-device-records/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Device records (parquet)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../bundles/events-sqlite/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Events (sqlite)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../bundles/video/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Video
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../bundles/integrity-and-sealing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Integrity and sealing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../bundles/bundle-versioning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bundle versioning
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../bundles/reading-bundles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reading a bundle
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Calibration
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Calibration
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../calibration/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../calibration/calibration-sets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Calibration sets
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../calibration/tuning-workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Tuning workflow
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../calibration/heat-flux-tune-procedure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Heat-flux tune procedure
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../calibration/tune-artifacts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Tune artifacts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Safety
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Safety
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../safety/principles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Principles
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../safety/authorization-gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Authorization gates
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../safety/destructive-operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Destructive operations
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../safety/saturation-and-deadlines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Saturation and deadlines
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../safety/shutdown-sequence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Shutdown sequence
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  CLI
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa run
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-gui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa gui
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-validate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa validate
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-finalize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa finalize
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa devices
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-hardware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa hardware
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa config
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa catalog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa plugins
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-method/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa method
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/capa-profile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa profile
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/headless-runs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Headless runs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_12" id="__nav_12_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Troubleshooting
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Troubleshooting
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/common-issues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Common issues
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/status-bar-symptoms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reading status-bar symptoms
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/reading-event-logs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reading event logs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/crash-recovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Crash recovery
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/reporting-bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reporting bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_13" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_13" id="__nav_13_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Architecture
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../capa-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture plan
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+        <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Runtime topology
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Runtime topology
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-model-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. The model in one page
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-topology" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. Topology
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-three-lifecycles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. Three lifecycles
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-the-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. The Worker
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. The Worker">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.1 State machine
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.2 Invariants
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-sync-facade" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.3 Sync facade
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-why-dedicated-thread-per-resource-not-a-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.4 Why dedicated thread per resource (not a pool)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-cancellation-shield" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5. The cancellation shield
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-the-conductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6. The Conductor
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. The Conductor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-run-startup-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.1 Run startup sequence
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-run-shutdown-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.2 Run shutdown protocol
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-saturation-deadline" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.3 Saturation deadline
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-threadbridge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7. ThreadBridge
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-databus-topology" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        8. DataBus topology
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-command-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9. Command flow
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Command flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-path-a-run-armed-conductor-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9.1 Path A: run armed (Conductor exists)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-path-b-idle-no-conductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9.2 Path B: idle (no Conductor)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-adapter-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10. Adapter contract
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Adapter contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-resource_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10.1 <code>resource_id</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-adapter-author-responsibilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10.2 Adapter author responsibilities
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-resource-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10.3 Resource validation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-procedure-cpu-offload" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        11. Procedure CPU offload
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-subprocessworker-escape-hatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        12. SubprocessWorker — escape hatch
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-backpressure-overflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        13. Backpressure &amp; overflow
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        14. Observability
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-clock-timestamps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        15. Clock &amp; timestamps
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-error-propagation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        16. Error propagation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17-async-style-and-event-loop-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        17. Async style and event-loop implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#18-gil-free-threaded-readiness" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        18. GIL &amp; free-threaded readiness
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#19-config-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        19. Config schema
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="19. Config schema">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#191-per-runtime-tunables" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        19.1 Per-runtime tunables
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#192-on_failure-per-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        19.2 <code>on_failure</code> per device
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#193-resource_id-per-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        19.3 <code>resource_id</code> per device
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#20-module-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        20. Module layout
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#21-topology-invariants-enforced-by-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        21. Topology invariants (enforced by tests)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#22-glossary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        22. Glossary
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-flow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Data flow
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../threading-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Threading model
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channel-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Channel pipeline
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bundle-write-path/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bundle write path
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui-runtime-boundary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  UI / runtime boundary
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_14" id="__nav_14_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Contributing
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/dev-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Dev setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/running-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Running tests
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/hardware-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Hardware tests
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/code-style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Code style
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/typing-and-mypy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Typing and mypy
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/commit-and-pr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Commits and PRs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/release-process/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Release process
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Extending capa
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Extending capa
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extending/plugin-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Plugin system
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extending/writing-a-procedure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Writing a procedure
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extending/writing-a-profile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Writing a profile
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extending/writing-a-device-adapter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Writing a device adapter
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extending/custom-sinks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Custom sinks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extending/custom-method-steps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Custom method steps
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../extending/plugin-lockfile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Plugin lockfile
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_16" id="__nav_16_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_16">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/file-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  File formats
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Environment variables
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Exit codes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Glossary
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_18" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../api/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API reference
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_18" id="__nav_18_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_18">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  API reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/capa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/runtime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.runtime
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.devices
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.config
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/channels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.channels
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/experiment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.experiment
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.storage
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.ui
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.core
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/calibration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.calibration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  capa.cli
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-model-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. The model in one page
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-topology" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. Topology
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-three-lifecycles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. Three lifecycles
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-the-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. The Worker
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. The Worker">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.1 State machine
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.2 Invariants
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-sync-facade" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.3 Sync facade
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-why-dedicated-thread-per-resource-not-a-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4.4 Why dedicated thread per resource (not a pool)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-cancellation-shield" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5. The cancellation shield
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-the-conductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6. The Conductor
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. The Conductor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-run-startup-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.1 Run startup sequence
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-run-shutdown-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.2 Run shutdown protocol
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-saturation-deadline" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6.3 Saturation deadline
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-threadbridge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7. ThreadBridge
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-databus-topology" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        8. DataBus topology
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-command-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9. Command flow
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Command flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-path-a-run-armed-conductor-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9.1 Path A: run armed (Conductor exists)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-path-b-idle-no-conductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9.2 Path B: idle (no Conductor)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-adapter-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10. Adapter contract
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Adapter contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-resource_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10.1 <code>resource_id</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-adapter-author-responsibilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10.2 Adapter author responsibilities
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-resource-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10.3 Resource validation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-procedure-cpu-offload" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        11. Procedure CPU offload
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-subprocessworker-escape-hatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        12. SubprocessWorker — escape hatch
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-backpressure-overflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        13. Backpressure &amp; overflow
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        14. Observability
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-clock-timestamps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        15. Clock &amp; timestamps
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-error-propagation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        16. Error propagation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17-async-style-and-event-loop-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        17. Async style and event-loop implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#18-gil-free-threaded-readiness" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        18. GIL &amp; free-threaded readiness
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#19-config-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        19. Config schema
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="19. Config schema">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#191-per-runtime-tunables" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        19.1 Per-runtime tunables
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#192-on_failure-per-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        19.2 <code>on_failure</code> per device
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#193-resource_id-per-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        19.3 <code>resource_id</code> per device
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#20-module-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        20. Module layout
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#21-topology-invariants-enforced-by-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        21. Topology invariants (enforced by tests)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#22-glossary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        22. Glossary
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+  
+
+
+<h1 id="capa-runtime-architecture">CAPA runtime architecture<a class="headerlink" href="#capa-runtime-architecture" title="Permanent link">&para;</a></h1>
+<p><strong>Audience:</strong> contributors touching <code>src/capa/runtime/</code>, adapter authors, procedure / plugin authors.
+<strong>Scope:</strong> how the per-resource-worker runtime is shaped today — components, data flow, lifetimes, invariants. Reference doc, not a plan.
+<strong>Companion docs:</strong> <a href="../capa-plan/"><code>capa-plan.md</code></a> (product surface).</p>
+<hr />
+<h2 id="1-the-model-in-one-page">1. The model in one page<a class="headerlink" href="#1-the-model-in-one-page" title="Permanent link">&para;</a></h2>
+<p>CAPA runs every hardware resource (one serial port, one DAQmx chassis, one camera handle) on <strong>its own thread, its own asyncio loop</strong>. Adapters keep their familiar <code>open/close/start/stop/stream/command/snapshot</code> surface; they are hosted inside per-resource <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/worker.py"><code>Worker</code></a> instances.</p>
+<p>The system has three nested lifetimes:</p>
+<ol>
+<li><strong>Config lifetime — <code>WorkerPool</code>.</strong> Opened when a config loads. Builds one <code>Worker</code> per resource, opens every adapter, and lives across many runs. Closed only on config-reload or app-quit. Operators can issue manual commands while no run is active; the Sartorius cold-open race and other open-once costs are paid once per config load.</li>
+<li><strong>Run lifetime — <code>Conductor</code>.</strong> Constructed when a run starts. Owns run-only state (clock, writer, procedure, drain tasks, heartbeat, saturation monitor). Arms the existing workers, drives sampling, disarms on stop. Workers stay open for the next run.</li>
+<li><strong>Command lifetime — single dispatch.</strong> A UI command crosses the thread seam once or twice and resolves.</li>
+</ol>
+<p>The <strong>UI thread</strong> owns Qt only and crosses to the Conductor (during a run) or to the WorkerPool (between runs) through thread-safe channels.</p>
+<p>There is no parallel <code>engine_v2</code> / <code>engine_v1</code> path. The old single-loop <code>Engine</code>, <code>DeviceRegistry</code>, and standalone <code>camera_task</code> are gone.</p>
+<hr />
+<h2 id="2-topology">2. Topology<a class="headerlink" href="#2-topology" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌────────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│ UI thread (qasync: Qt + asyncio merged)                            │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│                                                                    │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│  Widgets │ Plots │ Manual cards │ Numerics │ Status bar │ UIDataBus│
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│                                                                    │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  ┌──────────────────────────────────────────────────────────────┐  │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│  │ ManualClient — sync facade; lives on UI loop                 │  │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│  │   Routes to Conductor.dispatch (run armed) or                │  │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│  │   WorkerPool.dispatch (idle). Cards stay mode-agnostic.      │  │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│  └──────────────────────────────────────────────────────────────┘  │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>└────┬────────────────────────────────────────────────────┬──────────┘
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>     │ commands during run                                 │ commands when idle
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>     │ (run_coroutine_threadsafe → conductor)              │ (direct to pool)
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>     │                                                     │
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>     ▼                                                     │
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>┌────────────────────────────────────────────────────┐    │
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│ Conductor thread (per-run; pure asyncio, no Qt)    │    │
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│                                                    │    │
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│  ┌──────────────┐  ┌─────────────┐  ┌──────────┐   │    │
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│  │ ProcedureRun │  │ Drain tasks │  │ Heartbeat│   │    │
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│  └──────┬───────┘  │ (one per    │  │ Sat-dead-│   │    │
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│         │          │  worker)    │  │ line     │   │    │
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│  ┌──────┴───────┐  └──────┬──────┘  └──────────┘   │    │
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│  │ConductorData │         │                        │    │
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│  │Bus (authori- │         │                        │    │
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│  │tative)       │         │                        │    │
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>│  └──────────────┘         │                        │    │
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>│                           ▼                        │    │
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>│  per drain: writer.submit + conductor_databus.put  │    │
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>│             + ui_bridge.put                        │    │
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>└─────┬───────────────────────────────────────┬──────┘    │
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>      │                                       │           │
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>      │ ThreadBridge per worker (BLOCK + sat- │           │
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>      │ uration deadline at Conductor side)   │           │
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>      │                                       │           │
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>      ▼                                       ▼           ▼
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>┌─────────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>│ WorkerPool (config-lived; survives runs)                            │
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>│                                                                     │
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>│ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐         │
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>│ │Worker │ │Worker │ │Worker │ │Worker │ │Worker │ │Worker │         │
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>│ │COM6   │ │COM7   │ │COM4   │ │DAQmx  │ │webcam │ │FLIR-IR│         │
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>│ │Watlow │ │Alicat │ │Sartor.│ │cdaq1  │ │PyAV   │ │SDK    │         │
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>│ └───────┘ └───────┘ └───────┘ └───────┘ └───────┘ └───────┘         │
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>│ each: own thread + asyncio loop + adapter instances + state machine │
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>│                                                                     │
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>│ States: IDLE ↔ ARMED ↔ SAMPLING ↔ DRAINING ↔ IDLE  (§4.1)           │
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>└─────────────────────────────────────────────────────────────────────┘
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>                                                              ┌───┐
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>                                                              │WT │ (writer
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>                                                              └───┘  thread,
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>                                                                     constructed
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>                                                                     per run by
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>                                                                     Conductor)
+</code></pre></div>
+<p><strong>Thread inventory at full real config (6 devices + 2 cameras):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Thread</th>
+<th>Loop</th>
+<th>Lifetime</th>
+<th>Owns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ui-main</code></td>
+<td>qasync</td>
+<td>process</td>
+<td>Qt widgets, plot timers, UIDataBus subscribers, manual cards</td>
+</tr>
+<tr>
+<td><code>conductor</code></td>
+<td>asyncio</td>
+<td>per-run</td>
+<td>ProcedureRunner, drain tasks, heartbeat, saturation monitor, ingest, RunClock</td>
+</tr>
+<tr>
+<td><code>worker-heater</code></td>
+<td>asyncio</td>
+<td>config</td>
+<td>WatlowAdapter + serial transport</td>
+</tr>
+<tr>
+<td><code>worker-purge_mfc</code></td>
+<td>asyncio</td>
+<td>config</td>
+<td>AlicatAdapter + serial transport</td>
+</tr>
+<tr>
+<td><code>worker-balance</code></td>
+<td>asyncio</td>
+<td>config</td>
+<td>SartoriusAdapter + serial transport</td>
+</tr>
+<tr>
+<td><code>worker-cdaq1</code></td>
+<td>asyncio</td>
+<td>config</td>
+<td>NIDAQAdapter + DAQmx callbacks</td>
+</tr>
+<tr>
+<td><code>worker-visible_cam0</code></td>
+<td>asyncio</td>
+<td>config</td>
+<td>WebcamAdapter + PyAV input</td>
+</tr>
+<tr>
+<td><code>worker-ir_cam0</code></td>
+<td>asyncio</td>
+<td>config</td>
+<td>FlirIrAdapter + SDK callbacks</td>
+</tr>
+<tr>
+<td><code>writer</code></td>
+<td>(sync)</td>
+<td>per-run</td>
+<td>Bundle sinks, Arrow IPC streams, SQLite</td>
+</tr>
+</tbody>
+</table>
+<p>9 threads during a run (UI + conductor + 6 workers + writer). Each worker holds &lt;15 MB resident.</p>
+<hr />
+<h2 id="3-three-lifecycles">3. Three lifecycles<a class="headerlink" href="#3-three-lifecycles" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Config lifetime ────────────────────────────────────────────────────────┐
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>                                                                        │
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>   pool.open()                          pool.close()                    │
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>   ──────────►  WorkerPool alive   ───────────►   torn down             │
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                                                                        │
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>       Run lifetime ───────┐         Run lifetime ───────┐              │
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>         conductor.start() │           conductor.start() │              │
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>         ───►  arm  ───►   │           ───►  arm  ───►   │              │
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>              sample       │                sample       │              │
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>              disarm       │                disarm       │              │
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>         ◄─── finalize ────┘           ◄─── finalize ────┘              │
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>                                                                        │
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>       (idle between runs — workers in IDLE; manual commands accepted)  │
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>                                                                        │
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>            Command lifetime — single dispatch round-trip               │
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>            ManualClient.dispatch(...) → returns                        │
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>                                                                        │
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+<p><strong>Config lifetime</strong> is owned by the app/UI. Loading a config triggers <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/pool.py"><code>WorkerPool.open()</code></a>; reloading or quitting triggers <code>WorkerPool.close()</code>. Once <code>open()</code> returns, every adapter is open and every worker is IDLE.</p>
+<p><strong>Run lifetime</strong> is owned by the <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/conductor.py"><code>Conductor</code></a>. <code>Conductor.start()</code> constructs the run context (clock, writer, run_id), calls <code>pool.arm_all(run_context)</code> to install per-run state on every worker, runs preflight against live data, then calls <code>pool.begin_sampling_all()</code> and starts drain tasks and the procedure. <code>Conductor.stop()</code> reverses this and finalizes the bundle.</p>
+<p><strong>Command lifetime</strong> is a single sync-facade dispatch through <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/dispatch.py"><code>ManualClient</code></a>, which picks <code>ConductorDispatcher</code> when a run is armed (records into the bundle, gates by conductor state) or <code>PoolDispatcher</code> when idle (no recording, no gating).</p>
+<hr />
+<h2 id="4-the-worker">4. The Worker<a class="headerlink" href="#4-the-worker" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/worker.py"><code>Worker</code></a> owns one hardware resource and the 1..N adapters that share its <code>resource_id</code>. The constructor does no I/O; <code>start()</code> brings the runner up and opens every adapter inside the worker loop.</p>
+<h3 id="41-state-machine">4.1 State machine<a class="headerlink" href="#41-state-machine" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>                 ┌──────────────────────────────────────────────┐
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>   pool.open():  │                                              │
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>   open() ────►  │  IDLE                                         │  pool.close():
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>                 │   adapters open, no streams running           │  close() ───►
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>                 │   dispatch() permitted (manual)               │  (torn down)
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>                 │   no clock, no writer ref, no run_id          │
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>                 └────────────┬─────────────────────────────────┘
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>                              │ Conductor.start():
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>                              │ pool.arm_all(run_context)
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>                              ▼
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>                 ┌──────────────────────────────────────────────┐
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>                 │  ARMED                                        │
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>                 │   per-run context installed:                  │
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>                 │     clock, writer ref, run_id, bundle ref     │
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>                 │   streams NOT yet running                     │
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>                 │   dispatch() permitted (records into bundle)  │
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>                 └────────────┬─────────────────────────────────┘
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>                              │ Conductor.start():
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>                              │ pool.begin_sampling_all()
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>                              ▼
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>                 ┌──────────────────────────────────────────────┐
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>                 │  SAMPLING                                     │
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>                 │   stream tasks running                        │
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>                 │   emissions flowing to outbound bridge        │
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>                 │   dispatch() permitted                        │
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>                 └────────────┬─────────────────────────────────┘
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>                              │ Conductor.stop():
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>                              │ pool.disarm_all(grace_s)
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>                              ▼
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>                 ┌──────────────────────────────────────────────┐
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>                 │  DRAINING                                     │
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>                 │   adapter.stop() in flight                    │
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>                 │   outbound bridge drains then closes          │
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>                 │   dispatch() REFUSED                          │
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a>                 │   bounded by grace_s; hard-stop if exceeded   │
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a>                 └────────────┬─────────────────────────────────┘
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>                              │ drain complete OR grace expired
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>                              ▼
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>                         back to IDLE
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>                         (per-run context cleared)
+</code></pre></div>
+<p>Legal edges live in <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/lifecycle.py"><code>lifecycle.LEGAL_WORKER_EDGES</code></a>. Illegal transitions raise <code>WorkerStateError</code>.</p>
+<h3 id="42-invariants">4.2 Invariants<a class="headerlink" href="#42-invariants" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A Worker owns exactly one <code>resource_id</code> and is the only thread that touches its adapters.</li>
+<li>Adapter <code>open()</code> runs once on the IDLE-entry edge (pool open). Adapter <code>close()</code> runs once on the close edge (pool close). Streams come up and down per run.</li>
+<li><code>dispatch()</code> is permitted in IDLE, ARMED, SAMPLING; refused in DRAINING and when the pool is closed.</li>
+<li>All emissions are immutable. Once an adapter returns one, no thread mutates it.</li>
+</ul>
+<h3 id="43-sync-facade">4.3 Sync facade<a class="headerlink" href="#43-sync-facade" title="Permanent link">&para;</a></h3>
+<p>The Worker exposes a thread-safe sync API returning <code>concurrent.futures.Future</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Worker</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Future</span><span class="p">[</span><span class="kc">None</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">grace_s</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">5.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Future</span><span class="p">[</span><span class="kc">None</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">arm</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">run_context</span><span class="p">:</span> <span class="n">RunContext</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Future</span><span class="p">[</span><span class="kc">None</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">begin_sampling</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Future</span><span class="p">[</span><span class="n">ThreadBridge</span><span class="p">[</span><span class="n">DeviceEmission</span><span class="p">]]:</span> <span class="o">...</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">disarm</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">grace_s</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">5.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Future</span><span class="p">[</span><span class="n">DisarmResult</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">dispatch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">adapter_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cmd</span><span class="p">:</span> <span class="n">DeviceCommand</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Future</span><span class="p">[</span><span class="n">CommandResult</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">snapshot</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">adapter_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Future</span><span class="p">[</span><span class="n">DeviceSnapshot</span><span class="p">]:</span> <span class="o">...</span>
+</code></pre></div>
+<p>Every caller (Conductor, PoolDispatcher, UI cards) is on a different loop than the worker. Async callers <code>asyncio.wrap_future</code> it; sync CLI callers <code>.result()</code> it. This is the standard <code>loop.call_soon_threadsafe</code> bridge.</p>
+<h3 id="44-why-dedicated-thread-per-resource-not-a-pool">4.4 Why dedicated thread per resource (not a pool)<a class="headerlink" href="#44-why-dedicated-thread-per-resource-not-a-pool" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Each Worker owns persistent state (adapter handles, transport buffers, watlowlib client). It cannot move between threads.</li>
+<li>Per-resource means O(N_resources) threads, not O(N_emissions/sec). N_resources &lt; 20 at realistic configs.</li>
+<li>A pool buys nothing — it would add scheduler-affinity headaches and pickling for off-thread coroutines.</li>
+</ul>
+<hr />
+<h2 id="5-the-cancellation-shield">5. The cancellation shield<a class="headerlink" href="#5-the-cancellation-shield" title="Permanent link">&para;</a></h2>
+<p><strong>This is the single most load-bearing rule in the runtime.</strong></p>
+<blockquote>
+<p><strong>In-flight hardware transactions are shielded against task cancellation.</strong> When a caller cancels a pending <code>dispatch</code> future, the worker's <code>adapter.command()</code> call <strong>continues to completion</strong> inside <code>asyncio.shield(...)</code>. The caller's future is cancelled; the hardware transaction is not.</p>
+</blockquote>
+<p>Why: a canceller mid-transaction can leave stale bytes in the serial RX buffer. The next request reads those bytes as its own reply. This is exactly what produced <code>unexpected reply payload for write: ReadResponse</code> on COM6 — event-loop starvation caused a read timeout, cancellation propagated through the adapter, but the device's response arrived a few ms later and sat in the buffer until the next <code>set_setpoint</code>'s read picked it up.</p>
+<p>What "cancel" means under this rule:</p>
+<ul>
+<li><strong>Caller-side cancellation is observable but not enforceable.</strong> The caller's <code>wrap_future</code> cancels the underlying <code>concurrent.futures.Future</code>, which raises <code>CancelledError</code> in the caller. The worker's shielded coroutine continues; its result is dropped on completion.</li>
+<li><strong>For long-lived calls (rare for commands, common for <code>stream()</code>):</strong> commands are short (10–50 ms); cancellation is rarely meaningful. Streams are not driven through <code>dispatch()</code> — they live in <code>_stream_task</code> and exit only when the worker transitions out of SAMPLING.</li>
+<li><strong>UI surface:</strong> manual cards show "cancelling…" and surface the eventual result when it lands.</li>
+<li><strong>Adapter-level timeouts bound the worst case.</strong> The shield only protects against task-cancellation, not against an unbounded wait.</li>
+</ul>
+<p>Every adapter has a corresponding <code>test_&lt;adapter&gt;_dispatch_cancellation_does_not_corrupt_next_call</code> test.</p>
+<hr />
+<h2 id="6-the-conductor">6. The Conductor<a class="headerlink" href="#6-the-conductor" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/conductor.py"><code>Conductor</code></a> is the per-run coordinator. It lives on its own thread on its own asyncio loop, separate from the UI and from the pool's worker threads. A hung adapter (or a stalled writer fsync) cannot freeze the UI: every cross-thread hand-off is bounded by a <code>ThreadBridge</code> and every blocking deadline is observed by the <code>SaturationMonitor</code>.</p>
+<h3 id="61-run-startup-sequence">6.1 Run startup sequence<a class="headerlink" href="#61-run-startup-sequence" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>1. User triggers run (UI button) OR headless CLI
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>2. UI/CLI thread:
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>     conductor = Conductor(config, pool, runs_root, plugins_lock, operator_id)
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>     handle = await conductor.start()
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>3. Conductor thread (on its own loop):
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>     a. Authorization.arm(operator_id, run_id)
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>     b. Build RunClock (single authority)
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>     c. Build WriterThread for this run, start it
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>     d. Build run_context = RunContext(clock, run_id, writer_ref, bundle_ref)
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>     e. await pool.arm_all(run_context)
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>        — every worker transitions IDLE → ARMED
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>     f. Spawn per-worker drain tasks  (NB: drains start BEFORE preflight)
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>        — bridges are open; ConductorDataBus is publishable;
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>          procedure dynamic-preflight will see live samples
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>     g. await pool.begin_sampling_all()
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>        — every worker transitions ARMED → SAMPLING
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>     h. Run profile preflight (executor _wait_for path) via ConductorDataBus
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>        — samples now flowing; dynamic preflight can wait for stability
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>     i. Spawn procedure, heartbeat, saturation-deadline monitor, ingest
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>     j. UI&#39;s start_run future resolves with RunStarted(run_id, bundle_path)
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>4. Emissions flow; procedure executes; UI reflects state
+</code></pre></div>
+<p><strong>Drain-before-preflight is load-bearing.</strong> With workers in SAMPLING but drains not yet running, samples reach the outbound bridge but never reach the bus — preflight would hang on its own <code>_wait_for</code> timeout.</p>
+<p><strong>Worker startup is parallel.</strong> Bus-collision avoidance is handled by <code>resource_id</code> grouping, not by serializing across workers: two adapters that share a bus share a <code>resource_id</code> and therefore share one worker (and one loop), where their <code>open()</code> calls serialize through the adapter's own per-port lock. Two workers by definition own disjoint resources and cannot collide.</p>
+<h3 id="62-run-shutdown-protocol">6.2 Run shutdown protocol<a class="headerlink" href="#62-run-shutdown-protocol" title="Permanent link">&para;</a></h3>
+<p>Threaded-async systems fail here if the protocol isn't explicit and bounded.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Trigger: procedure-complete | external_stop | unrecoverable error | saturation deadline
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>Graceful disarm
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>1. Conductor stops procedure (procedure task exits)
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>2. Conductor calls pool.disarm_all(grace_s=5.0)
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>3. For each worker (in parallel):
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>     a. Worker transitions SAMPLING → DRAINING
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>     b. adapter.stop() called in worker loop (issues safe-shutdown command first
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>        for adapters with state-bearing hardware — e.g. heater)
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>     c. adapter.stream() exits naturally
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>     d. Outbound bridge drained, then closed (sentinel)
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>4. Conductor&#39;s drain tasks see sentinel → exit
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>5. Conductor awaits all disarm futures with grace_s
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>Forced stop + leak detection (if grace expires for any worker)
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>1. For each worker still in DRAINING:
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>     a. Capture stack via sys._current_frames()[worker.thread.ident]
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>     b. Record &quot;worker_hard_stop_attempt&quot; event into bundle (with stack)
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>     c. Call worker.loop.call_soon_threadsafe(worker.loop.stop)
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>     d. thread.join(timeout=2.0)
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>     e. If join fails:
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>          - Record &quot;worker_thread_leaked&quot; event (with stack)
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>          - Run marked degraded
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>          - Thread persists as daemon; no further action
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>            (interrupting wedged native state could corrupt vendor SDKs)
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>Drain and exit
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>1. Writer thread inbox stops accepting (Conductor signals it)
+<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>2. Writer thread drains its queue
+<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>3. Writer thread finalizes bundle
+<a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a>4. Conductor&#39;s loop exits; thread joins
+<a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a>5. Pool&#39;s workers return to IDLE (those that disarmed cleanly); leaked threads remain
+<a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a>6. UI sees the Conductor&#39;s start_run future resolve with run summary
+<a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a>7. WorkerPool remains alive — next run can be started against it
+</code></pre></div>
+<p><strong>Force-cancel never leaves the heater hot.</strong> The procedure executor's <code>SafeShutdownStep</code> (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/executor.py"><code>executor.py</code></a>) still runs <em>before</em> graceful disarm begins; for adapters with hard safety requirements, the adapter's own <code>stop()</code> also issues a safe-shutdown command in the worker's loop before signalling stream exit.</p>
+<p><strong>Forced stop is observable.</strong> Any time the engine takes the hard path, the bundle records it with a stack trace. Hard-stop attempts are not silent, and leaked threads are not pretended-away.</p>
+<p><strong>There is no guaranteed terminate.</strong> Python provides no safe way to interrupt a thread wedged inside a blocking vendor SDK call. The protocol's job is to be observable, not omnipotent. For crash-prone SDKs and safety-critical devices, see §11 (<code>SubprocessWorker</code>).</p>
+<h3 id="63-saturation-deadline">6.3 Saturation deadline<a class="headerlink" href="#63-saturation-deadline" title="Permanent link">&para;</a></h3>
+<p>The Conductor enforces an end-to-end durable-output deadline. Per-channel backpressure policies are necessary but insufficient: a writer/disk stall produces silent worker-side blocking that no per-device silence policy will catch until that policy exists.</p>
+<p><a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/saturation.py"><code>SaturationMonitor</code></a> polls per-bridge <code>blocked_since_ms</code> and the writer-inbox last-accept timestamp on a <code>saturation_deadline_s / 10</code> cadence (default 10s deadline, 1s poll). Escalation:</p>
+<ol>
+<li>Log the saturation cause and per-bridge / inbox metrics.</li>
+<li>Write a <code>saturation_deadline</code> event into the bundle.</li>
+<li>Mark the run outcome <code>crashed_but_sealed</code>.</li>
+<li>Trigger normal graceful shutdown — workers <code>disarm()</code> still runs <code>adapter.stop()</code>'s safe-shutdown path, so hardware does not stay in an inconsistent state.</li>
+</ol>
+<hr />
+<h2 id="7-threadbridge">7. ThreadBridge<a class="headerlink" href="#7-threadbridge" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/bridge.py"><code>ThreadBridge</code></a> is the cross-thread emission channel. Stdlib only — <code>asyncio.Queue</code> on the consumer side, <code>Semaphore</code> on the producer side, <code>loop.call_soon_threadsafe</code> for the hand-off.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ThreadBridge</span><span class="p">(</span><span class="n">Generic</span><span class="p">[</span><span class="n">T</span><span class="p">]):</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">put</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">item</span><span class="p">:</span> <span class="n">T</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">put_nowait</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">item</span><span class="p">:</span> <span class="n">T</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">T</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>           <span class="c1"># None = closed</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__aiter__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AsyncIterator</span><span class="p">[</span><span class="n">T</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="nd">@property</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">metrics</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ThreadBridgeMetrics</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<p><strong>Policies</strong> mirror <code>BoundedQueue</code>:</p>
+<ul>
+<li><code>BLOCK</code> — producer awaits space (default for emission bridges).</li>
+<li><code>DROP_OLDEST</code> — evict head, enqueue new.</li>
+<li><code>DROP_NEWEST</code> — discard new.</li>
+</ul>
+<p><strong>No <code>ABORT_RUN</code> on a ThreadBridge.</strong> Aborts are a run-level concern; the Conductor's saturation monitor decides whether sustained saturation is fatal.</p>
+<p><strong>Why not <code>janus</code> / <code>culsans</code> / <code>anyio.create_memory_object_stream</code>:</strong> the two cross-thread channels in this design are both <strong>async↔async across two different asyncio loops</strong> (Worker → Conductor; Conductor → UI/qasync). <code>janus.async_q</code> is bound to one loop. <code>anyio.create_memory_object_stream</code> is per-loop. <code>culsans</code> has the right shape but is alpha-quality. The stdlib hand-roll is ~150 LOC, free-threaded ready, and adds no dependency.</p>
+<p><strong><code>call_soon_threadsafe</code> is the only thread-crossing primitive used</strong>; CPython implements it via the loop's self-pipe, which wakes the consumer's <code>epoll_wait</code> / <code>WaitForMultipleObjects</code> immediately — there is no polling overhead.</p>
+<p><code>ThreadBridgeMetrics.blocked_since_ms</code> is the saturation-deadline signal: Conductor polls per-bridge <code>blocked_since_ms</code> and escalates if any worker has been blocked for <code>ConductorConfig.saturation_deadline_s</code>.</p>
+<hr />
+<h2 id="8-databus-topology">8. DataBus topology<a class="headerlink" href="#8-databus-topology" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/core/databus.py"><code>DataBus</code></a> is built on <code>BoundedQueue</code> (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/core/backpressure.py"><code>backpressure.py</code></a>), which is explicitly loop-local. The procedure handler <code>_wait_for</code> subscribes to a DataBus on the Conductor loop. UI widgets subscribe on the qasync loop. These are different loops on different threads.</p>
+<p><strong>Resolution: two loop-affine DataBus instances connected one-way through UIBridge.</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Conductor loop:                      UI/qasync loop:
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>┌─────────────────────────┐          ┌─────────────────────────┐
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>│ ConductorDataBus (auth) │          │ UIDataBus (mirror)      │
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>│   ▲ publish (await)     │          │   ▲ publish_nowait      │
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>│   ├─ procedure subs     │          │   ├─ widget subs        │
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>│   │  (BLOCK / ABORT_RUN │          │   │  (DROP_OLDEST)      │
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>│   │   tolerated)        │          │   │                     │
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>│   └─ analyzer subs      │          │   └─ status bar subs    │
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>└─────────────────────────┘          └─────────────────────────┘
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>         ▲                                    ▲
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>         │ conductor drain publishes here     │ UIBridge drain
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>         │                                    │ re-publishes here
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>         │                                    │
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>  Worker outbound bridge ─┬──→ writer.submit (await)
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>                          ├──→ ConductorDataBus.publish (await)
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>                          └──→ UIBridge.put_nowait ─────────────┘
+</code></pre></div>
+<p><strong>Invariants:</strong></p>
+<ol>
+<li>The UI side <strong>never publishes back</strong> into ConductorDataBus. UIDataBus is a one-way downstream mirror, fed exclusively by the UIBridge drain task.</li>
+<li>The conductor drain <code>await</code>s <code>conductor_databus.publish(emission)</code>. This preserves existing DataBus backpressure (a safety-critical subscriber with BLOCK or ABORT_RUN policy still gets honored) and surfaces a stuck subscriber as drain-task blocking, which the saturation deadline catches.</li>
+<li>The UI drain calls <code>ui_databus.publish_nowait(emission)</code>. Widget subscribers all use DROP_OLDEST. The UI loop cannot block on subscriber backpressure.</li>
+<li>Headless runs use only ConductorDataBus; UIBridge is unwired.</li>
+<li>DataBus publish is loop-affine. A runtime assertion in <code>publish</code> / <code>publish_nowait</code> verifies the call originates from the bus's owning loop.</li>
+</ol>
+<hr />
+<h2 id="9-command-flow">9. Command flow<a class="headerlink" href="#9-command-flow" title="Permanent link">&para;</a></h2>
+<p>Two paths, depending on whether a run is armed:</p>
+<h3 id="91-path-a-run-armed-conductor-exists">9.1 Path A: run armed (Conductor exists)<a class="headerlink" href="#91-path-a-run-armed-conductor-exists" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>UI: manual card &quot;Set heater 600°C&quot;
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>   │  (UI loop)
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>   ▼
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>ManualClient.dispatch(&quot;heater&quot;, cmd):
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>   if conductor is active:
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>       return conductor_dispatcher.dispatch(...)
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>   else:
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>       return pool_dispatcher.dispatch(...)
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>   │
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>   ▼  (Path A)
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>ConductorDispatcher.dispatch(&quot;heater&quot;, cmd)
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>   │  (asyncio.run_coroutine_threadsafe → conductor loop)
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>   ▼
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>Conductor._dispatch(name, cmd):
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>   if not self._state.permits_manual():
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>       reject Future with ConductorStateError
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>       return
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>   record CommandIssued event into bundle
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>   worker = self._pool.worker_for(name)
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>   return await asyncio.wrap_future(worker.dispatch(name, cmd))
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>   │  (asyncio.run_coroutine_threadsafe → worker loop)
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>   ▼
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>Worker.dispatch (on worker loop):
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>   adapter = self._adapters[name]
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>   return await asyncio.shield(adapter.command(cmd))   ← cancellation shield
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>   │
+<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a>   ▼  (bubbles back across two thread seams)
+<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a>UI awaits result, updates label
+</code></pre></div>
+<h3 id="92-path-b-idle-no-conductor">9.2 Path B: idle (no Conductor)<a class="headerlink" href="#92-path-b-idle-no-conductor" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>UI: manual card &quot;Read setpoint&quot; (between runs)
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>   │  (UI loop)
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>   ▼
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>ManualClient.dispatch(&quot;heater&quot;, cmd) → PoolDispatcher.dispatch
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>   │  (asyncio.run_coroutine_threadsafe → worker loop directly)
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>   ▼
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>Worker.dispatch:
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>   adapter = self._adapters[name]
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>   return await asyncio.shield(adapter.command(cmd))
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>   │
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>   ▼
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>UI awaits result
+</code></pre></div>
+<p><strong>Why two paths?</strong> Path A records the command-issue event into the bundle and enforces conductor-state gating (commands refused during DRAINING / FINALIZING). Path B has neither — there is no bundle to record into and no engine state to gate against. Manual fiddling between runs does not leak into the next run's bundle.</p>
+<p>The double-hop in Path A adds ~100–300 µs vs Path B's single hop. On a command path that already costs 10–50 ms of serial round-trip, this is invisible.</p>
+<hr />
+<h2 id="10-adapter-contract">10. Adapter contract<a class="headerlink" href="#10-adapter-contract" title="Permanent link">&para;</a></h2>
+<p>Adapters are unchanged except for one property:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nd">@runtime_checkable</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">DeviceAdapter</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">capabilities</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">[</span><span class="n">Capability</span><span class="p">]</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">resource_id</span><span class="p">:</span> <span class="nb">str</span>                      <span class="c1"># the only new field</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">open</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">stream</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AsyncIterator</span><span class="p">[</span><span class="n">DeviceEmission</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">command</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cmd</span><span class="p">:</span> <span class="n">DeviceCommand</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CommandResult</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">snapshot</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DeviceSnapshot</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<h3 id="101-resource_id">10.1 <code>resource_id</code><a class="headerlink" href="#101-resource_id" title="Permanent link">&para;</a></h3>
+<p>Identifies the hardware contention domain — one serial port, one DAQmx chassis, one camera handle:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">WatlowAdapter</span><span class="p">:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="nd">@property</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">resource_id</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;serial:</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">port</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="k">class</span><span class="w"> </span><span class="nc">NIDAQAdapter</span><span class="p">:</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="nd">@property</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">resource_id</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;daqmx:chassis:</span><span class="si">{</span><span class="n">_chassis_of</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">channels</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="k">class</span><span class="w"> </span><span class="nc">WebcamAdapter</span><span class="p">:</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    <span class="nd">@property</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">resource_id</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;webcam:</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">device_id</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+<p>Sims use <code>f"sim:{self.name}"</code>.</p>
+<p>When two adapters share a <code>resource_id</code>, they share a Worker and their I/O serializes through the adapter-level lock (e.g. <code>watlowlib.WatlowManager</code>'s per-port lock).</p>
+<h3 id="102-adapter-author-responsibilities">10.2 Adapter author responsibilities<a class="headerlink" href="#102-adapter-author-responsibilities" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Implement the contract above; the runtime takes care of everything else.</li>
+<li>Wrap blocking calls in <code>anyio.to_thread.run_sync</code>. Adapters run on a worker's loop; blocking it freezes that worker and its heartbeat.</li>
+<li>Bound every blocking call with a timeout. The cancellation shield protects against task-cancel, not unbounded wait.</li>
+<li>Stamp emissions with the adapter's own timestamps. The Worker only <em>adds</em> <code>t_bridge_put_ns</code> for observability; it never overwrites adapter timestamps.</li>
+</ul>
+<h3 id="103-resource-validation">10.3 Resource validation<a class="headerlink" href="#103-resource-validation" title="Permanent link">&para;</a></h3>
+<p><code>build_workers</code> (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/build.py"><code>build.py</code></a>) validates synchronously before any worker thread spawns:</p>
+<ol>
+<li><strong>Serial port uniqueness.</strong> Same port → same <code>resource_id</code>.</li>
+<li><strong>DAQmx physical-channel uniqueness.</strong> No two adapters claim the same channel. The default <code>resource_id</code> is keyed on the physical chassis (e.g. <code>daqmx:chassis:cDAQ1</code>) because tasks on the same chassis share timing engines — DAQmx will throw <code>-50103 resource reserved</code> if they're armed without coordination.</li>
+<li><strong>Webcam handle uniqueness.</strong> Same <code>webcam:N</code> may not be claimed by two adapters.</li>
+<li><strong>Global SDK singletons documented.</strong> NI-DAQmx system handle, PyAV format registration, FLIR Spinnaker <code>System.GetInstance()</code> are process-singletons regardless of <code>resource_id</code>. The pool writes these into <code>diagnostics.runtime.global_sdk_constraints</code>; resource grouping does <strong>not</strong> isolate them. SubprocessWorker (§11) is the only structural isolation.</li>
+</ol>
+<p>Validation failures raise <code>ResourceConflict</code>; pool open aborts before any hardware is touched.</p>
+<hr />
+<h2 id="11-procedure-cpu-offload">11. Procedure CPU offload<a class="headerlink" href="#11-procedure-cpu-offload" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/procedure.py"><code>ProcedureRunner</code></a> runs on the conductor loop, sharing it with per-worker drain tasks, the heartbeat, and the saturation monitor. Default step kinds (Hold, Ramp, Wait, Acquire, SafeShutdown, Prompt — see <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/executor.py"><code>executor.py</code></a>) are I/O-bound and behave.</p>
+<p>The risk surface is <code>CustomStep</code>: plugin authors can register arbitrary handlers via the <code>capa.procedures</code> entry-point. A handler that performs heavy CPU work inline will stall every drain task on the conductor.</p>
+<p><strong>Contract for procedure authors:</strong> custom handlers MUST wrap any non-trivial CPU work in <code>anyio.to_thread.run_sync</code>, the same way the webcam adapter wraps ffmpeg / libjpeg calls in <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/camera/webcam/adapter.py"><code>adapter.py</code></a>.</p>
+<p><strong>Why not a third thread for the procedure?</strong> It would mean another cross-thread channel for every <code>_command_setpoint</code> call and a thread-safe DataBus on the procedure side. The default handlers don't need it, and disciplined custom handlers are sufficient. If real-world plugins start consistently violating the contract, revisit with a dedicated <code>procedure</code> thread peer to the Conductor.</p>
+<hr />
+<h2 id="12-subprocessworker-escape-hatch">12. SubprocessWorker — escape hatch<a class="headerlink" href="#12-subprocessworker-escape-hatch" title="Permanent link">&para;</a></h2>
+<p><strong>Not built.</strong> The <code>Worker</code> interface is the abstraction boundary; a future <code>SubprocessWorker</code> satisfies it with no other code changes. Flagged for two specific cases:</p>
+<ol>
+<li><strong>Crash-prone SDKs.</strong> NI-DAQmx runtime faults and FLIR Spinnaker assertion failures can crash the entire Python process today. With a SubprocessWorker, the crash is contained: the child segfaults; the parent observes process exit and either restarts the child or marks the device failed and continues the run.</li>
+<li><strong>Safety-critical devices.</strong> The heater is the canonical case. <code>loop.stop()</code> + <code>thread.join</code> (§6.2 forced stop) cannot terminate a thread wedged inside a blocking vendor call. SIGKILL on a child process can.</li>
+</ol>
+<p><strong>Costs:</strong> per-emission IPC serialization (~5–10× latency vs in-thread), more memory per worker, more complex shutdown.</p>
+<p><strong>Trigger to build:</strong> the first time we either (a) ship a config with a known-crashy SDK or (b) need a guaranteed-terminable heater path.</p>
+<hr />
+<h2 id="13-backpressure-overflow">13. Backpressure &amp; overflow<a class="headerlink" href="#13-backpressure-overflow" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Channel</th>
+<th>Capacity</th>
+<th>Policy</th>
+<th>Deadline</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Worker outbound bridge</td>
+<td><code>max(64, ceil(8 * Σ rate_hz))</code></td>
+<td><code>BLOCK</code></td>
+<td><code>saturation_deadline_s</code> (default 10s)</td>
+<td>Producer (adapter) throttles if Conductor lags; sustained block triggers saturation escalation. Per-worker capacity derived from the sum of each hosted adapter's <code>expected_emission_rate_hz</code>; adapters that return <code>None</code> contribute nothing. Factors live as code constants in <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/build.py"><code>build.py</code></a>.</td>
+</tr>
+<tr>
+<td>Worker command inbox</td>
+<td><code>8</code></td>
+<td><code>BLOCK</code></td>
+<td>—</td>
+<td>Commands are rare; bridge full means worker is stuck. Conductor sees a slow future.</td>
+</tr>
+<tr>
+<td>Conductor → UIBridge</td>
+<td><code>runtime.ui_bridge_capacity</code> (default <code>4096</code>)</td>
+<td><code>DROP_OLDEST</code></td>
+<td>—</td>
+<td>UI is best-effort viewport.</td>
+</tr>
+<tr>
+<td>Conductor → ConductorDataBus</td>
+<td>(per-subscription)</td>
+<td>(per-subscription)</td>
+<td>implicit via saturation</td>
+<td>Procedure subscribers may use BLOCK; sustained block surfaces as drain blocking → saturation.</td>
+</tr>
+<tr>
+<td>Conductor → WriterThread inbox</td>
+<td>(existing)</td>
+<td>(existing)</td>
+<td><code>saturation_deadline_s</code></td>
+<td>Inbox stall is the canonical saturation trigger.</td>
+</tr>
+<tr>
+<td>UIDataBus subscriptions</td>
+<td>(existing)</td>
+<td><code>DROP_OLDEST</code></td>
+<td>—</td>
+<td>Widgets cannot block UI loop.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>No <code>ABORT_RUN</code> on the worker-outbound bridge.</strong> A stuck worker doesn't abort the run via the bridge. Sustained bridge blockage is handled by the conductor's saturation-deadline path. Per-device silence escalation is not implemented today; <code>on_failure</code> is retained as resolved metadata for that future policy.</p>
+<hr />
+<h2 id="14-observability">14. Observability<a class="headerlink" href="#14-observability" title="Permanent link">&para;</a></h2>
+<p>Every loop and every bridge is measured. The bundle's manifest gains a <code>diagnostics.runtime</code> block with per-thread, per-bridge, per-worker numbers.</p>
+<p><strong>Per-loop heartbeat</strong> (every worker + conductor + UI), via <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/heartbeat.py"><code>heartbeat.py</code></a>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_heartbeat_task</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="n">target</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_loop</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">():</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>        <span class="n">target</span> <span class="o">+=</span> <span class="mf">0.05</span>  <span class="c1"># 20 Hz sample</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>        <span class="n">before</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_loop</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">target</span> <span class="o">-</span> <span class="n">before</span><span class="p">))</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>        <span class="n">actual</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_loop</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>        <span class="n">lag_ms</span> <span class="o">=</span> <span class="p">(</span><span class="n">actual</span> <span class="o">-</span> <span class="n">target</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_metrics</span><span class="o">.</span><span class="n">loop_lag</span><span class="o">.</span><span class="n">observe</span><span class="p">(</span><span class="n">lag_ms</span><span class="p">)</span>
+</code></pre></div>
+<p><code>loop_lag.p99 &gt; 50ms</code> is a smoke alarm. The UI status bar shows the highest p99 across loops with a small badge that turns yellow &gt; 50 ms, red &gt; 200 ms.</p>
+<p><strong>Per-worker metrics</strong> (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/metrics.py"><code>metrics.py</code></a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">WorkerMetrics</span><span class="p">:</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">resource_id</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="n">adapter_names</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="n">on_failure</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">FailurePolicy</span><span class="p">]</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>    <span class="n">state</span><span class="p">:</span> <span class="n">WorkerState</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>    <span class="n">commands_total</span><span class="p">:</span> <span class="nb">int</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>    <span class="n">commands_inflight</span><span class="p">:</span> <span class="nb">int</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>    <span class="n">commands_failed</span><span class="p">:</span> <span class="nb">int</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>    <span class="n">samples_emitted</span><span class="p">:</span> <span class="nb">int</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>    <span class="n">polls_emitted</span><span class="p">:</span> <span class="nb">int</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>    <span class="n">tick_duration_ms</span><span class="p">:</span> <span class="n">_PercentileRing</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>    <span class="n">poll_period_ms</span><span class="p">:</span> <span class="n">_PercentileRing</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>    <span class="n">loop_lag</span><span class="p">:</span> <span class="n">LoopLagMetric</span>
+</code></pre></div>
+<p><code>on_failure</code> is the resolved per-adapter failure policy from
+<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/resolved.py"><code>ResolvedAdapter</code></a>. It is retained on
+<code>WorkerMetrics</code> as metadata; runtime enforcement for stream silence or
+per-device fatal-error escalation is not implemented today.</p>
+<p><strong>Per-thread CPU usage</strong> is polled at 1 Hz inside the Conductor via <code>psutil.Process().threads()</code>.</p>
+<p><strong>Logging:</strong> every worker thread sets a contextvar-bound <code>structlog</code> context at thread entry (<code>thread="worker"</code>, <code>resource_id</code>, <code>adapters</code>). Conductor and UI similarly bind. Every log line in a run identifies which thread emitted it.</p>
+<hr />
+<h2 id="15-clock-timestamps">15. Clock &amp; timestamps<a class="headerlink" href="#15-clock-timestamps" title="Permanent link">&para;</a></h2>
+<p><strong>Single RunClock authority per run.</strong> The Conductor constructs one <code>RunClock</code> (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/core/clock.py"><code>clock.py</code></a>) at run-arm and installs a reference into each Worker's <code>RunContext</code> via <code>arm()</code>. <code>RunClock.t_mono_ns()</code> calls <code>time.monotonic_ns()</code> which is process-global and thread-safe.</p>
+<p>Between runs (workers in IDLE), no clock is installed. Manual commands don't need run-relative timestamps.</p>
+<p>Wall clock (<code>datetime.now(UTC)</code>) is also thread-safe.</p>
+<p><strong>Timestamp capture site:</strong> unchanged — adapters stamp emissions where they do today. The Worker only <em>adds</em> <code>t_bridge_put_ns</code> for observability; it never overwrites the adapter's timestamps.</p>
+<hr />
+<h2 id="16-error-propagation">16. Error propagation<a class="headerlink" href="#16-error-propagation" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>Inside worker:
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>  AdapterError raised in _stream_task →
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    1. Record bundle event (via writer ref from run_context)
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    2. Set worker._fatal_error
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    3. Exit that adapter stream task
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>Conductor today:
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>  - Treats procedure, drain, preflight, pool, and conductor crashes as
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>    run-level crashes.
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>  - Treats saturation-deadline trips as `crashed_but_sealed`.
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>  - Does not yet enforce per-device `on_failure` from `worker._fatal_error`;
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>    that policy is advisory metadata until watchdog work is built.
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>Crashes (uncaught BaseException in worker thread):
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>  Worker._thread_main has top-level try/except BaseException
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>  Bundle records &quot;worker_thread_crashed&quot; with full traceback
+<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a>  Conductor force-aborts the run
+</code></pre></div>
+<p><strong>Exception identity is preserved across threads.</strong> <code>concurrent.futures.Future.set_exception(exc)</code> carries the exception by reference; <code>asyncio.wrap_future</code> re-raises the original.</p>
+<hr />
+<h2 id="17-async-style-and-event-loop-implementation">17. Async style and event-loop implementation<a class="headerlink" href="#17-async-style-and-event-loop-implementation" title="Permanent link">&para;</a></h2>
+<p><strong>Inside loops: anyio.</strong> All async code in this codebase uses anyio APIs — task groups (<code>anyio.create_task_group</code>), primitives (<code>anyio.Lock</code> / <code>Event</code> / <code>Semaphore</code>), offload (<code>anyio.to_thread.run_sync</code>) — with <code>backend="asyncio"</code>.</p>
+<p><strong>At thread seams: raw asyncio.</strong> The <code>ThreadBridge</code> (<code>asyncio.Queue</code> + <code>Semaphore</code> + <code>loop.call_soon_threadsafe</code>), command dispatch (<code>asyncio.run_coroutine_threadsafe</code>), and future bridging (<code>asyncio.wrap_future</code>) sit <em>below</em> anyio's abstraction layer.</p>
+<p><strong>Backend: asyncio everywhere, by necessity.</strong> A trio backend on any thread would require routing all cross-thread traffic through anyio portals. qasync is asyncio-only on the UI thread, and the existing cross-thread primitives are loop-affine to asyncio, so uniform asyncio everywhere is the simplest correct choice.</p>
+<p><strong>Loop implementation is per-thread and swappable.</strong> Each non-UI thread constructs its loop via <code>asyncio.new_event_loop()</code>. The Conductor and Workers can transparently swap in <code>winloop.new_event_loop()</code> (Windows) or <code>uvloop.new_event_loop()</code> (Linux/macOS) — both are drop-in <code>AbstractEventLoop</code> implementations. No bridge, no command-path, no shutdown protocol changes.</p>
+<hr />
+<h2 id="18-gil-free-threaded-readiness">18. GIL &amp; free-threaded readiness<a class="headerlink" href="#18-gil-free-threaded-readiness" title="Permanent link">&para;</a></h2>
+<p>Under the GIL:</p>
+<ul>
+<li>All worker I/O calls (<code>serial.read</code>, <code>nidaqmx.read</code>, <code>av.open</code>) release the GIL during their syscall. Wall-clock parallelism for I/O is real.</li>
+<li>Python-level work (Pydantic validation, Sample construction, np.array allocation) is serialized.</li>
+</ul>
+<p>At target load (≤200 Hz aggregate samples + 60 fps video decode), ~200 Python wake-ups/sec × &lt;1 ms each = &lt;20% GIL utilization. Comfortable.</p>
+<p>Under PEP 703 free-threaded Python (3.13t+), the code does not change. Threads gain true parallelism on Python bytecode. The design is forward-compatible by virtue of being thread-based; no migration needed.</p>
+<hr />
+<h2 id="19-config-schema">19. Config schema<a class="headerlink" href="#19-config-schema" title="Permanent link">&para;</a></h2>
+<h3 id="191-per-runtime-tunables">19.1 Per-runtime tunables<a class="headerlink" href="#191-per-runtime-tunables" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">[runtime]</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">shutdown_grace_s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">5.0</span><span class="w">            </span><span class="c1"># per-worker grace before hard-stop</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">loop_lag_warn_ms</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">50.0</span><span class="w">           </span><span class="c1"># logged when exceeded</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="n">ui_bridge_capacity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span><span class="w">         </span><span class="c1"># Conductor → UI; DROP_OLDEST when full</span>
+</code></pre></div>
+<p>All have sensible defaults. The corresponding schema type is
+<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/config.py"><code>RuntimeConfig</code></a>.</p>
+<p><strong>Not in <code>[runtime]</code></strong> (and intentionally so):</p>
+<ul>
+<li><code>bridge_capacity_factor</code> and <code>bridge_min_capacity</code> — internal
+  constants in <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/build.py"><code>build.py</code></a>
+  (<code>_BRIDGE_CAPACITY_FACTOR = 8.0</code>, <code>_BRIDGE_MIN_CAPACITY = 64</code>). The
+  per-worker outbound bridge capacity is derived from the sum of each
+  adapter's <code>expected_emission_rate_hz</code>: <code>max(64, ceil(8 * total_rate))</code>.
+  An adapter that declines to declare a rate contributes nothing.</li>
+<li><code>saturation_deadline_s</code> and <code>saturation_poll_period_s</code> — live on
+  <code>ConductorConfig</code> (see <a href="#63-saturation-deadline">§6.3</a>) but are
+  internal timing knobs. The headless CLI exposes
+  <code>saturation_deadline_s</code> as a flag for diagnostic runs.</li>
+<li>The five adapter-grace timers (<code>adapter_start_grace_s</code>,
+  <code>adapter_stop_grace_s</code>, <code>adapter_close_grace_s</code>, <code>stream_cancel_grace_s</code>,
+  <code>runner_stop_grace_s</code>) — live on
+  <a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/shutdown.py"><code>WorkerShutdownConfig</code></a> as code-level
+  per-stage deadlines.</li>
+</ul>
+<p>Promote a constant to <code>RuntimeConfig</code> only when an operator actually
+needs to change it for a real experiment.</p>
+<h3 id="192-on_failure-per-device">19.2 <code>on_failure</code> per device<a class="headerlink" href="#192-on_failure-per-device" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="k">[[devices]]</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;heater&quot;</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">adapter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;capa.devices.watlow&quot;</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">on_failure</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;abort&quot;</span><span class="w">   </span><span class="c1"># | &quot;warn&quot;</span>
+</code></pre></div>
+<p>Resolved and recorded in
+<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/metrics.py"><code>WorkerMetrics.on_failure</code></a> at
+worker construction. Enforcement is not wired today, so <code>on_failure</code> is
+advisory metadata. Default: <code>"abort"</code>.</p>
+<p>The camera-spec field of the same name
+(<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/camera/base.py"><code>CameraSpec.on_failure</code></a>) is a
+<em>separate</em> policy: it layers on the camera/safety system, not the
+runtime failure-policy metadata. The two enums are deliberately kept
+distinct until a real case for unifying them appears.</p>
+<h3 id="193-resource_id-per-device">19.3 <code>resource_id</code> per device<a class="headerlink" href="#193-resource_id-per-device" title="Permanent link">&para;</a></h3>
+<p>Each <code>DeviceConfig</code> may declare <code>resource_id</code> explicitly; otherwise the
+runtime reads the adapter's own
+<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/adapter.py"><code>DeviceAdapter.resource_id</code></a> (the
+historical default). When two adapters share the same <code>resource_id</code> the
+runtime groups them into one Worker so their I/O serialises through the
+resource's lock.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="k">[[devices]]</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;heater&quot;</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="n">adapter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;capa.devices.watlow&quot;</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># resource_id defaults to &quot;serial:COM6&quot; (from params.port)</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="k">[devices.params]</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="n">port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;COM6&quot;</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="k">[[devices]]</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;heater_secondary&quot;</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="n">adapter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;capa.devices.watlow&quot;</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="n">resource_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;serial:COM6&quot;</span><span class="w">   </span><span class="c1"># explicit — share bus with heater</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="k">[devices.params]</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="n">port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;COM6&quot;</span>
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a><span class="n">address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span>
+</code></pre></div>
+<hr />
+<h2 id="20-module-layout">20. Module layout<a class="headerlink" href="#20-module-layout" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>src/capa/runtime/
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>├── __init__.py           # public exports
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>├── bridge.py             # ThreadBridge + ThreadBridgeMetrics
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>├── build.py              # build_workers
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>├── bundle_ref.py         # bundle reference plumbing
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>├── camera_adapter.py     # camera → DeviceAdapter wrapper
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>├── conductor.py          # Conductor
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>├── dispatch.py           # AdapterDispatcher, PoolDispatcher, ConductorDispatcher, ManualClient
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>├── emissions.py          # WorkerEmission type
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>├── errors.py             # PoolStateError, WorkerStateError, ResourceConflict, …
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>├── headless.py           # headless entrypoint glue
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>├── heartbeat.py          # loop-lag heartbeat task
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a>├── lifecycle.py          # PoolState, WorkerState, legal-edge tables
+<a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a>├── metrics.py            # WorkerMetrics, DisarmResult
+<a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a>├── pool.py               # WorkerPool
+<a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a>├── preview.py            # PreviewFrame type for camera workers
+<a id="__codelineno-18-17" name="__codelineno-18-17" href="#__codelineno-18-17"></a>├── procedure.py          # ProcedureRunner
+<a id="__codelineno-18-18" name="__codelineno-18-18" href="#__codelineno-18-18"></a>├── runcontext.py         # RunContext, WriterRef, BundleRef
+<a id="__codelineno-18-19" name="__codelineno-18-19" href="#__codelineno-18-19"></a>├── runner.py             # ThreadedRunner, InlineRunner (test mode)
+<a id="__codelineno-18-20" name="__codelineno-18-20" href="#__codelineno-18-20"></a>├── saturation.py         # SaturationMonitor
+<a id="__codelineno-18-21" name="__codelineno-18-21" href="#__codelineno-18-21"></a>├── session.py            # RealRunSession, run id minting
+<a id="__codelineno-18-22" name="__codelineno-18-22" href="#__codelineno-18-22"></a>├── signals.py            # SIGINT install
+<a id="__codelineno-18-23" name="__codelineno-18-23" href="#__codelineno-18-23"></a>├── state.py              # ConductorState + edges
+<a id="__codelineno-18-24" name="__codelineno-18-24" href="#__codelineno-18-24"></a>├── worker.py             # Worker (with state machine)
+<a id="__codelineno-18-25" name="__codelineno-18-25" href="#__codelineno-18-25"></a>└── writer_ref.py         # WriterThreadRef
+</code></pre></div>
+<p>Tests:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>tests/unit/runtime/            — unit tests, mostly inline-runner
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>tests/integration/runtime/     — Worker / Pool / Conductor against sim adapters
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>tests/hardware/                — real-rig smoke tests (manual / off-by-default)
+</code></pre></div>
+<hr />
+<h2 id="21-topology-invariants-enforced-by-tests">21. Topology invariants (enforced by tests)<a class="headerlink" href="#21-topology-invariants-enforced-by-tests" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>One resource per worker, one worker per resource.</strong> A worker owns its <code>resource_id</code> exclusively.</li>
+<li><strong>No two threads touch one adapter.</strong> Once an adapter is constructed inside a worker, only that worker's loop calls into it.</li>
+<li><strong>No raw <code>asyncio.Queue</code> crosses a thread boundary.</strong> Cross-thread channels are always <code>ThreadBridge</code>.</li>
+<li><strong>No <code>await</code> on a future from another loop without going through <code>asyncio.wrap_future</code>.</strong></li>
+<li><strong>No <code>loop.run_until_complete</code> after startup.</strong> The conductor and workers use <code>run_forever</code> with explicit stop signals.</li>
+<li><strong>All <code>asyncio.Event</code> / <code>asyncio.Semaphore</code> / <code>asyncio.Queue</code> instances are constructed inside the loop that owns them.</strong> Cross-thread signalling goes through <code>loop.call_soon_threadsafe(event.set)</code>.</li>
+<li><strong>DataBus publish is loop-affine.</strong> Asserted at runtime.</li>
+<li><strong>In-flight <code>adapter.command()</code> calls are shielded against task cancellation</strong> (§5).</li>
+<li><strong>Worker state transitions are atomic per worker and verified.</strong> Illegal transitions raise.</li>
+</ol>
+<hr />
+<h2 id="22-glossary">22. Glossary<a class="headerlink" href="#22-glossary" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Adapter</strong> — A <code>DeviceAdapter</code> implementation. Owns one device's lifecycle, streams emissions, accepts commands. (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/adapter.py"><code>src/capa/devices/adapter.py</code></a>)</li>
+<li><strong>ARMED</strong> — Worker state: per-run context installed; streams not yet running; dispatch permitted.</li>
+<li><strong>Bridge</strong> (<code>ThreadBridge</code>) — Thread-safe bounded channel between two asyncio loops. (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/bridge.py"><code>bridge.py</code></a>)</li>
+<li><strong>Conductor</strong> — Per-run coordinator. Owns clock, writer, procedure, drain tasks, heartbeat, saturation monitor. (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/conductor.py"><code>conductor.py</code></a>)</li>
+<li><strong>ConductorDispatcher</strong> — <code>CommandDispatcher</code> that routes through the conductor; records command-issue events; gated by conductor state.</li>
+<li><strong>ConductorDataBus</strong> — Authoritative DataBus instance, lives on conductor loop. Procedure handlers subscribe here.</li>
+<li><strong>DataBus</strong> — Pub/sub for emissions, asyncio-loop-affine, with per-subscription backpressure. (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/core/databus.py"><code>databus.py</code></a>)</li>
+<li><strong>DeviceEmission</strong> — Union of <code>SourceRecord</code> / <code>ChannelSample</code> / <code>DeviceEvent</code> / <code>DeviceSnapshot</code> / <code>FrameReceipt</code>. The atomic unit of acquisition output.</li>
+<li><strong>Drain task</strong> — Conductor-side coroutine that iterates one worker's outbound bridge and routes each emission to writer + ConductorDataBus + UIBridge.</li>
+<li><strong>DRAINING</strong> — Worker state: <code>adapter.stop()</code> in flight; outbound bridge drains then closes; dispatch refused.</li>
+<li><strong>Hard-stop attempt</strong> — Last-resort shutdown: <code>loop.stop()</code> + <code>thread.join(timeout)</code>. Works only for threads parked at awaitable points. Records <code>worker_hard_stop_attempt</code> and (on failure) <code>worker_thread_leaked</code> events.</li>
+<li><strong>IDLE</strong> — Worker state: adapters open, no streams running, no run context. Manual dispatch permitted.</li>
+<li><strong>ManualClient</strong> — Single sync facade for UI manual cards. Routes to ConductorDispatcher when a run is armed, to PoolDispatcher otherwise.</li>
+<li><strong>PoolDispatcher</strong> — <code>CommandDispatcher</code> that routes through a <code>WorkerPool</code>. No bundle recording, no state gating. Used by ManualClient between runs.</li>
+<li><strong>Resource</strong> — A hardware contention domain. One serial port, one DAQmx chassis, one camera handle. Identified by <code>resource_id</code>.</li>
+<li><strong><code>resource_id</code></strong> — String key (<code>"serial:COM6"</code>, <code>"daqmx:chassis:cDAQ1"</code>, <code>"webcam:cam0"</code>) used to group adapters into workers.</li>
+<li><strong>RunClock</strong> — Single <code>RunClock</code> instance per run; thread-safe via <code>time.monotonic_ns()</code>.</li>
+<li><strong>RunContext</strong> — The per-run state installed into workers via <code>arm()</code>: clock, run_id, writer ref, bundle ref.</li>
+<li><strong>SAMPLING</strong> — Worker state: streams running, emissions flowing, dispatch permitted.</li>
+<li><strong>Saturation deadline</strong> — Conductor-owned end-to-end output deadline. If writer inbox stalls or any worker outbound bridge stays blocked for <code>saturation_deadline_s</code>, the run seals as <code>crashed_but_sealed</code>.</li>
+<li><strong>SubprocessWorker</strong> — Future variant of <code>Worker</code> hosting the adapter in a child process for crash isolation and guaranteed terminate. Not built; interface designed to admit it.</li>
+<li><strong>UIBridge</strong> — <code>ThreadBridge</code> carrying emissions from Conductor thread to UI thread.</li>
+<li><strong>UIDataBus</strong> — Mirror DataBus instance on UI loop. Widgets subscribe here. One-way downstream of ConductorDataBus.</li>
+<li><strong>Worker</strong> — Thread + asyncio loop owning one resource and its 1..N adapters. (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/worker.py"><code>worker.py</code></a>)</li>
+<li><strong>Worker loop</strong> — The asyncio event loop running inside a worker thread.</li>
+<li><strong>WorkerPool</strong> — Config-lifetime container for Workers. Lives across runs; opens hardware once per config. (<a href="https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/pool.py"><code>pool.py</code></a>)</li>
+</ul>
+<hr />
+<p><em>End of document.</em></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.code.copy","content.code.annotate","navigation.instant","navigation.tracking","navigation.sections","navigation.indexes","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.e2d2d235.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.6e5f0216.min.js"></script>
+      
+    
+  </body>
+</html>

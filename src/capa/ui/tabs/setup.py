@@ -290,6 +290,7 @@ class SetupTab(QWidget):
         # live?". State priority is resolved inside
         # :class:`ConnectionStrip`; this tab only feeds it inputs.
         self._connection_strip = ConnectionStrip(self)
+        self._connection_strip.setObjectName("setup_connection_strip")
         self._connection_strip.applyRequested.connect(self._on_apply_to_rig)
         self._connection_strip.revertRequested.connect(self._on_revert_draft)
         self._connection_strip.detailsRequested.connect(self._on_show_failure_details)
@@ -298,6 +299,7 @@ class SetupTab(QWidget):
         # Outline + main editor splitter.
         body = QSplitter(Qt.Orientation.Horizontal, self)
         self._outline = SetupOutline(body)
+        self._outline.setObjectName("setup_outline")
         body.addWidget(self._outline)
 
         self._stack = QStackedWidget(body)
@@ -309,6 +311,7 @@ class SetupTab(QWidget):
 
         # Problems panel.
         self._problems = SetupProblems(self)
+        self._problems.setObjectName("setup_problems")
         outer.addWidget(self._problems)
 
         # Build the section widgets and register them with the stack.

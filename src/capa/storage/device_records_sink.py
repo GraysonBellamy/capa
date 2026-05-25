@@ -213,7 +213,7 @@ def _record_to_row(record: SourceRecord) -> dict[str, Any]:
 
 
 class _PerFamilyWriter:
-    """One in-flight Parquet writer per adapter family.
+    """One in-flight Arrow IPC writer per adapter family.
 
     Buffers rows in Python until the first flush (so the schema can be
     inferred from a representative batch). After that, the schema is locked
@@ -370,7 +370,7 @@ class DeviceRecordsSink:
     """Multiplexing sink for :class:`SourceRecord`\\ s.
 
     Routes each record by ``adapter`` to a per-family Parquet writer under
-    ``<bundle_root>/device_records/<adapter>.in-flight.parquet``.
+    ``<bundle_root>/device_records/<adapter>.in-flight.arrows``.
     ``shape="block"`` records are skipped (block sidecar landing is deferred
     to TDMS; see ) but counted via :attr:`skipped_blocks`.
     """

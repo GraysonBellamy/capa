@@ -163,7 +163,7 @@ class CameraSpec(BaseModel):
     output_root: str | None = None
     """Optional override for the recorded file location. When
     set, the file lands at ``<output_root>/<run_id>/video/<name>.<ext>`` and
-    the manifest records both the absolute path and a relative reference. When
+    the manifest records both the external path and a relative reference. When
     ``None`` (default), the file lives inside the bundle directory."""
 
     on_failure: CameraOnFailure = "warn"

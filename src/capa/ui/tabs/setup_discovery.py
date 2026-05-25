@@ -247,6 +247,7 @@ class DiscoveryDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("discovery_dialog")
         self.setWindowTitle("Discover devices")
         self.setMinimumSize(720, 400)
         self._existing_names: set[str] = set(existing_names or ())
@@ -309,6 +310,7 @@ class DiscoveryDialog(QDialog):
         self._rescan_btn = QPushButton("Rescan", self)
         self._rescan_btn.clicked.connect(self.rescan)
         self._close_btn = QPushButton("Close", self)
+        self._close_btn.setObjectName("discovery_close_button")
         self._close_btn.clicked.connect(self.accept)
         buttons.addWidget(self._rescan_btn)
         buttons.addStretch(1)

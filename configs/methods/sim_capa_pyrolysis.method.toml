@@ -16,5 +16,5 @@ kind = "safe_shutdown"
 duration_s = 0.0
 
 [steps.cool_target]
-"heater.setpoint" = 100.0
+"heater.setpoint" = 20.0
 "purge.flow" = 0.0

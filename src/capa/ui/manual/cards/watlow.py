@@ -316,6 +316,7 @@ class HeaterCard(DeviceCard):
         info_label.setStyleSheet("color: #666;")
         row.addWidget(info_label, stretch=1)
         btn = QPushButton("Cool to safe", self)
+        btn.setObjectName("heater_cool_to_safe_button")
         btn.setToolTip(
             "Issue a single setpoint write driving the heater to its "
             "safe temperature. Safe temperature is read from the active "

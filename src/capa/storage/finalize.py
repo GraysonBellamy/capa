@@ -312,7 +312,7 @@ def finalize_in_place(
     queue_health: dict[str, dict[str, float]] | None = None,
     cameras: list[dict[str, Any]] | None = None,
 ) -> FinalizeResult:
-    """Rewrite in-flight Parquet, compute integrity, seal the bundle.
+    """Rewrite in-flight Arrow IPC streams, compute integrity, seal the bundle.
 
     Args:
         bundle_root: directory containing ``manifest.json``.

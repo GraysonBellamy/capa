@@ -155,9 +155,9 @@ class DomainProfileRef(BaseModel):
 class CalibrationSetRef(BaseModel):
     """Pointer to a CalibrationSet on disk.
 
-    A snapshot of the resolved set is written into the bundle as
-    ``calibration.json`` so the bundle is self-sufficient even
-    if the on-disk source moves.
+    The current bundle writer records this reference (name + revision) in
+    ``calibration.json``. Full resolved-curve snapshots are a planned
+    extension of the calibration runtime.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -174,9 +174,10 @@ class CalibrationSetRef(BaseModel):
 class StoragePolicy(BaseModel):
     """Storage knobs.
 
-    In-flight flush cadence, final Parquet codec, optional TDMS pass-through,
-    optional RO-Crate generation. Stores the
-    schema; the bundle writer reads it.
+    Stores the schema/UI intent for storage-related settings. ``bundle_root``
+    is currently consumed by profile disk-space preflight and the Setup UI;
+    shipped writer/finalize paths still use code-level constants for the
+    advanced IPC/Parquet/TDMS/RO-Crate knobs.
 
     In-flight artifacts are Arrow IPC streams (``*.in-flight.arrows``); see
     ``arrow-ipc-streaming-plan.md``. IPC has no compression-level knob, so
@@ -223,12 +224,12 @@ class StoragePolicy(BaseModel):
         gt=0,
         json_schema_extra={"capa_group": "advanced"},
     )
-    """How long the producer→fan-out queue may stay at capacity before the
-    run aborts. The producer queue's policy is :class:`ABORT_RUN`, so a
-    sustained writer-thread or fan-out stall surfaces as a crashed run
-    (bundle still sealed) rather than an indefinite acquisition freeze.
-    Tune upward only if the rig genuinely tolerates longer durable-sink
-    pauses — the default 5 s is the operator-runbook trade-off."""
+    """Reserved config-schema knob for a producer-queue stall deadline.
+
+    The shipped runtime uses code-level conductor saturation settings and
+    bridge policies today; promote this into the runtime path when the
+    producer queue grows a user-facing deadline.
+    """
 
 
 class SafetyRuleConfig(BaseModel):

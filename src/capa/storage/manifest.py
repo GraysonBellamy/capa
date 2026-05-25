@@ -213,11 +213,11 @@ class CameraEntry(BaseModel):
     """Bundle-relative POSIX path to the container file. Even when an
     ``output_root`` is in effect, this still records the
     relative-reference name so analysis tools can locate the file given
-    the ``output_path_external`` absolute path below."""
+    the ``output_path_external`` path below."""
     output_path_external: str | None = None
-    """Absolute path when the camera's :attr:`CameraSpec.output_root`
-    overrode the bundle directory. ``None`` for the common
-    case where the file lives inside the bundle."""
+    """External path when the camera's :attr:`CameraSpec.output_root`
+    overrode the bundle directory. ``None`` for the common case where the file
+    lives inside the bundle."""
     frames_path: str | None = None
     """Bundle-relative path to ``<name>.frames.parquet``. ``None`` until the
     finalize stage rewrites the in-flight file."""

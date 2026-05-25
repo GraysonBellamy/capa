@@ -1,0 +1,229 @@
+[project]
+site_name = "capa"
+site_description = "Control and DAQ application for a custom cone-calorimeter-class lab instrument."
+site_url = "https://GraysonBellamy.github.io/capa/"
+repo_url = "https://github.com/GraysonBellamy/capa"
+repo_name = "GraysonBellamy/capa"
+edit_uri = "edit/main/docs/"
+docs_dir = "docs"
+site_dir = "site"
+nav = [
+    { Home = "index.md" },
+    { Installation = "installation.md" },
+    { "Getting started" = [
+        { "Quick start (simulator)" = "getting-started/quick-start.md" },
+        { "Your first real run" = "getting-started/first-real-run.md" },
+        { "Daily operator workflow" = "getting-started/daily-workflow.md" },
+        { "The simulator profile" = "getting-started/simulator-tour.md" },
+    ] },
+    { "User guide" = [
+        { "Operator handbook" = "user-guide/operator-handbook.md" },
+        { "The Setup tab" = "user-guide/the-setup-tab.md" },
+        { "The Run tab" = "user-guide/the-run-tab.md" },
+        { "The Method tab" = "user-guide/the-method-tab.md" },
+        { "Manual controls" = "user-guide/manual-controls.md" },
+        { "Status bar" = "user-guide/status-bar-guide.md" },
+        { "Diagnostics dock" = "user-guide/diagnostics-dock.md" },
+        { "Camera preview" = "user-guide/camera-preview.md" },
+        { "Aborting safely" = "user-guide/aborting-safely.md" },
+        { "Reviewing a run" = "user-guide/reviewing-a-run.md" },
+    ] },
+    { Configuration = [
+        { Overview = "configuration/overview.md" },
+        { "Experiment YAML" = "configuration/experiment-yaml.md" },
+        { "Hardware TOML" = "configuration/hardware-toml.md" },
+        { "Method TOML" = "configuration/method-toml.md" },
+        { "Channel bindings" = "configuration/channel-bindings.md" },
+        { "Calibrations on disk" = "configuration/calibrations.md" },
+        { "CAPA profile fields" = "configuration/capa-profile.md" },
+        { "Validation and problems" = "configuration/validation-and-problems.md" },
+        { "Workspace layout" = "configuration/workspace-layout.md" },
+    ] },
+    { Procedures = [
+        { "What is a procedure" = "procedures/what-is-a-procedure.md" },
+        { "Free run" = "procedures/builtin-free-run.md" },
+        { "Recipe runner" = "procedures/builtin-recipe-runner.md" },
+        { "Batch" = "procedures/builtin-batch.md" },
+        { "Heat-flux tune" = "procedures/builtin-heat-flux-tune.md" },
+        { "Method step reference" = "procedures/method-steps-reference.md" },
+    ] },
+    { Devices = [
+        { Overview = "devices/overview.md" },
+        { "Watlow heaters" = "devices/watlow.md" },
+        { "Alicat mass-flow" = "devices/alicat.md" },
+        { "Sartorius balance" = "devices/sartorius.md" },
+        { "NI-DAQ" = "devices/nidaq.md" },
+        { "USB webcams" = "devices/cameras-webcam.md" },
+        { "FLIR IR cameras" = "devices/cameras-flir.md" },
+        { "Simulators" = "devices/simulators.md" },
+        { "Discovery" = "devices/discovery.md" },
+    ] },
+    { "Run bundles" = [
+        { "What's in a bundle" = "bundles/what-is-a-bundle.md" },
+        { "Manifest and schema" = "bundles/manifest-and-schema.md" },
+        { "Channel samples (parquet)" = "bundles/parquet-channel-samples.md" },
+        { "Device records (parquet)" = "bundles/parquet-device-records.md" },
+        { "Events (sqlite)" = "bundles/events-sqlite.md" },
+        { "Video" = "bundles/video.md" },
+        { "Integrity and sealing" = "bundles/integrity-and-sealing.md" },
+        { "Bundle versioning" = "bundles/bundle-versioning.md" },
+        { "Reading a bundle" = "bundles/reading-bundles.md" },
+    ] },
+    { Calibration = [
+        { Overview = "calibration/overview.md" },
+        { "Calibration sets" = "calibration/calibration-sets.md" },
+        { "Tuning workflow" = "calibration/tuning-workflow.md" },
+        { "Heat-flux tune procedure" = "calibration/heat-flux-tune-procedure.md" },
+        { "Tune artifacts" = "calibration/tune-artifacts.md" },
+    ] },
+    { Safety = [
+        { Principles = "safety/principles.md" },
+        { "Authorization gates" = "safety/authorization-gates.md" },
+        { "Destructive operations" = "safety/destructive-operations.md" },
+        { "Saturation and deadlines" = "safety/saturation-and-deadlines.md" },
+        { "Shutdown sequence" = "safety/shutdown-sequence.md" },
+    ] },
+    { CLI = [
+        { Overview = "cli/overview.md" },
+        { "capa run" = "cli/capa-run.md" },
+        { "capa gui" = "cli/capa-gui.md" },
+        { "capa validate" = "cli/capa-validate.md" },
+        { "capa finalize" = "cli/capa-finalize.md" },
+        { "capa devices" = "cli/capa-devices.md" },
+        { "capa hardware" = "cli/capa-hardware.md" },
+        { "capa config" = "cli/capa-config.md" },
+        { "capa catalog" = "cli/capa-catalog.md" },
+        { "capa plugins" = "cli/capa-plugins.md" },
+        { "capa method" = "cli/capa-method.md" },
+        { "capa profile" = "cli/capa-profile.md" },
+        { "Headless runs" = "cli/headless-runs.md" },
+    ] },
+    { Troubleshooting = [
+        { "Common issues" = "troubleshooting/common-issues.md" },
+        { "Reading status-bar symptoms" = "troubleshooting/status-bar-symptoms.md" },
+        { "Reading event logs" = "troubleshooting/reading-event-logs.md" },
+        { "Crash recovery" = "troubleshooting/crash-recovery.md" },
+        { "Reporting bugs" = "troubleshooting/reporting-bugs.md" },
+    ] },
+    { Architecture = [
+        { "Architecture plan" = "architecture/capa-plan.md" },
+        { "Runtime topology" = "architecture/runtime-architecture.md" },
+        { "Data flow" = "architecture/data-flow.md" },
+        { "Threading model" = "architecture/threading-model.md" },
+        { "Channel pipeline" = "architecture/channel-pipeline.md" },
+        { "Bundle write path" = "architecture/bundle-write-path.md" },
+        { "UI / runtime boundary" = "architecture/ui-runtime-boundary.md" },
+    ] },
+    { Contributing = [
+        { "Dev setup" = "contributing/dev-setup.md" },
+        { "Running tests" = "contributing/running-tests.md" },
+        { "Hardware tests" = "contributing/hardware-tests.md" },
+        { "Code style" = "contributing/code-style.md" },
+        { "Typing and mypy" = "contributing/typing-and-mypy.md" },
+        { "Commits and PRs" = "contributing/commit-and-pr.md" },
+        { "Release process" = "contributing/release-process.md" },
+    ] },
+    { "Extending capa" = [
+        { "Plugin system" = "extending/plugin-system.md" },
+        { "Writing a procedure" = "extending/writing-a-procedure.md" },
+        { "Writing a profile" = "extending/writing-a-profile.md" },
+        { "Writing a device adapter" = "extending/writing-a-device-adapter.md" },
+        { "Custom sinks" = "extending/custom-sinks.md" },
+        { "Custom method steps" = "extending/custom-method-steps.md" },
+        { "Plugin lockfile" = "extending/plugin-lockfile.md" },
+    ] },
+    { Reference = [
+        { "File formats" = "reference/file-formats.md" },
+        { "Environment variables" = "reference/environment-variables.md" },
+        { "Exit codes" = "reference/exit-codes.md" },
+        { Changelog = "reference/changelog.md" },
+    ] },
+    { Glossary = "glossary.md" },
+    { "API reference" = [
+        { Overview = "api/index.md" },
+        { "capa" = "api/capa.md" },
+        { "capa.runtime" = "api/runtime.md" },
+        { "capa.devices" = "api/devices.md" },
+        { "capa.config" = "api/config.md" },
+        { "capa.channels" = "api/channels.md" },
+        { "capa.experiment" = "api/experiment.md" },
+        { "capa.storage" = "api/storage.md" },
+        { "capa.ui" = "api/ui.md" },
+        { "capa.core" = "api/core.md" },
+        { "capa.calibration" = "api/calibration.md" },
+        { "capa.cli" = "api/cli.md" },
+    ] },
+]
+
+[project.theme]
+variant = "classic"
+features = [
+    "content.code.copy",
+    "content.code.annotate",
+    "navigation.instant",
+    "navigation.tracking",
+    "navigation.sections",
+    "navigation.indexes",
+    "navigation.top",
+    "search.highlight",
+    "search.suggest",
+    "toc.follow",
+]
+
+# CAPA uses a warm palette (orange + deep orange) to distinguish it from the
+# device-library docs sites (alicatlib, watlowlib, etc.), which use deep purple.
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "orange"
+accent = "deep orange"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "orange"
+accent = "deep orange"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.plugins.mkdocstrings]
+default_handler = "python"
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+show_source = true
+show_root_heading = true
+merge_init_into_class = true
+separate_signature = true
+
+[project.markdown_extensions.admonition]
+
+[project.markdown_extensions.attr_list]
+
+[project.markdown_extensions.md_in_html]
+
+[project.markdown_extensions.pymdownx.details]
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+
+[project.markdown_extensions.pymdownx.inlinehilite]
+
+[project.markdown_extensions.pymdownx.snippets]
+base_path = [".", "docs"]
+check_paths = true
+
+[project.markdown_extensions.pymdownx.superfences]
+
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+
+[project.markdown_extensions.tables]
+
+[project.markdown_extensions.toc]
+permalink = true

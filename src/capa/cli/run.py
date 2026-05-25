@@ -166,7 +166,7 @@ def finalize(
 ) -> None:
     """Finalize an open or crashed bundle.
 
-    Idempotent: rewrite in-flight Parquet, compute checksums, set
+    Idempotent: rewrite in-flight Arrow IPC streams, compute checksums, set
     ``ended_utc`` if absent, progress ``bundle_status`` to ``sealed``
     (or ``verification_failed``). Safe to run on already-sealed bundles.
     """

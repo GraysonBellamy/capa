@@ -154,6 +154,17 @@ class WatlowSim:
         return f"sim:{self.name}"
 
     async def open(self) -> None:
+        # CAPA_SIM_OPEN_DELAY_MS / CAPA_SIM_OPEN_FAIL exist so doc-tooling
+        # can hold the connection strip in its brief CONNECTING state or
+        # force it into FAILED state, neither of which happens naturally
+        # under a clean sim apply.
+        import os  # noqa: PLC0415
+
+        delay_ms = int(os.environ.get("CAPA_SIM_OPEN_DELAY_MS", "0") or "0")
+        if delay_ms > 0:
+            await anyio.sleep(delay_ms / 1000.0)
+        if os.environ.get("CAPA_SIM_OPEN_FAIL"):
+            raise AdapterError(f"watlow_sim:{self.name}: open refused (CAPA_SIM_OPEN_FAIL set)")
         self._lifecycle.open()
 
     async def close(self) -> None:

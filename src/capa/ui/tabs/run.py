@@ -111,11 +111,13 @@ class RunTab(QWidget):
 
     def _build_header(self) -> QWidget:
         header = QWidget(self)
+        header.setObjectName("run_header")
         h = QHBoxLayout(header)
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(12)
 
         self._state_label = QLabel("Idle", header)
+        self._state_label.setObjectName("run_state_badge")
         font = monospace_font(point_size=14)
         font.setBold(True)
         self._state_label.setFont(font)
@@ -135,6 +137,7 @@ class RunTab(QWidget):
         h.addStretch(1)
 
         self._start_btn = QPushButton("Start", header)
+        self._start_btn.setObjectName("run_start_button")
         self._start_btn.setMinimumSize(QSize(96, 36))
         self._start_btn.setEnabled(False)
         self._start_btn.clicked.connect(self._on_start_clicked)
@@ -144,6 +147,7 @@ class RunTab(QWidget):
         # because it runs the method's safe-shutdown step (or a default
         # cooldown for free-run) and seals the bundle. Non-destructive.
         self._stop_btn = QPushButton("Stop run", header)
+        self._stop_btn.setObjectName("run_stop_button")
         self._stop_btn.setMinimumSize(QSize(110, 36))
         self._stop_btn.setToolTip(
             "Graceful shutdown — runs the safe-shutdown step (or default "
@@ -162,6 +166,7 @@ class RunTab(QWidget):
             accent=COLOR_FAIL,
             parent=header,
         )
+        self._emergency_btn.setObjectName("run_emergency_button")
         self._emergency_btn.setMinimumSize(QSize(160, 36))
         self._emergency_btn.setToolTip(
             "Hold for 1 second to immediately abort the run. Skips the safe "

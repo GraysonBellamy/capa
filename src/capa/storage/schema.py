@@ -42,9 +42,11 @@ Empty by default. To add a v1 → v2 migration, register
 
 
 def current_version() -> int:
-    """Return :data:`BUNDLE_SCHEMA_VERSION`. Use this from the manifest writer
-    rather than importing the constant directly so test code can monkey-patch
-    if needed."""
+    """Return :data:`BUNDLE_SCHEMA_VERSION`.
+
+    Convenience helper for callers and tests that want the current bundle
+    layout version without importing the constant directly.
+    """
     return BUNDLE_SCHEMA_VERSION
 
 

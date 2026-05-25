@@ -2,10 +2,11 @@
 
 Control and DAQ application for a custom cone-calorimeter-class lab instrument.
 
-See [docs/runtime-architecture.md](docs/runtime-architecture.md) for the
-current runtime layer (per-resource workers, conductor / pool / manual
-client) and [docs/capa-plan.md](docs/capa-plan.md) for the high-level
-architecture plan (parts predating the runtime cutover are marked stale).
+See [docs/architecture/runtime-architecture.md](docs/architecture/runtime-architecture.md)
+for the current runtime layer (per-resource workers, conductor / pool /
+manual client) and [docs/architecture/capa-plan.md](docs/architecture/capa-plan.md)
+for the high-level architecture plan (parts predating the runtime cutover
+are marked stale).
 
 ## Status
 

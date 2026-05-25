@@ -159,6 +159,7 @@ class MainWindow(QMainWindow):
         self._setup_tab.applyRequested.connect(self._on_setup_apply_requested)
 
         self._tabs = QTabWidget(self)
+        self._tabs.setObjectName("main_tabs")
         self._tabs.addTab(self._setup_tab, "Setup")
         self._tabs.addTab(self._method_tab, "Method")
         self._tabs.addTab(self._run_tab, "Run")
@@ -293,6 +294,11 @@ class MainWindow(QMainWindow):
         file_menu.addAction(open_action)
         self._open_config_action = open_action
 
+        close_action = QAction("&Close Config", self)
+        close_action.triggered.connect(self._on_close_config)
+        file_menu.addAction(close_action)
+        self._close_config_action = close_action
+
         file_menu.addSeparator()
 
         quit_action = QAction("&Quit", self)
@@ -379,6 +385,41 @@ class MainWindow(QMainWindow):
             _logger.warning("ui.config_load_failed", path=str(path), error=str(exc))
             return
         self._apply_loaded_config(cfg, path)
+
+    def _on_close_config(self) -> None:
+        """Drop the active config and tear down the worker pool.
+
+        Leaves the Setup tab visible in its empty state (the welcome
+        hero only renders before *any* config has loaded). Refused while
+        a run is active — closing the config mid-run would orphan the
+        running writer.
+        """
+        if self._controller.is_active:
+            self._status.showMessage(
+                "Cannot close config while a run is active. Stop the run first.",
+                4000,
+            )
+            return
+        if self._config_loading:
+            self._status.showMessage(
+                "Config is still loading; wait for hardware initialization.",
+                4000,
+            )
+            return
+        self._setup_tab.clear()
+        self._method_tab.clear()
+        # Best-effort hardware teardown — fire-and-forget on the qasync
+        # loop. The strip already shows IDLE the moment the draft is
+        # cleared (has_config priority sits above hardware_ready), so
+        # the operator's visual ack doesn't wait on the pool close.
+        try:
+            asyncio.ensure_future(self._controller.aclose_pool())
+        except RuntimeError:
+            # No running loop (test harness); the synchronous draft
+            # clear above is enough for the screenshot path.
+            pass
+        self.setWindowTitle("capa")
+        _logger.info("ui.config_closed")
 
     def _on_setup_apply_requested(self, cfg: object, path: object) -> None:
         """Apply & Connect from the Setup tab.

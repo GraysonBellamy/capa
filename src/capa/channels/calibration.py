@@ -1,4 +1,4 @@
-"""Calibrations — first-class snapshotted objects, with documented uncertainty.
+"""Calibrations — first-class objects, with documented uncertainty.
 
 Every variant declares ``input_unit`` and ``output_unit`` (validated
 against :data:`~capa.core.units.UNIT_REGISTRY`); construction fails when the
@@ -8,8 +8,9 @@ variant carries an :class:`UncertaintySpec` (or an explicit ``None`` declaring
 transform plus, when meaningful, an analytical or Monte-Carlo uncertainty
 propagation.
 
-A :class:`CalibrationSet` (collection of curves keyed by channel name) is
-loaded at run-start and snapshotted into the bundle as ``calibration.json``.
+The current bundle writer records the active calibration-set reference
+(name + revision) in ``calibration.json``. Full resolved-curve snapshots are
+planned, but are not wired into the storage path yet.
 """
 
 from __future__ import annotations
@@ -285,8 +286,7 @@ class CustomCallable(_CalibrationBase):
     a custom calibration must name an entry point, package version,
     distribution hash, callable id, serialized parameters, input/output
     dimensions, and test vectors. Anonymous lambdas / unversioned scripts are
-    a config error. The active callable metadata is snapshotted into
-    ``calibration.json``.
+    a config error.
 
     Only validates the *schema* of the reference; resolving and invoking
     the callable requires the procedure plugin runtime.
@@ -343,9 +343,9 @@ the ``kind`` discriminator at deserialization time.
 class CalibrationSet(BaseModel):
     """Collection of calibration curves keyed by channel name.
 
-    snapshotted into the bundle at run-start as ``calibration.json``,
-    so re-deriving engineering values five years later does not depend on the
-    cal table that happens to be active today.
+    The set is validated and applied in memory. The current bundle writer
+    records the set reference in ``calibration.json``; a full resolved-curve
+    snapshot is planned but not wired yet.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

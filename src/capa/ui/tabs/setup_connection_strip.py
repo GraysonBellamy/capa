@@ -158,6 +158,7 @@ class ConnectionStrip(QWidget):
         line.addWidget(self._dot_label)
 
         self._text_label = QLabel("No config loaded", self)
+        self._text_label.setObjectName("strip_text_label")
         self._text_label.setWordWrap(True)
         self._text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         line.addWidget(self._text_label, stretch=1)
@@ -176,6 +177,7 @@ class ConnectionStrip(QWidget):
         self._revert_btn.clicked.connect(self.revertRequested)
         line.addWidget(self._revert_btn)
         self._apply_btn = QPushButton("Apply && Connect", self)
+        self._apply_btn.setObjectName("strip_apply_button")
         self._apply_btn.clicked.connect(self.applyRequested)
         line.addWidget(self._apply_btn)
 
