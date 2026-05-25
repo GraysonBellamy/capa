@@ -13,10 +13,14 @@ CONFIGS_DIR = REPO_ROOT / "configs"
 
 
 def _nidaqmx_driver_available() -> bool:
-    # The nidaqmx package loads NI-DAQmx's native DLL at import time; a missing
-    # driver raises DaqNotFoundError (or OSError). CI runners don't ship it.
+    # `import nidaqmx` succeeds without the driver — the package lazy-loads
+    # NI-DAQmx's native DLL on first call. We have to actually touch the lib
+    # (here via System.local().driver_version) to force the load and surface
+    # the DaqNotFoundError that CI runners hit without the driver.
     try:
-        import nidaqmx  # noqa: F401
+        import nidaqmx.system
+
+        _ = nidaqmx.system.System.local().driver_version
     except Exception:
         return False
     return True
