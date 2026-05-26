@@ -1,3 +1,7 @@
+---
+description: Lifecycle of a headless capa run — process model, two-stage SIGINT handling, runs-root and plugins.lock resolution, bundle sealing, exit-code contract for CI.
+---
+
 # Headless runs
 
 **Audience:** CI, automation, regression tests against real hardware, and any operator who would rather not look at a GUI.

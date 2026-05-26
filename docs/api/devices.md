@@ -1,3 +1,7 @@
+---
+description: capa.devices API — the async DeviceAdapter Protocol and per-family adapters for Watlow, Alicat, Sartorius, NI-DAQ, USB webcams, FLIR IR cameras, and simulators.
+---
+
 # `capa.devices`
 
 Device adapters and descriptor-driven discovery. Every adapter

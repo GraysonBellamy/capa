@@ -1,3 +1,7 @@
+---
+description: capa writer thread mechanics — bounded inbox queue, per-sink batching for channel samples, device records, events sqlite, fsync-driven in-flight Arrow IPC.
+---
+
 # Bundle write path
 
 **Audience:** contributors touching `capa.storage`; anyone debugging "the bundle didn't seal" or "the writer is at 100% CPU."

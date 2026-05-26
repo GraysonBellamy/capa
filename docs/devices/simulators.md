@@ -1,3 +1,7 @@
+---
+description: capa simulator adapters for hardware-free development, CI, and training — the signal-generator schema, sim_*.toml configs, and what sims do and do not model.
+---
+
 # Simulators
 
 **Audience:** developers, CI, anyone running capa without the rig in front of them — and operators training new students on a laptop.

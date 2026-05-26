@@ -1,3 +1,7 @@
+---
+description: Running capa test suite with `uv run pytest` — `unit/`, `integration/`, `smoke/`, `hardware/` tree, registered markers, async wiring, pytest-qt GUI tests.
+---
+
 # Running tests
 
 **Audience:** contributors who have a working dev install (see [Dev setup](dev-setup.md)).

@@ -1,3 +1,7 @@
+---
+description: Exit-code contract for capa CLI verbs — how (run_status, bundle_status, integrity_status) manifest triple maps to 0/1/2/3/5 for shell pipelines and CI drivers.
+---
+
 # Exit codes
 
 **Audience:** CI authors, scripters, anyone wiring `capa` into a shell pipeline or batch driver.

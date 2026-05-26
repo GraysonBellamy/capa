@@ -1,3 +1,7 @@
+---
+description: Every environment variable capa honors — CAPA_RUNS_ROOT, CAPA_PLUGIN_MODE, CAPA_HARDWARE_TESTS, XDG_CONFIG_HOME, HOME-derived plugins.lock and logs paths.
+---
+
 # Environment variables
 
 **Audience:** operators, CI authors, contributors driving capa from a script or a doc-tooling harness.

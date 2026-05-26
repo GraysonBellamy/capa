@@ -1,3 +1,7 @@
+---
+description: Four capa shutdown paths — graceful Stop, Emergency Stop, saturation deadline, and process crash — covering disarm, drain, finalize, and bundle sealing.
+---
+
 # Shutdown sequence
 
 **Audience:** operators (so you know what hitting Stop will do), plugin authors writing procedures (so your procedure honours the stop contract), contributors debugging "why didn't the rig cool down?"

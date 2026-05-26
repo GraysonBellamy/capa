@@ -1,3 +1,7 @@
+---
+description: Running capa `tests/hardware/` smoke suite on real instruments — `CAPA_HARDWARE_TESTS=1` opt-in, per-vendor `CAPA_TEST_*` vars, non-destructive writes.
+---
+
 # Hardware tests
 
 **Audience:** contributors with a real rig — or any subset of one (a single Watlow on a USB-serial adapter is enough to run one of the smoke tests).

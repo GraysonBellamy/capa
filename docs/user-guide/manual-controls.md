@@ -1,3 +1,7 @@
+---
+description: capa Manual Control dock — per-device cards for Watlow heaters, Alicat MFCs, Sartorius balances, and cameras, with capability gating and destructive-op confirm.
+---
+
 # Manual controls
 
 **Audience:** operators issuing one-off commands — taring a balance,

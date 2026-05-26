@@ -1,3 +1,7 @@
+---
+description: capa.ui API — PySide6 widgets, Setup / Run / Method tabs, manual controls, status bar, diagnostics dock, camera preview, UI / runtime thread-bridge boundary.
+---
+
 # `capa.ui`
 
 PySide6 widgets, tabs, docks, and the main window. The UI subscribes

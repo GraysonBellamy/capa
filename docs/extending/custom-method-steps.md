@@ -1,3 +1,7 @@
+---
+description: Extending capa methods with custom step kinds — declaring kind="custom" in .method.toml, registering handlers in a procedure, upgrading to a plugin.
+---
+
 # Custom method steps
 
 **Audience:** method authors with a one-off step that the built-in step kinds (`hold`, `ramp`, `setpoint`, `wait`, `prompt`, `acquire`, `safe_shutdown`) do not cover.

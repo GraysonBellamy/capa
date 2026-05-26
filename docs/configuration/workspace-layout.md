@@ -1,4 +1,8 @@
-﻿# Workspace layout
+﻿---
+description: capa workspace filesystem layout — `configs/`, `runs/`, `calibrations/` dirs, `CAPA_CONFIGS` / `CAPA_RUNS_ROOT` overrides, disk-usage monitoring.
+---
+
+# Workspace layout
 
 > **Status:** stub — content to be written.
 

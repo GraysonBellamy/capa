@@ -1,3 +1,7 @@
+---
+description: capa.channels API — runtime channel registry, channel spec, source bindings (device_field, derived, manual), units, and per-channel calibration glue.
+---
+
 # `capa.channels`
 
 Channel registry, specs, source bindings, and per-channel calibration

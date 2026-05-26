@@ -1,3 +1,7 @@
+---
+description: Day-to-day capa triage — Sartorius cold-open races, NI-DAQ chassis discovery, Alicat connection drops, FLIR camera failures, and symptom-cause-fix patterns.
+---
+
 # Common issues
 
 **Audience:** all users.

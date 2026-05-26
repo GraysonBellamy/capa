@@ -1,3 +1,7 @@
+---
+description: Field guide for diagnosing a degraded capa run from the status bar — which pill turned red first (sat, loop, q), and drilling into Acquisition Diagnostics.
+---
+
 # Reading status-bar symptoms
 
 **Audience:** operators triaging a degraded run.

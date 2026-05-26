@@ -1,3 +1,7 @@
+---
+description: capa ruff configuration — formatter settings, lint rule families, per-file ignores, Qt override naming exceptions, scientific unit suffixes, docstring style.
+---
+
 # Code style
 
 **Audience:** contributors writing or modifying Python in `src/capa/` or `tests/`.

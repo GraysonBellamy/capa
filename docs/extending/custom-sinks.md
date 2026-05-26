@@ -1,3 +1,7 @@
+---
+description: capa engine sink contract — ChannelSamplesSink, DeviceRecordsSink, FramesSink, EventsSink — patterns for InfluxDB, Postgres, S3, or LIMS run data.
+---
+
 # Custom sinks
 
 **Audience:** integrators wanting to wire capa to a destination beyond the on-disk bundle (InfluxDB, Postgres, S3, a live LIMS push).

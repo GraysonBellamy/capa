@@ -1,3 +1,7 @@
+---
+description: capa.cli API — Typer dispatcher and sub-apps behind the capa script entry point, covering headless runs, signal handling, and exit-code conventions.
+---
+
 # `capa.cli`
 
 Typer dispatcher and sub-apps. The ``[project.scripts]`` entry point

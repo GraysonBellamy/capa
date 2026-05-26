@@ -1,3 +1,7 @@
+---
+description: Reviewing a sealed capa bundle — finding runs_root, opening manifest.json, events.sqlite, parquet samples, bridging to runs.sqlite catalog or external tools.
+---
+
 # Reviewing a run
 
 **Audience:** anyone reading the bundle after the fact — the operator

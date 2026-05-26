@@ -53,6 +53,13 @@ dependencies = [
     "duvc-ctl>=2.1.0rc1 ; sys_platform == 'win32'",
 ]
 
+[project.urls]
+Homepage = "https://github.com/GraysonBellamy/capa"
+Repository = "https://github.com/GraysonBellamy/capa"
+Documentation = "https://graysonbellamy.github.io/capa/"
+Issues = "https://github.com/GraysonBellamy/capa/issues"
+Changelog = "https://github.com/GraysonBellamy/capa/releases"
+
 [project.scripts]
 capa = "capa.cli:main"
 

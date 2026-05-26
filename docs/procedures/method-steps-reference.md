@@ -1,3 +1,7 @@
+---
+description: Reference for every capa method step kind — hold, ramp, setpoint, wait, prompt, acquire, safe_shutdown, custom — schema, validation rules, emitted events.
+---
+
 # Method step reference
 
 **Audience:** method authors writing `*.method.toml` files; plugin authors adding new step kinds.

@@ -1,3 +1,7 @@
+---
+description: Install capa on Windows or Linux — Python 3.13, uv, sibling libs (alicatlib, watlowlib, sartoriuslib, nidaqlib), optional FLIR Atlas, duvc-ctl webcam wheel.
+---
+
 # Installation
 
 **Audience:** new users on a fresh rig PC or dev machine.
@@ -50,7 +54,7 @@ uv sync --group dev --extra flir
 uv sync --group dev --group docs
 ```
 
-`uv sync` creates `.venv/` in the project root and installs everything into it. The `dev` group pulls in pytest, pytest-qt, anyio[trio], ruff, mypy, and pre-commit. CI installs the narrower `lint`, `type`, and `test` groups directly; see [pyproject.toml](https://github.com/GraysonBellamy/capa/blob/main/pyproject.toml)'s `[dependency-groups]` for the breakdown.
+`uv sync` creates `.venv/` in the project root and installs everything into it. The `dev` group pulls in pytest, pytest-qt, `anyio[trio]`, ruff, mypy, and pre-commit. CI installs the narrower `lint`, `type`, and `test` groups directly; see [pyproject.toml](https://github.com/GraysonBellamy/capa/blob/main/pyproject.toml)'s `[dependency-groups]` for the breakdown.
 
 ### The vendored `duvc-ctl` wheel (Windows only)
 

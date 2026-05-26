@@ -1,3 +1,7 @@
+---
+description: Five short capa onboarding pages — installation, simulator quick start, your first real run, daily operator workflow, and the simulator profile tour.
+---
+
 # Get started
 
 Five short pages that get you from a fresh install to a running rig.

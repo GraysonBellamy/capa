@@ -1,3 +1,7 @@
+---
+description: capa commit and pull-request conventions — imperative subject lines, when to split vs bundle changes, PR body content, CI gating state, and review etiquette.
+---
+
 # Commits and PRs
 
 **Audience:** contributors preparing changes to land on `main`.

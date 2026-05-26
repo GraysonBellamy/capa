@@ -1,3 +1,7 @@
+---
+description: Destructive command handling in capa — EEPROM writes, valve holds, totalizer resets, balance calibration, with modal and hold-to-confirm gates.
+---
+
 # Destructive operations
 
 **Audience:** operators issuing manual commands; plugin authors exposing controls in the Manual Control dock.

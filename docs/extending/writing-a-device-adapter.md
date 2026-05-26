@@ -1,3 +1,7 @@
+---
+description: Adding a new device family to capa — DeviceAdapter Protocol, resource_id and worker model, AdapterDescriptor registration, capa.adapters entry points.
+---
+
 # Writing a device adapter
 
 **Audience:** integrators adding support for a new device family (a new mass flow controller, a new balance, a new analog DAQ).

@@ -1,3 +1,7 @@
+---
+description: capa.builtin.batch procedure for unattended replicate runs — orchestrates N child bundles with cooldowns, fail_fast control, manifest.custom.batch cross-refs.
+---
+
 # Procedure: batch
 
 **Audience:** operators running the same method many times in a row, typically unattended.

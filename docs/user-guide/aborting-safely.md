@@ -1,3 +1,7 @@
+---
+description: capa abort paths — Stop for graceful unwind, Emergency stop hold-to-confirm for fast disarm, OS kill force-cancel, with exit_reason and run_status outcomes.
+---
+
 # Aborting safely
 
 **Audience:** operators in a situation where something is wrong.

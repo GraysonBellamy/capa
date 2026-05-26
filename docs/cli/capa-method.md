@@ -1,3 +1,7 @@
+---
+description: Lint standalone capa method files (.method.toml / .method.yaml) from CLI — Pydantic-validate the step recipe a procedure executes without an experiment.
+---
+
 # capa method
 
 **Audience:** method authors.

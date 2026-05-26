@@ -1,3 +1,7 @@
+---
+description: Lookup index for capa reference — glossary, file formats, environment variables, exit codes, and changelog for the controlled-atmosphere pyrolysis stack.
+---
+
 # Reference
 
 Lookup material. Nothing in this tab tells you *how* to do anything —

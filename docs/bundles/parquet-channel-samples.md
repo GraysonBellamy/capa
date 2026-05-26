@@ -1,3 +1,7 @@
+---
+description: capa scalars.parquet schema — long-format channel samples with t_mono_ns, value, raw_value, unit, status; the canonical post-binding table for analysis.
+---
+
 # Channel samples (parquet)
 
 **Audience:** analysts reading channel samples in polars, pyarrow, or pandas; anyone writing a binding-aware downstream tool.

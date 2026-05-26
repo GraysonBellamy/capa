@@ -1,3 +1,7 @@
+---
+description: Field reference for capa experiment YAML — hardware, procedure, calibration_set, method, domain_profile, operator, sample, storage, safety, runtime, tags.
+---
+
 # Experiment YAML
 
 **Audience:** config authors composing a full experiment.

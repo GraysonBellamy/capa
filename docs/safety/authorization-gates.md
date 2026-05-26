@@ -1,3 +1,7 @@
+---
+description: capa Authorization helper — single chokepoint stamping every Watlow, Alicat, Sartorius, and FLIR device write with issued_by, authorization_id, confirmed_by.
+---
+
 # Authorization gates
 
 **Audience:** plugin authors writing procedures, method steps, or manual controls that issue commands to devices.

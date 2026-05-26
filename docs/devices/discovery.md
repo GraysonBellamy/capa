@@ -1,3 +1,7 @@
+---
+description: How capa probes a rig for connected hardware — per-adapter discover() hooks, Setup tab Discover dialog, non-destructive scans, results into hardware TOML.
+---
+
 # Discovery
 
 **Audience:** operators connecting a fresh rig, replacing a device, or troubleshooting "the Setup tab can't see my hardware."

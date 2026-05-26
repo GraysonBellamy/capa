@@ -1,3 +1,7 @@
+---
+description: Start a capa controlled-atmosphere pyrolysis experiment from the command line — headless dispatch, runs-root resolution, plugins.lock trust, and bundle sealing.
+---
+
 # capa run
 
 **Audience:** operators and CI/headless users.

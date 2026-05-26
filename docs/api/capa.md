@@ -1,3 +1,7 @@
+---
+description: capa top-level package API — __version__ re-export and map into runtime, devices, config, channels, experiment, storage, ui, core, calibration, cli.
+---
+
 # `capa`
 
 Top-level package — re-exports ``__version__`` and otherwise stays

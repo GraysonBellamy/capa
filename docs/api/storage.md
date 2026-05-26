@@ -1,3 +1,7 @@
+---
+description: capa.storage API — writer thread, per-sink writers, Arrow-IPC-then-rewrite bundle finalize, sha256 integrity sealing, and the bundle_status state machine.
+---
+
 # `capa.storage`
 
 The run bundle: writer thread, per-sink writers, finalize-in-place,

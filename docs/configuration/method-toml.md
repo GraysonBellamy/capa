@@ -1,3 +1,7 @@
+---
+description: Method TOML reference for capa — declarative `[[steps]]` blocks recipe-runner procedure executes, cross-validated against active hardware profile channels.
+---
+
 # Method TOML
 
 **Audience:** authors and operators building methods.

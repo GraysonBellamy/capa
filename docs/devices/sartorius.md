@@ -1,3 +1,7 @@
+---
+description: Recording specimen mass on a Sartorius balance in capa via sartoriuslib — xBPI and SBI protocols, tare/zero commands, cold-open race, stability flag.
+---
+
 # Sartorius balance
 
 **Audience:** operators recording specimen mass through a Sartorius balance — typically the mass-loss channel for a CAPA run.

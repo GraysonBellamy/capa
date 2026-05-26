@@ -1,3 +1,7 @@
+---
+description: USB visible-light webcams in capa — the PyAV-to-MKV pipeline, libx264 encoding, per-OS v4l2/avfoundation/dshow demuxers, UVC controls, and disconnect recovery.
+---
+
 # USB webcams
 
 **Audience:** operators with one or more USB cameras on the rig (typically a visible-light camera mounted above the sample).

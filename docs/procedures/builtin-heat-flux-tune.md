@@ -1,3 +1,7 @@
+---
+description: capa.builtin.heat_flux_tune — Schmidt-Boelter gauge calibration mapping kW/m² to Watlow setpoints, emits tune artifacts under configs/calibrations/flux.
+---
+
 # Procedure: heat-flux tune
 
 **Audience:** operators arming a heat-flux tune; UI authors wiring the dock; anyone debugging a stalled session from the live tick payload or audit events.

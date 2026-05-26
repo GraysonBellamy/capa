@@ -1,3 +1,7 @@
+---
+description: Every on-disk format capa reads or writes — YAML and TOML configs, Parquet samples, SQLite events and catalog, JSON manifest, MKV video, FLIR CSQ IR streams.
+---
+
 # File formats
 
 **Audience:** tool authors.

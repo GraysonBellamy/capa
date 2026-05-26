@@ -1,3 +1,7 @@
+---
+description: Tour of a capa run bundle directory — manifest.json, scalars.parquet, device_records, events.sqlite, video/, calibration.json, equipment.toml, and env lockfile.
+---
+
 # What's in a bundle
 
 **Audience:** anyone who has just produced a sealed run.

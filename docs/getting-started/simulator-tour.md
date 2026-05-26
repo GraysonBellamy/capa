@@ -1,4 +1,8 @@
-﻿# The simulator profile
+﻿---
+description: Tour of capa's simulator profile — simulated Watlow, Alicat, Sartorius, NI-DAQ polled/block, webcam, FLIR IR, shipped sim_*.yaml configs, tuning tips.
+---
+
+# The simulator profile
 
 > **Status:** stub — content to be written.
 

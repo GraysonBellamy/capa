@@ -1,3 +1,7 @@
+---
+description: capa bundle sealing protocol — bundle_status state machine, two-stage finalize, manifest.sha256 integrity verdict, crashed_but_sealed recovery semantics.
+---
+
 # Integrity and sealing
 
 **Audience:** anyone debugging "is this bundle complete?" — operators triaging an `open` or `verification_failed` bundle, tool authors confirming a bundle is safe to copy, plugin authors writing finalize-aware code.

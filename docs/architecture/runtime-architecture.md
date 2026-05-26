@@ -1,3 +1,7 @@
+---
+description: capa runtime topology — per-resource Worker threads, per-run Conductor, WorkerPool lifetimes, qasync UI seam for NI-DAQ, Watlow, Alicat, Sartorius adapters.
+---
+
 # CAPA runtime architecture
 
 **Audience:** contributors touching `src/capa/runtime/`, adapter authors, procedure / plugin authors.

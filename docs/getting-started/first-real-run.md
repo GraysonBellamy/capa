@@ -1,3 +1,7 @@
+---
+description: Bringing up real CAPA pyrolysis hardware for the first time — pre-flight checklist, gas and exhaust, leak-check, free-run setup, sealing first real bundle.
+---
+
 # Your first real run
 
 **Audience:** operators bringing up real hardware for the first time on

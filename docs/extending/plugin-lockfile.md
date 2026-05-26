@@ -1,3 +1,7 @@
+---
+description: capa plugins.lock — pinning trusted third-party procedure plugins by id, package, version, distribution_hash for production-mode gating and reproducible rigs.
+---
+
 # Plugin lockfile
 
 **Audience:** operators reading the file, and plugin authors regenerating it after a change.

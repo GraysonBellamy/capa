@@ -1,3 +1,7 @@
+---
+description: capa's `mypy --strict` baseline — the pydantic plugin, strictness flags, the four categories of override, and why pytest (not mypy) is the in-loop CI gate.
+---
+
 # Typing and mypy
 
 **Audience:** contributors writing typed Python in `src/capa/` or working under `--strict`.

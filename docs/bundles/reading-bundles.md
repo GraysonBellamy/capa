@@ -1,3 +1,7 @@
+---
+description: Reading a sealed capa bundle in polars, pyarrow, pandas, or sqlite — using started_mono_ns_anchor to join scalars.parquet, events.sqlite, and frame indices.
+---
+
 # Reading a bundle
 
 **Audience:** analysts opening a sealed bundle in polars, pyarrow, pandas, or the sqlite CLI; downstream tool authors.

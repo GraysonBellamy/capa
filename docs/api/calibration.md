@@ -1,3 +1,7 @@
+---
+description: capa.calibration API — tune-procedure artifacts including heater-setpoint to delivered-flux table from heat-flux tune procedure, with on-disk calibrations.
+---
+
 # `capa.calibration`
 
 Tune-procedure artifacts (the heater-setpoint → delivered-flux table

@@ -1,7 +1,7 @@
 [project]
 site_name = "capa"
 site_description = "Control and DAQ application for a custom cone-calorimeter-class lab instrument."
-site_url = "https://GraysonBellamy.github.io/capa/"
+site_url = "https://graysonbellamy.github.io/capa/"
 repo_url = "https://github.com/GraysonBellamy/capa"
 repo_name = "GraysonBellamy/capa"
 edit_uri = "edit/main/docs/"
@@ -177,6 +177,7 @@ nav = [
 
 [project.theme]
 variant = "classic"
+custom_dir = "overrides"
 features = [
     "content.code.copy",
     "content.code.annotate",

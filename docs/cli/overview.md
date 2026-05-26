@@ -1,3 +1,7 @@
+---
+description: capa Typer console script tour — sub-apps: run, gui, validate, finalize, catalog, plugins, devices, hardware, config, method, profile.
+---
+
 # CLI overview
 
 **Audience:** anyone who runs capa from a terminal.

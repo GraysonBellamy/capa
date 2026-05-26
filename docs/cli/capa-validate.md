@@ -1,3 +1,7 @@
+---
+description: Headless preflight for a capa experiment config — Pydantic load, plugin resolution, and optional --strict adapter handshake without arming hardware.
+---
+
 # capa validate
 
 **Audience:** config authors and CI.

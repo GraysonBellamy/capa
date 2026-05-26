@@ -1,3 +1,7 @@
+---
+description: Validate domain_profile metadata block of a capa experiment config — capa_pyrolysis and cone_calorimeter metadata checked against active profile model.
+---
+
 # capa profile
 
 **Audience:** CAPA pyrolysis operators and analysts checking that the domain-profile metadata block on an experiment is well-formed.

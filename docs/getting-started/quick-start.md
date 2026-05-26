@@ -1,3 +1,7 @@
+---
+description: From fresh capa install to a sealed simulator run bundle in five minutes — Setup tab, simulated Watlow and Alicat devices, Run tab, first sealed bundle.
+---
+
 # Quick start — your first run on the simulator
 
 This walkthrough takes you from a fresh capa install to a sealed run

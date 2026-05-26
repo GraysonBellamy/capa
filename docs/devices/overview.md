@@ -1,3 +1,7 @@
+---
+description: How capa wraps Watlow, Alicat, Sartorius, NI-DAQ, and cameras behind a uniform DeviceAdapter contract — resource grouping and emission shapes.
+---
+
 # Devices overview
 
 **Audience:** config authors, plugin authors, contributors touching

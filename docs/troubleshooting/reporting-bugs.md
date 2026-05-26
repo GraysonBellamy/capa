@@ -1,3 +1,7 @@
+---
+description: Filing actionable capa bug reports — capturing capa version, devices discover output, plugin lists, bundle extracts, and redacting sensitive manifest fields.
+---
+
 # Reporting bugs
 
 **Audience:** all users.

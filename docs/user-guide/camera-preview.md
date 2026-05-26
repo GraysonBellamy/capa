@@ -1,3 +1,7 @@
+---
+description: The capa camera preview tile — live USB webcam and FLIR IR feed independent of recording, with cadence indicators, border-color health, and per-camera controls.
+---
+
 # Camera preview
 
 **Audience:** operators with one or more cameras on the rig (USB webcam, FLIR IR, or both).

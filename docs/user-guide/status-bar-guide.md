@@ -1,3 +1,7 @@
+---
+description: Reading the capa status bar pills — state, sat, loop, q, safety queue, disk, cam, op, bundle — with healthy, warn, fail thresholds polled at 1 Hz.
+---
+
 # Status bar — how to read it
 
 **Audience:** operators running CAPA on the rig, contributors triaging "why does my run look weird?"

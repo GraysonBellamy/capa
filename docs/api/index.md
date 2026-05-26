@@ -1,4 +1,8 @@
-﻿# API reference
+﻿---
+description: capa API reference index — auto-generated docstrings for runtime, devices, config, channels, experiment, storage, ui, core, calibration, and cli subpackages.
+---
+
+# API reference
 
 Auto-generated from source docstrings via
 [mkdocstrings-python](https://mkdocstrings.github.io/python/). The

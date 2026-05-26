@@ -1,3 +1,7 @@
+---
+description: capa Acquisition Diagnostics dock — per-worker Rate, p50, jitter, Age columns from WorkerMetrics for triaging heater, MFC, balance, NI-DAQ, and camera polls.
+---
+
 # Acquisition Diagnostics dock
 
 **Audience:** operators triaging "why is this run weird?", contributors debugging adapters.

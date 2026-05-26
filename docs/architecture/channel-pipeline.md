@@ -1,3 +1,7 @@
+---
+description: How a declared capa channel becomes a calibrated, decimated sample — ChannelSpec, SourceBinding, ResolvedChannel, and build_channel_sample emission at run time.
+---
+
 # Channel pipeline
 
 **Audience:** contributors writing or maintaining device adapters; config authors who need to understand why a channel value is what it is.

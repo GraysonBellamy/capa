@@ -1,3 +1,7 @@
+---
+description: Four safety invariants in capa — audit-attributed device writes, isolated safety subsystem, fail-loud bundle sealing, and explicit non-real-time scope.
+---
+
 # Safety principles
 
 **Audience:** all users; required reading for plugin authors and contributors who touch device-write paths.

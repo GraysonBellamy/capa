@@ -1,3 +1,7 @@
+---
+description: capa hardware profile TOML reference — `[[devices]]`, `[[channels]]`, `[[cameras]]` tables wiring NI-DAQ, Watlow, Alicat, Sartorius, USB, FLIR adapters.
+---
+
 # Hardware TOML
 
 **Audience:** config authors describing the physical rig.

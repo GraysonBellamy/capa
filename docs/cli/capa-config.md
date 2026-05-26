@@ -1,3 +1,7 @@
+---
+description: Run capa full layered experiment-config validation pipeline (Layers 1-5) from CLI — Problems-panel parity with severity, section, JSON path per finding.
+---
+
 # capa config
 
 **Audience:** config authors and anyone diagnosing a Setup-tab Problems-panel finding from the command line.

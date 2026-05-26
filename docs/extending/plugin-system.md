@@ -1,3 +1,7 @@
+---
+description: capa's plugin model — entry-point discovery for procedures, device adapter descriptors, and domain profiles, with plugins.lock gating third-party procedures.
+---
+
 # Plugin system
 
 **Audience:** plugin authors and integrators, on their first read.

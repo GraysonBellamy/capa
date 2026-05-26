@@ -1,3 +1,7 @@
+---
+description: Single-page capa operator lookup — Setup, Run, and Method tabs, connection-strip states, status badges, and quick links to manual controls for pyrolysis runs.
+---
+
 # Operator handbook
 
 **Audience:** trained rig operators during an active session.

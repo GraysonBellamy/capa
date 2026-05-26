@@ -1,3 +1,7 @@
+---
+description: capa bundle video/ layout — webcam .mkv via PyAV, FLIR IR .csq via Atlas SDK, frames.parquet sidecars mapping frame index to monotonic time, meta sidecars.
+---
+
 # Video
 
 **Audience:** analysts handling recorded video (visible and IR); operators triaging a partial recording; plugin authors writing a new camera adapter.

@@ -1,3 +1,7 @@
+---
+description: capa channel binding reference — six `SourceBinding` variants pulling from Watlow, Alicat, Sartorius, NI-DAQ (polled and hardware-clocked), derived channels.
+---
+
 # Channel bindings
 
 **Audience:** config authors wiring channels to device parameters.

@@ -1,3 +1,7 @@
+---
+description: Manage capa on-disk run catalog (runs.sqlite) — list bundles with filters, verify manifest.sha256 integrity, rebuild index from each bundle manifest.
+---
+
 # capa catalog
 
 **Audience:** anyone working with the run catalog — operators looking up a recent run, analysts walking a fleet of bundles, CI verifying bundle integrity.

@@ -1,3 +1,7 @@
+---
+description: capa bundle manifest.json schema — BundleManifest Pydantic model, bundle_schema_version, run_status, integrity block, forward/backward compatibility rules.
+---
+
 # Manifest and schema
 
 **Audience:** bundle readers and downstream tooling.

@@ -1,3 +1,7 @@
+---
+description: capa SaturationMonitor — durable-output deadline catching wedged writer threads via bridge blocked_since_ms and inbox depth, escalates to crashed_but_sealed.
+---
+
 # Saturation and deadlines
 
 **Audience:** contributors writing adapters or custom procedure steps; anyone debugging the runtime's saturation monitor or chasing a `crashed_but_sealed` outcome.

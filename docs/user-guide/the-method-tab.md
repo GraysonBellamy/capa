@@ -1,3 +1,7 @@
+---
+description: capa Method tab GUI — toolbar, step table, auto-form detail editor, and profile graph for authoring multi-step .method.toml ramps, holds, safe-shutdown.
+---
+
 # The Method tab
 
 **Audience:** operators authoring or editing methods.

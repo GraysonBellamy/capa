@@ -1,3 +1,7 @@
+---
+description: capa.config API — ConfigDocument IO, canonicalization, validation pipeline, ConfigProblem taxonomy, and the frozen ExperimentConfig produced for the runtime.
+---
+
 # `capa.config`
 
 Config IO and validation surface. :class:`ConfigDocument` tracks

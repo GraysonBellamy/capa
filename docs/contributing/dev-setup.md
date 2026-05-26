@@ -1,3 +1,7 @@
+---
+description: First-time capa contributor setup — Python 3.13, `uv sync`, sibling checkouts (alicatlib, watlowlib, sartoriuslib, nidaqlib, capa-flir), lint/type/test loop.
+---
+
 # Dev setup
 
 **Audience:** first-time contributors getting capa running from source.

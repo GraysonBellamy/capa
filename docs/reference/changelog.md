@@ -1,3 +1,7 @@
+---
+description: Where capa release notes live and how bundle_schema_version is versioned independently — GitHub Releases, hatch-vcs tags, and bundle wire-format bumps.
+---
+
 # Changelog
 
 **Audience:** anyone tracking what changed between capa versions.

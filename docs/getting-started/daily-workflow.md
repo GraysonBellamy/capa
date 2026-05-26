@@ -1,3 +1,7 @@
+---
+description: Sustainable capa cadence between pyrolysis runs — reloading yesterday's config, Apply and Connect, editing sample ids and specimen mass, sealing, re-arming.
+---
+
 # Daily operator workflow
 
 **Audience:** operators running a sequence of experiments in one session

@@ -8,7 +8,12 @@ libraries, records every run as a self-contained on-disk **bundle**,
 and treats research workflows (calibrations, custom routines) as
 first-class plugins.
 
-> 📚 **Full docs:** <https://GraysonBellamy.github.io/capa/>
+The project is named after the **C**ontrolled **A**tmosphere
+**P**yrolysis **A**pparatus — the bench-scale gasification rig
+originally introduced by Swann et al. (CAPA II, 2017) and revisited
+in Bellamy's M.S. thesis (UMD, 2022). See [References](#references).
+
+> 📚 **Full docs:** <https://graysonbellamy.github.io/capa/>
 
 ## What capa is for
 
@@ -137,6 +142,22 @@ More: [Dev setup](docs/contributing/dev-setup.md) ·
 | Reading a finished bundle | [Reading bundles](docs/bundles/reading-bundles.md) |
 | Writing a plugin | [Writing a procedure](docs/extending/writing-a-procedure.md) · [Plugin system](docs/extending/plugin-system.md) |
 | Touching the source | [Runtime architecture](docs/architecture/runtime-architecture.md) · [Dev setup](docs/contributing/dev-setup.md) |
+
+## References
+
+The CAPA the project is named after has been described in:
+
+- Swann, J. D., Ding, Y., McKinnon, M. B., & Stoliarov, S. I. (2017).
+  *Controlled atmosphere pyrolysis apparatus II (CAPA II): A new tool
+  for analysis of pyrolysis of charring and intumescent polymers.*
+  Fire Safety Journal, 91, 130–139.
+  <https://doi.org/10.1016/j.firesaf.2017.03.038>
+- Bellamy, G. T. (2022). *Development and Improvements of the
+  Controlled Atmosphere Pyrolysis Apparatus.* M.S. thesis, Department
+  of Fire Protection Engineering, University of Maryland, College
+  Park. <https://doi.org/10.13016/gzi8-ivaz>
+
+If you use capa itself in academic work, see [CITATION.cff](CITATION.cff).
 
 ## License
 

@@ -1,3 +1,7 @@
+---
+description: capa.core API — runtime primitives: monotonic clock, data bus, ring buffers, backpressure policies, units, logging, and plugin entry-point registry.
+---
+
 # `capa.core`
 
 Core primitives: monotonic clock, data bus, ring buffers, backpressure

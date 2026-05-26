@@ -1,3 +1,7 @@
+---
+description: Authoring a capa DomainProfile plugin — Setup-tab metadata fields, required channel groups, preflight checks, manifest block for a new experimental domain.
+---
+
 # Writing a profile
 
 **Audience:** integrators adding a new scientific domain (e.g. drying study, char yield, micro-scale calorimetry).

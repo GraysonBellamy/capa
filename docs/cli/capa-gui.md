@@ -1,3 +1,7 @@
+---
+description: Launch the capa PySide6 GUI with Setup, Run, and Method tabs — qasync bootstrap, optional preloaded config, shared headless conductor underneath.
+---
+
 # capa gui
 
 **Audience:** operators.

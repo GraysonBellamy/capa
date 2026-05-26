@@ -1,3 +1,7 @@
+---
+description: capa bundle_schema_version policy — integer bump rule, MIGRATIONS registry chain in schema.py, and forward/backward compatibility for downstream readers.
+---
+
 # Bundle versioning
 
 **Audience:** tool authors reading bundles across capa versions; contributors who need to bump the schema.

@@ -1,3 +1,7 @@
+---
+description: capa Setup tab walkthrough — outline, section editor, problems panel, connection strip, and discovery, calibration plot, diff, and apply-to-channels dialogs.
+---
+
 # The Setup tab
 
 **Audience:** operators and config authors.

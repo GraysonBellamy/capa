@@ -1,3 +1,7 @@
+---
+description: capa events.sqlite and status.sqlite schemas — DeviceEvent log of adapter commands, procedure milestones, safety trips plus 1 Hz DeviceSnapshot health pings.
+---
+
 # Events and status (sqlite)
 
 **Audience:** analysts reconstructing what happened during a run; operators triaging a `crashed_but_sealed` outcome; plugin authors deciding what their adapter should log.

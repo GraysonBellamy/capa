@@ -1,3 +1,7 @@
+---
+description: Recover a crashed or interrupted capa run bundle — re-seal Arrow IPC streams to parquet, stamp manifest.sha256, and reinsert into the runs.sqlite catalog.
+---
+
 # capa finalize
 
 **Audience:** anyone recovering a partial bundle — operators after a power loss, CI after a runner crash, anyone whose `capa run` did not exit cleanly.

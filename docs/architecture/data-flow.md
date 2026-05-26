@@ -1,3 +1,7 @@
+---
+description: One sample journey through capa — adapter stream callback through ChannelSample build, ThreadBridge, Conductor dispatch, and writer thread onto parquet.
+---
+
 # Data flow
 
 **Audience:** contributors and analysts; anyone asking "what happens between the device callback and the parquet file?"

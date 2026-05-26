@@ -1,3 +1,7 @@
+---
+description: Recovering a capa bundle after power loss or SIGKILL — detecting open, finalizing, or finalized_unverified bundle_status and running capa finalize to reseal.
+---
+
 # Crash recovery
 
 **Audience:** operators after an unclean shutdown (power loss, OS crash, SIGKILL, force-quit).

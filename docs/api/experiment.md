@@ -1,3 +1,7 @@
+---
+description: capa.experiment API — experiment schemas, procedures, domain profiles, method executor, authorization gates, and plan turning validated config into a run.
+---
+
 # `capa.experiment`
 
 Experiment-level schemas, procedures, profiles, the method executor,

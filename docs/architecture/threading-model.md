@@ -1,3 +1,7 @@
+---
+description: capa threading rules — ui-main qasync, per-resource worker loops, conductor, and writer thread; what each owns and the rules for crossing thread seams safely.
+---
+
 # Threading model
 
 **Audience:** contributors changing anything inside `src/capa/runtime/`, `src/capa/ui/`, or `src/capa/storage/`, or adding adapters that touch I/O at unusual cadences.

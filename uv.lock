@@ -234,8 +234,6 @@ dependencies = [
     { name = "anyio" },
     { name = "capa" },
     { name = "cffi" },
-    { name = "numpy" },
-    { name = "pillow" },
 ]
 
 [package.metadata]
@@ -245,8 +243,6 @@ requires-dist = [
     { name = "capa", editable = "." },
     { name = "cffi", specifier = ">=1.16" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
-    { name = "numpy", specifier = ">=2" },
-    { name = "pillow", specifier = ">=10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
 ]

@@ -1,3 +1,7 @@
+---
+description: Driving Watlow EZ-Zone PM heaters in capa via watlowlib — devices.params schema, Standard Bus and Modbus RTU, channel bindings, discovery, long-row emissions.
+---
+
 # Watlow heaters
 
 **Audience:** operators and config authors using Watlow EZ-Zone controllers as the rig's heater control loop.

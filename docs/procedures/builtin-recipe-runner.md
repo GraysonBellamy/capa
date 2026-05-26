@@ -1,3 +1,7 @@
+---
+description: capa.builtin.recipe_runner procedure — walks a scripted .method.toml step by step via MethodExecutor for ramps, holds, waits, and prompts in pyrolysis runs.
+---
+
 # Procedure: recipe runner
 
 **Audience:** operators running a scripted multi-step method.

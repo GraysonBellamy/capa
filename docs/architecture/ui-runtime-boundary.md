@@ -1,3 +1,7 @@
+---
+description: capa PySide6 UI / runtime seam — ManualClient command dispatch, UIDataBus live emissions, RunController lifecycle keeping Qt off worker and conductor threads.
+---
+
 # UI / runtime boundary
 
 **Audience:** anyone adding a widget, a manual card, a new dock, or wiring a new live signal into the UI.

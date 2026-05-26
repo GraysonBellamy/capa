@@ -1,3 +1,7 @@
+---
+description: capa Run tab live console — state badge, Start / Stop / Emergency hold-to-confirm buttons, PyQtGraph plot pane, and run-identity header during a run.
+---
+
 # The Run tab
 
 **Audience:** operators during an active run.

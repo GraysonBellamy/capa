@@ -1,3 +1,7 @@
+---
+description: capa glossary — plain-English definitions for bundle, method, procedure, profile, channel binding, and controlled-atmosphere pyrolysis vocabulary.
+---
+
 # Glossary
 
 Plain-English definitions of capa's core concepts. Each entry is short on

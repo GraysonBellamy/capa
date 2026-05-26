@@ -1,3 +1,7 @@
+---
+description: Inspect capa procedure plugins and write trust entries — list discovered entry-points, gate them against plugins.lock, and refresh distribution hashes.
+---
+
 # capa plugins
 
 **Audience:** plugin authors, operators verifying a production-mode rig, lab leads granting trust to a new procedure.

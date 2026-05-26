@@ -1,3 +1,7 @@
+---
+description: capa architecture plan — the product surface for the controlled-atmosphere pyrolysis app, covering channels, run bundles, procedures, safety, and storage.
+---
+
 # capa — Architecture Plan
 
 **Scope:** the product surface of capa — what a channel is, what the run bundle contains, how procedures and methods compose, how the safety layer and storage layer work. The runtime topology that hosts all of this (per-resource workers coordinated by a per-run conductor over a long-lived worker pool) is documented separately in [`runtime-architecture.md`](runtime-architecture.md); this document references it but does not duplicate it.

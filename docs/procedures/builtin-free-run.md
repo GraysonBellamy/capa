@@ -1,3 +1,7 @@
+---
+description: capa.builtin.free_run procedure for ad-hoc capture — no method, fixed heater setpoint, smoke-test for engine pipeline and single-setpoint pyrolysis holds.
+---
+
 # Procedure: free run
 
 **Audience:** operators doing ad-hoc data collection.

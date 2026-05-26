@@ -1,3 +1,7 @@
+---
+description: Pointer page for capa calibration configs on disk — channel-calibration TOML sets under `configs/calibrations/` and orthogonal heat-flux tune artifact system.
+---
+
 # Calibrations on disk
 
 **Audience:** config authors trying to find the calibration documentation from the Configuration nav.

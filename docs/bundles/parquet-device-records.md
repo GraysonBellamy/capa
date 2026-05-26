@@ -1,3 +1,7 @@
+---
+description: capa device_records/*.parquet — native adapter records for Alicat, Watlow, Sartorius, and NI-DAQ in wide_row, long_row, single_value_row, and block shapes.
+---
+
 # Device records (parquet)
 
 **Audience:** analysts who need the raw native adapter records (not the binding-projected channel samples); plugin authors deciding what shape a new adapter should emit.

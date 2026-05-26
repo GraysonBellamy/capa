@@ -1,3 +1,7 @@
+---
+description: Building a capa procedure plugin — Procedure Protocol, ProcedureContext, picking free-run vs method-walking vs self-driving, shipping as installable package.
+---
+
 # Writing a procedure
 
 **Audience:** researchers and integrators adding a new procedure plugin.

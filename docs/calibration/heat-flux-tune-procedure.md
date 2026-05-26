@@ -1,3 +1,7 @@
+---
+description: capa.builtin.heat_flux_tune convergence — supervisory secant outer loop over Watlow PID, Schmidt-Boelter windowed mean, Hampel rejection, runaway detector.
+---
+
 # Heat-flux tune procedure — the algorithm
 
 **Audience:** anyone tuning predicate thresholds, debugging an unstable tune, or reading a stalled session in the bundle audit trail. The page that comes alongside this one is [Procedure: heat-flux tune](../procedures/builtin-heat-flux-tune.md), which covers the operator/API surface — config fields, the dock, the tick payload. This page is the *algorithm*: the convergence rule, the predicate, the secant step, and the rationale for the empirical constants.

@@ -1,3 +1,7 @@
+---
+description: capa HeatFluxTuneArtifact schema — heater-setpoint↔delivered-flux TOML under configs/calibrations/flux/, latest.toml pointer, partial-save, interpolation.
+---
+
 # Tune artifacts
 
 **Audience:** calibration authors, downstream tools, anyone parsing `configs/calibrations/flux/*.toml`.

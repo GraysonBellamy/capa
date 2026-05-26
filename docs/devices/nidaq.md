@@ -1,3 +1,7 @@
+---
+description: NI-DAQmx acquisition in capa via nidaqlib — polled software-timed vs hardware-clocked block mode, thermocouple and voltage channels, blocks in the bundle.
+---
+
 # NI-DAQ
 
 **Audience:** config authors using an NI-DAQmx chassis (analog in, digital in, counters) — typically thermocouple and voltage acquisition for sample temperatures and auxiliary sensors.

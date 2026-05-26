@@ -1,3 +1,7 @@
+---
+description: Author and probe capa hardware profile TOMLs — discover, new, validate, check (live handshake) across Watlow, Alicat, Sartorius, NI-DAQ, camera adapters.
+---
+
 # capa hardware
 
 **Audience:** config authors building hardware TOMLs.

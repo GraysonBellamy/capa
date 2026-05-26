@@ -1,3 +1,7 @@
+---
+description: capa procedure concept — how procedures, methods, and domain profiles compose the three-axis split driving every controlled-atmosphere pyrolysis run.
+---
+
 # What is a procedure
 
 **Audience:** config authors, operators, plugin authors.

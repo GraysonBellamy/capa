@@ -1,3 +1,7 @@
+---
+description: Configuring Alicat mass-flow and pressure controllers in capa via alicatlib — setpoint, gas-select, tare, multi-drop RS-485 buses, and wide-row frame fields.
+---
+
 # Alicat mass-flow
 
 **Audience:** operators and config authors with Alicat mass-flow / pressure controllers or meters on the rig.

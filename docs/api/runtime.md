@@ -1,3 +1,7 @@
+---
+description: capa.runtime API — per-resource-worker model with Conductor, WorkerPool, Worker, ManualClient, ThreadBridge queues, dispatchers, SaturationMonitor deadline.
+---
+
 # `capa.runtime`
 
 Per-resource-worker runtime. Each hardware resource gets its own

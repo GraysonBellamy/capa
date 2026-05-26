@@ -1,3 +1,7 @@
+---
+description: Tour of capa's four config kinds — experiment YAML, hardware TOML, method TOML, and calibration sets — how they compose on disk and load into Pydantic models.
+---
+
 # Configuration overview
 
 **Audience:** anyone editing a capa config.

@@ -1,3 +1,7 @@
+---
+description: Operator workflow for a capa heat-flux tune — pick target kW/m², arm capa.builtin.heat_flux_tune, watch convergence on dock, save artifact, cite it in runs.
+---
+
 # Tuning workflow
 
 **Audience:** operators running a heat-flux tune; calibration authors arming the procedure for the first time.

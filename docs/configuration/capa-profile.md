@@ -1,3 +1,7 @@
+---
+description: Field reference for `capa.profiles.capa_pyrolysis` domain profile — specimen, HeaterProgram, Atmosphere, DownstreamAnalyzer, preflight checks for pyrolysis.
+---
+
 # CAPA profile fields
 
 **Audience:** CAPA pyrolysis operators authoring an experiment YAML; anyone parsing `profiles/capa_pyrolysis.toml` from a bundle.

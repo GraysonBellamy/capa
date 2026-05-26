@@ -1,3 +1,7 @@
+---
+description: FLIR thermal cameras in capa via the capa-flir plugin — Atlas SDK prerequisites, radiometric .csq capture, IR colormap controls, FLIR IR simulator.
+---
+
 # FLIR IR cameras
 
 **Audience:** operators with a FLIR thermal camera (validated against the E85; A-series and other Atlas-supported cameras work via the same adapter).

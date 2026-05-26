@@ -1,4 +1,8 @@
-﻿# Validation and problems
+﻿---
+description: How capa validates configs — canonical form, error vs warning severities, the Problems panel, field navigation, and the `capa validate` CLI gate.
+---
+
+# Validation and problems
 
 > **Status:** stub — content to be written.
 

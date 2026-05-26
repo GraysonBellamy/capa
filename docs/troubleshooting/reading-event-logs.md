@@ -1,3 +1,7 @@
+---
+description: Post-mortem capa runs via events.sqlite and run.log — schema, event taxonomy, monotonic-time joins to parquet samples, SQLite and JSON Lines queries.
+---
+
 # Reading event logs
 
 **Audience:** analysts and contributors reconstructing what happened during a past run.

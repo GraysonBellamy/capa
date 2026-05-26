@@ -1,3 +1,7 @@
+---
+description: capa GUI screenshot probe — `CAPA_SCREENSHOT_PROBE` / `CAPA_SCREENSHOT_PROBE_INTERACTIVE` env vars exposing `QWidget.grab()` and `QTest` on 127.0.0.1:9876.
+---
+
 # UI probe
 
 **Audience:** anyone generating or refreshing GUI screenshots, or driving

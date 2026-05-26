@@ -1,3 +1,7 @@
+---
+description: capa channel-calibration TOML format — CalibrationSet curves, linear_two_point and polynomial transforms, UncertaintySpec, diff workflow for Setup-tab drafts.
+---
+
 # Calibration sets
 
 **Audience:** calibration authors writing `configs/calibrations/*.toml` files; operators applying a set in the Setup tab; analysts parsing `calibration.json` out of a bundle.

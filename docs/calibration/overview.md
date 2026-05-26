@@ -1,3 +1,7 @@
+---
+description: capa's two calibration subsystems — CalibrationSet channel curves (raw to engineering units) versus HeatFluxTuneArtifact (heater setpoint to delivered kW/m²).
+---
+
 # Calibration overview
 
 **Audience:** anyone whose runs depend on calibrated values — operators, analysts, contributors writing adapter code.

@@ -1,3 +1,7 @@
+---
+description: Discover non-camera hardware attached to a capa rig — probe Watlow, Alicat, Sartorius, and NI-DAQmx adapters and emit a table or JSON inventory.
+---
+
 # capa devices
 
 **Audience:** config authors discovering attached hardware.
