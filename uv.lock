@@ -202,7 +202,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.4" },
     { name = "tomli-w", specifier = ">=1.0" },
     { name = "typer", specifier = ">=0.12" },
-    { name = "watlowlib", specifier = ">=0.6.0,<0.7" },
+    { name = "watlowlib", specifier = ">=0.7.0,<0.8" },
 ]
 provides-extras = ["flir"]
 
@@ -234,6 +234,8 @@ dependencies = [
     { name = "anyio" },
     { name = "capa" },
     { name = "cffi" },
+    { name = "numpy" },
+    { name = "pillow" },
 ]
 
 [package.metadata]
@@ -243,6 +245,8 @@ requires-dist = [
     { name = "capa", editable = "." },
     { name = "cffi", specifier = ">=1.16" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
+    { name = "numpy", specifier = ">=2" },
+    { name = "pillow", specifier = ">=10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
 ]
@@ -1459,16 +1463,16 @@ wheels = [
 
 [[package]]
 name = "watlowlib"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anymodbus" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d7/2d/f9a5d6ebb967ab2c3e5ff5280f8510c3b298690b483065e09db5d812a3f0/watlowlib-0.6.0.tar.gz", hash = "sha256:601bd7f15e42034c4a16377ee7653f302399eb7a647a07e6916a79ef311f0960", size = 381209, upload-time = "2026-05-15T23:51:01.543Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/63/fef96ecdd1d0d78b4fc94f7459bdcd1536b7f6e2d4ce19acf19d8d3cff08/watlowlib-0.7.0.tar.gz", hash = "sha256:10479c684f3b4f430f3c14eaa1cd625f09d027b330815598b788c043371e0e2c", size = 396341, upload-time = "2026-05-30T01:49:18.555Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/38/6b79e2df5d1808e5ad574ecfd116e3f3b17e45807dccbbb2c3ba7574c741/watlowlib-0.6.0-py3-none-any.whl", hash = "sha256:714b95d40494e652f30103b90b0a3548c28b87eb7cde7446bee43229b981a12a", size = 332352, upload-time = "2026-05-15T23:50:59.727Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/fc/28648e1955d06b4288051e33edde5088c25a1b265f91de26294726bd4836/watlowlib-0.7.0-py3-none-any.whl", hash = "sha256:7059dece4c442752768df30cd3751906e871e14fc04141640d388a90318ed1f0", size = 341982, upload-time = "2026-05-30T01:49:17.075Z" },
 ]
 
 [[package]]

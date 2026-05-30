@@ -387,9 +387,8 @@ class WatlowAdapter:
                 # is. Best-effort: ``read_comms_unit_label`` returns ``None``
                 # on a device that rejects the read, and that ``None`` is
                 # itself useful state (it tells the snapshot we tried). Note
-                # this is diagnostic only — under watlowlib 0.4 the wire-side
-                # tag on Sample.unit comes from ``wire_temperature_unit``, not
-                # this label.
+                # this is diagnostic only — the wire-side tag on Sample.unit
+                # comes from ``wire_temperature_unit``, not this label.
                 self._display_unit = await self._controller.read_comms_unit_label()
         except WatlowError as exc:
             await self._safe_close_controller()
@@ -645,10 +644,10 @@ class WatlowAdapter:
             unit_arg = cmd.payload["unit"]
             # Writes parameter 17050 (the comms-display *label*). RWE /
             # persistent; the authorization gate above already accepted, so
-            # we pass confirm=True through to watlowlib's own gate. Under
-            # watlowlib 0.4 this is label-only — it does NOT change the
-            # scale of values on the wire, only what the device reports for
-            # 17050. We still cache the echoed value for the snapshot and
+            # we pass confirm=True through to watlowlib's own gate. This is
+            # label-only — it does NOT change the scale of values on the
+            # wire, only what the device reports for 17050. We still cache
+            # the echoed value for the snapshot and
             # clear the drift-skip set in case the operator's
             # ``wire_temperature_unit`` assertion was wrong and is being
             # corrected via a re-open elsewhere.
@@ -799,9 +798,9 @@ class WatlowAdapter:
     async def read_display_units(self) -> Unit | None:
         """Read the cached comms-display *label* (parameter 17050).
 
-        Under watlowlib 0.4 this is the label-only register, not the
-        wire-side unit — see :attr:`WatlowAdapterParams.wire_temperature_unit`
-        for the latter. The cached value is primed at :meth:`open` and
+        This is the label-only register, not the wire-side unit — see
+        :attr:`WatlowAdapterParams.wire_temperature_unit` for the
+        latter. The cached value is primed at :meth:`open` and
         refreshed on every call here / on :meth:`set_display_units`.
         """
         if self._controller is None:
@@ -1076,8 +1075,8 @@ async def discover(
 ) -> list[dict[str, Any]]:
     """Probe local serial buses for Watlow PM-series controllers.
 
-    Thin wrapper over :func:`watlowlib.find_devices` (shipped in
-    watlowlib 0.5.0). The library iterates the cartesian product of
+    Thin wrapper over :func:`watlowlib.find_devices`. The library
+    iterates the cartesian product of
     ``ports × baudrates × protocols × addresses``, runs
     :meth:`Controller.identify` per probe, and short-circuits a port
     if it can't be opened.
