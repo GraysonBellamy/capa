@@ -13,7 +13,7 @@ The project is named after the **C**ontrolled **A**tmosphere
 originally introduced by Swann et al. (CAPA II, 2017) and revisited
 in Bellamy's M.S. thesis (UMD, 2022). See [References](#references).
 
-> 📚 **Full docs:** <https://graysonbellamy.github.io/capa/>
+> 📚 **Full docs:** <https://capa.graysonbellamy.dev/>
 
 ## What capa is for
 
