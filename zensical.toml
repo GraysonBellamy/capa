@@ -1,7 +1,7 @@
 [project]
 site_name = "capa"
 site_description = "Control and DAQ application for a custom cone-calorimeter-class lab instrument."
-site_url = "https://graysonbellamy.github.io/capa/"
+site_url = "https://capa.graysonbellamy.dev/"
 repo_url = "https://github.com/GraysonBellamy/capa"
 repo_name = "GraysonBellamy/capa"
 edit_uri = "edit/main/docs/"

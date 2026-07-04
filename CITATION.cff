@@ -11,7 +11,7 @@ authors:
     affiliation: University of Maryland
 license: MIT
 repository-code: "https://github.com/GraysonBellamy/capa"
-url: "https://graysonbellamy.github.io/capa/"
+url: "https://capa.graysonbellamy.dev/"
 abstract: >-
   capa is a control and data-acquisition application for a custom
   cone-calorimeter-class lab instrument used for controlled-atmosphere

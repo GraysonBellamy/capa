@@ -56,7 +56,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/GraysonBellamy/capa"
 Repository = "https://github.com/GraysonBellamy/capa"
-Documentation = "https://graysonbellamy.github.io/capa/"
+Documentation = "https://capa.graysonbellamy.dev/"
 Issues = "https://github.com/GraysonBellamy/capa/issues"
 Changelog = "https://github.com/GraysonBellamy/capa/releases"
 

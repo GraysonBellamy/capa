@@ -107,7 +107,7 @@ A future `docs/reference/changelog.md` may emerge once Phase 12 of [`DOCS_AUTHOR
 
 ## Docs auto-deploy
 
-[.github/workflows/docs.yml](../../.github/workflows/docs.yml) deploys [https://graysonbellamy.github.io/capa/](https://graysonbellamy.github.io/capa/) on **every push to `main`** — not on tag creation. This means:
+[.github/workflows/docs.yml](../../.github/workflows/docs.yml) deploys [https://capa.graysonbellamy.dev/](https://capa.graysonbellamy.dev/) on **every push to `main`** — not on tag creation. This means:
 
 - A release tag does not by itself trigger a docs rebuild. The merge commit that the tag points at already triggered one.
 - Tagging never blocks a docs deploy or unblocks one.
