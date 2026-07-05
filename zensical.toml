@@ -215,6 +215,15 @@ accent = "deep orange"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 
+[[project.extra.social]]
+icon = "fontawesome/solid/house"
+link = "https://graysonbellamy.dev"
+name = "graysonbellamy.dev"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/GraysonBellamy/capa"
+
 [project.plugins.mkdocstrings]
 default_handler = "python"
 
