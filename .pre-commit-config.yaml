@@ -43,10 +43,11 @@ repos:
         # Domain terms (alicat, watlow, sartorius, nidaq, daqmx, qasync,
         # pyqtgraph, parquet) and common false positives the spellchecker
         # snags on capa's vocabulary. Also: absout (PowerShell variable
-        # token in tools/build_duvc_wheel.ps1) and doubleclick (Qt
-        # mouse-event method-name fragment in zensical.toml filters).
+        # token in tools/build_duvc_wheel.ps1), doubleclick (Qt
+        # mouse-event method-name fragment in zensical.toml filters) and
+        # ontrolled (the README spells out the acronym as **C**ontrolled).
         args:
-          - "--ignore-words-list=capa,alicat,watlow,sartorius,nidaq,daqmx,qasync,pyqtgraph,parquet,iso,nin,inout,doub,unparseable,zensical,winloop,uvloop,anyio,arange,absout,doubleclick"
+          - "--ignore-words-list=capa,alicat,watlow,sartorius,nidaq,daqmx,qasync,pyqtgraph,parquet,iso,nin,inout,doub,unparseable,zensical,winloop,uvloop,anyio,arange,absout,doubleclick,ontrolled"
           - "--skip=uv.lock,vendor/*,site/*,runs/*"
 
   # Local hook — runs mypy at pre-push (not pre-commit) so the per-commit
