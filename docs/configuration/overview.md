@@ -156,7 +156,7 @@ The runtime distinguishes config changes that require tearing down the
 | Add / remove / rename a channel | no — rebuild | channel registry is constructed at apply |
 | Change a channel's calibration | yes — hot | calibrations are applied per-sample |
 | Change a channel's `alarms` | yes — hot | schema is preserved today; the runtime safety evaluator is planned |
-| Change a channel's `plot_group` | yes — hot | UI-only metadata |
+| Change a channel's `plot_group` or `plot` | yes — hot | UI-only metadata |
 | Change anything under `domain_profile.metadata` | yes — hot | profile metadata is read at arm |
 | Change the procedure id or config | yes — hot | procedure is constructed at arm |
 | Change method steps | yes — hot | method is loaded at arm |

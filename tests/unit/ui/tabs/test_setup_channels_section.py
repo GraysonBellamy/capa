@@ -130,6 +130,25 @@ def test_channels_section_rename_round_trips(qtbot: Any) -> None:
     assert channels[0]["name"] == "heater.pv_renamed"
 
 
+def test_channels_section_show_in_plots_round_trips(qtbot: Any) -> None:
+    section, _ = _make_section(qtbot)
+    section._table.selectRow(0)
+    # Plotted is the default, and the default is not written out.
+    assert section._plot_check.isChecked()
+    assert "plot" not in section._model.channels()[0]
+    section._plot_check.setChecked(False)
+    section._on_plot_toggled(False)
+    assert section._model.channels()[0]["plot"] is False
+    # Selecting another channel and coming back shows what was stored.
+    section._table.selectRow(1)
+    assert section._plot_check.isChecked()
+    section._table.selectRow(0)
+    assert not section._plot_check.isChecked()
+    section._plot_check.setChecked(True)
+    section._on_plot_toggled(True)
+    assert "plot" not in section._model.channels()[0]
+
+
 def test_channels_section_change_kind_reorders_binding_combo(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
     # Add a blank channel and flip its kind to thermocouple — the

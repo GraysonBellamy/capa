@@ -817,6 +817,13 @@ class ChannelsSection(SectionWidget):
         self._plot_group_edit = QLineEdit(self._identity_widget)
         self._plot_group_edit.textChanged.connect(self._on_plot_group_changed)
         identity_form.addRow("Plot group:", self._plot_group_edit)
+        self._plot_check = QCheckBox("Show in plots", self._identity_widget)
+        self._plot_check.setToolTip(
+            "Give the channel a trace in the Run tab's plots. Unticked, it is "
+            "still recorded, shown in Numerics and available to alarms."
+        )
+        self._plot_check.toggled.connect(self._on_plot_toggled)
+        identity_form.addRow("", self._plot_check)
         self._capa_group_edit = QLineEdit(self._identity_widget)
         self._capa_group_edit.setPlaceholderText("e.g. heater_pv (CAPA profile mapping)")
         self._capa_group_edit.textChanged.connect(self._on_capa_group_changed)
@@ -1084,6 +1091,16 @@ class ChannelsSection(SectionWidget):
 
         self._mutate_current(_apply)
 
+    def _on_plot_toggled(self, checked: bool) -> None:
+        def _apply(ch: dict[str, Any]) -> None:
+            # Plotted is the default, so only "not plotted" is written out.
+            if checked:
+                ch.pop("plot", None)
+            else:
+                ch["plot"] = False
+
+        self._mutate_current(_apply)
+
     def _on_capa_group_changed(self, text: str) -> None:
         value = text.strip()
 
@@ -1246,6 +1263,7 @@ class ChannelsSection(SectionWidget):
             if idx >= 0:
                 self._kind_combo.setCurrentIndex(idx)
             self._plot_group_edit.setText(str(channel.get("plot_group") or ""))
+            self._plot_check.setChecked(channel.get("plot", True) is not False)
             metadata = channel.get("metadata") or {}
             self._capa_group_edit.setText(str(metadata.get("capa_group") or ""))
             self._unit_edit.setText(str(channel.get("unit") or ""))

@@ -165,6 +165,12 @@ Decimation, time windows, and channel grouping are configured per
 channel in the experiment YAML. See
 [channel bindings](../configuration/channel-bindings.md) for the knobs.
 
+Every channel gets a curve unless it declares `plot = false` in the
+[hardware TOML](../configuration/hardware-toml.md) (the Setup tab's
+**Show in plots** box). A channel left off the plots is still recorded
+and still has its tile in the Numerics dock; use it for a flag or a
+state that would only draw a flat line.
+
 ---
 
 ## What you should watch during a run
