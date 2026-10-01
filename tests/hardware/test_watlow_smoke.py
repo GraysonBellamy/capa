@@ -4,11 +4,12 @@ Checks for Watlow:
 
 1. Open and identify a real PM-class controller.
 2. Read PV; assert sane numeric value.
-3. Set the current setpoint to its current value (no-op delta) — exercises
+3. Read the setpoint and write the same value back (no-op delta) — exercises
    the authorization gate + ``confirm=True`` path without changing the
-   physical state.
+   physical state — then read it again and check it did not move.
 4. Drive a short headless ``capa run`` and verify the bundle has both
-   ``device_records/watlow.parquet`` and ``scalars.parquet``.
+   ``device_records/watlow.parquet`` and ``scalars.parquet``. The channel
+   declares the scale the wire carries (``CAPA_TEST_WATLOW_WIRE_UNIT``).
 
 Skipped unless ``CAPA_HARDWARE_TESTS=1``. Connection parameters come from
 the envvars documented in :mod:`tests.hardware.__init__`.
@@ -48,6 +49,15 @@ pytestmark = [
 ]
 
 
+def _wire_unit() -> str:
+    """The scale of temperatures on the wire: ``"F"`` (the adapter's default)
+    or ``"C"``."""
+    unit = os.environ.get("CAPA_TEST_WATLOW_WIRE_UNIT", "F").strip().upper()
+    if unit not in ("C", "F"):
+        pytest.fail(f"CAPA_TEST_WATLOW_WIRE_UNIT must be C or F, got {unit!r}")
+    return unit
+
+
 def _watlow_params() -> dict[str, Any]:
     port = os.environ.get("CAPA_TEST_WATLOW_PORT")
     if port is None:
@@ -58,6 +68,7 @@ def _watlow_params() -> dict[str, Any]:
         "protocol": os.environ.get("CAPA_TEST_WATLOW_PROTOCOL", "stdbus"),
         "rate_hz": 1.0,
         "snapshot_period_s": 5.0,
+        "wire_temperature_unit": _wire_unit(),
     }
 
 
@@ -87,18 +98,29 @@ class TestRealWatlow:
 
     async def test_set_setpoint_noop_echo(self) -> None:
         """Set the setpoint to its current value — no physical change but
-        exercises the authorize → confirm=True → echo round-trip."""
+        exercises the authorize → confirm=True → echo round-trip.
+
+        The value written is the setpoint as just read, never the process
+        value: writing the PV would move the setpoint. With no channel bound
+        the adapter sends the value to the wire as given, so what is read is
+        what is written.
+        """
         adapter = WatlowAdapter(name="heater", **_watlow_params())
         await adapter.open()
         try:
-            current_sp = await adapter.read_pv()  # use PV as a safe surrogate
-            target = float(current_sp.value or 25.0)
+            before = await adapter.read_state_snapshot()
+            assert before is not None
+            if before.setpoint is None:
+                pytest.skip("the controller's setpoint could not be read; nothing is written")
             result = await adapter.set_setpoint(
-                target,
+                before.setpoint,
                 issued_by=_operator_id(),
                 confirmed_by=_operator_id(),  # explicit manual confirm
             )
             assert result.accepted is True
+            after = await adapter.read_state_snapshot()
+            assert after is not None
+            assert after.setpoint == pytest.approx(before.setpoint)
         finally:
             await adapter.close()
 
@@ -106,6 +128,10 @@ class TestRealWatlow:
 class TestRealWatlowEngineRun:
     def test_short_freerun_writes_bundle(self, tmp_path: Path) -> None:
         params = _watlow_params()
+        # The channel declares the wire's own scale. A channel in another
+        # scale is quarantined by the adapter's unit check and records
+        # nothing, so there would be no scalars.parquet to find.
+        unit = "degF" if _wire_unit() == "F" else "degC"
         config = ExperimentConfig(
             hardware=HardwareProfile(
                 name="watlow_smoke",
@@ -123,9 +149,9 @@ class TestRealWatlowEngineRun:
                         source=WatlowParameter(
                             device="heater", parameter="process_value", instance=1
                         ),
-                        unit="degC",
-                        derived_unit="degC",
-                        calibration=Identity(input_unit="degC", output_unit="degC"),
+                        unit=unit,
+                        derived_unit=unit,
+                        calibration=Identity(input_unit=unit, output_unit=unit),
                     ),
                 ),
             ),
@@ -158,5 +184,7 @@ class TestRealWatlowEngineRun:
         assert (bundle / "scalars.parquet").is_file()
         records = pq.read_table(bundle / "device_records" / "watlow.parquet")
         assert records.num_rows >= 3  # at least a few ticks of data
-        scalars = pq.read_table(bundle / "scalars.parquet")
-        assert scalars.num_rows >= 3
+        scalars = pq.read_table(bundle / "scalars.parquet").to_pylist()
+        assert len(scalars) >= 3
+        assert {row["channel"] for row in scalars} == {"heater.pv"}
+        assert {row["unit"] for row in scalars} == {unit}

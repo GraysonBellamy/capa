@@ -43,7 +43,7 @@ The opt-in env var alone is not enough — each smoke module also reads a small 
 
 | Adapter | Required | Optional (defaults shown) |
 |---|---|---|
-| Watlow | `CAPA_TEST_WATLOW_PORT` | `CAPA_TEST_WATLOW_ADDR` (`1`), `CAPA_TEST_WATLOW_PROTOCOL` (`stdbus` \| `modbus_rtu` \| `auto`), `CAPA_TEST_WATLOW_OPERATOR` (`"hw-test"`) |
+| Watlow | `CAPA_TEST_WATLOW_PORT` | `CAPA_TEST_WATLOW_ADDR` (`1`), `CAPA_TEST_WATLOW_PROTOCOL` (`stdbus` \| `modbus_rtu` \| `auto`), `CAPA_TEST_WATLOW_WIRE_UNIT` (`F` \| `C`; `F`, the scale the adapter assumes on the wire), `CAPA_TEST_WATLOW_OPERATOR` (`"hw-test"`) |
 | Alicat | `CAPA_TEST_ALICAT_PORT` | `CAPA_TEST_ALICAT_UNIT_ID` (`"A"`), `CAPA_TEST_ALICAT_BAUD` (`19200`), `CAPA_TEST_ALICAT_OPERATOR` (`"hw-test"`) |
 | Sartorius | `CAPA_TEST_SARTORIUS_PORT` | `CAPA_TEST_SARTORIUS_PROTOCOL` (`"xbpi"`), `CAPA_TEST_SARTORIUS_BAUD` (`9600`), `CAPA_TEST_SARTORIUS_OPERATOR` (`"hw-test"`) |
 | Fuji | `CAPA_TEST_FUJI_PORT` | `CAPA_TEST_FUJI_ADDRESS` (`1`), `CAPA_TEST_FUJI_CHANNEL_MAP` (`"CH1=co2,CH2=co,CH3=o2"`), `CAPA_TEST_FUJI_OPERATOR` (`"hw-test"`) |
@@ -108,7 +108,7 @@ Each of the three assertions includes `result.exit_reason` as its message becaus
 
 ### 3. Authorized no-op write (where applicable)
 
-For controllers (not pure sensors), echo the current setpoint back to the device. The physical state doesn't change, but the test exercises the `Authorization` + `confirm=True` round-trip through the real adapter — the path that goes wrong silently if anything in the authorization plumbing drifts. The test is automatically skipped if the connected device is a meter rather than a controller.
+For controllers (not pure sensors), read the current setpoint, write the same value back, and read it again to check it did not move. Echo the setpoint itself, never the process value: writing the PV as the setpoint changes the controller. The physical state doesn't change, but the test exercises the `Authorization` + `confirm=True` round-trip through the real adapter — the path that goes wrong silently if anything in the authorization plumbing drifts. The test is automatically skipped if the connected device is a meter rather than a controller.
 
 See [authorization gates](../safety/authorization-gates.md) for why this check exists at all.
 
