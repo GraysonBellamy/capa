@@ -24,7 +24,7 @@ def devices_discover(
         str | None,
         typer.Option(
             "--adapter",
-            help="Only probe the named adapter (watlow|alicat|sartorius|nidaq). "
+            help="Only probe the named adapter (watlow|alicat|sartorius|fuji|nidaq). "
             "Default: probe every real adapter.",
         ),
     ] = None,

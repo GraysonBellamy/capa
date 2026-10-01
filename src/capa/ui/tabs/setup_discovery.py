@@ -57,7 +57,7 @@ _logger = structlog.get_logger("capa.ui.setup_discovery")
 # families are run sequentially below so each adapter gets a clean
 # shot at every port; non-serial scans (NI-DAQ, cameras) keep their
 # parallel fan-out.
-_SERIAL_PORT_FAMILIES: frozenset[str] = frozenset({"alicat", "watlow", "sartorius"})
+_SERIAL_PORT_FAMILIES: frozenset[str] = frozenset({"alicat", "watlow", "sartorius", "fuji"})
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +81,8 @@ def build_device_payload_from_row(
 
     Each adapter's ``discover()`` returns a list of dicts with adapter-
     specific keys (Watlow has ``port`` + ``address``; Alicat has
-    ``port`` + ``unit_id`` + ``baudrate``; NI-DAQ has ``device`` +
+    ``port`` + ``unit_id`` + ``baudrate``; Fuji has ``port`` + ``address``
+    + the type code's suggested ``channel_map``; NI-DAQ has ``device`` +
     ``ai_channels``; cameras have ``selector`` / ``model`` /
     ``serial`` etc.). This function maps those into the schema
     that :class:`HardwareProfile` expects: ``name`` + ``adapter`` +
@@ -107,6 +108,15 @@ def build_device_payload_from_row(
             # Some Sartorius scans surface the wire protocol; downstream
             # params model accepts it.
             params["protocol"] = row["protocol"]
+    elif family == "fuji":
+        for key in ("port", "address"):
+            if key in row:
+                params[key] = row[key]
+        # The analyzer's type code only suggests which gas each channel
+        # carries. Pre-fill the map with the suggestion; the operator
+        # confirms or corrects it in the device detail pane.
+        if isinstance(row.get("channel_map"), dict):
+            params["channel_map"] = dict(row["channel_map"])
     elif family == "nidaq" and row.get("device"):
         # NI-DAQ discover returns devices, not channels — operator
         # fills the channel list separately in the device detail pane.
@@ -197,6 +207,17 @@ def _summarise_row(family: str, row: dict[str, Any]) -> str:
             bits.append(str(row["port"]))
         if row.get("protocol"):
             bits.append(row["protocol"])
+        return "  ".join(bits) or "(no identity)"
+    if family == "fuji":
+        bits = []
+        if row.get("port"):
+            bits.append(str(row["port"]))
+        if row.get("address"):
+            bits.append(f"station={row['address']}")
+        if row.get("model"):
+            bits.append(str(row["model"]))
+        if row.get("serial"):
+            bits.append(f"sn={row['serial']}")
         return "  ".join(bits) or "(no identity)"
     if family == "nidaq":
         bits = []

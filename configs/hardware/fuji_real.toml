@@ -1,0 +1,84 @@
+name = "fuji_real"
+
+# Single real Fuji ZP-series gas analyzer (ZPA; also sold as the CAI ZPA).
+# Adjust ``port`` and ``address`` to match the rig; the link is Modbus RTU at
+# a fixed 38400 8-N-1. ``channel_map`` asserts which gas each analyzer
+# channel carries: the analyzer's type code only suggests it.
+[[devices]]
+name = "analyzer"
+adapter = "capa.devices.fuji"
+[devices.params]
+port = "COM8"
+address = 1
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+[devices.params.channel_map]
+CH1 = "co2"
+CH2 = "co"
+CH3 = "o2"
+
+# --- Channels ---
+
+[[channels]]
+name = "gas.co2"
+kind = "gas_concentration"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "gases"
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH1"
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[[channels]]
+name = "gas.co"
+kind = "gas_concentration"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "gases"
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH2"
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[[channels]]
+name = "gas.o2"
+kind = "gas_concentration"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "gases"
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH3"
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+# 1 while the O2 reading is live, 0 while it is held, calibrating, in error
+# or settling after a reconnect. Bind an alarm to it to watch validity.
+[[channels]]
+name = "gas.o2_valid"
+kind = "gas_concentration"
+unit = "dimensionless"
+derived_unit = "dimensionless"
+plot_group = "gases"
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH3"
+field = "valid"
+[channels.calibration]
+kind = "identity"
+input_unit = "dimensionless"
+output_unit = "dimensionless"

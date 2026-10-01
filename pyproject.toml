@@ -39,10 +39,13 @@ dependencies = [
     "ruamel.yaml>=0.18",
     "pyarrow>=18",
     "typer>=0.12",
-    "alicatlib>=0.3.0,<0.4",
-    "watlowlib>=0.7.0,<0.8",
-    "sartoriuslib>=0.4.0,<0.5",
+    # The serial libraries share anyserial; these are the releases that
+    # accept the anyserial 0.2 (and, in watlowlib, anymodbus 0.3) fujilib needs.
+    "alicatlib>=0.3.1,<0.4",
+    "watlowlib>=0.7.1,<0.8",
+    "sartoriuslib>=0.4.3,<0.5",
     "nidaqlib>=0.3.0,<0.4",
+    "fujilib>=0.2.0,<0.3",
     "pyside6>=6.7",
     "qasync>=0.27",
     "pyqtgraph>=0.13",
@@ -243,6 +246,7 @@ disallow_untyped_calls = false
 [[tool.mypy.overrides]]
 module = [
     "tests.hardware.test_alicat_smoke",
+    "tests.hardware.test_fuji_smoke",
     "tests.hardware.test_nidaq_smoke",
     "tests.hardware.test_sartorius_smoke",
     "tests.hardware.test_watlow_smoke",

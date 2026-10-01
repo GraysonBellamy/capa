@@ -253,7 +253,85 @@ def _layer2_referential(config: Any, document: ConfigDocument) -> list[ConfigPro
             )
 
     problems.extend(_layer2_nidaq_join(hardware, document))
+    problems.extend(_layer2_fuji_join(hardware, document))
     return problems
+
+
+def _layer2_fuji_join(hardware: Any, document: ConfigDocument) -> list[ConfigProblem]:
+    """Validate the join between a Fuji analyzer's ``channel_map`` and the
+    ``fuji_channel`` bindings that read from it.
+
+    * ``channels.fuji_channel_unmapped`` — a binding names an analyzer
+      channel its device's ``channel_map`` does not list. The adapter emits
+      samples only for channels whose gas is asserted there, so the capa
+      channel would silently emit nothing.
+    * ``devices.fuji.shared_port`` — two analyzers are declared on one serial
+      port. The adapter opens one analyzer per port.
+    """
+    from capa.devices._helpers import serial_resource_id  # noqa: PLC0415
+    from capa.devices.registry import get_descriptor  # noqa: PLC0415
+
+    problems: list[ConfigProblem] = []
+    mapped: dict[str, set[str]] = {}
+    device_on_port: dict[str, str] = {}
+    for dev in hardware.devices:
+        descriptor = get_descriptor(dev.adapter)
+        if descriptor is None or "fuji_channel" not in descriptor.supported_binding_sources:
+            continue
+        channel_map = dev.params.get("channel_map")
+        if isinstance(channel_map, Mapping):
+            mapped[dev.name] = {str(channel).upper() for channel in channel_map}
+        # Without one, the simulator uses its own default map; the real
+        # adapter's schema requires it.
+        port = dev.params.get("port")
+        if descriptor.family != "fuji" or not isinstance(port, str):
+            continue
+        resource = serial_resource_id(port)
+        first = device_on_port.setdefault(resource, dev.name)
+        if first != dev.name:
+            problems.append(
+                ConfigProblem(
+                    severity="error",
+                    code="devices.fuji.shared_port",
+                    message=(
+                        f"device {dev.name!r} is on port {port!r}, which device {first!r} "
+                        "already uses; one Fuji analyzer per serial port is supported"
+                    ),
+                    section="devices",
+                    path=("devices", dev.name, "params", "port"),
+                    source_file=document.hardware_path,
+                )
+            )
+
+    for idx, ch in enumerate(hardware.channels):
+        binding = ch.source
+        if getattr(binding, "source", None) != "fuji_channel":
+            continue
+        channels = mapped.get(binding.device)
+        if channels is None or binding.channel in channels:
+            # A device that is not a Fuji analyzer is the family-mismatch check's to report.
+            continue
+        problems.append(
+            ConfigProblem(
+                severity="error",
+                code="channels.fuji_channel_unmapped",
+                message=(
+                    f"channel {ch.name!r} reads {binding.channel} of {binding.device!r}, but "
+                    f"that device's channel_map does not name a gas for {binding.channel}. "
+                    f"Mapped channels: {sorted(channels, key=_fuji_channel_number)!r}"
+                ),
+                section="channels",
+                path=("channels", idx, "source", "channel"),
+                source_file=document.hardware_path,
+            )
+        )
+    return problems
+
+
+def _fuji_channel_number(channel: str) -> int:
+    """``3`` for ``"CH3"``; names that are not channels sort last."""
+    digits = channel.removeprefix("CH")
+    return int(digits) if digits.isdigit() else 99
 
 
 def _layer2_nidaq_join(hardware: Any, document: ConfigDocument) -> list[ConfigProblem]:

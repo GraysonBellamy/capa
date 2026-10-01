@@ -192,6 +192,7 @@ class DeviceCard(QGroupBox):
         target: str | None = None,
         destructive: bool = False,
         destructive_summary: str | None = None,
+        destructive_note: str | None = None,
     ) -> CommandResult | None:
         """Issue one :class:`DeviceCommand` through the adapter.
 
@@ -203,7 +204,9 @@ class DeviceCard(QGroupBox):
         ``destructive`` triggers a :class:`QMessageBox` confirmation
         showing ``destructive_summary`` (or a generated default). Sartorius
         DANGEROUS / PERSISTENT verbs and Alicat valve-closed / totalizer
-        verbs use this.
+        verbs use this. ``destructive_note`` replaces the dialog's closing
+        sentence, which speaks of a write that persists in the device, for
+        an operation whose consequence is something else.
         """
         # Refuse during an active run. The same gate also drops the action
         # widgets so this is belt-and-braces.
@@ -224,14 +227,17 @@ class DeviceCard(QGroupBox):
 
         if destructive:
             summary = destructive_summary or f"{kind} on {self._name}"
+            note = destructive_note or (
+                "This may persist to EEPROM or otherwise alter device "
+                "state in a way that survives power-cycle."
+            )
             answer = QMessageBox.question(
                 self,
                 "Confirm device write",
                 (
                     f"Confirm destructive operation:\n\n  {summary}\n\n"
                     f"Operator: {operator}\n\n"
-                    "This may persist to EEPROM or otherwise alter device "
-                    "state in a way that survives power-cycle."
+                    f"{note}"
                 ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
@@ -297,6 +303,7 @@ class DeviceCard(QGroupBox):
         target: str | None = None,
         destructive: bool = False,
         destructive_summary: str | None = None,
+        destructive_note: str | None = None,
     ) -> None:
         """Sync entry point for Qt button slots. Wraps :meth:`dispatch`
         as an asyncio task on the running qasync loop. Errors are surfaced
@@ -309,6 +316,7 @@ class DeviceCard(QGroupBox):
                 target=target,
                 destructive=destructive,
                 destructive_summary=destructive_summary,
+                destructive_note=destructive_note,
             )
         )
         if task is None:

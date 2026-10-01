@@ -205,6 +205,7 @@ _KNOWN_LAYOUTS: dict[str, str] = {
     "alicat": "wide_row",
     "watlow": "long_row",
     "sartorius": "single_value_row",
+    "fuji": "wide_row",
     "nidaq_polled": "wide_row",
     "nidaq_block": "block",
 }

@@ -89,6 +89,12 @@ def _compose_reads_from(source: object) -> str:
         if device:
             return f"{device}.{field}"
         return f"({variant})"
+    if variant == "fuji_channel":
+        channel = source.get("channel") or "?"
+        suffix = " (valid)" if source.get("field") == "valid" else ""
+        if device:
+            return f"{device}.{channel}{suffix}"
+        return f"({variant})"
     if variant == "nidaq_reading_field":
         task = source.get("task") or "?"
         field = source.get("field") or "?"
@@ -119,6 +125,7 @@ _VARIANT_LABELS: dict[str, str] = {
     "watlow_parameter": "Watlow parameter",
     "alicat_frame_field": "Alicat frame field",
     "sartorius_reading": "Sartorius reading",
+    "fuji_channel": "Fuji analyzer channel",
     "nidaq_reading_field": "NI-DAQ reading field",
     "nidaq_block_channel": "NI-DAQ block channel",
     "derived": "Derived expression",
@@ -145,6 +152,10 @@ _VARIANT_FIELDS: dict[str, tuple[tuple[str, str, type, str | None], ...]] = {
     ),
     "alicat_frame_field": (("field", "Field", str, None),),
     "sartorius_reading": (("field", "Field", str, None),),
+    "fuji_channel": (
+        ("channel", "Channel", str, "fuji_channels"),
+        ("field", "Field", str, "fuji_fields"),
+    ),
     "nidaq_reading_field": (
         ("task", "Task", str, "nidaq_tasks"),
         ("field", "Field", str, "nidaq_fields"),
@@ -594,6 +605,11 @@ class _SourceBindingEditor(QWidget):
         currently-selected device so the combo reflects what's reachable
         from this binding.
         """
+        if key == "fuji_channels":
+            return [f"CH{number}" for number in range(1, 13)]
+        if key == "fuji_fields":
+            # The concentration, or 1/0 for whether the reading is live.
+            return ["value", "valid"]
         if key is None or not self._nidaq_declared:
             return None
         device_name = self._device_combo.currentData()

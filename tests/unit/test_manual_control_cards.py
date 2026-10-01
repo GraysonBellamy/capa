@@ -14,6 +14,7 @@ asserts that:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +82,14 @@ def controller(tmp_path: Path) -> RunController:
 @pytest.fixture
 def op_provider() -> OperatorIdProvider:
     return OperatorIdProvider(initial="opA")
+
+
+@pytest.fixture(autouse=True)
+def _pool_closed_after(controller: RunController) -> Iterator[None]:
+    """Close the worker pool even when a test fails: an open pool's worker
+    thread would keep the test process alive."""
+    yield
+    _close_pool_sync(controller)
 
 
 def _run_async(coro: Any) -> Any:

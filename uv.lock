@@ -4,15 +4,15 @@ requires-python = "==3.13.*"
 
 [[package]]
 name = "alicatlib"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/da/1c/a04d8f008169817ec4452b74a6cccb6c01abde285d54f171c90170de0fc8/alicatlib-0.3.0.tar.gz", hash = "sha256:83bd313d2ad60bf0c86da51897384d5ef50d83da8bb004471ef35ccd9111946c", size = 480503, upload-time = "2026-05-15T23:55:32.898Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/6d/773e7f228bcc4071ed71776a80774d3af2acd50e88f24019f4ef126ab206/alicatlib-0.3.1.tar.gz", hash = "sha256:4262022b233deab2f6744acc523e73856cd8b7399224b50e15ce3f282b179564", size = 482303, upload-time = "2026-10-01T13:37:11.767Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/44/159214cb9f7d9cf6701d6a76eaa25ddf48abe178c0373254df148e36645d/alicatlib-0.3.0-py3-none-any.whl", hash = "sha256:cdcb8c5fdd0b9222f84abd0c87674e9b04b155cb8352ddf87e27cff5ca486b1b", size = 293900, upload-time = "2026-05-15T23:55:30.983Z" },
+    { url = "https://files.pythonhosted.org/packages/40/e0/a0f93e224e8044beadcda262e0a877eedd70d1146e7740e8bf7e71ccb238/alicatlib-0.3.1-py3-none-any.whl", hash = "sha256:c0b0754c255c629232e355af4b9752a22b8efef0fb497c14316896e927b8fb63", size = 294041, upload-time = "2026-10-01T13:37:10.152Z" },
 ]
 
 [[package]]
@@ -35,14 +35,15 @@ wheels = [
 
 [[package]]
 name = "anyio"
-version = "4.13.0"
+version = "4.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "idna" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/14/2c5dd9f512b66549ae92767a9c7b330ae88e1932ca57876909410251fe13/anyio-4.13.0.tar.gz", hash = "sha256:334b70e641fd2221c1505b3890c69882fe4a2df910cba14d97019b90b24439dc", size = 231622, upload-time = "2026-03-24T12:59:09.671Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/d2/f4d173e22df740bc37b1db102b386ba719b66e95b0f0d751f556b387e6d2/anyio-4.15.1.tar.gz", hash = "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94", size = 276966, upload-time = "2026-09-05T10:42:39.44Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/42/e921fccf5015463e32a3cf6ee7f980a6ed0f395ceeaa45060b61d86486c2/anyio-4.13.0-py3-none-any.whl", hash = "sha256:08b310f9e24a9594186fd75b4f73f4a4152069e3853f1ed8bfbf58369f4ad708", size = 114353, upload-time = "2026-03-24T12:59:08.246Z" },
+    { url = "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl", hash = "sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101", size = 132079, upload-time = "2026-09-05T10:42:37.923Z" },
 ]
 
 [package.optional-dependencies]
@@ -52,27 +53,27 @@ trio = [
 
 [[package]]
 name = "anymodbus"
-version = "0.1.1"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/43/81/2a241539dfb4327fce85edfe379f4ba0f272455c3b33f1a8cb8d6dbf2589/anymodbus-0.1.1.tar.gz", hash = "sha256:771ae2212913f3aaefeaf236f8d06d77484d0c249a182621e3d2c6f982a99487", size = 94990, upload-time = "2026-04-26T13:46:51.541Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/58/81590747514e9c171683a25f577b9e7186bdcd6aba148dae1352df20c20f/anymodbus-0.3.0.tar.gz", hash = "sha256:6c353ca829940f8eb01c5bdfc8d1f641dc72586e0aa946288fef58f0458d4285", size = 145832, upload-time = "2026-09-28T21:32:23.212Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/ea/32864d0b3f96197e9aa39d54793d3c4327958035f2119c00343f2f03ee69/anymodbus-0.1.1-py3-none-any.whl", hash = "sha256:24c57ef3cbc8c8f6b19c60ab7771219261d12f0f9a186aa00f0e99d4f96edc5b", size = 55043, upload-time = "2026-04-26T13:46:49.817Z" },
+    { url = "https://files.pythonhosted.org/packages/56/64/6211e1f13e74b36b02b9a9e4795cd59fac16e2c4ab24dd77f56c6acb2cb3/anymodbus-0.3.0-py3-none-any.whl", hash = "sha256:aafdebf5fa21d83a071612b9438ee85eb85ede65b0973d0fd8e873a0f189aa16", size = 83227, upload-time = "2026-09-28T21:32:21.787Z" },
 ]
 
 [[package]]
 name = "anyserial"
-version = "0.1.2"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c4/db/fd539426d89b0b4b0e9fe3f3636b67019f200356e2b091356d297e4f2adb/anyserial-0.1.2.tar.gz", hash = "sha256:e17277a1ff894da4f8a7f9f03db68d47cb2035b373846651532e48d747ae5fac", size = 233844, upload-time = "2026-05-09T20:32:19.606Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/25/43/4de5a5dd1a63a90865ebbbbf5aad926fa5127d64ff9e9acac296a434518b/anyserial-0.2.0.tar.gz", hash = "sha256:c98c5c46f8b847e92e2c48eab21b026b5725d6e4ce3001291168a38f4202baf8", size = 248416, upload-time = "2026-09-28T21:36:54.495Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/d9/8ce9148e7b3a58dac17461b35a213939af3e4eaf1305cbb85a813a572b69/anyserial-0.1.2-py3-none-any.whl", hash = "sha256:81dc1a061a0aecf42395c8c073505e269c077824e80812026a82b25e719b4989", size = 131931, upload-time = "2026-05-09T20:32:18.078Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/34/9276d50e7e146eba3e5ef747d4c16cee22f52fa233608a90c050ede93e34/anyserial-0.2.0-py3-none-any.whl", hash = "sha256:e3d24a5873b68948c085351f010aa9a00f3b9f31559da0ea515fe5ab00df5d1d", size = 136508, upload-time = "2026-09-28T21:36:52.896Z" },
 ]
 
 [[package]]
@@ -132,6 +133,7 @@ dependencies = [
     { name = "anyio" },
     { name = "av" },
     { name = "duvc-ctl", marker = "sys_platform == 'win32'" },
+    { name = "fujilib" },
     { name = "nidaqlib" },
     { name = "numpy" },
     { name = "pillow" },
@@ -182,11 +184,12 @@ type = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alicatlib", specifier = ">=0.3.0,<0.4" },
+    { name = "alicatlib", specifier = ">=0.3.1,<0.4" },
     { name = "anyio", specifier = ">=4.6" },
     { name = "av", specifier = ">=13" },
     { name = "capa-flir", marker = "extra == 'flir'", editable = "../capa-flir" },
     { name = "duvc-ctl", marker = "sys_platform == 'win32'", path = "vendor/duvc_ctl-2.1.0rc1-cp313-cp313-win_amd64.whl" },
+    { name = "fujilib", specifier = ">=0.2.0,<0.3" },
     { name = "nidaqlib", specifier = ">=0.3.0,<0.4" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pillow", specifier = ">=10" },
@@ -198,11 +201,11 @@ requires-dist = [
     { name = "pyside6", specifier = ">=6.7" },
     { name = "qasync", specifier = ">=0.27" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
-    { name = "sartoriuslib", specifier = ">=0.4.0,<0.5" },
+    { name = "sartoriuslib", specifier = ">=0.4.3,<0.5" },
     { name = "structlog", specifier = ">=24.4" },
     { name = "tomli-w", specifier = ">=1.0" },
     { name = "typer", specifier = ">=0.12" },
-    { name = "watlowlib", specifier = ">=0.7.0,<0.8" },
+    { name = "watlowlib", specifier = ">=0.7.1,<0.8" },
 ]
 provides-extras = ["flir"]
 
@@ -429,6 +432,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/82/99/b4de7e39e8eaf8207ba1a8fa2241dd98b2ba72ae6e16960d8351736d8702/flexparser-0.4.tar.gz", hash = "sha256:266d98905595be2ccc5da964fe0a2c3526fbbffdc45b65b3146d75db992ef6b2", size = 31799, upload-time = "2024-11-07T02:00:56.249Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fe/5e/3be305568fe5f34448807976dc82fc151d76c3e0e03958f34770286278c1/flexparser-0.4-py3-none-any.whl", hash = "sha256:3738b456192dcb3e15620f324c447721023c0293f6af9955b481e91d00179846", size = 27625, upload-time = "2024-11-07T02:00:54.523Z" },
+]
+
+[[package]]
+name = "fujilib"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "anymodbus" },
+    { name = "anyserial" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/57/90/52168fd07fecd44ee869646dbf15927d19645e45d01da39cb2bb190c074a/fujilib-0.2.0.tar.gz", hash = "sha256:55652caf6bbbd1aa001de2d40e62622e536c4d4e651f4b96b5759a01f4dbda1e", size = 576072, upload-time = "2026-10-01T15:34:00.803Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6f/b1/54de3374daebbbe4282e3dcb9be9f2d5b02dfc7d9b2a8c9771d760eaa36f/fujilib-0.2.0-py3-none-any.whl", hash = "sha256:659709891efd2d9505a485dcd58b46538486cada5bd20aa1883edfff774291a1", size = 294987, upload-time = "2026-10-01T15:33:59.102Z" },
 ]
 
 [[package]]
@@ -1247,15 +1264,15 @@ wheels = [
 
 [[package]]
 name = "sartoriuslib"
-version = "0.4.1"
+version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c2/2a/3daeb306ba99f9c1eec1d57199db115b1c1167f1d9207407398dbdaa29aa/sartoriuslib-0.4.1.tar.gz", hash = "sha256:b2804c9d1e2b326c645af40cf8e3d0095b311d12dbe209eb6be30a3831b2034b", size = 416396, upload-time = "2026-05-16T00:40:24.394Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/84/73/509f72fef49bba290bc08500828feb2d1427e210ffc915fec070e34ab523/sartoriuslib-0.4.3.tar.gz", hash = "sha256:6c915051769db8b81f29a7583f4eb5473d8a5e5bdf4090e3317c73e7e4a850e7", size = 421298, upload-time = "2026-10-01T13:37:22.752Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/53/78/a368eac14730c82e8c669e8db75ba4b4808cbf049bfcb0869b0226867c93/sartoriuslib-0.4.1-py3-none-any.whl", hash = "sha256:2712f52568dedf1969c3799eb84a8c081026ce805ec64ff4d793f8b193fd1541", size = 233983, upload-time = "2026-05-16T00:40:22.635Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/04/a6e4826e2daee19925c8ba899f7e3f6690c852c2704dca2e36504e16c52e/sartoriuslib-0.4.3-py3-none-any.whl", hash = "sha256:f9481d491cb273c3f1106feb42135c0540f84664b761e044b0e1eedb55011b7b", size = 235357, upload-time = "2026-10-01T13:37:21.097Z" },
 ]
 
 [[package]]
@@ -1376,11 +1393,11 @@ wheels = [
 
 [[package]]
 name = "typing-extensions"
-version = "4.15.0"
+version = "4.16.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/72/94/1a15dd82efb362ac84269196e94cf00f187f7ed21c242792a923cdb1c61f/typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466", size = 109391, upload-time = "2025-08-25T13:49:26.313Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/cc/6253133b5bb138fc3306cebfbda2c520f545d36b5be2c7255cc528bb45d6/typing_extensions-4.16.0.tar.gz", hash = "sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5", size = 113555, upload-time = "2026-07-02T08:40:05.92Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548", size = 44614, upload-time = "2025-08-25T13:49:24.86Z" },
+    { url = "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl", hash = "sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8", size = 45571, upload-time = "2026-07-02T08:40:04.659Z" },
 ]
 
 [[package]]
@@ -1463,16 +1480,16 @@ wheels = [
 
 [[package]]
 name = "watlowlib"
-version = "0.7.0"
+version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anymodbus" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e8/63/fef96ecdd1d0d78b4fc94f7459bdcd1536b7f6e2d4ce19acf19d8d3cff08/watlowlib-0.7.0.tar.gz", hash = "sha256:10479c684f3b4f430f3c14eaa1cd625f09d027b330815598b788c043371e0e2c", size = 396341, upload-time = "2026-05-30T01:49:18.555Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1b/85/790340293050de004109a70eff69ce416b842f3b07c820feab1db4031ee2/watlowlib-0.7.1.tar.gz", hash = "sha256:6d3844402870abef6a68b895c9f057233096e2100007a9101323964abf89401c", size = 397181, upload-time = "2026-10-01T13:42:53.158Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/fc/28648e1955d06b4288051e33edde5088c25a1b265f91de26294726bd4836/watlowlib-0.7.0-py3-none-any.whl", hash = "sha256:7059dece4c442752768df30cd3751906e871e14fc04141640d388a90318ed1f0", size = 341982, upload-time = "2026-05-30T01:49:17.075Z" },
+    { url = "https://files.pythonhosted.org/packages/83/57/d9073c9c126a409d53cfd50427ab04d654b04e646e819d54800c2e164f6c/watlowlib-0.7.1-py3-none-any.whl", hash = "sha256:9054c81a57924fe467b120832f8c4aee53c6a977ff6b32fbf22640b9dddf7736", size = 342070, upload-time = "2026-10-01T13:42:51.019Z" },
 ]
 
 [[package]]
