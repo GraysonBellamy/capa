@@ -73,6 +73,7 @@ columns.
 | [Watlow](watlow.md#discovery-and-handshake) | `discover` | serial `ports × bauds × protocols × addresses` via `watlowlib.find_devices` | `ports`, `addresses`, `baudrates`, `timeout_s` | `port`, `address`, `baudrate`, `protocol`, `model`, `firmware`, `hardware`, `family` |
 | [Alicat](alicat.md#discovery-and-handshake) | `discover` | serial scan + identify via `alicatlib.find_devices` | `ports`, `unit_ids`, `baudrates` | `port`, `unit_id`, `baudrate`, `model`, `serial`, `firmware`, `kind` |
 | [Sartorius](sartorius.md#discovery-and-handshake) | `discover` | serial scan via `sartoriuslib.find_devices` + `summarize_discovery` | `ports`, `baudrates`, `timeout_s` | `port`, `protocol`, `baudrate`, `autoprint_active` |
+| [Fuji](fuji.md#discovery-and-handshake) | `discover` | serial `ports × addresses` at 38400 8-N-1 via `fujilib.find_devices` | `ports`, `addresses`, `timeout_s` | `port`, `address`, `baudrate`, `model`, `serial`, `type_code`, `channels`, `channel_map` |
 | [NI-DAQ](nidaq.md#discovery-and-handshake) | `discover` | DAQmx enumeration via `nidaqlib.find_devices` | none (chassis-driven) | `device`, `product_type`, `serial`, `ai_channels`, `ao_channels`, `di_lines`, `do_lines`, `ci_channels`, `co_channels` |
 | [USB webcams](cameras-webcam.md#discovery) | `discover_cameras` | per-OS API: V4L2 sysfs / DirectShow `duvc_ctl.list_devices` / `[]` on macOS | none | `selector`, `model`, `serial`, `transport` |
 | [FLIR IR](cameras-flir.md#discovery) | `discover_cameras` | Atlas SDK discovery | `discovery_timeout_s`, `interfaces` | `model`, `serial`, `transport` |
@@ -94,6 +95,7 @@ The rules are simple per-family lifts:
 | Watlow | `port`, `address` | `descriptor.default_params` (e.g. `protocol="stdbus"`, `rate_hz=1.0`) |
 | Alicat | `port`, `unit_id`, `baudrate` | `rate_hz=2.0` |
 | Sartorius | `port`, `baudrate`, `protocol` (if surfaced) | descriptor defaults |
+| Fuji | `port`, `address`, and the suggested `channel_map` | `rate_hz=1.0`; the operator confirms or corrects the map |
 | NI-DAQ | `device` → `task_name = "<device>_ai"` | operator still fills the channel list |
 | Cameras (visible/IR) | full camera payload via `build_hw_entry_from_row` | `kind` from family |
 
@@ -119,6 +121,10 @@ Per family:
   which to add.
 - **Sartorius** — one row per port that responded; `summarize_discovery`
   collapses per-baudrate probes for the same port.
+- **Fuji** — one row per `(port, address)` that identified as an
+  analyzer. The row's `channel_map` is what the type code suggests, not
+  a measurement: see [Fuji § The channel map is
+  asserted](fuji.md#the-channel-map-is-asserted).
 - **NI-DAQ** — one row per physical NI device. No conflict possible —
   device names are globally unique.
 - **Cameras** — `serial` exact-match wins; `model_hint` with multiple
@@ -128,7 +134,7 @@ Per family:
 
 ## Why serial scans run sequentially
 
-Three families probe serial ports: Alicat, Watlow, Sartorius. The UI
+Four families probe serial ports: Alicat, Watlow, Sartorius, Fuji. The UI
 dispatcher runs these **sequentially**, not in parallel. The reason
 lives in
 [`setup_discovery.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/tabs/setup_discovery.py)
@@ -197,6 +203,7 @@ family contributed zero rows.
   [Watlow](watlow.md#discovery-and-handshake) ·
   [Alicat](alicat.md#discovery-and-handshake) ·
   [Sartorius](sartorius.md#discovery-and-handshake) ·
+  [Fuji](fuji.md#discovery-and-handshake) ·
   [NI-DAQ](nidaq.md#discovery-and-handshake) ·
   [USB webcams](cameras-webcam.md#discovery) ·
   [FLIR IR](cameras-flir.md#discovery).

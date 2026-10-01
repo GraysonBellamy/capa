@@ -7,7 +7,7 @@ description: First-time capa contributor setup — Python 3.13, `uv sync`, sibli
 **Audience:** first-time contributors getting capa running from source.
 **Scope:** clone layout, dependency install with [uv](https://github.com/astral-sh/uv), running the GUI and CLI from source, the lint/type/test loop. Editor setup is intentionally not prescribed.
 
-CAPA is a Python 3.13 project that depends on four sibling device libraries (`alicatlib`, `watlowlib`, `sartoriuslib`, `nidaqlib`) and one optional sibling (`capa-flir`). The dev loop is `uv sync` → edit → `uv run pytest` → `uv run ruff check` → `uv run mypy`. There is no `pip install -e .` path; everything goes through `uv`.
+CAPA is a Python 3.13 project that depends on five sibling device libraries (`alicatlib`, `watlowlib`, `sartoriuslib`, `fujilib`, `nidaqlib`) and one optional sibling (`capa-flir`). The dev loop is `uv sync` → edit → `uv run pytest` → `uv run ruff check` → `uv run mypy`. There is no `pip install -e .` path; everything goes through `uv`.
 
 ---
 
@@ -30,7 +30,7 @@ capa-flir = { path = "../capa-flir", editable = true }
 duvc-ctl = { path = "vendor/duvc_ctl-2.1.0rc1-cp313-cp313-win_amd64.whl" }
 ```
 
-The `../capa-flir` entry is a relative path. **`uv sync` will fail if `capa-flir` is not a sibling directory of `capa`** when you build with the `flir` extra. The other four device libraries (`alicatlib`, `watlowlib`, `sartoriuslib`, `nidaqlib`) are pulled from PyPI by default but most contributors check them out as siblings too, so edits to a device library are immediately picked up by an editable install (`uv pip install -e ../alicatlib`).
+The `../capa-flir` entry is a relative path. **`uv sync` will fail if `capa-flir` is not a sibling directory of `capa`** when you build with the `flir` extra. The other five device libraries (`alicatlib`, `watlowlib`, `sartoriuslib`, `fujilib`, `nidaqlib`) are pulled from PyPI by default but most contributors check them out as siblings too, so edits to a device library are immediately picked up by an editable install (`uv pip install -e ../alicatlib`).
 
 Recommended layout:
 
@@ -41,6 +41,7 @@ parent-dir/
 ├── alicatlib/        ← optional; sibling editable install for active development
 ├── watlowlib/        ← same
 ├── sartoriuslib/     ← same
+├── fujilib/          ← same
 └── nidaqlib/         ← same
 ```
 
@@ -53,6 +54,7 @@ git clone https://github.com/GraysonBellamy/capa-flir        # if you need IR ca
 git clone https://github.com/GraysonBellamy/alicatlib        # optional but common
 git clone https://github.com/GraysonBellamy/watlowlib
 git clone https://github.com/GraysonBellamy/sartoriuslib
+git clone https://github.com/GraysonBellamy/fujilib
 git clone https://github.com/GraysonBellamy/nidaqlib
 ```
 

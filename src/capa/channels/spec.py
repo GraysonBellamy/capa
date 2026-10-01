@@ -7,7 +7,7 @@ channels. Devices come and go; channels are the stable contract.
 ``SourceBinding`` is deliberately more specific than "device + channel". Each
 variant points at the exact emitted field or parameter inside the underlying
 library record (alicatlib ``Sample``, watlowlib ``Sample``, sartoriuslib
-``Sample``, nidaqlib ``DaqReading`` / ``DaqBlock``).
+``Sample``, fujilib ``Sample``, nidaqlib ``DaqReading`` / ``DaqBlock``).
 """
 
 from __future__ import annotations
@@ -47,6 +47,8 @@ class ChannelKind(StrEnum):
     """Balance reading."""
     MFC_FLOW = "mfc_flow"
     """Mass flow controller flow value."""
+    GAS_CONCENTRATION = "gas_concentration"
+    """Concentration of one gas from a gas analyzer (O2, CO2, CO)."""
     VIDEO_VISIBLE = "video_visible"
     """Visible-camera frame stream (no scalar value column)."""
     VIDEO_IR = "video_ir"
@@ -60,7 +62,7 @@ class ChannelKind(StrEnum):
 #
 # alicatlib emits wide DataFrame rows; watlowlib emits long
 # rows per (device, parameter, instance); sartoriuslib emits one balance row;
-# nidaqlib polled emits wide rows; nidaqlib hardware-clocked emits rectangular
+# fujilib emits one wide row per poll; nidaqlib polled emits wide rows; nidaqlib hardware-clocked emits rectangular
 # blocks. Each variant below is the *capa-side selector* into one of those
 # emitted records.
 # ---------------------------------------------------------------------------
@@ -109,6 +111,38 @@ class SartoriusReading(_BindingBase):
     field: str = "value"
 
 
+class FujiChannel(_BindingBase):
+    """Selector into a :class:`fujilib.Sample`.
+
+    A Fuji ZP-series analyzer reports up to twelve display channels per poll,
+    each with a concentration and a validity state. ``channel`` picks one;
+    which gas it carries is asserted in the device's ``channel_map``.
+
+    ``field`` is ``"value"``, the concentration, or ``"valid"``: ``1.0`` while
+    the reading is live and ``0.0`` while it is held, calibrating, in error or
+    settling after a reconnect. Bind ``"valid"`` when an alarm or a procedure
+    has to watch validity: a sample's ``status`` is stored, but nothing reads
+    it. No sample is emitted while the analyzer does not report validity.
+    """
+
+    source: Literal["fuji_channel"] = "fuji_channel"
+    channel: Literal[
+        "CH1",
+        "CH2",
+        "CH3",
+        "CH4",
+        "CH5",
+        "CH6",
+        "CH7",
+        "CH8",
+        "CH9",
+        "CH10",
+        "CH11",
+        "CH12",
+    ]
+    field: Literal["value", "valid"] = "value"
+
+
 class NIDAQReadingField(_BindingBase):
     """Selector into a polled :class:`nidaqlib.tasks.models.DaqReading`.
 
@@ -155,6 +189,7 @@ SourceBinding = Annotated[
     AlicatFrameField
     | WatlowParameter
     | SartoriusReading
+    | FujiChannel
     | NIDAQReadingField
     | NIDAQBlockChannel
     | DerivedBinding,
@@ -338,6 +373,7 @@ __all__ = [
     "ChannelKind",
     "ChannelSpec",
     "DerivedBinding",
+    "FujiChannel",
     "NIDAQBlockChannel",
     "NIDAQReadingField",
     "SartoriusReading",

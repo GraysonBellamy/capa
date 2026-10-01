@@ -1,5 +1,5 @@
 ---
-description: Discover non-camera hardware attached to a capa rig — probe Watlow, Alicat, Sartorius, and NI-DAQmx adapters and emit a table or JSON inventory.
+description: Discover non-camera hardware attached to a capa rig — probe Watlow, Alicat, Sartorius, Fuji, and NI-DAQmx adapters and emit a table or JSON inventory.
 ---
 
 # capa devices
@@ -35,14 +35,14 @@ Usage: capa devices discover [OPTIONS]
 
 Options:
   --adapter  TEXT  Only probe the named adapter
-                   (watlow|alicat|sartorius|nidaq).
+                   (watlow|alicat|sartorius|fuji|nidaq).
                    Default: probe every real adapter.
   --json           Emit machine-readable JSON instead of a table.
 ```
 
 ### What it does
 
-Walks the [`AdapterDescriptor`](../../src/capa/devices/registry.py) registry, **excluding cameras**, and runs each adapter's `discover_descriptor()` async path. For serial adapters (Watlow, Alicat, Sartorius) that means a port scan + identify pass; for the NI-DAQ adapter that means an `nidaqmx.system.System()` enumeration.
+Walks the [`AdapterDescriptor`](../../src/capa/devices/registry.py) registry, **excluding cameras**, and runs each adapter's `discover_descriptor()` async path. For serial adapters (Watlow, Alicat, Sartorius, Fuji) that means a port scan + identify pass; for the NI-DAQ adapter that means an `nidaqmx.system.System()` enumeration.
 
 Each row carries the adapter id and whatever identity fields the discovery path returns — typically port name, serial number, model id, and an `idn` string.
 
@@ -85,6 +85,7 @@ $ uv run capa devices discover
 
 Notes:
   sartorius: no devices found
+  fuji: no devices found
 ```
 
 The `Notes:` block surfaces adapter-level outcomes (no devices found, or transient errors during the probe) without polluting the device table.

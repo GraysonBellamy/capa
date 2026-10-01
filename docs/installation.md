@@ -1,5 +1,5 @@
 ---
-description: Install capa on Windows or Linux — Python 3.13, uv, sibling libs (alicatlib, watlowlib, sartoriuslib, nidaqlib), optional FLIR Atlas, duvc-ctl webcam wheel.
+description: Install capa on Windows or Linux — Python 3.13, uv, sibling libs (alicatlib, watlowlib, sartoriuslib, fujilib, nidaqlib), optional FLIR Atlas, duvc-ctl webcam wheel.
 ---
 
 # Installation
@@ -33,18 +33,19 @@ capa expects its sibling device libraries to live as editable path dependencies 
 ├── alicatlib/         # required
 ├── watlowlib/         # required
 ├── sartoriuslib/      # required
+├── fujilib/           # required
 ├── nidaqlib/          # required
 └── capa-flir/         # only if you need FLIR IR cameras (optional extra)
 ```
 
-`pyproject.toml` declares `capa-flir` as an editable path source (`../capa-flir`); the four `*lib` packages resolve from their published versions but are commonly installed as editables for development. Clone all five (or six, with `capa-flir`) before running `uv sync`.
+`pyproject.toml` declares `capa-flir` as an editable path source (`../capa-flir`); the five `*lib` packages resolve from their published versions but are commonly installed as editables for development. Clone all six (or seven, with `capa-flir`) before running `uv sync`.
 
 ## Install
 
 From the `capa/` directory:
 
 ```sh
-# Baseline install — runtime, GUI, all four device libs, dev tooling
+# Baseline install — runtime, GUI, all five device libs, dev tooling
 uv sync --group dev
 
 # With FLIR IR camera support

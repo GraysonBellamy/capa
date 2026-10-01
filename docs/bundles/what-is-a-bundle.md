@@ -25,6 +25,7 @@ runs/<run_id>/
 │   ├── alicat.parquet         # library-native rows, one file per adapter family
 │   ├── watlow.parquet
 │   ├── sartorius.parquet
+│   ├── fuji.parquet
 │   └── nidaq_polled.parquet
 ├── events.sqlite              # DeviceEvent + procedure / safety events
 ├── status.sqlite              # periodic DeviceSnapshot health pings
@@ -81,7 +82,8 @@ Schema reference: [Channel samples parquet](parquet-channel-samples.md).
 The library-native row stream, **preserved without reshaping**. One
 file per adapter family — `alicat.parquet` has Alicat-shaped wide
 rows; `watlow.parquet` has `(device, parameter, instance)` long rows;
-`sartorius.parquet` has single-value balance rows; `nidaq_polled.parquet`
+`sartorius.parquet` has single-value balance rows; `fuji.parquet` has one
+wide row per poll of the gas analyzer; `nidaq_polled.parquet`
 has wide `(channel ↦ value)` rows.
 
 Why both `scalars.parquet` and `device_records/`? The channel binding

@@ -101,6 +101,7 @@ nav = [
             { "Watlow heaters" = "devices/watlow.md" },
             { "Alicat mass-flow" = "devices/alicat.md" },
             { "Sartorius balance" = "devices/sartorius.md" },
+            { "Fuji gas analyzer" = "devices/fuji.md" },
             { "NI-DAQ" = "devices/nidaq.md" },
             { "USB webcams" = "devices/cameras-webcam.md" },
             { "FLIR IR cameras" = "devices/cameras-flir.md" },

@@ -1,5 +1,5 @@
 ---
-description: capa Manual Control dock — per-device cards for Watlow heaters, Alicat MFCs, Sartorius balances, and cameras, with capability gating and destructive-op confirm.
+description: capa Manual Control dock — per-device cards for Watlow heaters, Alicat MFCs, Sartorius balances, Fuji gas analyzers, and cameras, with capability gating and destructive-op confirm.
 ---
 
 # Manual controls
@@ -65,20 +65,22 @@ on each adapter's `Capability` flagset. If a device advertises **none**
 of the manual-relevant capabilities (`HAS_TARE`, `HAS_ZERO`,
 `HAS_INTERNAL_CAL`, `HAS_PARAMETER_CONFIG`, `HAS_SETPOINT`,
 `HAS_GAS_SELECT`, `HAS_VALVE_HOLD`, `HAS_TOTALIZER`,
-`HAS_DISPLAY_CONTROL`), the device is skipped entirely — no empty card.
+`HAS_DISPLAY_CONTROL`, `HAS_GAS_CALIBRATION`), the device is skipped
+entirely — no empty card.
 
 If the worker pool is still **opening** when the dock builds, the cards
 fall back to the adapter-import-string fingerprint (e.g. *sartorius* →
 balance, *alicat* → MFC) to pick the right card class. They'll repick
 the right capability set once the pool finishes opening.
 
-The five card classes that ship today:
+The six card classes that ship today:
 
 | Card | Devices it matches | Common controls |
 |---|---|---|
 | **HeaterCard** | Watlow temperature controllers | Setpoint, Heat-flux tune launcher |
 | **BalanceCard** | Sartorius balances | Tare, zero, internal cal, filter / auto-zero / display unit, save settings |
 | **AlicatCard** | Alicat MFCs and pressure devices | Flow setpoint, gas select, valve hold, totalizer reset |
+| **FujiCard** | Fuji ZP-series gas analyzers | Response time, range and range method, output hold, calibration-gas setting, a guarded zero or span with a live steadiness readout |
 | **FlirCard** | FLIR IR cameras | Stream format, palette, NUC trigger |
 | **WebcamCard** | USB / built-in cameras | Resolution, framerate, codec |
 

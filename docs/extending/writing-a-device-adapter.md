@@ -28,6 +28,7 @@ The shipped adapters are also the best learning resource:
 | Watlow | [`src/capa/devices/watlow.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/watlow.py) | Setpoint + PV with hardware-side PID; `HAS_SETPOINT`/`HAS_RAMP`. |
 | Alicat | [`src/capa/devices/alicat.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/alicat.py) | Multi-parameter device on RS-485 multi-drop bus — multiple adapters per `resource_id`. |
 | Sartorius | [`src/capa/devices/sartorius.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sartorius.py) | Stability flag and the cold-open race. |
+| Fuji | [`src/capa/devices/fuji.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/fuji.py) | Error rows that keep their columns, a validity state per reading, a unit check that quarantines, tiered writes, and a long-running operation owned by one task across several commands. |
 | NI-DAQ | [`src/capa/devices/nidaq.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/nidaq.py) | Hardware-clocked task, polled vs block mode, `HARDWARE_CLOCKED`/`EMITS_BLOCKS`. |
 
 Read the family closest to yours before opening this page's contract section.
@@ -99,6 +100,7 @@ The `DeviceRecordsSink` in [`src/capa/storage/device_records_sink.py`](https://g
 | Shape | Example | Stored as |
 |---|---|---|
 | wide row | Alicat: one row, many columns (pressure, temperature, density, flow) | `device_records/alicat.parquet` |
+| wide row | Fuji: one row per poll, eleven columns per analyzer channel | `device_records/fuji.parquet` |
 | long row | Watlow: one row per (timestamp, channel, value) tuple | `device_records/watlow.parquet` |
 | single_value_row | Sartorius: one row, value + stable flag | `device_records/sartorius.parquet` |
 | block | NI-DAQ block mode: large arrays | deferred (planned TDMS sidecar) |
@@ -143,7 +145,7 @@ The format is `<scheme>:<body>` where `scheme` is one of:
 
 | Scheme | Body | Used by |
 |---|---|---|
-| `serial` | port name | watlow, alicat, sartorius |
+| `serial` | port name | watlow, alicat, sartorius, fuji |
 | `daqmx` | chassis/device name | nidaq |
 | `webcam` | serial number | webcam |
 | `sim` | adapter-chosen name | simulators |
@@ -189,6 +191,7 @@ class Capability(Flag):
     HAS_TOTALIZER
     HAS_VALVE_HOLD
     HAS_DISPLAY_CONTROL
+    HAS_GAS_CALIBRATION
 ```
 
 These flags drive both the UI (an Alicat adapter that declares `HAS_GAS_SELECT` gets a gas-select widget on its tile) and procedure preflight (a procedure that declares `required_capabilities=("HAS_SETPOINT",)` is rejected if no adapter declares that flag).

@@ -1,5 +1,5 @@
 ---
-description: Author and probe capa hardware profile TOMLs — discover, new, validate, check (live handshake) across Watlow, Alicat, Sartorius, NI-DAQ, camera adapters.
+description: Author and probe capa hardware profile TOMLs — discover, new, validate, check (live handshake) across Watlow, Alicat, Sartorius, Fuji, NI-DAQ, camera adapters.
 ---
 
 # capa hardware
@@ -137,7 +137,7 @@ Usage: capa hardware discover [OPTIONS]
 
 Options:
   --adapter  TEXT  Probe only the named adapter
-                   (watlow|alicat|sartorius|nidaq|camera_visible|camera_ir).
+                   (watlow|alicat|sartorius|fuji|nidaq|camera_visible|camera_ir).
   --json           Emit machine-readable JSON instead of a table.
 ```
 

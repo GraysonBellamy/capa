@@ -22,6 +22,10 @@ adapter = "capa.devices.sim.sartorius_sim"
 name = "cdaq1"
 adapter = "capa.devices.sim.nidaq_polled_sim"
 
+[[devices]]
+name = "analyzer"
+adapter = "capa.devices.sim.fuji_sim"
+
 # --- Channels: heater ---
 
 [[channels]]
@@ -194,3 +198,52 @@ ref_high_value = 21.0
 kind = "absolute"
 value = 0.05
 coverage_factor = 2.0
+
+# --- Channels: gas analyzer over Modbus (CO2 / CO / O2, with their validity
+# state). Recorded beside the analog O2 channel above; the cone profile's
+# oxygen group still reads the analog one. ---
+
+[[channels]]
+name = "gas.co2"
+kind = "gas_concentration"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "gases"
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH1"
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[[channels]]
+name = "gas.co"
+kind = "gas_concentration"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "gases"
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH2"
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[[channels]]
+name = "gas.o2"
+kind = "gas_concentration"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "gases"
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH3"
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"

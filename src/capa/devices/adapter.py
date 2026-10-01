@@ -127,6 +127,10 @@ class Capability(Flag):
     HAS_DISPLAY_CONTROL = auto()
     """Adapter exposes front-panel display control (lock/unlock, blink).
     Unlock is always callable as a safety escape."""
+    HAS_GAS_CALIBRATION = auto()
+    """Adapter drives a zero or span calibration against a gas the operator
+    supplies and names (Fuji gas analyzer). Manual-override territory: it
+    overwrites the calibration, and is right only if that gas is flowing."""
 
 
 class DeviceCommand(BaseModel):

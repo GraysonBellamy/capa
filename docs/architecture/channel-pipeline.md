@@ -47,7 +47,7 @@ A channel's lifecycle has four phases, in order:
 [`ChannelSpec`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/spec.py) is a frozen Pydantic model with the full per-channel config. The interesting fields:
 
 - `name` — the stable run-local identifier. UI, sinks, and plots key off this.
-- `kind` — `ChannelKind` (`tc`, `analog_in`, `process_var`, `setpoint`, `mass`, `mfc_flow`, `video_visible`, `video_ir`, `derived`, ...). Used by the UI for widget/axis choice.
+- `kind` — `ChannelKind` (`tc`, `analog_in`, `process_var`, `setpoint`, `mass`, `mfc_flow`, `gas_concentration`, `video_visible`, `video_ir`, `derived`, ...). Used by the UI for widget/axis choice.
 - `source` — the binding variant (see below).
 - `unit` / `derived_unit` — pre- and post-calibration units. Dimensional consistency is checked at config-load via `pint`.
 - `calibration` — a `Calibration` variant (`Identity`, `Polynomial`, `Piecewise`, `CustomCallable`, ...). See [`calibration.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/calibration.py).
@@ -68,13 +68,14 @@ ChannelSpec(name="purge_pressure",
 
 ### 2. Bind — `SourceBinding` variants
 
-[`SourceBinding`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/spec.py) is a tagged union; the `source` discriminator picks the variant on deserialization. There are six variants, one per library row shape:
+[`SourceBinding`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/spec.py) is a tagged union; the `source` discriminator picks the variant on deserialization. There are seven variants, one per library row shape:
 
 | Variant                      | Reads from                          | Selector fields                |
 |------------------------------|-------------------------------------|--------------------------------|
 | `alicat_frame_field`         | `alicatlib.streaming.Sample` (wide) | `device`, `field`              |
 | `watlow_parameter`           | `watlowlib.streaming.Sample` (long) | `device`, `parameter`, `instance` |
 | `sartorius_reading`          | `sartoriuslib.streaming.Sample`     | `device`, `field` (defaults `"value"`) |
+| `fuji_channel`               | `fujilib.Sample` (wide)             | `device`, `channel`, `field` (defaults `"value"`) |
 | `nidaq_reading_field`        | polled `nidaqlib.DaqReading` (wide) | `device`, `task`, `field`      |
 | `nidaq_block_channel`        | hardware-clocked `nidaqlib.DaqBlock`| `device`, `task`, `channel`    |
 | `derived`                    | other channels                      | `expression`, `inputs`         |

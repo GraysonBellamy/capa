@@ -1,12 +1,13 @@
 ---
-description: capa.devices API — the async DeviceAdapter Protocol and per-family adapters for Watlow, Alicat, Sartorius, NI-DAQ, USB webcams, FLIR IR cameras, and simulators.
+description: capa.devices API — the async DeviceAdapter Protocol and per-family adapters for Watlow, Alicat, Sartorius, Fuji, NI-DAQ, USB webcams, FLIR IR cameras, and simulators.
 ---
 
 # `capa.devices`
 
 Device adapters and descriptor-driven discovery. Every adapter
 implements the same :class:`DeviceAdapter` Protocol — the runtime
-treats Watlow loops, Alicat MFCs, Sartorius balances, NI-DAQ tasks,
+treats Watlow loops, Alicat MFCs, Sartorius balances, Fuji gas
+analyzers, NI-DAQ tasks,
 and cameras through the same lifecycle.
 
 **Narrative guides:**
@@ -16,6 +17,7 @@ and cameras through the same lifecycle.
 - [Discovery](../devices/discovery.md) — how the catalog probes hardware.
 - Per-family pages: [Watlow](../devices/watlow.md),
   [Alicat](../devices/alicat.md), [Sartorius](../devices/sartorius.md),
+  [Fuji](../devices/fuji.md),
   [NI-DAQ](../devices/nidaq.md), [Webcams](../devices/cameras-webcam.md),
   [FLIR](../devices/cameras-flir.md),
   [Simulators](../devices/simulators.md).

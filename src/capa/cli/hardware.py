@@ -109,7 +109,7 @@ def hardware_discover(
         typer.Option(
             "--adapter",
             help=(
-                "Probe only the named adapter (watlow|alicat|sartorius|"
+                "Probe only the named adapter (watlow|alicat|sartorius|fuji|"
                 "nidaq|camera_visible|camera_ir). Default: probe every"
                 " discoverable adapter."
             ),

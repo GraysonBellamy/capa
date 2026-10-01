@@ -48,6 +48,18 @@ def _sartorius_reading_binding(field: str = "value") -> Callable[[str], dict[str
     return _factory
 
 
+def _fuji_channel_binding(channel: str, field: str = "value") -> Callable[[str], dict[str, object]]:
+    def _factory(device_name: str) -> dict[str, object]:
+        return {
+            "source": "fuji_channel",
+            "device": device_name,
+            "channel": channel,
+            "field": field,
+        }
+
+    return _factory
+
+
 def _nidaq_reading_binding(task: str, field: str) -> Callable[[str], dict[str, object]]:
     def _factory(device_name: str) -> dict[str, object]:
         return {
@@ -113,6 +125,44 @@ SARTORIUS_MASS = ChannelTemplate(
     plot_group="mass",
 )
 
+# The channel numbers are the usual layout of a three-component analyzer (NDIR
+# components first, then O2); the device's ``channel_map`` says what each carries.
+FUJI_CO2 = ChannelTemplate(
+    id="fuji.co2",
+    label="CO2 from Fuji gas analyzer",
+    kind="gas_concentration",
+    source_factory=_fuji_channel_binding("CH1"),
+    default_unit="percent",
+    default_derived_unit="percent",
+    default_calibration={"kind": "identity", "input_unit": "percent", "output_unit": "percent"},
+    capa_group=None,
+    plot_group="gases",
+)
+
+FUJI_CO = ChannelTemplate(
+    id="fuji.co",
+    label="CO from Fuji gas analyzer",
+    kind="gas_concentration",
+    source_factory=_fuji_channel_binding("CH2"),
+    default_unit="percent",
+    default_derived_unit="percent",
+    default_calibration={"kind": "identity", "input_unit": "percent", "output_unit": "percent"},
+    capa_group=None,
+    plot_group="gases",
+)
+
+FUJI_O2 = ChannelTemplate(
+    id="fuji.o2",
+    label="O2 from Fuji gas analyzer",
+    kind="gas_concentration",
+    source_factory=_fuji_channel_binding("CH3"),
+    default_unit="percent",
+    default_derived_unit="percent",
+    default_calibration={"kind": "identity", "input_unit": "percent", "output_unit": "percent"},
+    capa_group=None,
+    plot_group="gases",
+)
+
 NIDAQ_THERMOCOUPLE = ChannelTemplate(
     id="nidaq.thermocouple",
     label="Thermocouple from NI-DAQ task",
@@ -128,6 +178,9 @@ NIDAQ_THERMOCOUPLE = ChannelTemplate(
 
 __all__ = [
     "ALICAT_PURGE_FLOW",
+    "FUJI_CO",
+    "FUJI_CO2",
+    "FUJI_O2",
     "NIDAQ_THERMOCOUPLE",
     "SARTORIUS_MASS",
     "WATLOW_HEATER_PV",

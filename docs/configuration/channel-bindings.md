@@ -1,5 +1,5 @@
 ---
-description: capa channel binding reference — six `SourceBinding` variants pulling from Watlow, Alicat, Sartorius, NI-DAQ (polled and hardware-clocked), derived channels.
+description: capa channel binding reference — seven `SourceBinding` variants pulling from Watlow, Alicat, Sartorius, Fuji, NI-DAQ (polled and hardware-clocked), derived channels.
 ---
 
 # Channel bindings
@@ -24,6 +24,7 @@ The shape of that row depends on the library:
 | `watlowlib` | one long row per `(device, parameter, instance)` | parameter name + instance |
 | `alicatlib` | one wide row per poll (many fields) | field name |
 | `sartoriuslib` | one single-value row per balance reading | field name (defaults to `value`) |
+| `fujilib` | one wide row per poll (every analyzer channel) | analyzer channel + field (defaults to `value`) |
 | `nidaqlib` (polled) | one wide row per read (channel ↦ value) | task name + field name |
 | `nidaqlib` (hardware-clocked) | rectangular `(channels, samples)` block | task name + channel name |
 | n/a (derived) | computed from other channels | dependency list + expression id |
@@ -32,9 +33,9 @@ See [Devices overview — emission
 shapes](../devices/overview.md#emission-shapes) for the picture of how
 each library lays out its rows.
 
-## The six binding kinds
+## The seven binding kinds
 
-Every binding is one of six discriminated variants. The `source` field
+Every binding is one of seven discriminated variants. The `source` field
 picks which model applies; Pydantic refuses any other value at load
 time.
 
@@ -103,6 +104,31 @@ source = "sartorius_reading"
 device = "balance"
 field = "value"
 ```
+
+### `fuji_channel`
+
+Selects one channel of a Fuji ZP-series gas analyzer. The analyzer
+reports up to twelve channels per poll, each with a concentration and
+a validity state; which gas a channel carries is asserted in the
+device's `channel_map`.
+
+| Field | Type | Required | Notes |
+|---|---|:-:|---|
+| `device` | str | yes | The analyzer's device name. |
+| `channel` | str | yes | `"CH1"` … `"CH12"`. Must be named in the device's `channel_map`. |
+| `field` | str | no | `"value"` (default), the concentration, or `"valid"`: `1.0` while the reading is live, `0.0` while it is held, calibrating, in error or settling. |
+
+```toml
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH3"
+```
+
+A sample's `status` carries the reading's validity state, but nothing
+in capa acts on `status`. Bind a second channel with `field = "valid"`
+when an alarm or a procedure has to watch validity. See [Fuji § The
+validity state](../devices/fuji.md#the-validity-state).
 
 ### `nidaq_reading_field`
 
@@ -286,6 +312,7 @@ lives in
 | `setpoint` | `watlow_parameter`, `alicat_frame_field` |
 | `mass` | `sartorius_reading` |
 | `mfc_flow` | `alicat_frame_field` |
+| `gas_concentration` | `fuji_channel`, `nidaq_reading_field` |
 | `analog_in` | `nidaq_reading_field`, `nidaq_block_channel` |
 | `derived` | `derived` |
 

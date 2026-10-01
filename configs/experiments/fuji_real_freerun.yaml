@@ -1,0 +1,41 @@
+# Free-run experiment against a real Fuji ZP-series gas analyzer.
+#
+# Records CO2, CO and O2 at 1 Hz into both ``device_records/fuji.parquet``
+# (the wide-row library frame, with each reading's validity state) and
+# ``scalars.parquet`` (calibrated ChannelSamples). The bundle's manifest
+# captures the analyzer identity (model, serial) at run-start, and the
+# device snapshots record its ranges, response times and calibration gases.
+#
+# Run with:
+#
+#   capa validate --strict configs/experiments/fuji_real_freerun.yaml
+#   capa run --headless     configs/experiments/fuji_real_freerun.yaml
+#
+# Adjust ``configs/hardware/fuji_real.toml`` first to match the rig's port,
+# station number and channel map. Let the analyzer warm up before trusting
+# its readings: it does not report that it is still warming up.
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 30.0
+
+calibration_set:
+  name: default
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: FUJI-REAL-001
+  material: none
+  notes: "Real-hardware gas-analyzer free run"
+
+tags:
+  - real
+  - fuji
+  - freerun
+
+hardware: ../hardware/fuji_real.toml

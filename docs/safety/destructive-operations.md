@@ -28,7 +28,11 @@ The full list of `destructive=True` dispatches in the Manual Control cards, as o
 | Alicat MFC | `hold_valves_closed` | Force the controller's valves fully closed regardless of setpoint. [`alicat.py:254`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/alicat.py#L254) |
 | Alicat MFC | `totalizer_reset` | Zero a totalizer's accumulated flow history. [`alicat.py:284`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/alicat.py#L284) |
 | Alicat MFC | `totalizer_reset_peak` | Zero a totalizer's peak-flow watermark. [`alicat.py:298`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/alicat.py#L298) |
+| Fuji gas analyzer | `set_calibration_gas` | Changes the zero or span gas the analyzer calibrates a range against; the setting survives power-cycle and the next calibration is computed from it. [`fuji.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/fuji.py) |
+| Fuji gas analyzer | `calibration_begin` | Presses the analyzer's calibration keys up to its wait step. Nothing is calibrated yet, but the readings are marked calibrating until the operator calibrates or cancels. [`fuji.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/fuji.py) |
 | FLIR camera | `set_temperature_range` | Persistent camera-firmware config that survives power-cycle. [`camera.py:184`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/camera.py#L184) |
+
+The key that actually calibrates the gas analyzer (`calibration_commit`) is not a `destructive=True` dispatch: it sits behind a hold-to-confirm button that is enabled only while the reading is steady on the named gas, and the adapter refuses it without a person's confirmation even inside an authorized run. See [Fuji § Calibrating from capa](../devices/fuji.md#calibrating-from-capa).
 
 Not on this list today: factory reset, baud rate change, and explicit gas-supply-line venting. If a future adapter adds those, flag them `destructive=True` and add a `destructive_summary` describing the consequence.
 
@@ -41,13 +45,16 @@ Every dispatch from a Manual Control card flows through [`ManualCardBase.dispatc
 ```python
 if destructive:
     summary = destructive_summary or f"{kind} on {self._name}"
+    note = destructive_note or (
+        "This may persist to EEPROM or otherwise alter device "
+        "state in a way that survives power-cycle."
+    )
     answer = QMessageBox.question(
         self,
         "Confirm device write",
         f"Confirm destructive operation:\n\n  {summary}\n\n"
         f"Operator: {operator}\n\n"
-        "This may persist to EEPROM or otherwise alter device "
-        "state in a way that survives power-cycle.",
+        f"{note}",
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         QMessageBox.StandardButton.No,  # default is No
     )
@@ -56,8 +63,9 @@ if destructive:
         return None
 ```
 
-Three things to note:
+Four things to note:
 
+- **The closing sentence can be replaced.** A card passes `destructive_note` when the consequence is not a write that persists in the device — beginning a gas-analyzer calibration, for one — so the dialog says what the operation actually does.
 - **Default is "No."** The dialog opens with focus on `No`, so an accidental Enter-press cancels.
 - **The operator id is shown in the dialog.** This is the operator who will be stamped into the `confirmed_by` field if they click `Yes`.
 - **Cancellation is logged as an `idle` status, not as an event.** The card resets to its quiescent state; no `confirmed` row is written into the event log. (Future change: log cancellations to make accidental-near-misses auditable — track in your project notes.)

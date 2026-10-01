@@ -1,5 +1,5 @@
 ---
-description: How capa wraps Watlow, Alicat, Sartorius, NI-DAQ, and cameras behind a uniform DeviceAdapter contract — resource grouping and emission shapes.
+description: How capa wraps Watlow, Alicat, Sartorius, Fuji, NI-DAQ, and cameras behind a uniform DeviceAdapter contract — resource grouping and emission shapes.
 ---
 
 # Devices overview
@@ -13,7 +13,7 @@ shapes that downstream sinks key off.
 
 ---
 
-## The four sibling libraries
+## The sibling libraries
 
 capa never talks to instruments directly. Every device family is wrapped
 by a dedicated *device library* — a separately maintained Python
@@ -26,12 +26,14 @@ emissions onto capa's universal `DeviceAdapter` contract.
 | Watlow EZ-Zone controllers | [`watlowlib`](https://github.com/GraysonBellamy/watlowlib) | [`capa.devices.watlow`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/watlow.py) | `capa.devices.sim.watlow_sim` |
 | Alicat mass-flow controllers | [`alicatlib`](https://github.com/GraysonBellamy/alicatlib) | [`capa.devices.alicat`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/alicat.py) | `capa.devices.sim.alicat_sim` |
 | Sartorius lab balances | [`sartoriuslib`](https://github.com/GraysonBellamy/sartoriuslib) | [`capa.devices.sartorius`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sartorius.py) | `capa.devices.sim.sartorius_sim` |
+| Fuji ZP-series gas analyzers | [`fujilib`](https://github.com/GraysonBellamy/fujilib) | [`capa.devices.fuji`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/fuji.py) | `capa.devices.sim.fuji_sim` |
 | NI cDAQ / DAQmx | [`nidaqlib`](https://github.com/GraysonBellamy/nidaqlib) | [`capa.devices.nidaq`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/nidaq.py) | `capa.devices.sim.nidaq_polled_sim`, `nidaq_block_sim` |
 
 Cameras are peers of devices but not subtypes — they live under
 [`capa.devices.camera`](https://github.com/GraysonBellamy/capa/tree/main/src/capa/devices/camera).
 The per-family pages ([Watlow](watlow.md), [Alicat](alicat.md),
-[Sartorius](sartorius.md), [NI-DAQ](nidaq.md), [Webcam](cameras-webcam.md),
+[Sartorius](sartorius.md), [Fuji](fuji.md), [NI-DAQ](nidaq.md),
+[Webcam](cameras-webcam.md),
 [FLIR](cameras-flir.md), [Simulators](simulators.md)) document the
 adapter-specific `params` schema and operational quirks.
 
@@ -84,6 +86,7 @@ does not declare.
 | Control surface | `HAS_SETPOINT`, `HAS_RAMP`, `HAS_GAS_SELECT`, `HAS_VALVE_HOLD`, `WRITES_DIGITAL` |
 | Acquisition | `READS_PROCESS_VAR`, `HARDWARE_CLOCKED`, `EMITS_BLOCKS`, `EMITS_STABILITY_FLAG` |
 | Balance / mass | `HAS_TARE`, `HAS_ZERO`, `HAS_INTERNAL_CAL`, `HAS_TOTALIZER` |
+| Gas analysis | `HAS_GAS_CALIBRATION` |
 | Discovery / lifecycle | `SUPPORTS_DISCOVERY`, `SUPPORTS_AUTO_RECONNECT`, `HAS_PARAMETER_CONFIG`, `HAS_DISPLAY_CONTROL` |
 
 See the per-family pages for which flags each adapter actually
@@ -145,11 +148,11 @@ Neither flows through the main fan-out queue.
 
 `SourceRecord.shape` is the layout tag that decides how the record
 maps onto a `device_records/<adapter>.parquet` schema. The four
-shapes match the four library row layouts:
+shapes match the libraries' row layouts:
 
 | Shape | One row is… | Used by |
 |---|---|---|
-| `wide_row` | one poll, many fields | `alicatlib` `Sample`, `nidaqlib` polled `DaqReading` |
+| `wide_row` | one poll, many fields | `alicatlib` `Sample`, `fujilib` `Sample`, `nidaqlib` polled `DaqReading` |
 | `long_row` | one `(device, parameter, instance)` | `watlowlib` `Sample` |
 | `single_value_row` | one balance reading | `sartoriuslib` `Sample` |
 | `block` | a rectangular `(channels, samples_per_channel)` chunk | `nidaqlib` hardware-clocked `DaqBlock` |
@@ -165,6 +168,7 @@ kinds](../configuration/channel-bindings.md):
 | Shape | Compatible binding kinds |
 |---|---|
 | `wide_row` (Alicat) | `alicat_frame_field` |
+| `wide_row` (Fuji) | `fuji_channel` |
 | `wide_row` (NI polled) | `nidaq_reading_field` |
 | `long_row` (Watlow) | `watlow_parameter` |
 | `single_value_row` (Sartorius) | `sartorius_reading` |

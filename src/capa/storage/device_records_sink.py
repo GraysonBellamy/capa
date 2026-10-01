@@ -10,6 +10,7 @@ Adapter id           Native shape                  path
 ``alicat``           wide_row                      ``device_records/alicat.parquet``
 ``watlow``           long_row                      ``device_records/watlow.parquet``
 ``sartorius``        single_value_row              ``device_records/sartorius.parquet``
+``fuji``             wide_row                      ``device_records/fuji.parquet``
 ``nidaq_polled``     wide_row                      ``device_records/nidaq_polled.parquet``
 ``nidaq_block``      block (TDMS / sidecar later)  deferred
 ==================== ============================ ====================================

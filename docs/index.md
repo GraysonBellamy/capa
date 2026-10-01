@@ -1,5 +1,5 @@
 ---
-description: capa — Python control and DAQ for a controlled-atmosphere pyrolysis lab instrument driving NI-DAQ, Watlow, Alicat, Sartorius, FLIR into sealed bundles.
+description: capa — Python control and DAQ for a controlled-atmosphere pyrolysis lab instrument driving NI-DAQ, Watlow, Alicat, Sartorius, Fuji, FLIR into sealed bundles.
 hide:
   - navigation
   - toc
@@ -10,7 +10,7 @@ hide:
 Control and DAQ for a custom **controlled-atmosphere pyrolysis** lab
 instrument (cone-calorimeter-class). capa drives a heterogeneous rig —
 NI-DAQ, Watlow heaters, Alicat mass-flow controllers, Sartorius balances,
-USB and FLIR IR cameras — through async-first device libraries, records
+Fuji gas analyzers, USB and FLIR IR cameras — through async-first device libraries, records
 every run as a self-contained on-disk **bundle**, and treats research
 workflows (calibrations, custom routines) as first-class plugins.
 
