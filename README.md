@@ -3,10 +3,10 @@
 **Control and DAQ for a custom controlled-atmosphere pyrolysis lab
 instrument** (cone-calorimeter-class). capa drives a heterogeneous
 rig — NI-DAQ, Watlow heaters, Alicat mass-flow controllers, Sartorius
-balances, USB and FLIR IR cameras — through async-first device
-libraries, records every run as a self-contained on-disk **bundle**,
-and treats research workflows (calibrations, custom routines) as
-first-class plugins.
+balances, Fuji gas analyzers, USB and FLIR IR cameras — through
+async-first device libraries, records every run as a self-contained
+on-disk **bundle**, and treats research workflows (calibrations, custom
+routines) as first-class plugins.
 
 The project is named after the **C**ontrolled **A**tmosphere
 **P**yrolysis **A**pparatus — the bench-scale gasification rig
@@ -88,6 +88,7 @@ adapters):
    ├── alicatlib/
    ├── watlowlib/
    ├── sartoriuslib/
+   ├── fujilib/
    ├── nidaqlib/
    └── capa-flir/     ← optional, for FLIR IR cameras
    ```

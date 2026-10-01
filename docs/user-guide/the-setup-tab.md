@@ -233,7 +233,7 @@ tab empty; the recipe runner expects a method.
 
 ### Hardware → Devices
 
-The device table. Add a Watlow, Alicat, NI-DAQ, Sartorius row; pick a
+The device table. Add a Watlow, Alicat, NI-DAQ, Sartorius, Fuji row; pick a
 transport (`com_port=COM5`, `host=192.168.1.10`, etc.). The Discovery
 dialog can populate this for you — see below.
 

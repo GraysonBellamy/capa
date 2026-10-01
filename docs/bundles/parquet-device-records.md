@@ -1,5 +1,5 @@
 ---
-description: capa device_records/*.parquet — native adapter records for Alicat, Watlow, Sartorius, and NI-DAQ in wide_row, long_row, single_value_row, and block shapes.
+description: capa device_records/*.parquet — native adapter records for Alicat, Watlow, Sartorius, Fuji, and NI-DAQ in wide_row, long_row, single_value_row, and block shapes.
 ---
 
 # Device records (parquet)
@@ -17,7 +17,7 @@ Every [`SourceRecord`](https://github.com/GraysonBellamy/capa/blob/main/src/capa
 
 | Shape | When | Layout |
 |---|---|---|
-| `wide_row` | Most multi-channel adapters (Alicat, NI-DAQ polled, NI-DAQ block metadata) | One row per emission, columns = readings (`Mass_Flow`, `Abs_Press`, …) |
+| `wide_row` | Most multi-channel adapters (Alicat, Fuji, NI-DAQ polled, NI-DAQ block metadata) | One row per emission, columns = readings (`Mass_Flow`, `Abs_Press`, …) |
 | `long_row` | Watlow (one parameter at a time over Modbus) | Rows of `(device, parameter, instance, value)` |
 | `single_value_row` | Sartorius balance | One value per record — the mass reading |
 | `block` | Reserved for kHz NI-DAQ acquisition via TDMS sidecar | Metadata record; bulk samples live in a sidecar (not currently emitted in tree) |
@@ -35,6 +35,7 @@ runs/<run_id>/device_records/
 ├── alicat.parquet           # wide_row
 ├── watlow.parquet           # long_row
 ├── sartorius.parquet        # single_value_row
+├── fuji.parquet             # wide_row
 ├── nidaq_polled.parquet     # wide_row
 └── nidaq_block.parquet      # wide_row block-metadata records (when block mode is used)
 ```
@@ -85,6 +86,26 @@ requested_at, received_at, latency_s
 ```
 
 (Column set inferred from the `sartoriuslib.Reading` fields constructed in `sartorius_sim.py`; the real adapter uses the same library serializer, but the exact final column set is whatever `sartoriuslib.sinks.sample_to_row` produces.) The `stable`, `overload`, and `underload` boolean flags are what the safety layer reads to gate ignition-time procedure steps; they are also surfaced on the derived channel sample's `status` (`"ok"` / `"settling"` / `"overload"`).
+
+### Fuji — `wide_row`
+
+Each poll of the gas analyzer reads every channel and the analyzer's status. The adapter ([`fuji.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/fuji.py)) emits one record per poll through `fujilib.sample_to_row`, so the row is the one an offline `fujilib` recording would write:
+
+```
+record_id, t_mono_ns, t_utc,
+device, address, protocol,
+t_midpoint_mono_ns, requested_at, received_at, latency_s,
+ch1_value, ch1_raw, ch1_decimals, ch1_unit, ch1_gas, ch1_label_source,
+ch1_state, ch1_valid, ch1_hold, ch1_calibrating, ch1_errors,
+…the same eleven columns for each channel in the device's channel map…
+instrument_error, calibration_error, analyzer_errors,
+alarm1 … alarm6, auto_calibration_running,
+error_type, error_message
+```
+
+`chN_state` is the reading's validity state (`ok`, `hold`, `calibrating`, `settling`, …) and `chN_valid` its boolean; the value is kept as read in every state. `chN_gas` is the gas asserted for the channel, and `chN_label_source` says where that label came from.
+
+A poll that failed is a row too: the same columns, the reading and analyzer columns empty, and `error_type` / `error_message` filled. Gaps in an outage are therefore recorded, not missing. The sink types each column from its first flush, so a run whose first 1,024 rows are all failed polls stores the reading columns as text; see [Fuji § A run that starts during an outage](../devices/fuji.md#a-run-that-starts-during-an-outage).
 
 ### NI-DAQ polled — `wide_row`
 

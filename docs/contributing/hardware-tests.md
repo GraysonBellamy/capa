@@ -33,7 +33,7 @@ pytestmark = [
 ]
 ```
 
-Unlike `alicatlib`'s three-tier scheme (`hardware` / `hardware_stateful` / `hardware_destructive`), capa uses a single tier. Reasoning: every smoke test in `tests/hardware/` is already designed to be **non-destructive** — the writes they perform are deliberate no-op echoes (set the heater's current setpoint to its current value, set the MFC setpoint to its current setpoint). If a destructive hardware test ever becomes necessary, add a second marker rather than weakening the meaning of `hardware`.
+Unlike `alicatlib`'s three-tier scheme (`hardware` / `hardware_stateful` / `hardware_destructive`), capa uses a single tier. Reasoning: every smoke test in `tests/hardware/` is already designed to be **non-destructive** — the writes they perform are deliberate no-op echoes (set the heater's current setpoint to its current value, set the MFC setpoint to its current setpoint). The gas analyzer's smoke test writes nothing at all: no setting, no front-panel key, no calibration. If a destructive hardware test ever becomes necessary, add a second marker rather than weakening the meaning of `hardware`.
 
 ---
 
@@ -46,6 +46,7 @@ The opt-in env var alone is not enough — each smoke module also reads a small 
 | Watlow | `CAPA_TEST_WATLOW_PORT` | `CAPA_TEST_WATLOW_ADDR` (`1`), `CAPA_TEST_WATLOW_PROTOCOL` (`stdbus` \| `modbus_rtu` \| `auto`), `CAPA_TEST_WATLOW_OPERATOR` (`"hw-test"`) |
 | Alicat | `CAPA_TEST_ALICAT_PORT` | `CAPA_TEST_ALICAT_UNIT_ID` (`"A"`), `CAPA_TEST_ALICAT_BAUD` (`19200`), `CAPA_TEST_ALICAT_OPERATOR` (`"hw-test"`) |
 | Sartorius | `CAPA_TEST_SARTORIUS_PORT` | `CAPA_TEST_SARTORIUS_PROTOCOL` (`"xbpi"`), `CAPA_TEST_SARTORIUS_BAUD` (`9600`), `CAPA_TEST_SARTORIUS_OPERATOR` (`"hw-test"`) |
+| Fuji | `CAPA_TEST_FUJI_PORT` | `CAPA_TEST_FUJI_ADDRESS` (`1`), `CAPA_TEST_FUJI_CHANNEL_MAP` (`"CH1=co2,CH2=co,CH3=o2"`), `CAPA_TEST_FUJI_OPERATOR` (`"hw-test"`) |
 | NI-DAQ | none if your rig uses `cDAQ1Mod1` | `CAPA_TEST_NIDAQ_DEVICE` (`"cDAQ1Mod1"`), `CAPA_TEST_NIDAQ_OPERATOR` (`"hw-test"`) |
 | Webcam | `CAPA_TEST_WEBCAM_DEVICE` | `CAPA_TEST_WEBCAM_INPUT_FORMAT` (platform default), `CAPA_TEST_WEBCAM_OPERATOR` (`"hw-test"`) |
 
@@ -58,6 +59,7 @@ $env:CAPA_HARDWARE_TESTS = "1"
 $env:CAPA_TEST_WATLOW_PORT = "COM5"
 $env:CAPA_TEST_ALICAT_PORT = "COM6"
 $env:CAPA_TEST_SARTORIUS_PORT = "COM7"
+$env:CAPA_TEST_FUJI_PORT = "COM8"
 $env:CAPA_TEST_NIDAQ_DEVICE = "Dev1"
 $env:CAPA_TEST_WEBCAM_DEVICE = "USB Video Device"
 uv run pytest tests/hardware -v

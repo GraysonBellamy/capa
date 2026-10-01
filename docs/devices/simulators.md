@@ -102,6 +102,7 @@ the test suite. For UI demos, set `duration_s` to a more human-scale
 The signal keys are *adapter-specific* — Watlow uses
 `"<parameter>/<instance>"`; Alicat uses underscored frame-field names
 (`Mass_Flow`, `Abs_Press`); Sartorius takes a single `mass_signal`;
+Fuji uses analyzer channels (`CH3`);
 NI-DAQ uses display-name channels. The per-device pages list each
 adapter's accepted key schema.
 
@@ -116,6 +117,7 @@ them apart by feature surface.
 | [`capa.devices.sim.watlow_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/watlow_sim.py) | [Watlow](watlow.md) | `long_row` | `{"<parameter>/<instance>": spec}` | Heater PV/SP rendering, setpoint command path, ramp UI. |
 | [`capa.devices.sim.alicat_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/alicat_sim.py) | [Alicat](alicat.md) | `wide_row` | `{"<Frame_Field>": spec}` | Flow plots, gas-select UI, totalizer surfaces. |
 | [`capa.devices.sim.sartorius_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/sartorius_sim.py) | [Sartorius](sartorius.md) | `single_value_row` | single `mass_signal` spec | Mass loss curves, tare/zero plumbing, stability flag propagation. |
+| [`capa.devices.sim.fuji_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/fuji_sim.py) | [Fuji](fuji.md) | `wide_row` | `{"<CHn>": spec}`, in vol% | Gas plots, validity states, the settings verbs, a zero or span from the manual card. |
 | [`capa.devices.sim.nidaq_polled_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/nidaq_polled_sim.py) | [NI-DAQ polled](nidaq.md#polled-mode) | `wide_row` | `{"<channel>": spec}` | TC channels, polled binding kind. |
 | [`capa.devices.sim.nidaq_block_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/nidaq_block_sim.py) | [NI-DAQ block](nidaq.md#hardware-clocked-block-mode) | `block` | `{"<channel>": spec}` | Block sidecar, kHz path, downsampled channels. |
 | [`capa.devices.sim.flir_ir_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/flir_ir_sim.py) | [FLIR IR](cameras-flir.md) | `FrameReceipt` (camera path) | n/a — synthetic gradient frames | Camera-task wiring, manifest `cameras` block, frame-index parquet round-trip without an Atlas install. |
@@ -152,6 +154,10 @@ green sim run as a green real run.
   second cost on first `open()` while it waits for a stable reading
   window; the sim opens instantly. See [Sartorius §
   Cold-open race](sartorius.md#cold-open-race).
+- **The gas analyzer's outages and warm-up.** The Fuji sim never
+  fails a poll, so it produces no error rows and no `settling`
+  readings, and its calibration always succeeds. See [Fuji § Sim
+  equivalent](fuji.md#sim-equivalent).
 - **Hardware timing jitter.** Sims tick on an `anyio.sleep`. The real
   Watlow polls take ~50 ms per parameter; real DAQmx blocks land on
   the onboard clock; real cameras emit at their UVC/Atlas frame

@@ -27,8 +27,8 @@ Cameras are *peers* of devices, not subtypes — they implement
 [`Camera`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/camera/base.py),
 not `DeviceAdapter`. Emissions are `FrameReceipt` + `CameraHealth`
 records (one per frame, posted from the worker thread), not
-`ChannelSample`s. See [Devices overview § "The four sibling
-libraries"](overview.md#the-four-sibling-libraries) for the placement.
+`ChannelSample`s. See [Devices overview § "The sibling
+libraries"](overview.md#the-sibling-libraries) for the placement.
 
 ## Supported hardware
 

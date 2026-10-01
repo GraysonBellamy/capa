@@ -1,5 +1,5 @@
 ---
-description: capa hardware profile TOML reference — `[[devices]]`, `[[channels]]`, `[[cameras]]` tables wiring NI-DAQ, Watlow, Alicat, Sartorius, USB, FLIR adapters.
+description: capa hardware profile TOML reference — `[[devices]]`, `[[channels]]`, `[[cameras]]` tables wiring NI-DAQ, Watlow, Alicat, Sartorius, Fuji, USB, FLIR adapters.
 ---
 
 # Hardware TOML
@@ -61,6 +61,7 @@ The `adapter` value is one of:
 | Watlow | `capa.devices.watlow` | `capa.devices.sim.watlow_sim` |
 | Alicat | `capa.devices.alicat` | `capa.devices.sim.alicat_sim` |
 | Sartorius | `capa.devices.sartorius` | `capa.devices.sim.sartorius_sim` |
+| Fuji gas analyzer | `capa.devices.fuji` | `capa.devices.sim.fuji_sim` |
 | NI-DAQ (polled) | `capa.devices.nidaq` | `capa.devices.sim.nidaq_polled_sim` |
 | NI-DAQ (hardware-clocked) | `capa.devices.nidaq` | `capa.devices.sim.nidaq_block_sim` |
 | Plugin adapter descriptors | resolved via `capa.adapters` / `capa.cameras` descriptor entry points (Setup/discovery) or dotted module-path adapter ids (runtime-safe path) | — |
@@ -77,6 +78,8 @@ coherent. Field-by-field references live on the per-family pages:
   gases, polling rate.
 - [Sartorius](../devices/sartorius.md) — serial port, model,
   decimation, stability window.
+- [Fuji](../devices/fuji.md) — serial port, station number, the
+  channel map (which gas each analyzer channel carries), polling rate.
 - [NI-DAQ](../devices/nidaq.md) — chassis id, task definitions,
   channel list, sample mode (polled vs block).
 - [Webcam](../devices/cameras-webcam.md) — USB index, codec,
@@ -134,6 +137,7 @@ binding-kind combobox by likely match.
 | `setpoint` | Controller commanded setpoint (Watlow SP, MFC flow setpoint) |
 | `mass` | Balance reading |
 | `mfc_flow` | Mass flow controller flow value |
+| `gas_concentration` | Concentration of one gas from a gas analyzer (O2, CO2, CO) |
 | `video_visible` | Visible-camera frame stream (no scalar value column) |
 | `video_ir` | IR-camera frame stream |
 | `derived` | Computed from other channels (future derivation registry) |
@@ -155,9 +159,9 @@ parameter = "process_value"
 instance = 1
 ```
 
-The six binding kinds — `watlow_parameter`, `alicat_frame_field`,
-`sartorius_reading`, `nidaq_reading_field`, `nidaq_block_channel`,
-`derived` — are documented field-by-field on the [Channel
+The seven binding kinds — `watlow_parameter`, `alicat_frame_field`,
+`sartorius_reading`, `fuji_channel`, `nidaq_reading_field`,
+`nidaq_block_channel`, `derived` — are documented field-by-field on the [Channel
 bindings](channel-bindings.md) page.
 
 ### `calibration` — per-channel transform

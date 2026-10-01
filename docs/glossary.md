@@ -45,10 +45,11 @@ profile section in the UI only appears when `domain_profile.id` is set.
 
 How a channel gets its value. A channel like `heater_pv` doesn't store
 data itself — it **reads from** a specific device parameter (e.g. a
-Watlow controller's `PV` register). Six binding kinds exist today,
+Watlow controller's `PV` register). Seven binding kinds exist today,
 each matching a device family's emission shape: `watlow_parameter`,
-`alicat_frame_field`, `sartorius_reading`, `nidaq_reading_field`,
-`nidaq_block_channel`, or `derived` (computed from other channels).
+`alicat_frame_field`, `sartorius_reading`, `fuji_channel`,
+`nidaq_reading_field`, `nidaq_block_channel`, or `derived` (computed
+from other channels).
 See [Channel bindings](configuration/channel-bindings.md) for the
 field-by-field reference.
 
@@ -223,7 +224,7 @@ safety net for fields the channel binding didn't promote. Schema in
 The four native shapes an adapter can emit, mirrored into the manifest's
 `data_shape.device_records[].layout` so a reader knows what to expect
 before opening the file: **`wide_row`** (one row per tick, columns =
-readings — Alicat, NI-DAQ polled), **`long_row`** (rows of
+readings — Alicat, Fuji, NI-DAQ polled), **`long_row`** (rows of
 `(device, parameter, instance, value)` — Watlow), **`single_value_row`**
 (one value per record — Sartorius), **`block`** (reserved for
 hardware-clocked bursts; today's NI-DAQ block mode still emits

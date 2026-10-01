@@ -18,7 +18,7 @@ relevant sections here.
 ## Subpackages
 
 - [`capa.runtime`](runtime.md) — `Conductor`, `WorkerPool`, `Worker`, `ManualClient`, bridges, dispatchers.
-- [`capa.devices`](devices.md) — adapter contract and per-family adapters (Watlow, Alicat, Sartorius, NI-DAQ, cameras, simulators).
+- [`capa.devices`](devices.md) — adapter contract and per-family adapters (Watlow, Alicat, Sartorius, Fuji, NI-DAQ, cameras, simulators).
 - [`capa.config`](config.md) — config models, canonicalization, validation, problems.
 - [`capa.channels`](channels.md) — channel registry, spec, calibration.
 - [`capa.experiment`](experiment.md) — procedures, profiles, method executor, authorization.
