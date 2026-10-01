@@ -74,6 +74,12 @@ class TestChannelSpec:
     def test_keep_raw_default_false(self) -> None:
         assert _make_alicat_spec().keep_raw is False
 
+    def test_a_channel_is_plotted_unless_it_says_otherwise(self) -> None:
+        spec = _make_alicat_spec()
+        assert spec.plot is True
+        hidden = ChannelSpec.model_validate({**spec.model_dump(), "plot": False})
+        assert hidden.plot is False
+
 
 class TestSourceBindings:
     def test_alicat(self) -> None:

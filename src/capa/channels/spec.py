@@ -315,6 +315,12 @@ class ChannelSpec(BaseModel):
     """e.g. ``"temperatures"``, ``"flows"``, ``"mass"`` — used by the Plots
     pane to lay out related channels together."""
 
+    plot: bool = True
+    """Whether the channel gets a trace in the Run tab's plots. With
+    ``False`` it is recorded, shown in the Numerics dock and available to
+    alarms and procedures like any other channel; it only has no curve. For
+    a flag or a state that would draw a flat line."""
+
     alarms: tuple[AlarmBand, ...] = ()
 
     sinks: tuple[str, ...] = ("scalars",)

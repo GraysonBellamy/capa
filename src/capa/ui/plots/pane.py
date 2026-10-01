@@ -80,8 +80,9 @@ class PlotPane(QWidget):
     """Container that owns one sub-plot per ``plot_group``.
 
     Channels with no ``plot_group`` declared land in a single ``"misc"``
-    pane so they remain visible. Time axis is seconds since run start
-    (``t_mono_ns / 1e9``).
+    pane so they remain visible. A channel declared with ``plot = false``
+    gets no curve, and a group none of whose channels is plotted gets no
+    sub-plot. Time axis is seconds since run start (``t_mono_ns / 1e9``).
     """
 
     def __init__(
@@ -93,7 +94,7 @@ class PlotPane(QWidget):
     ) -> None:
         super().__init__(parent)
         self._registry: RingBufferRegistry = registry
-        self._channels: list[ChannelSpec] = list(channels)
+        self._channels: list[ChannelSpec] = [ch for ch in channels if ch.plot]
 
         # Group channels by plot_group; keep declaration order.
         groups: dict[str, list[ChannelSpec]] = {}

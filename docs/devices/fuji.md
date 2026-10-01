@@ -149,9 +149,10 @@ The raw value is kept in every state: a held or calibrating reading is
 recorded as read, with its state beside it. capa stores `status` in
 `scalars.parquet`, but **plots, alarms and procedures do not read it**. To
 act on validity, bind a second channel with `field = "valid"` and watch
-that. Add one only where an alarm or a procedure needs it: every channel
-gets a trace in the Run tab's plots, and a flag that sits at 1 is not worth
-one. The shipped `fuji_real.toml` declares none.
+that. `plot = false` keeps it off the Run tab's plots, where a flag that
+sits at 1 would only draw a flat line; it is still recorded and shown in
+the Numerics dock. Add one where an alarm or a procedure needs it. The
+shipped `fuji_real.toml` declares none.
 
 ```toml
 [[channels]]
@@ -159,6 +160,7 @@ name = "gas.o2_valid"
 kind = "gas_concentration"
 unit = "dimensionless"
 derived_unit = "dimensionless"
+plot = false
 
 [channels.source]
 source = "fuji_channel"
