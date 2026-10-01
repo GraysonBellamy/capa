@@ -65,20 +65,8 @@ kind = "identity"
 input_unit = "percent"
 output_unit = "percent"
 
-# 1 while the O2 reading is live, 0 while it is held, calibrating, in error
-# or settling after a reconnect. Bind an alarm to it to watch validity.
-[[channels]]
-name = "gas.o2_valid"
-kind = "gas_concentration"
-unit = "dimensionless"
-derived_unit = "dimensionless"
-plot_group = "gases"
-[channels.source]
-source = "fuji_channel"
-device = "analyzer"
-channel = "CH3"
-field = "valid"
-[channels.calibration]
-kind = "identity"
-input_unit = "dimensionless"
-output_unit = "dimensionless"
+# Each reading's validity (live, held, calibrating, settling, ...) is in
+# device_records/fuji.parquet and in the status of every sample. A channel
+# with ``field = "valid"`` (1 while live, 0 otherwise) is needed only when an
+# alarm or a procedure has to watch it; every channel is plotted, so none is
+# declared here. See docs/devices/fuji.md.
