@@ -150,6 +150,25 @@ def test_the_real_rig_config_validates(configs_dir: Path) -> None:
 
 def test_a_channel_outside_the_channel_map_is_flagged(configs_dir: Path) -> None:
     doc = _load(configs_dir)
+    doc.hardware_payload["channels"].append(
+        {
+            "name": "gas.o2_valid",
+            "kind": "gas_concentration",
+            "unit": "dimensionless",
+            "derived_unit": "dimensionless",
+            "source": {
+                "source": "fuji_channel",
+                "device": "analyzer",
+                "channel": "CH3",
+                "field": "valid",
+            },
+            "calibration": {
+                "kind": "identity",
+                "input_unit": "dimensionless",
+                "output_unit": "dimensionless",
+            },
+        }
+    )
     doc.hardware_payload["devices"][0]["params"]["channel_map"].pop("CH3")
     problems = _with_code(validate(doc), "channels.fuji_channel_unmapped")
     # Both channels bound to CH3: its value and its validity.
