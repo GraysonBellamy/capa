@@ -14,7 +14,7 @@ A *domain profile* layers scientific metadata + preflight checks on top of the g
 - **required channel groups** — heater pair, sample TC, mass, purge MFC
 - **preflight checks** — heater PV safe range, purge flow established, leak-test recency, balance stability
 
-The profile sits at `experiment.domain_profile.id = "capa.profiles.capa_pyrolysis"` in the experiment YAML. When set, the Setup tab's CAPA Profile section appears with all the fields below.
+The profile sits at `experiment.domain_profile.id = "capa.profiles.capa_pyrolysis"` in the experiment YAML. When set, the Setup tab's CAPA Profile section edits all the fields below; its forms are built from the profile's models, so the editor and this schema cannot disagree.
 
 CAPA is a **controlled-atmosphere cone-calorimeter-class instrument**: a specimen sits in a holder on a load cell under a radiant heater, swept by a purge gas to control atmosphere chemistry. The scientific parameter is the radiant heat flux at the specimen surface (kW/m²). Most runs are a single setpoint hold; dynamic programs (ramps) are the minority.
 
@@ -37,7 +37,9 @@ domain_profile:
     sop_revision: "..."    # optional
 ```
 
-Every sub-model is frozen and `extra="forbid"` — typos in field names fail validation, they do not silently default. The Pydantic models live in [`capa_pyrolysis.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/profiles/capa_pyrolysis.py).
+Every sub-model is frozen and `extra="forbid"` — typos in field names fail validation, they do not silently default. Required text fields must be non-empty. The Pydantic models live in [`capa_pyrolysis.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/profiles/capa_pyrolysis.py).
+
+`ExperimentConfig` types `domain_profile.metadata` as a free-form dict, so schema validation (Layer 1) does not look inside it. Layer 3 of the Setup validation pipeline validates it against `CapaPyrolysisMetadata`; each problem points at the offending field and blocks Save and Apply & Connect. `capa config validate` and [`capa profile validate`](../cli/capa-profile.md) run the same check from the command line. Keys starting with `_` (such as `_safe_arm`) are preflight tuning knobs read at arm time, not model fields, and are skipped by this check.
 
 ---
 
@@ -47,9 +49,10 @@ The physical sample under test.
 
 | Field | Unit | Required | Notes |
 |---|---|---|---|
-| `id` | — | yes | Operator-assigned specimen id. Goes into `sample.id` and child-bundle templates for Batch runs. |
+| `id` | — | yes | Operator-assigned specimen id. Mirrored into `sample.id`; Batch runs template it per child. |
 | `material` | — | yes | Free-text material name. The value an analyzer five years from now needs to know "what was this?" |
 | `initial_mass_g` | g | yes | Mass on the load cell before heating begins. Must be > 0. |
+| `thickness_mm` | mm | no | Specimen thickness. Leave unset when it isn't meaningful (powders). |
 | `form` | `disk` \| `other` | yes | ~99% of CAPA runs use a disk. `other` is the escape hatch for irregular solids, liquids, etc.; describe in `notes`. |
 | `particle_size_um` | µm | no | Median particle size for powder/granulate runs. Leave unset for the typical solid disk. |
 | `specimen_holder` | — | yes | Holder description (e.g. `"stainless steel cup"`). Holder geometry varies by run; depth and diameter change the exposed surface area. |
@@ -66,7 +69,21 @@ The specimen fields are not optional record-keeping. Five years later, an analys
 - **Form + holder geometry** sets the exposed surface area, which is needed to convert mass-loss rate into a mass-loss flux.
 - **Particle size + conditioning** explain transport-limited effects that the rate trace alone cannot account for.
 
-Missing fields are a Layer-3 validation error and the engine refuses to arm.
+Missing fields are a Layer-3 validation error, so the Setup tab refuses to save or Apply & Connect.
+
+### The `sample` block mirrors the specimen
+
+The experiment's top-level `sample` block names the run id, the catalog entry and `manifest.json`'s sample record; the specimen block is what lands in the bundle's `profiles/capa_pyrolysis.toml`. They describe the same specimen, so the specimen is the source and `sample` mirrors it:
+
+| `specimen` field | `sample` field |
+|---|---|
+| `id` | `id` |
+| `material` | `material` |
+| `initial_mass_g` | `mass_g` |
+| `thickness_mm` | `thickness_mm` |
+| `notes` | `notes` |
+
+`sample.extra` is not mirrored. The Setup tab's Specimen pane rewrites `sample` on every edit, and the Operator & sample section shows it read-only. Layer 3 reports any field that disagrees (`capa_profile.sample_mismatch`), which only happens when the YAML is edited by hand.
 
 ---
 

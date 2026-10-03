@@ -271,7 +271,7 @@ async def _heater_pv_safe(ctx: ProfilePreflightContext) -> Problem | None:
        commissioning workflows that intentionally want a *tighter* gate
        (e.g. new-rig burn-in requiring cold start).
     2. **Hot-start policy.** When the active method declares a
-       ``heater_program.heater_setpoint_c`` above the default ceiling,
+       ``program.heater_setpoint_c`` above the default ceiling,
        the limit auto-raises to ``heater_setpoint_c + _HOT_START_MARGIN_C``.
        At a 1000 °C default this branch is rare — only fires when an
        exotic high-temp method declares a setpoint above the rig-survival
@@ -341,25 +341,20 @@ def _method_heater_setpoint_c(profile_metadata: dict[str, Any]) -> float | None:
     """Extract the method's ``heater_setpoint_c`` from ``profile_metadata``.
 
     The CAPA pyrolysis profile carries this under the ``program`` key
-    (matching :attr:`CapaPyrolysisMetadata.program`); accepts the
-    legacy / test-fixture ``heater_program`` alias as a fallback so a
-    profile that ships with either key still feeds the hot-start
-    policy. Returns ``None`` when no setpoint is declared or the value
-    is non-numeric — the caller treats that as "no policy override,
-    use the default limit."
+    (:attr:`CapaPyrolysisMetadata.program`). Returns ``None`` when no
+    setpoint is declared or the value is non-numeric — the caller
+    treats that as "no policy override, use the default limit."
     """
-    for key in ("program", "heater_program"):
-        program = profile_metadata.get(key)
-        if not isinstance(program, dict):
-            continue
-        raw = program.get("heater_setpoint_c")
-        if raw is None:
-            continue
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            return None
-    return None
+    program = profile_metadata.get("program")
+    if not isinstance(program, dict):
+        return None
+    raw = program.get("heater_setpoint_c")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 @register("capa.purge_flow_established", category="dynamic")
@@ -463,12 +458,7 @@ async def _flux_calibration_freshness(ctx: ProfilePreflightContext) -> Problem |
     * ``_flux_calibration_window_days`` (default ``7``)
     * ``_flux_calibration_dir`` (default ``configs/calibrations/flux``)
     """
-    # CapaPyrolysisMetadata.program is the model field; ``heater_program``
-    # remains accepted as a legacy fixture alias (matches the parallel
-    # convention in :func:`_method_heater_setpoint_c`).
-    program = (
-        ctx.profile_metadata.get("program") or ctx.profile_metadata.get("heater_program") or {}
-    )
+    program = ctx.profile_metadata.get("program") or {}
     if not isinstance(program, dict):
         return None
     target = program.get("target_heat_flux_kw_m2")

@@ -4,7 +4,7 @@
 |-------|----------------|------|
 | 1 | Pydantic schema | per-keystroke + every save |
 | 2 | Referential (cross-row refs, name uniqueness) | row leave + save |
-| 3 | Domain (CAPA profile rules) | save |
+| 3 | Domain (CAPA profile metadata, mappings, sample mirror) | save |
 | 4 | Resource (``build_workers`` dry run) | save |
 | 5 | Live (``discover()`` / handshakes) | only on explicit Check Hardware |
 
@@ -24,6 +24,12 @@ from typing import TYPE_CHECKING, Any
 import anyio
 from pydantic import ValidationError
 
+from capa.config.capa_profile import (
+    CAPA_PROFILE_ID,
+    CAPA_REQUIRED_GROUPS,
+    profile_model_fields,
+    sample_specimen_mismatches,
+)
 from capa.config.problems import ConfigProblem, Section
 
 if TYPE_CHECKING:
@@ -482,21 +488,28 @@ def _layer2_nidaq_join(hardware: Any, document: ConfigDocument) -> list[ConfigPr
 # ---------------------------------------------------------------------------
 
 
-from capa.config.capa_profile import CAPA_REQUIRED_GROUPS as _CAPA_REQUIRED_GROUPS  # noqa: E402
-
-
 def _layer3_domain(config: Any, document: ConfigDocument) -> list[ConfigProblem]:
-    """CAPA profile required-mapping check.
+    """CAPA profile checks.
 
-    For CAPA pyrolysis: every required group above must be present at
-    least once in ``channel.metadata["capa_group"]``. Most CAPA experiments
-    are single-setpoint, so we don't over-constrain ramp parameters at this
-    layer.
+    For CAPA pyrolysis:
+
+    * every required group above must be present at least once in
+      ``channel.metadata["capa_group"]``;
+    * ``domain_profile.metadata`` must validate against
+      :class:`~capa.experiment.profiles.capa_pyrolysis.CapaPyrolysisMetadata`
+      (``ExperimentConfig`` types it as a free-form dict, so Layer 1
+      never looks inside it);
+    * the experiment's ``sample`` block must mirror the profile's
+      ``specimen`` block, so the run id and catalog row name the same
+      specimen as the bundle's ``profiles/capa_pyrolysis.toml``.
+
+    Most CAPA experiments are single-setpoint, so we don't over-constrain
+    ramp parameters at this layer.
     """
     profile_ref = getattr(config, "domain_profile", None)
     if profile_ref is None:
         return []
-    if getattr(profile_ref, "id", None) != "capa.profiles.capa_pyrolysis":
+    if getattr(profile_ref, "id", None) != CAPA_PROFILE_ID:
         return []
 
     problems: list[ConfigProblem] = []
@@ -507,7 +520,7 @@ def _layer3_domain(config: Any, document: ConfigDocument) -> list[ConfigProblem]
         if capa_group:
             seen_groups[capa_group] = ch.name
 
-    for group, _acceptable_kinds in _CAPA_REQUIRED_GROUPS.items():
+    for group, _acceptable_kinds in CAPA_REQUIRED_GROUPS.items():
         if group not in seen_groups:
             problems.append(
                 ConfigProblem(
@@ -523,7 +536,74 @@ def _layer3_domain(config: Any, document: ConfigDocument) -> list[ConfigProblem]
                     fix_label=f"Map {group}",
                 )
             )
+    problems.extend(_capa_metadata_problems(profile_ref.metadata, document))
+    problems.extend(_capa_sample_problems(config, profile_ref.metadata, document))
     return problems
+
+
+def _capa_metadata_problems(metadata: Any, document: ConfigDocument) -> list[ConfigProblem]:
+    """Validate ``domain_profile.metadata`` against the CAPA metadata model."""
+    from capa.experiment.profiles.capa_pyrolysis import (  # noqa: PLC0415
+        CapaPyrolysisMetadata,
+    )
+
+    try:
+        CapaPyrolysisMetadata.model_validate(profile_model_fields(metadata))
+    except ValidationError as exc:
+        problems: list[ConfigProblem] = []
+        for err in exc.errors():
+            loc = tuple(_normalise_path_part(p) for p in err.get("loc", ()))
+            where = ".".join(str(p) for p in loc) or "metadata"
+            problems.append(
+                ConfigProblem(
+                    severity="error",
+                    code=f"capa_profile.metadata.{err.get('type', 'invalid')}",
+                    message=f"CAPA profile {where}: {err.get('msg', 'invalid')}",
+                    section="capa_profile",
+                    path=("domain_profile", "metadata", *loc),
+                    source_file=document.experiment_path,
+                )
+            )
+        return problems
+    return []
+
+
+def _capa_sample_problems(
+    config: Any, metadata: Any, document: ConfigDocument
+) -> list[ConfigProblem]:
+    """Flag ``sample`` fields that disagree with the profile's specimen.
+
+    The Setup tab keeps the two in step (the CAPA Profile section writes
+    ``sample`` whenever the specimen changes), so a mismatch means the
+    experiment file was edited by hand.
+    """
+    specimen = metadata.get("specimen") if isinstance(metadata, Mapping) else None
+    if not isinstance(specimen, Mapping):
+        # A missing specimen is reported by the metadata check.
+        return []
+    sample = config.sample.model_dump(mode="python")
+    problems: list[ConfigProblem] = []
+    for specimen_key, sample_key, expected, actual in sample_specimen_mismatches(sample, specimen):
+        problems.append(
+            ConfigProblem(
+                severity="error",
+                code="capa_profile.sample_mismatch",
+                message=(
+                    f"sample.{sample_key} is {_shown(actual)} but the CAPA profile "
+                    f"specimen's {specimen_key} is {_shown(expected)}. The sample block "
+                    "mirrors the specimen; edit the specimen in CAPA Profile."
+                ),
+                section="capa_profile",
+                path=("sample", sample_key),
+                source_file=document.experiment_path,
+                fix_label="Edit specimen",
+            )
+        )
+    return problems
+
+
+def _shown(value: Any) -> str:
+    return "unset" if value is None else repr(value)
 
 
 # ---------------------------------------------------------------------------

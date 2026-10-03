@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from capa.config import ConfigDocument
 from capa.config.capa_profile import (
@@ -11,11 +14,17 @@ from capa.config.capa_profile import (
     CAPA_REQUIRED_GROUPS,
     current_capa_mappings,
 )
+from capa.experiment.profiles.capa_pyrolysis import CapaPyrolysisMetadata
 from capa.ui.tabs.setup_sections.capa_profile import CapaProfileSection
 from capa.ui.tabs.setup_state import SetupDraft
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SIM_CAPA_EXP = REPO_ROOT / "configs" / "experiments" / "sim_capa_pyrolysis.yaml"
+CAPA_EXPERIMENTS = sorted(
+    p
+    for p in (REPO_ROOT / "configs" / "experiments").glob("*.yaml")
+    if "capa.profiles.capa_pyrolysis" in p.read_text(encoding="utf-8")
+)
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +72,16 @@ def _make_section(qtbot: Any) -> tuple[CapaProfileSection, SetupDraft]:
     return section, draft
 
 
+def _metadata(payload: dict[str, object] | None) -> dict[str, Any]:
+    """``domain_profile.metadata`` out of a section payload."""
+    assert payload is not None
+    profile = payload["domain_profile"]
+    assert isinstance(profile, dict)
+    metadata = profile["metadata"]
+    assert isinstance(metadata, dict)
+    return metadata
+
+
 def test_capa_profile_renders_mapping_rows(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
     groups = [row.group for row in section._mapping_rows]
@@ -78,18 +97,140 @@ def test_capa_profile_chip_states_reflect_existing_mappings(qtbot: Any) -> None:
         assert chips[group] == "✓", f"{group} should be ✓ in sim_capa.toml"
 
 
-def test_capa_profile_payload_includes_channels_and_profile(qtbot: Any) -> None:
+def test_capa_profile_payload_includes_channels_profile_and_sample(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
     payload = section.payload()
-    assert "channels" in payload
-    assert "domain_profile" in payload
+    assert payload is not None
+    assert set(payload) == {"channels", "domain_profile", "sample"}
     profile = payload["domain_profile"]
     assert isinstance(profile, dict)
-    assert "metadata" in profile
-    metadata = profile["metadata"]
-    assert "specimen" in metadata
-    assert "heater_program" in metadata
-    assert "atmosphere" in metadata
+    assert profile["id"] == "capa.profiles.capa_pyrolysis"
+    # What the panes write is exactly what the profile validates.
+    CapaPyrolysisMetadata.model_validate(profile["metadata"])
+
+
+@pytest.mark.parametrize("path", CAPA_EXPERIMENTS, ids=lambda p: p.name)
+def test_capa_profile_round_trips_shipped_configs(qtbot: Any, path: Path) -> None:
+    """Loading a shipped CAPA config and composing the payload without
+    edits reproduces its profile and sample blocks unchanged."""
+    document = ConfigDocument.load(path)
+    original_profile = copy.deepcopy(document.experiment_payload["domain_profile"])
+    original_sample = copy.deepcopy(document.experiment_payload["sample"])
+    section = CapaProfileSection()
+    qtbot.addWidget(section)
+    section.set_draft(SetupDraft(document=document))
+
+    payload = section.payload()
+    assert payload is not None
+    assert payload["domain_profile"] == original_profile
+    assert payload["sample"] == original_sample
+
+
+def test_capa_profile_specimen_edit_rewrites_sample(qtbot: Any) -> None:
+    """The Specimen pane is the one place the specimen is described; the
+    payload's ``sample`` block follows it and keeps ``extra``."""
+    section, draft = _make_section(qtbot)
+    draft.document.experiment_payload["sample"]["extra"] = {"lot": "B7"}
+    form = section._pane_forms["specimen"]
+    form.set_values(
+        {
+            "id": "PMMA-S073-001",
+            "material": "PMMA (cast)",
+            "initial_mass_g": 4.82,
+            "thickness_mm": 6.0,
+            "notes": "edge chipped",
+        }
+    )
+
+    payload = section.payload()
+    assert payload is not None
+    assert payload["sample"] == {
+        "id": "PMMA-S073-001",
+        "material": "PMMA (cast)",
+        "mass_g": 4.82,
+        "thickness_mm": 6.0,
+        "notes": "edge chipped",
+        "extra": {"lot": "B7"},
+    }
+
+
+def test_capa_profile_unset_required_number_is_omitted(qtbot: Any) -> None:
+    """A required number with no value stays out of the payload, so
+    validation reports it missing instead of accepting a placeholder."""
+    section, draft = _make_section(qtbot)
+    del draft.document.experiment_payload["domain_profile"]["metadata"]["atmosphere"]["purge"][
+        "target_flow_sccm"
+    ]
+    section.refresh()
+
+    payload = section.payload()
+    assert payload is not None
+    purge = _metadata(payload)["atmosphere"]["purge"]
+    assert "target_flow_sccm" not in purge
+
+
+def test_capa_profile_refresh_replaces_previous_draft_values(qtbot: Any) -> None:
+    """Switching to a draft whose specimen omits optional fields clears
+    the values the previous draft left in the form."""
+    section, draft = _make_section(qtbot)
+    assert section._pane_forms["specimen"].values()["conditioning"]
+    specimen = draft.document.experiment_payload["domain_profile"]["metadata"]["specimen"]
+    del specimen["conditioning"]
+    section.refresh()
+
+    assert section._pane_forms["specimen"].values()["conditioning"] is None
+
+
+def test_capa_profile_preserves_preflight_knobs(qtbot: Any) -> None:
+    """``_``-prefixed preflight knobs aren't pane fields but survive an edit."""
+    section, draft = _make_section(qtbot)
+    metadata = draft.document.experiment_payload["domain_profile"]["metadata"]
+    metadata["_safe_arm"] = {"max_heater_pv_c": 400.0}
+    section.refresh()
+
+    payload = section.payload()
+    assert payload is not None
+    assert _metadata(payload)["_safe_arm"] == {"max_heater_pv_c": 400.0}
+
+
+def test_capa_profile_without_profile_offers_add(qtbot: Any) -> None:
+    section, draft = _make_section(qtbot)
+    del draft.document.experiment_payload["domain_profile"]
+    draft.document.experiment_payload["sample"] = {
+        "id": "S-9",
+        "material": "PS",
+        "mass_g": 3.5,
+    }
+    section.refresh()
+
+    assert section._editor.isHidden()
+    assert not section._add_profile_btn.isHidden()
+    assert section.payload() is None
+
+    with qtbot.waitSignal(section.valuesChanged):
+        section._add_profile_btn.click()
+
+    payload = section.payload()
+    assert payload is not None
+    specimen = _metadata(payload)["specimen"]
+    assert specimen["id"] == "S-9"
+    assert specimen["material"] == "PS"
+    assert specimen["initial_mass_g"] == 3.5
+    # The heater program starts unset rather than at placeholder numbers.
+    assert _metadata(payload)["program"] == {}
+
+
+def test_capa_profile_leaves_other_profiles_alone(qtbot: Any) -> None:
+    section, draft = _make_section(qtbot)
+    draft.document.experiment_payload["domain_profile"] = {
+        "id": "capa.profiles.cone_calorimeter",
+        "metadata": {},
+    }
+    section.refresh()
+
+    assert section._editor.isHidden()
+    assert section._add_profile_btn.isHidden()
+    assert section.payload() is None
 
 
 def test_capa_profile_change_mapping_updates_channel_metadata(qtbot: Any) -> None:
@@ -118,24 +259,23 @@ def test_capa_profile_change_mapping_updates_channel_metadata(qtbot: Any) -> Non
 
 def test_capa_profile_specimen_pane_round_trips(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
-    assert section._specimen_form is not None
-    section._specimen_form.set_values(
+    section._pane_forms["specimen"].set_values(
         {
             "id": "pmma_disk_S073-001",
             "material": "PMMA",
             "form": "disk",
-            "mass_g": 25.0,
+            "initial_mass_g": 25.0,
             "thickness_mm": 10.0,
             "specimen_holder": "ceramic_ring_25mm",
         }
     )
     payload = section.payload()
-    domain_profile = payload["domain_profile"]
-    assert isinstance(domain_profile, dict)
-    metadata = domain_profile["metadata"]
-    assert metadata["specimen"]["id"] == "pmma_disk_S073-001"
-    assert metadata["specimen"]["material"] == "PMMA"
-    assert metadata["specimen"]["mass_g"] == 25.0
+    assert payload is not None
+    specimen = _metadata(payload)["specimen"]
+    assert specimen["id"] == "pmma_disk_S073-001"
+    assert specimen["material"] == "PMMA"
+    assert specimen["initial_mass_g"] == 25.0
+    assert specimen["thickness_mm"] == 10.0
 
 
 def test_capa_profile_compose_preserves_unmanaged_capa_group(qtbot: Any) -> None:
@@ -206,7 +346,6 @@ def test_apply_artifact_in_bracket_writes_setpoint_and_ref(qtbot: Any) -> None:
     ``heater_setpoint_c`` (linearly interpolated) and
     ``flux_calibration_ref`` (the artifact id) back into the form."""
     section, _ = _make_section(qtbot)
-    assert section._heater_form is not None
     section._heater_form.set_values({"target_heat_flux_kw_m2": 50.0})
     artifact = _make_artifact(points=[(25.0, 450.0), (75.0, 750.0)])
 
@@ -224,9 +363,8 @@ def test_apply_artifact_out_of_bracket_leaves_form_alone(qtbot: Any, monkeypatch
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     section, _ = _make_section(qtbot)
-    assert section._heater_form is not None
     section._heater_form.set_values(
-        {"target_heat_flux_kw_m2": 100.0, "heater_setpoint_c": 600.0, "flux_calibration_ref": ""}
+        {"target_heat_flux_kw_m2": 100.0, "heater_setpoint_c": 600.0, "flux_calibration_ref": None}
     )
     artifact = _make_artifact(points=[(25.0, 450.0), (75.0, 700.0)])
 
@@ -235,19 +373,18 @@ def test_apply_artifact_out_of_bracket_leaves_form_alone(qtbot: Any, monkeypatch
     values = section._heater_form.values()
     # Setpoint left at its operator-supplied value.
     assert values["heater_setpoint_c"] == 600.0
-    assert values["flux_calibration_ref"] == ""
+    assert values["flux_calibration_ref"] is None
     assert "does not bracket" in section._tune_status_label.text()
 
 
 def test_apply_artifact_no_target_prompts_operator(qtbot: Any, monkeypatch: Any) -> None:
-    """Applying with target ≤ 0 is a no-op with an informational toast."""
+    """Applying with no target set is a no-op with an informational toast."""
     from PySide6.QtWidgets import QMessageBox
 
     called: list[tuple[Any, ...]] = []
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: called.append(args))
     section, _ = _make_section(qtbot)
-    assert section._heater_form is not None
-    section._heater_form.set_values({"target_heat_flux_kw_m2": 0.0})
+    section._heater_form.set_values({"target_heat_flux_kw_m2": None})
     artifact = _make_artifact(points=[(25.0, 450.0), (75.0, 700.0)])
 
     section._apply_artifact(artifact)
@@ -257,7 +394,6 @@ def test_apply_artifact_no_target_prompts_operator(qtbot: Any, monkeypatch: Any)
 
 def test_clear_tune_ref_clears_ref_only(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
-    assert section._heater_form is not None
     section._heater_form.set_values(
         {
             "target_heat_flux_kw_m2": 50.0,
@@ -269,7 +405,7 @@ def test_clear_tune_ref_clears_ref_only(qtbot: Any) -> None:
     section._on_clear_tune_ref_clicked()
 
     values = section._heater_form.values()
-    assert values["flux_calibration_ref"] == ""
+    assert values["flux_calibration_ref"] is None
     # Setpoint untouched.
     assert values["heater_setpoint_c"] == 600.0
 
@@ -312,7 +448,6 @@ def test_holding_tick_applies_setpoint_to_heater_form(qtbot: Any, monkeypatch: A
     drive headlessly, but the apply logic is the contract worth
     pinning."""
     section, _ = _make_section(qtbot)
-    assert section._heater_form is not None
     monkeypatch.setattr(
         section,
         "_prompt_apply_hold",

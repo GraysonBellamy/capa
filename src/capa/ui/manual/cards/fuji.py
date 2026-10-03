@@ -248,10 +248,14 @@ class FujiCard(DeviceCard):
 
     def _build_calibration_gas_section(self) -> None:
         body = self.add_section("Calibration gas setting")
+        # Which gas on one line, its concentration on the next: one line
+        # of all six would set the width of the whole right-hand column.
         row = self._row(body, "Gas:")
         channel = self._combo(row, self._channels, "Analyzer channel.")
         number = self._combo(row, ("1", "2"), "Range the gas belongs to.")
         kind = self._combo(row, CALIBRATION_KINDS, "Zero gas or span gas.")
+        row.addStretch(1)
+        row = self._row(body, "Value:")
         value = QDoubleSpinBox(self)
         value.setDecimals(3)
         value.setRange(0.0, 100000.0)
@@ -287,6 +291,8 @@ class FujiCard(DeviceCard):
         row = self._row(body, "Calibrate:")
         self._cal_channel = self._combo(row, self._channels, "Analyzer channel to calibrate.")
         self._cal_kind = self._combo(row, CALIBRATION_KINDS, "Zero or span.")
+        row.addStretch(1)
+        row = self._row(body, "Gas value:")
         self._cal_value = QDoubleSpinBox(self)
         self._cal_value.setDecimals(3)
         self._cal_value.setRange(0.0, 100000.0)
@@ -296,6 +302,7 @@ class FujiCard(DeviceCard):
         self.register_action_widget(self._cal_value)
         row.addWidget(self._cal_value)
         self._cal_unit = self._combo(row, GAS_UNITS, "Unit of the gas value.")
+        row.addStretch(1)
 
         row = self._row(body, "Gas label:")
         self._cal_label = QLineEdit(self)

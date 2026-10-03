@@ -192,9 +192,12 @@ sample:
 | `notes` | no | Free text. |
 | `extra` | no | Free-form `dict[str, Any]` for fields the schema does not cover. |
 
-When `domain_profile` is set, the profile's own metadata model
-layers additional required specimen fields on top of these (initial
-mass, form, holder, etc.) — see [CAPA profile fields](capa-profile.md).
+When the CAPA profile is set, its `specimen` block is the source and
+`sample` mirrors `id`, `material`, `mass_g` (from `initial_mass_g`),
+`thickness_mm` and `notes` from it; Layer 3 validation reports any
+field that disagrees. The specimen block adds the profile's own required
+fields (form, holder, etc.) — see
+[CAPA profile fields](capa-profile.md#the-sample-block-mirrors-the-specimen).
 
 ## `storage:`
 
@@ -327,7 +330,8 @@ The Setup validation pipeline has five layers:
    channels, adapter families match binding kinds, and camera/device names
    do not collide.
 3. **Domain** - when the CAPA profile is set, required channel groups are
-   present.
+   present, `domain_profile.metadata` validates against the profile's
+   model, and `sample` mirrors the profile's specimen.
 4. **Resource** - passive adapter/materialization dry run and resource
    conflict checks. This does not open hardware.
 5. **Live** - optional discovery and handshake checks. This touches

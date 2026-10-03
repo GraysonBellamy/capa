@@ -8,6 +8,11 @@ from typing import Annotated
 
 import typer
 
+from capa.config.capa_profile import (
+    CAPA_PROFILE_ID,
+    profile_model_fields,
+    sample_specimen_mismatches,
+)
 from capa.core.errors import CapaError
 from capa.core.logging import configure_pre_run_logging
 from capa.experiment.config import ExperimentConfig
@@ -95,10 +100,24 @@ def profile_validate(
         raise typer.Exit(code=2)
 
     try:
-        meta_validator(ec.domain_profile.metadata)
+        meta_validator(profile_model_fields(ec.domain_profile.metadata))
     except Exception as exc:
         typer.secho(f"profile validate: {exc}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2) from exc
+
+    specimen = ec.domain_profile.metadata.get("specimen")
+    if profile_id == CAPA_PROFILE_ID and isinstance(specimen, dict):
+        mismatches = sample_specimen_mismatches(ec.sample.model_dump(), specimen)
+        for specimen_key, sample_key, expected, actual in mismatches:
+            typer.secho(
+                f"profile validate: sample.{sample_key} is {actual!r} but "
+                f"specimen.{specimen_key} is {expected!r}; sample mirrors the specimen",
+                err=True,
+                fg=typer.colors.RED,
+            )
+        if mismatches:
+            raise typer.Exit(code=2)
+
     typer.echo(f"OK: {config}")
     typer.echo(f"  profile: {profile_id}")
     typer.echo(f"  standards: {', '.join(ec.domain_profile.standard_refs) or '(none)'}")

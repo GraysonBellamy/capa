@@ -16,10 +16,11 @@ run, with bundle recording + state gating).
 from __future__ import annotations
 
 import structlog
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QDockWidget,
     QLabel,
+    QMainWindow,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -92,12 +93,17 @@ class ManualControlDock(QDockWidget):
         self._controller.pool_changed.connect(self._on_pool_changed)
 
         # Outer scroll area so the dock stays usable when many cards stack.
+        # The horizontal bar stays available: Qt lets a dock shrink below
+        # its cards' minimum width, and without the bar the right-hand
+        # controls would be clipped out of reach.
         outer_widget = QWidget(self)
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setWidget(outer_widget)
         self.setWidget(self._scroll)
+        # Re-fit on show: the dock may have been hidden, or restored
+        # narrower, when the cards were built.
+        self.visibilityChanged.connect(self._on_visibility_changed)
 
         self._cards_layout = QVBoxLayout(outer_widget)
         self._cards_layout.setContentsMargins(6, 6, 6, 6)
@@ -215,6 +221,38 @@ class ManualControlDock(QDockWidget):
         # Schedule a best-effort readback refresh for cards that already
         # have an open adapter (registry-shared with a recent run).
         self._schedule_initial_readback()
+
+        # Deferred so the fit sees the settled layout: MainWindow adds
+        # its other right-hand docks after this call returns.
+        QTimer.singleShot(0, self, self.fit_width_to_cards)
+
+    def fit_width_to_cards(self) -> None:
+        """Widen the dock until the widest card shows without clipping.
+
+        Only ever widens: an operator who narrows the dock afterwards
+        gets the horizontal scrollbar instead. No-op while floating or
+        hidden, since only a docked, laid-out dock has a width to fix.
+        """
+        main_window = self.parentWidget()
+        if not isinstance(main_window, QMainWindow) or self.isFloating() or not self.isVisible():
+            return
+        content = self._scroll.widget()
+        if content is None:
+            return
+        # Reserve the vertical bar whether or not it shows yet, so the
+        # fit survives cards stacking taller than the dock.
+        needed = (
+            content.minimumSizeHint().width()
+            + self._scroll.verticalScrollBar().sizeHint().width()
+            + 2 * self._scroll.frameWidth()
+        )
+        deficit = needed - self._scroll.width()
+        if deficit > 0:
+            main_window.resizeDocks([self], [self.width() + deficit], Qt.Orientation.Horizontal)
+
+    def _on_visibility_changed(self, visible: bool) -> None:
+        if visible:
+            QTimer.singleShot(0, self, self.fit_width_to_cards)
 
     def _on_pool_changed(self, pool: object) -> None:
         if pool is not None:

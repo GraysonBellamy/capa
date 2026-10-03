@@ -38,7 +38,7 @@ Arguments:
   CONFIG  [required]
 ```
 
-Loads the experiment config, then runs the profile-specific metadata validator (CAPA's [`validate_metadata`](../../src/capa/experiment/profiles/capa_pyrolysis.py) for `capa_pyrolysis` profiles, the cone-calorimeter equivalent for `cone_calorimeter`). The check is **metadata-only** — it does not touch hardware or run preflight checks.
+Loads the experiment config, then runs the profile-specific metadata validator (CAPA's [`validate_metadata`](../../src/capa/experiment/profiles/capa_pyrolysis.py) for `capa_pyrolysis` profiles, the cone-calorimeter equivalent for `cone_calorimeter`). Keys starting with `_` (preflight tuning knobs such as `_safe_arm`) are not model fields and are skipped. For CAPA profiles it also checks that the experiment's `sample` block mirrors the profile's specimen (id, material, mass, thickness, notes) and reports each field that disagrees. The check is **metadata-only** — it does not touch hardware or run preflight checks.
 
 The active profile is picked by the `domain_profile.id` field in the config:
 
@@ -71,7 +71,7 @@ OK: configs/experiments/sim_freerun.yaml (no domain_profile)
 | Code | Meaning |
 |---|---|
 | 0 | Profile metadata validated, or config has no `domain_profile` block. |
-| 2 | Config load failed, profile id is unknown, or profile metadata failed validation. |
+| 2 | Config load failed, profile id is unknown, profile metadata failed validation, or `sample` disagrees with the CAPA specimen. |
 
 ---
 

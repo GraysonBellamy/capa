@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from PySide6.QtWidgets import QMessageBox, QPushButton
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QPushButton, QWidget
 
 from capa.channels.calibration import Identity
 from capa.channels.spec import ChannelSpec, WatlowParameter
@@ -671,6 +672,38 @@ class TestManualControlDock:
         assert set(dock._cards_by_name.keys()) == {"balance.main", "mfc.purge"}
         assert dock._empty_label.isHidden()
         _close_pool_sync(controller)
+
+    def test_dock_widens_to_fit_cards_and_scrolls_when_narrowed(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        # A dock narrower than its cards used to clip the right-hand
+        # controls with no way to scroll to them.
+        cfg = _make_config(
+            (
+                DeviceConfig(name="heater", adapter="capa.devices.sim.watlow_sim"),
+                DeviceConfig(name="air_mfc", adapter="capa.devices.sim.alicat_sim"),
+            )
+        )
+        window = QMainWindow()
+        window.setCentralWidget(QWidget())
+        qtbot.addWidget(window)
+        dock = ManualControlDock(controller=controller, operator_provider=op_provider)
+        window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        window.resize(1500, 950)
+        window.show()
+        qtbot.waitExposed(window)
+
+        dock.load_config(cfg)
+        content = dock._scroll.widget()
+        assert content is not None
+        content_min = content.minimumSizeHint().width()
+        qtbot.waitUntil(lambda: dock._scroll.viewport().width() >= content_min)
+
+        window.resizeDocks([dock], [content_min // 2], Qt.Orientation.Horizontal)
+        qtbot.waitUntil(lambda: dock._scroll.horizontalScrollBar().isVisible())
 
     def test_reload_config_rebuilds_cards(
         self,

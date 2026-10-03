@@ -81,6 +81,64 @@ def test_layer3_skipped_when_profile_is_not_capa(configs_dir: Path) -> None:
     assert capa_problems == []
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "sim_capa_pyrolysis.yaml",
+        "capa_real_full.yaml",
+        "capa_real_partial_a.yaml",
+        "capa_real_partial_b.yaml",
+    ],
+)
+def test_layer3_shipped_capa_configs_are_clean(configs_dir: Path, name: str) -> None:
+    """Every shipped CAPA config has valid metadata and a matching sample."""
+    doc = ConfigDocument.load(configs_dir / "experiments" / name)
+    problems = validate(doc)
+    assert [p for p in problems if p.code.startswith("capa_profile.")] == []
+
+
+def test_layer3_capa_metadata_validated_against_model(configs_dir: Path) -> None:
+    """``domain_profile.metadata`` is a free-form dict to Layer 1; Layer 3
+    checks it against the CAPA model and points at the offending field."""
+    doc = ConfigDocument.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+    metadata = doc.experiment_payload["domain_profile"]["metadata"]
+    del metadata["specimen"]["initial_mass_g"]
+    metadata["atmosphere"]["purge"]["species"] = ""
+    metadata["program"]["unknown_knob"] = 1
+    problems = validate(doc)
+    by_path = {p.path: p for p in problems if p.code.startswith("capa_profile.metadata.")}
+    assert set(by_path) == {
+        ("domain_profile", "metadata", "specimen", "initial_mass_g"),
+        ("domain_profile", "metadata", "atmosphere", "purge", "species"),
+        ("domain_profile", "metadata", "program", "unknown_knob"),
+    }
+    assert all(p.severity == "error" and p.section == "capa_profile" for p in by_path.values())
+    assert by_path[("domain_profile", "metadata", "specimen", "initial_mass_g")].code == (
+        "capa_profile.metadata.missing"
+    )
+
+
+def test_layer3_preflight_knobs_are_not_model_fields(configs_dir: Path) -> None:
+    """``_``-prefixed preflight knobs share the metadata block but are
+    not validated against the model."""
+    doc = ConfigDocument.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+    doc.experiment_payload["domain_profile"]["metadata"]["_safe_arm"] = {"max_heater_pv_c": 400.0}
+    problems = validate(doc)
+    assert [p for p in problems if p.code.startswith("capa_profile.")] == []
+
+
+def test_layer3_sample_must_mirror_specimen(configs_dir: Path) -> None:
+    """A hand-edited sample that disagrees with the specimen is an error
+    per mismatched field, addressed at the sample field."""
+    doc = ConfigDocument.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+    doc.experiment_payload["sample"]["id"] = "SOMETHING-ELSE"
+    doc.experiment_payload["sample"].pop("mass_g")
+    problems = validate(doc)
+    mismatches = [p for p in problems if p.code == "capa_profile.sample_mismatch"]
+    assert {p.path for p in mismatches} == {("sample", "id"), ("sample", "mass_g")}
+    assert all(p.severity == "error" for p in mismatches)
+
+
 # ---------------------------------------------------------------------------
 # Layer 4 — resource dry run.
 # ---------------------------------------------------------------------------

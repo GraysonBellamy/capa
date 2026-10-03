@@ -776,6 +776,9 @@ class MainWindow(QMainWindow):
             self.restoreState(self._default_window_state)
         if self._default_window_geometry is not None:
             self.restoreGeometry(self._default_window_geometry)
+        # The default layout was captured before any cards existed, so
+        # it holds the empty dock's width.
+        QTimer.singleShot(0, self._manual_dock, self._manual_dock.fit_width_to_cards)
         with contextlib.suppress(OSError):
             if WINDOW_STATE_PATH.exists():
                 WINDOW_STATE_PATH.unlink()

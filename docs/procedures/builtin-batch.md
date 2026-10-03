@@ -81,7 +81,7 @@ Sample-id template examples:
 Each iteration produces a fresh bundle via [`run_headless`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/runtime/headless.py). The child config is derived from the parent's `ExperimentConfig` with three changes:
 
 1. **`procedure`** swaps to the inner `ProcedureRef`.
-2. **`sample.id`** is the templated child id; other sample fields carry over.
+2. **`sample.id`** is the templated child id; other sample fields carry over. When the domain profile has a `specimen` block, its `id` gets the same child id, since `sample` mirrors the specimen.
 3. **`custom['batch']`** gains:
    ```json
    {

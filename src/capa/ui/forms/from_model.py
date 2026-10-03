@@ -254,27 +254,39 @@ class ModelForm(QWidget):
 
         Hidden fields (the ``kind`` discriminator) are reinjected from
         the model class so the dict round-trips through
-        ``model_cls.model_validate(...)`` cleanly."""
+        ``model_cls.model_validate(...)`` cleanly. A required field whose
+        widget is still unset (a numeric field with no value yet) is
+        left out, so validation reports it as missing rather than
+        accepting a placeholder."""
         out: dict[str, Any] = {}
         for name, widget in self._fields.items():
-            out[name] = widget.value()
+            value = widget.value()
+            if value is None and self._model_cls.model_fields[name].is_required():
+                continue
+            out[name] = value
         for hidden in self._hidden_fields & set(self._model_cls.model_fields):
             default = self._model_cls.model_fields[hidden].default
             if default is not None:
                 out[hidden] = default
         return out
 
-    def set_values(self, data: dict[str, Any] | BaseModel) -> None:
+    def set_values(self, data: dict[str, Any] | BaseModel, *, replace: bool = False) -> None:
         """Populate the form from a dict or a model instance.
 
-        Unknown keys are ignored; missing keys leave the field at its
-        current value. Use this from the Method editor's row-selection
-        handler to swap one step's values for another's."""
+        Unknown keys are ignored. Missing keys leave the field at its
+        current value — use this from the Method editor's row-selection
+        handler to swap one step's values for another's — unless
+        ``replace`` is set, in which case they fall back to the field's
+        default (or its unset state). Pass ``replace=True`` when ``data``
+        is the complete value, e.g. a section re-reading its draft."""
         if isinstance(data, BaseModel):
             data = data.model_dump(mode="python")
+        defaults = self._defaults_dict() if replace else {}
         for name, widget in self._fields.items():
             if name in data:
                 widget.set_value(data[name])
+            elif replace:
+                widget.set_value(defaults.get(name))
 
     def validate(self) -> list[dict[str, Any]]:
         """Validate current state. Returns the Pydantic

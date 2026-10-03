@@ -36,16 +36,15 @@ You're ready to run.
 
 ## Editing between runs
 
-The standard between-runs edit is the new sample id and any
-sample-specific notes:
+The standard between-runs edit is the new specimen:
 
-1. **Experiment → Operator & sample.** Update the sample id.
-2. **Experiment → CAPA Profile.** Update specimen mass (post-tare) and
-   anything else that's per-sample.
-3. The connection strip flips to ◐ **Draft has *N* unsaved edit(s).**
-4. Click **Apply && Connect**. Strip cycles CONNECTING → CONNECTED.
+1. **Experiment → CAPA Profile → Specimen.** Update the specimen id,
+   initial mass (post-tare) and anything else that's per-sample. The
+   experiment's sample id follows automatically.
+2. The connection strip flips to ◐ **Draft has *N* unsaved edit(s).**
+3. Click **Apply && Connect**. Strip cycles CONNECTING → CONNECTED.
 
-That's the loop. Five clicks, fifteen seconds.
+That's the loop — about fifteen seconds.
 
 For setpoint changes you want *during* a run, don't use Apply — use the
 [manual control dock](../user-guide/manual-controls.md). Apply is

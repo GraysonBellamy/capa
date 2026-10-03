@@ -42,7 +42,7 @@ operator:
 sample:
   id: REAL-C-001
   material: PMMA
-  notes: "All-real integration (Windows)"
+  mass_g: 5.0
 
 tags:
   - real
