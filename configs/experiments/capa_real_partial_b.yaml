@@ -42,7 +42,7 @@ operator:
 sample:
   id: REAL-B-001
   material: PMMA
-  notes: "Mixed-hardware integration"
+  mass_g: 5.0
 
 tags:
   - real

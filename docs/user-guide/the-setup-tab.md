@@ -211,17 +211,34 @@ section in the outline.
 
 ### Experiment → CAPA Profile
 
-The cone-calorimeter scientific metadata: external flux, sample mass,
-distance, atmosphere, holder. See
+The CAPA profile's scientific metadata, in four panes built directly from
+the profile's models: **Specimen**, **Heater program** (target heat flux,
+heater setpoint, tune-artifact lookup), **Atmosphere** (purge gas,
+optional reactive gas, leak-check timestamp) and **Analyzer & SOP**.
+Below them, the required-channel mapping panel ties each CAPA channel
+group to a hardware channel. See
 [CAPA profile fields](../configuration/capa-profile.md) for the per-field
 reference. **This is the section to fill in for a real run** — most of it
 is irrelevant for a simulator tour.
 
+The Specimen pane is the one place to describe the specimen. Every edit
+also rewrites the experiment's `sample` block (id, material, mass,
+thickness, notes), which names the run id and the catalog entry.
+
+Required numbers with no value yet show `—`; they and any other
+missing or invalid field appear in the Problems panel. For an experiment
+without a domain profile the section offers **Add CAPA profile**, which
+starts the specimen from the current sample.
+
 ### Experiment → Operator & sample
 
-Free-text fields: operator id (goes to the status bar's `op` pill), sample
-id, notes. The operator id is stamped into every event the run records,
-so changing it mid-day matters for the audit trail.
+Operator id (goes to the status bar's `op` pill), calibration set, tags
+and custom fields. The operator id is stamped into every event the run
+records, so changing it mid-day matters for the audit trail.
+
+While the CAPA profile is on, the sample fields here are read-only — they
+show what the Specimen pane wrote — and **Edit specimen** jumps to CAPA
+Profile. Without a domain profile, the sample is edited here.
 
 ### Experiment → Procedure
 

@@ -121,18 +121,23 @@ will spell out exactly what's changing.
 **Experiment → CAPA Profile** is the section to fill in for a real run.
 Per [CAPA profile fields](../configuration/capa-profile.md):
 
-- **Atmosphere:** carrier gas + flow targets.
-- **Specimen:** mass (post-tare), form, holder geometry.
-- **Heat-flux setpoint** and the calibration source for it.
-- **Leak-check timestamp** (from your pre-flight).
+- **Specimen:** id, material, initial mass (post-tare), form, holder
+  geometry. This is the one place you describe the specimen; the
+  experiment's sample block (the sample id in the Run tab's run-id line
+  and the catalog) is filled from it.
+- **Heater program:** target heat flux and the heater setpoint that
+  delivers it, plus the calibration source for it.
+- **Atmosphere:** purge gas + flow target, and the leak-check timestamp
+  from your pre-flight.
 
 These don't change the run — they record *what was measured*. Five
 years from now this is what tells you whether two bundles are
-comparable.
+comparable. Anything required and still empty shows up in the Problems
+panel, and Apply & Connect stays disabled until it's filled in.
 
-Also fill in **Experiment → Operator & sample** — operator id (stamped
-into every event) and sample id (used in the run-id line on the Run
-tab).
+Also fill in **Experiment → Operator & sample** with the operator id
+(stamped into every event). Its sample fields are read-only while the
+CAPA profile is on; **Edit specimen** jumps back to CAPA Profile.
 
 ---
 
@@ -249,7 +254,7 @@ You don't need to close capa between runs. The next run typically just
 needs:
 
 - A new sample loaded.
-- The Operator & sample fields updated (new sample id).
+- The CAPA Profile specimen updated (new specimen id and mass).
 - Click **Apply & Connect** to capture the change. See
   [what Apply & Connect actually does](daily-workflow.md#what-apply-connect-actually-does).
 - Switch to Run, Start.

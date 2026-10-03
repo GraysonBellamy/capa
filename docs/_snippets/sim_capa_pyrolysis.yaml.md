@@ -14,7 +14,7 @@ domain_profile:
   id: capa.profiles.capa_pyrolysis  # CAPA scientific layer
   metadata:
     specimen:
-      id: SIM-PMMA-001
+      id: SIM-CAPA-001
       material: PMMA
       initial_mass_g: 5.0
       form: disk
@@ -41,7 +41,7 @@ operator:
 sample:
   id: SIM-CAPA-001
   material: PMMA
-  notes: "CAPA sim smoke run"
+  mass_g: 5.0
 
 tags: [sim, capa, pyrolysis]
 ```

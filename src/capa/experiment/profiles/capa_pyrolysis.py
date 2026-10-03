@@ -11,9 +11,11 @@ single setpoint hold; dynamic programs (ramps) are the minority.
 
 This profile contributes:
 
-- **specimen fields** — id, material, mass, form (disk for ~99% of runs;
-  ``other`` for rare non-disk shapes), particle size when relevant,
-  specimen-holder description and optional dimensions, conditioning notes
+- **specimen fields** — id, material, mass, optional thickness, form (disk
+  for ~99% of runs; ``other`` for rare non-disk shapes), particle size when
+  relevant, specimen-holder description and optional dimensions,
+  conditioning notes. The experiment's ``sample`` block mirrors the
+  identity fields from here.
 - **method fields** — heater program (target heat flux + heater setpoint,
   optional flux-calibration reference, optional ramp rate), atmosphere
   composition + purge flow target, optional secondary-flow for
@@ -73,17 +75,30 @@ class CapaSpecimen(BaseModel):
     """CAPA-specific specimen metadata.
 
     Required at run-arm. Missing fields fail :func:`validate_metadata`.
+
+    This block is the source of truth for the specimen's identity: the
+    experiment's top-level ``sample`` block mirrors ``id``, ``material``,
+    ``initial_mass_g`` (as ``mass_g``), ``thickness_mm`` and ``notes``
+    from here (see :data:`capa.config.capa_profile.SPECIMEN_SAMPLE_FIELDS`).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    id: str
-    material: str
+    id: str = Field(min_length=1)
+    material: str = Field(min_length=1)
     initial_mass_g: float = Field(
         gt=0,
         json_schema_extra={
             "capa_unit": "g",
             "capa_help": "Initial sample mass on the load cell, before heating begins.",
+        },
+    )
+    thickness_mm: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "mm",
+            "capa_help": "Specimen thickness. Leave unset when it isn't meaningful (powders).",
         },
     )
     form: SpecimenForm
@@ -99,7 +114,7 @@ class CapaSpecimen(BaseModel):
         },
     )
 
-    specimen_holder: str
+    specimen_holder: str = Field(min_length=1)
     """Specimen-holder description (e.g. ``"stainless steel cup"``). The
     holder geometry varies by run — depth and diameter, plus optional
     insulation, change the exposed surface area."""
@@ -192,10 +207,10 @@ class PurgeGas(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    species: str
+    species: str = Field(min_length=1)
     """Common name. ``"N2"``, ``"Ar"``, ``"He"``, ``"air"``, ``"5% O2/N2"``."""
 
-    purity: str
+    purity: str = Field(min_length=1)
     """Grade / purity. ``"UHP 5.0"``, ``"99.999%"``, ``"zero-grade air"``."""
 
     supplier: str | None = None
@@ -219,10 +234,10 @@ class ReactiveGas(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    species: str
+    species: str = Field(min_length=1)
     """e.g. ``"O2"``, ``"H2"``, ``"CO"``."""
 
-    purity: str
+    purity: str = Field(min_length=1)
     target_flow_sccm: float = Field(
         ge=0,
         json_schema_extra={

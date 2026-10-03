@@ -16,8 +16,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtWidgets import QPushButton
+
 from capa.config.problems import ConfigProblem
 from capa.ui.tabs.setup import SetupTab
+from capa.ui.tabs.setup_sections.capa_profile import CapaProfileSection
 from capa.ui.tabs.setup_sections.experiment import ExperimentSection
 from capa.ui.tabs.setup_sections.safety import SafetySection
 from capa.ui.tabs.setup_sections.storage import StorageSection
@@ -148,6 +151,90 @@ def test_experiment_edit_round_trips_through_save(qtbot: Any, tmp_path: Path) ->
 
     reloaded = ExperimentConfig.load(work_exp)
     assert reloaded.operator.id == "edited_op"
+
+
+# ---------------------------------------------------------------------------
+# Sample ownership under the CAPA profile.
+# ---------------------------------------------------------------------------
+
+
+def test_capa_profile_owns_sample(qtbot: Any) -> None:
+    """With the CAPA profile on, the sample fields are read-only and the
+    section leaves ``sample`` out of its payload."""
+    tab = SetupTab()
+    qtbot.addWidget(tab)
+    tab.load_path(SIM_CAPA_EXP)
+    section = tab._sections["experiment"]
+    assert isinstance(section, ExperimentSection)
+    sample_widget = section._form.field_widget("sample")
+    assert sample_widget is not None
+    assert not sample_widget.isEnabled()
+    assert not section._profile_notice.isHidden()
+    assert "sample" not in section.payload()
+
+    edit_button = section._profile_notice.findChild(QPushButton)
+    assert edit_button is not None
+    with qtbot.waitSignal(section.editSectionRequested) as blocker:
+        edit_button.click()
+    assert blocker.args == ["capa_profile"]
+    assert tab._stack.currentWidget() is tab._section_panes["capa_profile"]
+
+
+def test_experiment_section_edits_sample_without_profile(qtbot: Any) -> None:
+    tab = SetupTab()
+    qtbot.addWidget(tab)
+    tab.load_path(SIM_CAPA_EXP)
+    tab.draft.document.experiment_payload.pop("domain_profile")
+    section = tab._sections["experiment"]
+    assert isinstance(section, ExperimentSection)
+    section.refresh()
+
+    sample_widget = section._form.field_widget("sample")
+    assert sample_widget is not None
+    assert sample_widget.isEnabled()
+    assert section._profile_notice.isHidden()
+    assert "sample" in section.payload()
+
+
+def test_specimen_edit_updates_sample_everywhere(qtbot: Any) -> None:
+    """Editing the specimen rewrites ``sample`` in the draft and the
+    Operator & sample section re-reads it straight away."""
+    tab = SetupTab()
+    qtbot.addWidget(tab)
+    tab.load_path(SIM_CAPA_EXP)
+    capa = tab._sections["capa_profile"]
+    assert isinstance(capa, CapaProfileSection)
+
+    capa._pane_forms["specimen"].set_values({"id": "PMMA-042", "initial_mass_g": 4.75})
+    capa._pane_forms["specimen"].valuesChanged.emit()
+
+    sample = tab.draft.document.experiment_payload["sample"]
+    assert sample["id"] == "PMMA-042"
+    assert sample["mass_g"] == 4.75
+    experiment = tab._sections["experiment"]
+    assert isinstance(experiment, ExperimentSection)
+    assert experiment._form.values()["sample"]["id"] == "PMMA-042"
+    tab.draft.validate()
+    assert [p for p in tab.draft.problems if p.severity == "error"] == []
+
+
+def test_capa_mapping_edit_refreshes_channels_section(qtbot: Any) -> None:
+    """A mapping changed in CAPA Profile reaches the Channels section, so
+    a later Channels edit can't write its stale copy back."""
+    tab = SetupTab()
+    qtbot.addWidget(tab)
+    tab.load_path(SIM_CAPA_EXP)
+    capa = tab._sections["capa_profile"]
+    assert isinstance(capa, CapaProfileSection)
+    row = next(r for r in capa._mapping_rows if r.group == "heater_pv")
+    row.combo.setCurrentIndex(0)  # "(none)" — emits through _on_mapping_changed
+
+    channels_payload = tab._sections["channels"].payload()
+    assert channels_payload is not None
+    channels = channels_payload["channels"]
+    assert isinstance(channels, list)
+    pv = next(c for c in channels if c["name"] == "heater.pv")
+    assert "capa_group" not in (pv.get("metadata") or {})
 
 
 # ---------------------------------------------------------------------------

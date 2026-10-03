@@ -1,25 +1,36 @@
-"""CAPA Profile section — curated profile editor.
+"""CAPA Profile section — the profile metadata editor.
 
-Three small metadata panes (Specimen / Heater Program / Atmosphere)
-sit above the required-mapping panel that ties each CAPA
-group to a hardware channel. The mapping panel is the operator-visible
-payoff: every required group reports a green ✓ / red ✗ chip, and
-selecting a channel writes ``metadata["capa_group"]`` on it without
-touching the Channels section.
+Four metadata panes (Specimen / Heater program / Atmosphere / Analyzer
+& SOP) sit above the required-mapping panel that ties each CAPA group
+to a hardware channel. Every pane is built from the profile's own
+models (:class:`CapaSpecimen`, :class:`HeaterProgram`,
+:class:`Atmosphere`, and the remaining top-level fields of
+:class:`CapaPyrolysisMetadata`), so what the form writes is exactly
+what the profile validates.
 
-The metadata panes edit ``experiment_payload["domain_profile"]["metadata"]``
-through view models defined locally — :class:`DomainProfileRef.metadata`
-is a free-form ``dict[str, Any]`` so we curate the editor without
-changing the runtime model.
+The Specimen pane is the one place the operator describes the
+specimen. Every edit also rewrites the experiment's ``sample`` block
+from it (:func:`capa.config.capa_profile.sample_from_specimen`); the
+Operator & sample section shows that block read-only while the profile
+is active.
+
+The mapping panel is the operator-visible payoff for the hardware
+side: every required group reports a green ✓ / red ✗ chip, and
+selecting a channel writes ``metadata["capa_group"]`` on it.
+
+Experiments without a domain profile get an "Add CAPA profile" button
+that seeds the specimen from the existing ``sample`` block; experiments
+on a different profile are left alone.
 """
 
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, create_model
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -45,11 +56,21 @@ from capa.calibration.tune_artifact import (
 from capa.channels.spec import ChannelKind
 from capa.config.capa_profile import (
     CAPA_OPTIONAL_GROUPS,
+    CAPA_PROFILE_ID,
     CAPA_REQUIRED_GROUPS,
+    SPECIMEN_SAMPLE_FIELDS,
     current_capa_mappings,
+    is_capa_profile,
+    sample_from_specimen,
 )
 from capa.experiment.procedures.builtin.heat_flux_tune.config import (
     PROCEDURE_ID as HEAT_FLUX_TUNE_PROCEDURE_ID,
+)
+from capa.experiment.profiles.capa_pyrolysis import (
+    Atmosphere,
+    CapaPyrolysisMetadata,
+    CapaSpecimen,
+    HeaterProgram,
 )
 from capa.runtime.emissions import ProcedureTick
 from capa.ui.forms import build_form
@@ -62,50 +83,28 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# View models for the metadata panes.
+# Metadata panes.
 # ---------------------------------------------------------------------------
 
 
-class _SpecimenView(BaseModel):
-    """Specimen metadata pane."""
+_PANES: tuple[tuple[str, str, type[BaseModel]], ...] = (
+    ("specimen", "Specimen", CapaSpecimen),
+    ("program", "Heater program", HeaterProgram),
+    ("atmosphere", "Atmosphere", Atmosphere),
+)
+"""``(metadata key, pane title, model)`` for each dedicated pane."""
 
-    model_config = ConfigDict(extra="ignore")
-
-    id: str = ""
-    material: str = ""
-    form: str = "disk"
-    mass_g: float = Field(default=0.0, ge=0)
-    thickness_mm: float = Field(default=0.0, ge=0)
-    specimen_holder: str = ""
-
-
-class _HeaterProgramView(BaseModel):
-    """Heater program metadata pane."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    target_heat_flux_kw_m2: float = Field(default=50.0, ge=0)
-    heater_setpoint_c: float = Field(default=600.0, ge=0)
-    flux_calibration_ref: str = ""
-    ramp_rate_c_per_min: float | None = None
-
-
-class _AtmosphereView(BaseModel):
-    """Atmosphere metadata pane."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    mode: str = "inert"
-    """``"inert"`` / ``"oxidative"`` / ``"reducing"`` / ``"blend"``."""
-    purge_species: str = "N2"
-    purge_purity: str = "99.999%"
-    purge_flow_lpm: float = Field(default=10.0, ge=0)
-    purge_duration_s: float = Field(default=120.0, ge=0)
-
-
-# Sub-dict keys under ``domain_profile.metadata`` so the three view-model
-# blocks don't stomp on each other. Each block reads/writes its own key.
-_METADATA_KEYS = ("specimen", "heater_program", "atmosphere")
+_RecordView: type[BaseModel] = create_model(
+    "_RecordView",
+    **{
+        name: (info.annotation, info)
+        for name, info in CapaPyrolysisMetadata.model_fields.items()
+        if name not in {key for key, _title, _model in _PANES}
+    },  # type: ignore[call-overload]
+)
+"""The top-level metadata fields without a dedicated pane (the
+downstream analyzer and SOP revision). Derived from the model so a new
+top-level field gets an editor without touching this module."""
 
 
 _DEFAULT_FLUX_DIR = "configs/calibrations/flux"
@@ -113,6 +112,20 @@ _DEFAULT_FLUX_DIR = "configs/calibrations/flux"
 in :class:`~capa.experiment.procedures.builtin.heat_flux_tune.HeatFluxTuneConfig.persist_dir`.
 The Setup tab's autofill button reads from the same path so an artifact
 written by the procedure is discoverable immediately."""
+
+
+def _without_none(value: Any) -> Any:
+    """Drop ``None`` entries from nested dicts.
+
+    Every optional field in the CAPA models defaults to ``None``, so an
+    absent key and ``None`` mean the same thing; leaving them out keeps
+    the saved YAML as terse as a hand-written one (and TOML-safe).
+    """
+    if isinstance(value, Mapping):
+        return {k: _without_none(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list | tuple):
+        return [_without_none(v) for v in value]
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +163,7 @@ class _MappingRow:
 # ---------------------------------------------------------------------------
 
 
-def _bordered(title: str) -> tuple[QFrame, QVBoxLayout]:
+def _bordered(title: str, hint: str | None = None) -> tuple[QFrame, QVBoxLayout]:
     frame = QFrame()
     frame.setFrameShape(QFrame.Shape.StyledPanel)
     frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -160,6 +173,11 @@ def _bordered(title: str) -> tuple[QFrame, QVBoxLayout]:
     header = QLabel(title, frame)
     header.setStyleSheet("font-weight: 600;")
     box.addWidget(header)
+    if hint:
+        note = QLabel(hint, frame)
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #666;")
+        box.addWidget(note)
     return frame, box
 
 
@@ -170,10 +188,9 @@ class CapaProfileSection(SectionWidget):
         super().__init__(parent)
         self._draft: SetupDraft | None = None
         self._suppress = False
+        self._active = False
         self._mapping_rows: list[_MappingRow] = []
-        self._specimen_form: ModelForm | None = None
-        self._heater_form: ModelForm | None = None
-        self._atmosphere_form: ModelForm | None = None
+        self._pane_forms: dict[str, ModelForm] = {}
         # Hold-mode post-tune apply prompt state. ``_hold_prompt`` holds
         # the live non-modal QMessageBox so Qt doesn't garbage-collect
         # the dialog out from under us; ``_hold_prompt_fired`` latches
@@ -192,32 +209,80 @@ class CapaProfileSection(SectionWidget):
         title.setStyleSheet("font-size: 14pt; font-weight: 600;")
         outer.addWidget(title)
 
-        # Specimen block.
-        specimen_frame, specimen_box = _bordered("Specimen")
-        self._specimen_form = build_form(_SpecimenView, parent=specimen_frame)
-        self._specimen_form.valuesChanged.connect(lambda: self._on_metadata_changed("specimen"))
-        specimen_box.addWidget(self._specimen_form)
-        outer.addWidget(specimen_frame)
+        # Shown instead of the editor when the experiment has no CAPA
+        # profile.
+        self._inactive = QWidget(self)
+        inactive_box = QVBoxLayout(self._inactive)
+        inactive_box.setContentsMargins(0, 0, 0, 0)
+        self._inactive_label = QLabel(self._inactive)
+        self._inactive_label.setWordWrap(True)
+        self._inactive_label.setStyleSheet("color: #555;")
+        inactive_box.addWidget(self._inactive_label)
+        self._add_profile_btn = QPushButton("Add CAPA profile", self._inactive)
+        self._add_profile_btn.setToolTip(
+            "Attach the CAPA pyrolysis profile to this experiment. The specimen "
+            "starts from the current sample id, material, mass, thickness and notes."
+        )
+        self._add_profile_btn.clicked.connect(self._on_add_profile_clicked)
+        inactive_box.addWidget(self._add_profile_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        outer.addWidget(self._inactive)
 
-        # Heater Program block.
-        heater_frame, heater_box = _bordered("Heater Program")
-        self._heater_form = build_form(_HeaterProgramView, parent=heater_frame)
-        self._heater_form.valuesChanged.connect(lambda: self._on_metadata_changed("heater_program"))
-        heater_box.addWidget(self._heater_form)
-        # Tune-artifact toolbar. The artifact maps
-        # heater setpoint ↔ measured flux; clicking "Apply latest" reads
-        # the operator's target_heat_flux_kw_m2 and writes back the
-        # interpolated heater_setpoint_c + flux_calibration_ref. The
-        # artifact lookup is intentionally on-demand (button), not
-        # automatic — the operator owns the decision to overwrite the
-        # current setpoint.
+        self._editor = QWidget(self)
+        editor_box = QVBoxLayout(self._editor)
+        editor_box.setContentsMargins(0, 0, 0, 0)
+        editor_box.setSpacing(10)
+        outer.addWidget(self._editor)
+
+        for key, pane_title, model_cls in _PANES:
+            hint = (
+                "The experiment's sample block (run id, catalog entry) is filled from here."
+                if key == "specimen"
+                else None
+            )
+            frame, box = _bordered(pane_title, hint)
+            form = build_form(model_cls, parent=frame)
+            form.valuesChanged.connect(self._on_metadata_changed)
+            box.addWidget(form)
+            self._pane_forms[key] = form
+            if key == "program":
+                box.addLayout(self._build_tune_row(frame))
+            editor_box.addWidget(frame)
+
+        record_frame, record_box = _bordered("Analyzer & SOP")
+        self._record_form = build_form(_RecordView, parent=record_frame)
+        self._record_form.valuesChanged.connect(self._on_metadata_changed)
+        record_box.addWidget(self._record_form)
+        editor_box.addWidget(record_frame)
+
+        # Required channel mappings.
+        mapping_frame, mapping_box = _bordered("Required channel mappings")
+        self._mapping_form = QFormLayout()
+        self._mapping_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        mapping_box.addLayout(self._mapping_form)
+        editor_box.addWidget(mapping_frame)
+
+        outer.addStretch(1)
+
+        self._build_mapping_rows()
+        self._show_active(False)
+
+    def _build_tune_row(self, parent: QWidget) -> QHBoxLayout:
+        """Tune-artifact toolbar under the heater-program form.
+
+        The artifact maps heater setpoint ↔ measured flux; clicking
+        "Apply latest" reads the operator's target_heat_flux_kw_m2 and
+        writes back the interpolated heater_setpoint_c +
+        flux_calibration_ref. The artifact lookup is intentionally
+        on-demand (button), not automatic — the operator owns the
+        decision to overwrite the current setpoint.
+        """
         tune_row = QHBoxLayout()
         tune_row.setContentsMargins(0, 0, 0, 0)
         tune_row.setSpacing(6)
-        self._tune_status_label = QLabel("(no tune artifact loaded)", heater_frame)
+        self._tune_status_label = QLabel("(no tune artifact loaded)", parent)
         self._tune_status_label.setStyleSheet("color: #666; font-style: italic;")
         tune_row.addWidget(self._tune_status_label, stretch=1)
-        apply_latest_btn = QPushButton("Apply latest tune", heater_frame)
+        apply_latest_btn = QPushButton("Apply latest tune", parent)
         apply_latest_btn.setToolTip(
             "Look up the most recent on-disk HeatFluxTuneArtifact under "
             f"{_DEFAULT_FLUX_DIR!s}, interpolate to the current "
@@ -226,34 +291,19 @@ class CapaProfileSection(SectionWidget):
         )
         apply_latest_btn.clicked.connect(self._on_apply_latest_tune_clicked)
         tune_row.addWidget(apply_latest_btn)
-        browse_btn = QPushButton("Browse…", heater_frame)
+        browse_btn = QPushButton("Browse…", parent)
         browse_btn.setToolTip("Pick a specific tune artifact .toml from disk.")
         browse_btn.clicked.connect(self._on_browse_tune_clicked)
         tune_row.addWidget(browse_btn)
-        clear_btn = QPushButton("Clear ref", heater_frame)
+        clear_btn = QPushButton("Clear ref", parent)
         clear_btn.setToolTip("Clear flux_calibration_ref (heater_setpoint_c is left as-is).")
         clear_btn.clicked.connect(self._on_clear_tune_ref_clicked)
         tune_row.addWidget(clear_btn)
-        heater_box.addLayout(tune_row)
-        outer.addWidget(heater_frame)
+        return tune_row
 
-        # Atmosphere block.
-        atm_frame, atm_box = _bordered("Atmosphere")
-        self._atmosphere_form = build_form(_AtmosphereView, parent=atm_frame)
-        self._atmosphere_form.valuesChanged.connect(lambda: self._on_metadata_changed("atmosphere"))
-        atm_box.addWidget(self._atmosphere_form)
-        outer.addWidget(atm_frame)
-
-        # Required channel mappings.
-        mapping_frame, mapping_box = _bordered("Required channel mappings")
-        self._mapping_form = QFormLayout()
-        self._mapping_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        mapping_box.addLayout(self._mapping_form)
-        outer.addWidget(mapping_frame)
-
-        outer.addStretch(1)
-
-        self._build_mapping_rows()
+    @property
+    def _heater_form(self) -> ModelForm:
+        return self._pane_forms["program"]
 
     # -- SectionWidget API --------------------------------------------------
 
@@ -267,35 +317,88 @@ class CapaProfileSection(SectionWidget):
         if self._draft is None:
             return
         exp = self._draft.document.experiment_payload
-        domain_profile = exp.get("domain_profile") or {}
-        if not isinstance(domain_profile, dict):
-            domain_profile = {}
-        metadata = domain_profile.get("metadata") or {}
-        if not isinstance(metadata, dict):
-            metadata = {}
+        if not is_capa_profile(exp):
+            profile = exp.get("domain_profile")
+            if isinstance(profile, Mapping):
+                self._inactive_label.setText(
+                    f"This experiment uses the {profile.get('id')!r} domain profile. "
+                    "This section edits the CAPA pyrolysis profile only."
+                )
+                self._add_profile_btn.setVisible(False)
+            else:
+                self._inactive_label.setText(
+                    "This experiment has no domain profile, so there is no specimen, "
+                    "heater-program or atmosphere record to edit."
+                )
+                self._add_profile_btn.setVisible(True)
+            self._show_active(False)
+            return
 
+        metadata = exp["domain_profile"].get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            metadata = {}
         self._suppress = True
         try:
-            if self._specimen_form is not None:
-                self._specimen_form.set_values(metadata.get("specimen") or {})
-            if self._heater_form is not None:
-                self._heater_form.set_values(metadata.get("heater_program") or {})
-            if self._atmosphere_form is not None:
-                self._atmosphere_form.set_values(metadata.get("atmosphere") or {})
+            for key, form in self._pane_forms.items():
+                block = metadata.get(key)
+                form.set_values(dict(block) if isinstance(block, Mapping) else {}, replace=True)
+            self._record_form.set_values(dict(metadata), replace=True)
             self._refresh_mapping_rows()
         finally:
             self._suppress = False
+        self._show_active(True)
 
-    def payload(self) -> dict[str, object]:
-        """Emit a multi-key payload — channels go to hardware, profile to
-        experiment. The Setup tab's router splits on the key."""
-        out: dict[str, object] = {}
-        out["domain_profile"] = self._compose_domain_profile()
-        # Channels carry the capa_group mapping; only emit if we have a
-        # bound draft (otherwise nothing to mutate).
-        if self._draft is not None:
-            out["channels"] = self._compose_channels_with_mappings()
-        return out
+    def payload(self) -> dict[str, object] | None:
+        """Emit a multi-key payload — channels go to hardware, profile and
+        sample to experiment. The Setup tab's router splits on the key."""
+        if self._draft is None or not self._active:
+            return None
+        exp = self._draft.document.experiment_payload
+        domain_profile = self._compose_domain_profile()
+        specimen = domain_profile["metadata"]["specimen"]
+        current_sample = exp.get("sample")
+        return {
+            "domain_profile": domain_profile,
+            "sample": sample_from_specimen(
+                specimen,
+                current_sample if isinstance(current_sample, Mapping) else None,
+            ),
+            "channels": self._compose_channels_with_mappings(),
+        }
+
+    # -- slots: profile on/off ----------------------------------------------
+
+    def _show_active(self, active: bool) -> None:
+        self._active = active
+        self._editor.setVisible(active)
+        self._inactive.setVisible(not active)
+
+    def _on_add_profile_clicked(self) -> None:
+        """Attach the CAPA profile, seeding the specimen from ``sample``.
+
+        The rest of the metadata starts at the model defaults (required
+        numbers unset), so the Problems panel lists what still needs
+        filling in.
+        """
+        if self._draft is None:
+            return
+        sample = self._draft.document.experiment_payload.get("sample")
+        seed: dict[str, Any] = {}
+        if isinstance(sample, Mapping):
+            for specimen_key, sample_key in SPECIMEN_SAMPLE_FIELDS:
+                value = sample.get(sample_key)
+                if value is not None and value != "":
+                    seed[specimen_key] = value
+        self._suppress = True
+        try:
+            for key, form in self._pane_forms.items():
+                form.set_values(seed if key == "specimen" else {}, replace=True)
+            self._record_form.set_values({}, replace=True)
+            self._refresh_mapping_rows()
+        finally:
+            self._suppress = False
+        self._show_active(True)
+        self.valuesChanged.emit()
 
     # -- slots: tune-artifact autofill --------------------------------------
 
@@ -357,15 +460,11 @@ class CapaProfileSection(SectionWidget):
         """Clear ``flux_calibration_ref`` only; leave ``heater_setpoint_c``
         alone so an operator who is about to re-enter the setpoint by
         hand doesn't lose context."""
-        if self._heater_form is None:
+        if self._heater_form.values().get("flux_calibration_ref") is None:
             return
-        values = dict(self._heater_form.values())
-        if not values.get("flux_calibration_ref"):
-            return
-        values["flux_calibration_ref"] = ""
         self._suppress = True
         try:
-            self._heater_form.set_values(values)
+            self._heater_form.set_values({"flux_calibration_ref": None})
         finally:
             self._suppress = False
         self._tune_status_label.setText("(flux_calibration_ref cleared)")
@@ -380,14 +479,8 @@ class CapaProfileSection(SectionWidget):
         the form untouched and updates the inline status label with the
         artifact's bracket so the operator knows what to fix.
         """
-        if self._heater_form is None:
-            return
-        values = dict(self._heater_form.values())
-        try:
-            target = float(values.get("target_heat_flux_kw_m2") or 0.0)
-        except (TypeError, ValueError):
-            target = 0.0
-        if target <= 0:
+        target = self._heater_form.values().get("target_heat_flux_kw_m2")
+        if not isinstance(target, int | float) or target <= 0:
             QMessageBox.information(
                 self,
                 "No target declared",
@@ -417,11 +510,11 @@ class CapaProfileSection(SectionWidget):
                 f"includes this target.",
             )
             return
-        values["heater_setpoint_c"] = float(setpoint)
-        values["flux_calibration_ref"] = artifact.id
         self._suppress = True
         try:
-            self._heater_form.set_values(values)
+            self._heater_form.set_values(
+                {"heater_setpoint_c": float(setpoint), "flux_calibration_ref": artifact.id}
+            )
         finally:
             self._suppress = False
         self._tune_status_label.setText(
@@ -481,17 +574,12 @@ class CapaProfileSection(SectionWidget):
     def _prompt_apply_hold(self, target_kw_m2: float, setpoint_c: float) -> None:
         """Raise the non-modal "apply held tune?" dialog.
 
-        Suppresses to a status-label toast when no heater-program form
-        is loaded — avoids a confusing dialog with nowhere to write.
-        Stored as ``self._hold_prompt`` until dismissed so Qt doesn't
-        garbage-collect the dialog while the operator is reading it.
+        Skipped when the experiment has no CAPA profile — there is no
+        heater-program form to write to. Stored as ``self._hold_prompt``
+        until dismissed so Qt doesn't garbage-collect the dialog while
+        the operator is reading it.
         """
-        if self._heater_form is None:
-            self._tune_status_label.setText(
-                f"Tune held at {setpoint_c:.1f} °C → {target_kw_m2:g} kW/m². "
-                f"Load a method to apply."
-            )
-            self._tune_status_label.setStyleSheet("color: #2a7;")
+        if not self._active:
             return
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Icon.Question)
@@ -543,14 +631,14 @@ class CapaProfileSection(SectionWidget):
         is intentionally left untouched: the artifact-based "Apply
         latest tune" button is still the right way to set that.
         """
-        if self._heater_form is None:
-            return
-        values = dict(self._heater_form.values())
-        values["target_heat_flux_kw_m2"] = float(target_kw_m2)
-        values["heater_setpoint_c"] = float(setpoint_c)
         self._suppress = True
         try:
-            self._heater_form.set_values(values)
+            self._heater_form.set_values(
+                {
+                    "target_heat_flux_kw_m2": float(target_kw_m2),
+                    "heater_setpoint_c": float(setpoint_c),
+                }
+            )
         finally:
             self._suppress = False
         self._tune_status_label.setText(
@@ -573,7 +661,7 @@ class CapaProfileSection(SectionWidget):
 
     # -- slots --------------------------------------------------------------
 
-    def _on_metadata_changed(self, _block: str) -> None:
+    def _on_metadata_changed(self) -> None:
         if self._suppress:
             return
         self.valuesChanged.emit()
@@ -683,25 +771,29 @@ class CapaProfileSection(SectionWidget):
         return []
 
     def _compose_domain_profile(self) -> dict[str, Any]:
-        # Preserve the existing domain_profile dict's other keys
-        # (id, standard_refs) so save round-trips.
-        if self._draft is None:
-            return {}
-        exp = self._draft.document.experiment_payload
+        """Build ``domain_profile`` from the panes.
+
+        Keeps the block's other keys (``standard_refs``) and any
+        metadata keys the panes don't own (the ``_``-prefixed preflight
+        knobs) so a save round-trips them.
+        """
+        exp = self._draft.document.experiment_payload if self._draft is not None else {}
         existing = exp.get("domain_profile")
-        if isinstance(existing, dict):
-            out = {k: v for k, v in existing.items() if k != "metadata"}
-        else:
-            out = {"id": "capa.profiles.capa_pyrolysis"}
-        metadata = (
-            dict((existing or {}).get("metadata") or {}) if isinstance(existing, dict) else {}
+        out: dict[str, Any] = (
+            {k: v for k, v in existing.items() if k != "metadata"}
+            if isinstance(existing, Mapping)
+            else {}
         )
-        if self._specimen_form is not None:
-            metadata["specimen"] = self._specimen_form.values()
-        if self._heater_form is not None:
-            metadata["heater_program"] = self._heater_form.values()
-        if self._atmosphere_form is not None:
-            metadata["atmosphere"] = self._atmosphere_form.values()
+        out["id"] = CAPA_PROFILE_ID
+        current = existing.get("metadata") if isinstance(existing, Mapping) else None
+        metadata: dict[str, Any] = dict(current) if isinstance(current, Mapping) else {}
+        for key, form in self._pane_forms.items():
+            metadata[key] = _without_none(form.values())
+        for key, value in self._record_form.values().items():
+            if value is None:
+                metadata.pop(key, None)
+            else:
+                metadata[key] = _without_none(value)
         out["metadata"] = metadata
         return out
 

@@ -114,10 +114,13 @@ def _build_inner(
         return _LineEditField(parent=parent)
     if annotation is bool:
         return _CheckBoxField(parent=parent)
+    # A required number with no default starts unset ("—") rather than at
+    # a placeholder the operator could mistake for a real value.
     if annotation is int:
         return _SpinBoxField(
             constraints=_numeric_constraints(field),
             unit=_unit_from_field(field),
+            allow_unset=field.is_required(),
             parent=parent,
         )
     if annotation is float:
@@ -125,6 +128,7 @@ def _build_inner(
             constraints=_numeric_constraints(field),
             decimals=_decimals_for_field(field_name, field),
             unit=_unit_from_field(field),
+            allow_unset=field.is_required(),
             parent=parent,
         )
     if annotation is datetime:

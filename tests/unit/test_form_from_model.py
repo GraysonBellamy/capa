@@ -112,6 +112,61 @@ def test_str_tuple_round_trips(qtbot: Any) -> None:
     assert tuple(out["channels"]) == ("heater.pv", "balance.mass")
 
 
+class _RequiredNumbers(BaseModel):
+    mass_g: float = Field(gt=0)
+    flow_sccm: float = Field(ge=0)
+    count: int = Field(ge=0)
+
+
+def test_required_numbers_start_unset_and_are_omitted(qtbot: Any) -> None:
+    """A required number has no honest starting value: it shows as unset
+    and stays out of ``values()`` so validation reports it missing,
+    rather than submitting the spinbox minimum (0 would silently pass
+    ``ge=0``)."""
+    form = build_form(_RequiredNumbers)
+    qtbot.addWidget(form)
+    spin = form._fields["flow_sccm"].findChild(QDoubleSpinBox)
+    assert spin is not None
+    assert spin.text() == "—"
+    assert form.values() == {}
+    errors = form.validate()
+    assert {err["loc"][0] for err in errors} == {"mass_g", "flow_sccm", "count"}
+    assert {err["type"] for err in errors} == {"missing"}
+
+
+def test_required_number_round_trips_and_resets_to_unset(qtbot: Any) -> None:
+    form = build_form(_RequiredNumbers)
+    qtbot.addWidget(form)
+    form.set_values({"mass_g": 4.2, "flow_sccm": 0.0, "count": 0})
+    assert form.values() == {"mass_g": 4.2, "flow_sccm": 0.0, "count": 0}
+    form.set_values({}, replace=True)
+    assert form.values() == {}
+
+
+def test_set_values_replace_resets_missing_fields(qtbot: Any) -> None:
+    form = build_form(_OptionalDemo)
+    qtbot.addWidget(form)
+    form.set_values({"notes": "first", "duration_s": 3.0})
+    form.set_values({"notes": "second"})
+    assert form.values() == {"notes": "second", "duration_s": 3.0}
+    form.set_values({"notes": "third"}, replace=True)
+    assert form.values() == {"notes": "third", "duration_s": None}
+
+
+class _NestedOptional(BaseModel):
+    inner: _OptionalDemo = Field(default_factory=_OptionalDemo)
+
+
+def test_nested_value_is_set_whole(qtbot: Any) -> None:
+    """A nested model's value is the whole object: sub-fields it leaves
+    out reset rather than keeping the previous value's."""
+    form = build_form(_NestedOptional)
+    qtbot.addWidget(form)
+    form.set_values({"inner": {"notes": "a", "duration_s": 2.0}})
+    form.set_values({"inner": {"notes": "b"}})
+    assert form.values() == {"inner": {"notes": "b", "duration_s": None}}
+
+
 def test_validate_clean_returns_empty(qtbot: Any) -> None:
     form = build_form(_Demo)
     qtbot.addWidget(form)

@@ -70,6 +70,18 @@ _logger = structlog.get_logger("capa.ui.setup")
 # experiment side. Kept module-level so tests can introspect.
 _HARDWARE_PAYLOAD_KEYS: frozenset[str] = frozenset({"devices", "channels", "cameras"})
 
+# Sections that render a payload key some other section can write. When
+# an edit changes one of these keys, the listed sections (other than the
+# editing one) re-read the draft so their widgets never hold a stale
+# copy — a stale section would write its old copy back on its next edit.
+_SECTIONS_SHOWING_KEY: dict[str, tuple[str, ...]] = {
+    "devices": ("hardware",),
+    "cameras": ("hardware",),
+    "channels": ("channels", "calibration", "capa_profile", "hardware"),
+    "sample": ("experiment",),
+    "domain_profile": ("experiment", "capa_profile"),
+}
+
 
 class SetupTab(QWidget):
     """Editor shell for the experiment / hardware / method setup.
@@ -346,6 +358,11 @@ class SetupTab(QWidget):
         hardware_section = self._sections.get("hardware")
         if isinstance(hardware_section, HardwareGlanceSection):
             hardware_section.editSectionRequested.connect(self._outline.select)
+
+        # The read-only sample notice jumps to CAPA Profile.
+        experiment_section = self._sections.get("experiment")
+        if isinstance(experiment_section, ExperimentSection):
+            experiment_section.editSectionRequested.connect(self._outline.select)
 
         # Wire outline ↔ stack.
         self._outline.sectionSelected.connect(self._on_section_selected)
@@ -1261,7 +1278,8 @@ class SetupTab(QWidget):
         if section is not None:
             slice_payload = section.payload()
             if slice_payload is not None:
-                self._apply_payload(section_id, slice_payload)
+                changed = self._apply_payload(section_id, slice_payload)
+                self._refresh_sections_showing(changed, except_section=section_id)
         self._draft.mark_dirty(section_id)
         # An edit invalidates any sticky apply-outcome state; the
         # operator is moving on and the strip's red failure detail or
@@ -1281,20 +1299,38 @@ class SetupTab(QWidget):
         # Kick the debounce.
         self._validate_timer.start()
 
-    def _apply_payload(self, section_id: str, slice_payload: dict[str, object]) -> None:
+    def _apply_payload(self, section_id: str, slice_payload: dict[str, object]) -> set[str]:
         """Merge a section's payload slice into the right document dict.
 
         Routing is keyed by the slice's top-level dict key rather than
         by the section id, so a single section can write to multiple
-        destinations (the CAPA Profile section returns both ``channels``
-        — hardware payload — and ``domain_profile`` — experiment payload —
-        in one emit).
+        destinations (the CAPA Profile section returns ``channels`` —
+        hardware payload — plus ``domain_profile`` and ``sample`` —
+        experiment payload — in one emit). Returns the keys whose value
+        actually changed.
         """
+        changed: set[str] = set()
         for key, value in slice_payload.items():
-            if key in _HARDWARE_PAYLOAD_KEYS:
-                self._draft.document.hardware_payload[key] = value
-            else:
-                self._draft.document.experiment_payload[key] = value
+            target = (
+                self._draft.document.hardware_payload
+                if key in _HARDWARE_PAYLOAD_KEYS
+                else self._draft.document.experiment_payload
+            )
+            if target.get(key) != value:
+                changed.add(key)
+            target[key] = value
+        return changed
+
+    def _refresh_sections_showing(self, keys: set[str], *, except_section: str) -> None:
+        """Re-read the draft into every other section that renders ``keys``."""
+        to_refresh = {
+            section_id
+            for key in keys
+            for section_id in _SECTIONS_SHOWING_KEY.get(key, ())
+            if section_id != except_section
+        }
+        for section_id in sorted(to_refresh):
+            self._refresh_section(section_id)
 
     def _run_validate(self) -> None:
         """Debounce-fired validation pass.

@@ -50,12 +50,17 @@ class _LineEditField(FieldWidget):
             self._edit.setText("" if v is None else str(v))
 
 
+_UNSET_TEXT = "—"
+"""Shown by a required numeric field that has no value yet."""
+
+
 class _SpinBoxField(FieldWidget):
     def __init__(
         self,
         *,
         constraints: dict[str, float],
         unit: str | None = None,
+        allow_unset: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -69,6 +74,16 @@ class _SpinBoxField(FieldWidget):
             self._spin.setMaximum(int(constraints["le"]))
         if "lt" in constraints:
             self._spin.setMaximum(int(constraints["lt"]) - 1)
+        # A required field with no default has no honest initial value:
+        # one step below the valid range stands for "unset" so the form
+        # reports it missing instead of submitting the range minimum.
+        self._allow_unset = allow_unset
+        if allow_unset:
+            # Clamped: QSpinBox is 32-bit, and an unconstrained field
+            # already starts at the floor.
+            self._spin.setMinimum(max(self._spin.minimum() - 1, -(2**31)))
+            self._spin.setSpecialValueText(_UNSET_TEXT)
+            self._spin.setValue(self._spin.minimum())
         if unit:
             self._spin.setSuffix(f" {unit}")
         layout = QHBoxLayout(self)
@@ -76,14 +91,19 @@ class _SpinBoxField(FieldWidget):
         layout.addWidget(self._spin)
         self._spin.valueChanged.connect(self.valueChanged)
 
-    def value(self) -> int:
+    def value(self) -> int | None:
         """Current value held by this widget, coerced to the model-side type."""
+        if self._allow_unset and self._spin.value() <= self._spin.minimum():
+            return None
         return int(self._spin.value())
 
     def set_value(self, v: Any) -> None:
         """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._spin):
-            self._spin.setValue(int(v) if v is not None else 0)
+            if v is None:
+                self._spin.setValue(self._spin.minimum() if self._allow_unset else 0)
+            else:
+                self._spin.setValue(int(v))
 
 
 class _DoubleSpinBoxField(FieldWidget):
@@ -93,6 +113,7 @@ class _DoubleSpinBoxField(FieldWidget):
         constraints: dict[str, float],
         decimals: int = 3,
         unit: str | None = None,
+        allow_unset: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -113,6 +134,12 @@ class _DoubleSpinBoxField(FieldWidget):
             self._spin.setMaximum(constraints["le"])
         if "lt" in constraints:
             self._spin.setMaximum(constraints["lt"] - eps)
+        # See _SpinBoxField: one step below the valid range is "unset".
+        self._allow_unset = allow_unset
+        if allow_unset:
+            self._spin.setMinimum(self._spin.minimum() - eps)
+            self._spin.setSpecialValueText(_UNSET_TEXT)
+            self._spin.setValue(self._spin.minimum())
         if unit:
             self._spin.setSuffix(f" {unit}")
         layout = QHBoxLayout(self)
@@ -120,14 +147,19 @@ class _DoubleSpinBoxField(FieldWidget):
         layout.addWidget(self._spin)
         self._spin.valueChanged.connect(self.valueChanged)
 
-    def value(self) -> float:
+    def value(self) -> float | None:
         """Current value held by this widget, coerced to the model-side type."""
+        if self._allow_unset and self._spin.value() <= self._spin.minimum():
+            return None
         return float(self._spin.value())
 
     def set_value(self, v: Any) -> None:
         """Set this widget's value from a model-side value."""
         with QSignalBlocker(self._spin):
-            self._spin.setValue(float(v) if v is not None else 0.0)
+            if v is None:
+                self._spin.setValue(self._spin.minimum() if self._allow_unset else 0.0)
+            else:
+                self._spin.setValue(float(v))
 
 
 class _CheckBoxField(FieldWidget):

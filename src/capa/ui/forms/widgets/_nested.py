@@ -63,8 +63,12 @@ class _NestedModelField(FieldWidget):
         return self._inner.values()
 
     def set_value(self, v: Any) -> None:
-        """Set this widget's value from a model-side value."""
-        self._inner.set_values(v if v is not None else {})
+        """Set this widget's value from a model-side value.
+
+        The value is the whole nested object, so sub-fields it doesn't
+        name reset to their defaults rather than keeping whatever the
+        previous value left behind."""
+        self._inner.set_values(v if v is not None else {}, replace=True)
 
 
 def _is_discriminated_union(annotation: Any, field: FieldInfo | None = None) -> bool:

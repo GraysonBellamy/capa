@@ -323,6 +323,8 @@ def _build_child_config(
 
     * ``procedure`` swaps to the inner :class:`ProcedureRef`.
     * ``sample.id`` is the templated child id; other sample fields carry over.
+      A domain profile's ``specimen.id`` takes the same id, since the
+      sample block mirrors the specimen.
     * ``custom`` gains a ``batch`` block recording the parent batch id and
       iteration index. The parent batch id ends up in the bundle's
       manifest, which is what the catalog cross-indexes.
@@ -334,13 +336,17 @@ def _build_child_config(
         "iteration": iteration,
         "parent_sample_id": parent.sample.id,
     }
-    return parent.model_copy(
-        update={
-            "procedure": inner,
-            "sample": new_sample,
-            "custom": new_custom,
-        }
-    )
+    update: dict[str, Any] = {
+        "procedure": inner,
+        "sample": new_sample,
+        "custom": new_custom,
+    }
+    profile = parent.domain_profile
+    specimen = profile.metadata.get("specimen") if profile is not None else None
+    if profile is not None and isinstance(specimen, dict):
+        metadata = {**profile.metadata, "specimen": {**specimen, "id": child_sample_id}}
+        update["domain_profile"] = profile.model_copy(update={"metadata": metadata})
+    return parent.model_copy(update=update)
 
 
 __all__ = [

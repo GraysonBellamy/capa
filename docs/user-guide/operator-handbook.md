@@ -147,13 +147,12 @@ warrants investigation.
 ## Common between-runs sequence
 
 1. New sample in the holder.
-2. Setup tab → **Operator & sample**: new sample id.
-3. Setup tab → **CAPA Profile**: new mass.
-4. **Apply && Connect** → wait for green.
-5. Run tab → **Start**.
-6. Watch status bar. Wait.
-7. Run ends (naturally or via Stop). Badge → `Sealed`.
-8. Repeat.
+2. Setup tab → **CAPA Profile → Specimen**: new specimen id and mass.
+3. **Apply && Connect** → wait for green.
+4. Run tab → **Start**.
+5. Watch status bar. Wait.
+6. Run ends (naturally or via Stop). Badge → `Sealed`.
+7. Repeat.
 
 ---
 

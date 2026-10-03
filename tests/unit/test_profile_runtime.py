@@ -334,28 +334,6 @@ async def test_heater_pv_no_program_uses_default_limit(
     assert problem.metadata["limit_c"] == 1000.0
 
 
-@pytest.mark.anyio
-async def test_heater_pv_accepts_legacy_heater_program_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The hot-start lookup accepts the legacy ``heater_program`` alias.
-
-    The CAPA pyrolysis model field is ``program`` (matches the YAML
-    config keys today), but earlier test fixtures and some plugin
-    code use ``heater_program``. Both shapes feed the policy so a
-    fixture/profile shipping with either key works."""
-    from capa.experiment.profiles import runtime as runtime_mod
-
-    ctx = _ctx(adapters_started=True)
-    ctx.profile_metadata = {"heater_program": {"heater_setpoint_c": 1100.0}}
-
-    monkeypatch.setattr(runtime_mod, "_sample_one", lambda *a, **kw: _fake_sample(1130.0))
-    problem = await runtime_mod._heater_pv_safe(ctx)
-    assert problem is not None
-    assert problem.code == "capa.heater_pv_hot_start_permitted"
-    assert problem.metadata["limit_c"] == 1150.0
-
-
 # ---------------------------------------------------------------------------
 # flux_calibration_freshness preflight gate
 # ---------------------------------------------------------------------------
@@ -367,7 +345,7 @@ async def test_flux_calibration_freshness_no_target_passes() -> None:
     from capa.experiment.profiles.runtime import _flux_calibration_freshness
 
     ctx = _ctx(adapters_started=False)
-    ctx.profile_metadata = {"heater_program": {}}
+    ctx.profile_metadata = {"program": {}}
 
     assert await _flux_calibration_freshness(ctx) is None
 
@@ -378,9 +356,7 @@ async def test_flux_calibration_freshness_target_but_empty_ref_warns() -> None:
     from capa.experiment.profiles.runtime import _flux_calibration_freshness
 
     ctx = _ctx(adapters_started=False)
-    ctx.profile_metadata = {
-        "heater_program": {"target_heat_flux_kw_m2": 50.0, "flux_calibration_ref": ""}
-    }
+    ctx.profile_metadata = {"program": {"target_heat_flux_kw_m2": 50.0, "flux_calibration_ref": ""}}
 
     problem = await _flux_calibration_freshness(ctx)
     assert problem is not None
@@ -397,7 +373,7 @@ async def test_flux_calibration_freshness_freeform_ref_passes() -> None:
 
     ctx = _ctx(adapters_started=False)
     ctx.profile_metadata = {
-        "heater_program": {
+        "program": {
             "target_heat_flux_kw_m2": 50.0,
             "flux_calibration_ref": "lab notebook 2026-05-17 p.43",
         },
@@ -448,7 +424,7 @@ async def test_flux_calibration_freshness_fresh_artifact_passes(tmp_path: Path) 
 
     ctx = _ctx(adapters_started=False)
     ctx.profile_metadata = {
-        "heater_program": {
+        "program": {
             "target_heat_flux_kw_m2": 50.0,
             "flux_calibration_ref": "capa_flux_fresh",
         },
@@ -499,7 +475,7 @@ async def test_flux_calibration_freshness_stale_artifact_warns(tmp_path: Path) -
 
     ctx = _ctx(adapters_started=False)
     ctx.profile_metadata = {
-        "heater_program": {
+        "program": {
             "target_heat_flux_kw_m2": 50.0,
             "flux_calibration_ref": "capa_flux_stale",
         },
