@@ -111,8 +111,10 @@ class DeviceCard(QGroupBox):
         self._sections_layout.setSpacing(4)
         outer.addLayout(self._sections_layout)
 
-        # Inline status: last-command outcome.
+        # Inline status: last-command outcome. Wrapped so a long error
+        # message grows the card downward, not past the dock's right edge.
         self._status_label = QLabel("idle", self)
+        self._status_label.setWordWrap(True)
         self._status_label.setFont(monospace_font(point_size=9))
         self._status_label.setStyleSheet(f"color: {COLOR_IDLE.name()};")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
