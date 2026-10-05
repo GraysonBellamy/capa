@@ -27,6 +27,9 @@ This profile contributes:
   * ``purge_gas_flow`` — the inert/sweep gas MFC
 - **purge-gas metadata** — purge-gas spec (purity grade, supplier,
   cylinder lot) and sweep flow target.
+- **gas-sampling metadata** — optional, for a rig with a gas analyzer:
+  probe position, sample flow, sample line, conditioning and transport
+  delay.
 - **preflight checks** — heater PV in safe range, purge gas flow
   established and stable, balance stability when present,
   required channel mappings.
@@ -263,6 +266,99 @@ class Atmosphere(BaseModel):
     reactive: ReactiveGas | None = None
 
 
+class GasSampling(BaseModel):
+    """How the gas analyzer's sample is drawn from the exhaust and carried
+    to it. Set when the rig has a gas analyzer.
+
+    The analyzer's own settings (ranges, response-time filters,
+    calibration gases) are read from it and recorded with its snapshots,
+    so they are not repeated here.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    probe_location: str = Field(
+        min_length=1,
+        json_schema_extra={
+            "capa_help": (
+                'Where the probe inlet sits, e.g. "exhaust duct, 300 mm above the '
+                'hood, centerline".'
+            ),
+        },
+    )
+    probe_height_mm: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "mm",
+            "capa_help": "Height of the probe inlet above the specimen surface.",
+        },
+    )
+    probe_radial_offset_mm: float | None = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={
+            "capa_unit": "mm",
+            "capa_help": "Distance of the probe inlet from the duct centerline; 0 on it.",
+        },
+    )
+    sample_flow_slpm: float = Field(
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "slpm",
+            "capa_help": (
+                "Sample flow drawn through the analyzer, as set on the sample-line flowmeter."
+            ),
+        },
+    )
+    line_length_m: float | None = Field(
+        default=None,
+        gt=0,
+        title="Line length",
+        json_schema_extra={
+            "capa_unit": "m",
+            "capa_help": "Sample-line length from the probe to the analyzer inlet.",
+        },
+    )
+    line_inner_diameter_mm: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={"capa_unit": "mm", "capa_help": "Sample-line inner diameter."},
+    )
+    line_material: str | None = None
+    """e.g. ``"PTFE"``, ``"stainless steel"``."""
+
+    line_temperature_c: float | None = Field(
+        default=None,
+        json_schema_extra={
+            "capa_unit": "°C",
+            "capa_help": "Heated-line temperature. Leave unset for an unheated line.",
+        },
+    )
+    conditioning: str | None = Field(
+        default=None,
+        json_schema_extra={
+            "capa_help": (
+                "What the sample passes through between the probe and the analyzer, "
+                "in flow order: filters, chiller or dryer, dilution."
+            ),
+        },
+    )
+    transport_delay_s: float | None = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={
+            "capa_unit": "s",
+            "capa_help": (
+                "Time for gas to travel from the probe inlet to the analyzer, e.g. "
+                "from a step test. Shifts the gas readings onto the other channels' "
+                "time base in analysis."
+            ),
+        },
+    )
+    notes: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Top-level metadata model.
 # ---------------------------------------------------------------------------
@@ -280,6 +376,7 @@ class CapaPyrolysisMetadata(BaseModel):
     specimen: CapaSpecimen
     program: HeaterProgram
     atmosphere: Atmosphere
+    gas_sampling: GasSampling | None = None
     sop_revision: str | None = Field(
         default=None,
         title="SOP revision",
@@ -419,6 +516,7 @@ __all__ = [
     "AtmosphereMode",
     "CapaPyrolysisMetadata",
     "CapaSpecimen",
+    "GasSampling",
     "HeaterProgram",
     "PurgeGas",
     "ReactiveGas",

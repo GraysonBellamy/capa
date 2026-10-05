@@ -1,5 +1,5 @@
 ---
-description: Field reference for `capa.profiles.capa_pyrolysis` domain profile — specimen, HeaterProgram, Atmosphere, SOP revision, preflight checks for pyrolysis.
+description: Field reference for `capa.profiles.capa_pyrolysis` domain profile — specimen, HeaterProgram, Atmosphere, GasSampling, SOP revision, preflight checks for pyrolysis.
 ---
 
 # CAPA profile fields
@@ -11,6 +11,7 @@ A *domain profile* layers scientific metadata + preflight checks on top of the g
 
 - **specimen fields** — id, material, mass, form, holder geometry
 - **method fields** — heater program (target heat flux + heater setpoint), atmosphere composition, optional secondary gas
+- **gas-sampling fields** — optional, for a rig with a gas analyzer: probe position, sample flow, sample line, transport delay
 - **required channel groups** — heater pair, mass, purge MFC
 - **preflight checks** — heater PV safe range, purge flow established, balance stability
 
@@ -33,6 +34,7 @@ domain_profile:
     specimen: { ... }      # CapaSpecimen
     program: { ... }       # HeaterProgram
     atmosphere: { ... }    # Atmosphere (purge + optional reactive)
+    gas_sampling: { ... }  # GasSampling (optional)
     sop_revision: "..."    # optional
 ```
 
@@ -128,6 +130,32 @@ Controls the gas atmosphere the specimen sees during the run.
 ### `ReactiveGas`
 
 Same shape as `PurgeGas` plus an optional `target_mole_fraction` (0–1) recording the operator's intended blend fraction. The actual blend depends on both MFCs and is what the channel data records — the mole fraction here is captured for intent.
+
+---
+
+## Gas sampling (`GasSampling`, optional) { #gassampling }
+
+How the gas analyzer's sample is drawn from the exhaust and carried to it. Set it when the rig has a gas analyzer (the Fuji); leave it out otherwise.
+
+| Field | Unit | Required | Notes |
+|---|---|---|---|
+| `probe_location` | — | yes | Where the probe inlet sits, e.g. `"exhaust duct, 300 mm above the hood, centerline"`. |
+| `probe_height_mm` | mm | no | Height of the probe inlet above the specimen surface. |
+| `probe_radial_offset_mm` | mm | no | Distance of the probe inlet from the duct centerline; 0 on it. |
+| `sample_flow_slpm` | slpm | yes | Sample flow drawn through the analyzer, as set on the sample-line flowmeter. Must be > 0. |
+| `line_length_m` | m | no | Sample-line length from the probe to the analyzer inlet. |
+| `line_inner_diameter_mm` | mm | no | Sample-line inner diameter. |
+| `line_material` | — | no | e.g. `"PTFE"`, `"stainless steel"`. |
+| `line_temperature_c` | °C | no | Heated-line temperature. Leave unset for an unheated line. |
+| `conditioning` | — | no | What the sample passes through between the probe and the analyzer, in flow order: filters, chiller or dryer, dilution. |
+| `transport_delay_s` | s | no | Time for gas to travel from the probe inlet to the analyzer, e.g. from a step test. |
+| `notes` | — | no | Free text. |
+
+### Why these are captured
+
+The analyzer reads the gas at the end of the sample line, not at the specimen. To line gas readings up with mass loss, an analyst shifts them back by the transport delay. Sample flow, line length and line diameter let them check or estimate that delay when no step test was run. Probe position and conditioning explain why the measured concentrations differ from the gas at the specimen: dilution in the duct, water removed by the chiller.
+
+The analyzer's own settings (ranges, response-time filters, calibration gases) are not repeated here. capa reads them from the analyzer and records them in the bundle's `status.sqlite` with its periodic snapshots.
 
 ---
 

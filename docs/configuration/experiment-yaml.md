@@ -132,7 +132,7 @@ domain_profile:
 | `metadata` | no | Profile-specific metadata. Validated by the profile's `metadata_model`. |
 
 The CAPA-pyrolysis profile's `metadata` schema (specimen, program,
-atmosphere blocks) is documented in [CAPA profile
+atmosphere and gas-sampling blocks) is documented in [CAPA profile
 fields](capa-profile.md). Cone-calorimeter and any future profiles
 have their own `metadata` shape — switch on `id`.
 

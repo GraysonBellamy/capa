@@ -95,3 +95,44 @@ def test_profile_module_protocol_attributes_present() -> None:
     assert cap.metadata_model is cap.CapaPyrolysisMetadata
     assert cap.required_channel_groups == cap.REQUIRED_CHANNEL_GROUPS
     assert cap.preflight_checks == cap.PREFLIGHT_CHECKS
+
+
+def test_gas_sampling_is_optional() -> None:
+    assert cap.validate_metadata(_good_metadata()).gas_sampling is None
+
+
+def test_gas_sampling_accepts_probe_and_flow() -> None:
+    raw = _good_metadata()
+    raw["gas_sampling"] = {
+        "probe_location": "exhaust duct, centerline",
+        "probe_height_mm": 450.0,
+        "probe_radial_offset_mm": 0.0,
+        "sample_flow_slpm": 1.0,
+        "line_length_m": 3.0,
+        "line_material": "PTFE",
+        "conditioning": "particulate filter, chiller",
+        "transport_delay_s": 12.5,
+    }
+    sampling = cap.validate_metadata(raw).gas_sampling
+    assert sampling is not None
+    assert sampling.probe_radial_offset_mm == 0.0
+    assert sampling.transport_delay_s == 12.5
+    assert sampling.line_temperature_c is None
+
+
+@pytest.mark.parametrize(
+    "gas_sampling",
+    [
+        {"sample_flow_slpm": 1.0},
+        {"probe_location": "", "sample_flow_slpm": 1.0},
+        {"probe_location": "exhaust duct"},
+        {"probe_location": "exhaust duct", "sample_flow_slpm": 0.0},
+        {"probe_location": "exhaust duct", "sample_flow_slpm": 1.0, "flow_sccm": 1000},
+    ],
+    ids=["no-location", "blank-location", "no-flow", "zero-flow", "unknown-key"],
+)
+def test_gas_sampling_rejects_incomplete_block(gas_sampling: dict[str, Any]) -> None:
+    raw = _good_metadata()
+    raw["gas_sampling"] = gas_sampling
+    with pytest.raises(Exception):
+        cap.validate_metadata(raw)
