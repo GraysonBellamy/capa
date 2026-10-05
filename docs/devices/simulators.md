@@ -143,8 +143,13 @@ applying them and reading them back works the same as on hardware:
   `save_menu` / `reload_menu` are no-ops.
 - **`flir_ir_sim`** keeps its temperature range, radiometric
   parameters, auto-NUC interval and palettes.
+- **`fuji_sim`** keeps each gas's response time, range and range
+  method, output hold and hold mode, and the calibration gases. Its
+  ranges are in vol%: one per gas, two for O2 (0–25 and 0–10 vol%). As
+  on the analyzer, `set_range` is refused unless the range method is
+  manual.
 
-All three answer `read_state_snapshot()` like their real adapters, so
+All four answer `read_state_snapshot()` like their real adapters, so
 the manual cards show the simulated state.
 
 ## Sim-only environment flags

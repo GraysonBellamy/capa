@@ -7,13 +7,14 @@ read-back is the adapter's own :class:`FujiStateSnapshot`.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
-from PySide6.QtWidgets import QMessageBox, QPushButton
+from PySide6.QtWidgets import QComboBox, QMessageBox, QPushButton
 
 from capa.devices.fuji import FujiReadback, FujiStateSnapshot
 from capa.devices.fuji_calibration import CalibrationStatus
@@ -21,6 +22,7 @@ from capa.experiment.config import DeviceConfig
 from capa.ui.docks.manual_control import ManualControlDock
 from capa.ui.manual.cards.fuji import (
     CALIBRATION_BEGIN_NOTE,
+    NOT_READ,
     FujiCard,
     _calibration_text,
     is_fuji_device,
@@ -57,8 +59,15 @@ def _pool_closed_after(controller: RunController) -> Iterator[None]:
     _close_pool_sync(controller)
 
 
+CHANNEL_MAP = {"CH1": "co2", "CH2": "co", "CH3": "o2"}
+
+
 def _device(**params: Any) -> DeviceConfig:
-    return DeviceConfig(name="analyzer", adapter=SIM, params={"settle_s": 0.0, **params})
+    return DeviceConfig(
+        name="analyzer",
+        adapter=SIM,
+        params={"settle_s": 0.0, "channel_map": CHANNEL_MAP, **params},
+    )
 
 
 def _card(
@@ -78,6 +87,20 @@ def _card(
     )
     qtbot.addWidget(card)
     return card
+
+
+def _pick(combo: QComboBox | None, text: str) -> None:
+    """Select ``text`` in ``combo`` as the operator does."""
+    assert combo is not None
+    index = combo.findText(text)
+    assert index >= 0, [combo.itemText(i) for i in range(combo.count())]
+    combo.setCurrentIndex(index)
+    combo.activated.emit(index)
+
+
+def _texts(combo: QComboBox | None) -> list[str]:
+    assert combo is not None
+    return [combo.itemText(i) for i in range(combo.count())]
 
 
 def _say(monkeypatch: pytest.MonkeyPatch, answer: QMessageBox.StandardButton) -> list[str]:
@@ -114,8 +137,11 @@ def test_the_card_offers_the_mapped_channels(
     qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
 ) -> None:
     card = _card(qtbot, controller, op_provider, tmp_path, channel_map={"CH1": "co2", "CH4": "o2"})
-    choices = [card._cal_channel.itemText(i) for i in range(card._cal_channel.count())]
-    assert choices == ["CH1", "CH4"]
+    combo = card._cal_channel
+    assert combo is not None
+    # Each channel by its gas; the channel id goes with it to the adapter.
+    assert [combo.itemText(i) for i in range(combo.count())] == ["CO2", "O2"]
+    assert [combo.itemData(i) for i in range(combo.count())] == ["CH1", "CH4"]
     texts = [b.text() for b in card.findChildren(QPushButton)]
     assert "Begin…" in texts
     assert "Return to measurement" in texts
@@ -133,7 +159,9 @@ def test_a_setting_is_dispatched_with_the_operator(
     assert result is not None
     assert result.accepted
     _run_async(card.refresh_readback())
-    assert card._settings["response_time_o2_s"] == 5
+    _pick(card._settings_gas, "O2")
+    assert card._response_spin is not None
+    assert card._response_spin.value() == 5
     _close_pool_sync(controller)
 
 
@@ -179,8 +207,9 @@ def test_a_zero_from_the_card_and_its_saved_record(
     assert card._cancel_button is not None
     assert not card._commit_button.isEnabled()
 
-    card._cal_channel.setCurrentText("CH3")
-    card._cal_kind.setCurrentText("zero")
+    _pick(card._cal_channel, "O2")
+    _pick(card._cal_kind, "Zero")
+    assert card._cal_value is not None and card._cal_label is not None
     card._cal_value.setValue(0.0)
     card._cal_label.setText("N2, cylinder 1234")
     asked = _say(monkeypatch, QMessageBox.StandardButton.Yes)
@@ -236,9 +265,18 @@ def test_the_begin_button_asks_and_names_the_gas(
     card = _card(qtbot, controller, op_provider, tmp_path)
     seen: list[dict[str, Any]] = []
     monkeypatch.setattr(card, "schedule_calibration", lambda **kwargs: seen.append(kwargs))
-    card._cal_channel.setCurrentText("CH3")
-    card._cal_kind.setCurrentText("span")
+    _pick(card._cal_channel, "O2")
+    _pick(card._cal_kind, "Span")
+    assert card._cal_value is not None and card._cal_label is not None
     card._cal_value.setValue(20.95)
+    # The gas's unit is its range's, so it is not known before a read-back.
+    card._on_begin()
+    assert seen == []
+    assert "not read yet" in card._status_label.text()
+    _run_async(card.refresh_readback())
+    assert card._cal_unit is not None and card._cal_unit.text() == "vol%"
+    assert card._cal_setting is not None
+    assert card._cal_setting.text() == "analyzer's span gas (0–25 vol%): 20.95 vol%"
     card._cal_label.setText("air")
     card._on_begin()
     assert seen[0]["kind"] == "calibration_begin"
@@ -250,7 +288,9 @@ def test_the_begin_button_asks_and_names_the_gas(
         "gas_unit": "vol%",
         "gas_label": "air",
     }
-    assert "20.95 vol% (air)" in seen[0]["destructive_summary"]
+    assert seen[0]["destructive_summary"].startswith(
+        "Begin a span calibration of O2 on analyzer against 20.95 vol% (air)"
+    )
     assert "Nothing is calibrated until you hold Calibrate" in seen[0]["destructive_note"]
     # A zero gas of 0 goes without a unit.
     card._cal_value.setValue(0.0)
@@ -293,15 +333,13 @@ def test_the_plan_button_reads_what_the_calibration_would_reach(
 ) -> None:
     card = _card(qtbot, controller, op_provider, tmp_path)
     assert "Plan" in [b.text() for b in card.findChildren(QPushButton)]
-    card._cal_channel.setCurrentText("CH3")
-    card._cal_kind.setCurrentText("span")
     result = _run_async(
         card.dispatch(kind="calibration_plan", payload={"channel": "CH3", "kind": "span"})
     )
     assert result is not None
     assert result.accepted
-    assert result.detail == "calibration_plan: span of CH3: CH3 range 1 against 20.95 vol%"
-    assert "span of CH3" in card._status_label.text()
+    assert result.detail == "calibration_plan: span of O2: O2 0–25 vol% against 20.95 vol%"
+    assert "span of O2" in card._status_label.text()
     # Reading the plan begins nothing.
     assert _adapter_for(controller, "analyzer").calibration.state == "idle"
     _close_pool_sync(controller)
@@ -330,7 +368,7 @@ def test_a_calibration_command_reads_back_at_once(
     assert card._cancel_button is not None
     assert card._cancel_button.isEnabled()
     assert card._calibration_label is not None
-    assert "zero of CH3: CH3 range 1 against 0 vol%" in card._calibration_label.text()
+    assert "zero of O2: O2 0–25 vol% against 0 vol%" in card._calibration_label.text()
     _run_async(card._dispatch_and_read_back({"kind": "calibration_cancel"}))
     assert card._calibration.outcome == "cancelled"
     assert card.last_saved_record is not None
@@ -426,7 +464,9 @@ def test_a_snapshot_without_readings_says_so(
     card.apply_snapshot(
         FujiStateSnapshot(readings=(FujiReadback("CH3", "o2", None, "vol%", "unknown"),))
     )
-    assert card._subtitle_label.text() == "O2 — vol% [unknown]"
+    assert card._subtitle_label.text() == (
+        "Device: analyzer   Adapter: fuji_sim   O2 — vol% [unknown]"
+    )
     _close_pool_sync(controller)
 
 
@@ -503,3 +543,235 @@ def test_the_calibration_readout(status: CalibrationStatus, fragment: str, color
     text, shown = _calibration_text(status)
     assert fragment in text
     assert shown == color
+
+
+# ---------------------------------------------------------------------------
+# The analyzer's settings, named and read back
+# ---------------------------------------------------------------------------
+
+
+def test_every_field_is_empty_until_the_analyzer_reports(
+    qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
+) -> None:
+    card = _card(qtbot, controller, op_provider, tmp_path)
+    assert card._response_spin is not None
+    assert card._response_spin.text() == NOT_READ
+    for combo in (card._range_combo, card._method_combo, card._hold_combo, card._hold_mode_combo):
+        assert combo is not None
+        assert combo.currentIndex() == -1
+        assert combo.placeholderText() == NOT_READ
+    # The gases are the config's, so they are there from the start.
+    assert _texts(card._settings_gas) == ["CO2", "CO", "O2"]
+    _close_pool_sync(controller)
+
+
+def test_the_fields_show_the_analyzers_settings_by_name(
+    qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
+) -> None:
+    card = _card(qtbot, controller, op_provider, tmp_path)
+    _run_async(card.refresh_readback())
+    assert card._response_spin is not None
+    assert card._response_spin.text() == "15 s"
+    assert _texts(card._range_combo) == ["0–10 vol%"]
+    assert card._range_combo is not None and card._range_combo.currentText() == "0–10 vol%"
+    assert card._method_combo is not None and card._method_combo.currentText() == "Manual"
+    assert card._hold_combo is not None and card._hold_combo.currentText() == "Off"
+    assert card._hold_mode_combo is not None
+    assert _texts(card._hold_mode_combo) == ["Last reading", "Preset value"]
+    assert card._hold_mode_combo.currentText() == "Last reading"
+    # Another gas shows its own settings.
+    _pick(card._settings_gas, "O2")
+    assert _texts(card._range_combo) == ["0–25 vol%", "0–10 vol%"]
+    assert card._range_combo.currentText() == "0–25 vol%"
+    assert card._subtitle_label.text().startswith(
+        "Device: analyzer   Adapter: fuji_sim   CO2 0.04 vol%   CO 0 vol%   O2 20.95 vol%"
+    )
+    _close_pool_sync(controller)
+
+
+def test_a_response_time_of_zero_reads_as_zero(
+    qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
+) -> None:
+    card = _card(qtbot, controller, op_provider, tmp_path)
+    _ = _run_async(card.dispatch(kind="set_response_time", payload={"target": "CH1", "seconds": 0}))
+    _run_async(card.refresh_readback())
+    assert card._response_spin is not None
+    # Qt shows a spinbox's special text at its minimum; 0 is a value here.
+    assert card._response_spin.text() == "0 s"
+    _close_pool_sync(controller)
+
+
+def test_an_unapplied_change_survives_a_read_back(
+    qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
+) -> None:
+    card = _card(qtbot, controller, op_provider, tmp_path)
+    _run_async(card.refresh_readback())
+    spin = card._response_spin
+    assert spin is not None
+    spin.setValue(30)
+    _pick(card._method_combo, "Auto")
+    _run_async(card.refresh_readback())
+    assert spin.value() == 30
+    assert card._method_combo is not None and card._method_combo.currentText() == "Auto"
+    # Applied, the field shows what the analyzer took.
+    _run_async(
+        card._apply_field_and_read_back(
+            "response_time",
+            {"kind": "set_response_time", "payload": {"target": "CH1", "seconds": 30}},
+        )
+    )
+    assert "response_time" not in card._unapplied_edits
+    assert spin.value() == 30
+    assert "range_method" in card._unapplied_edits
+    # Picking another gas drops the changes made for the last one.
+    _pick(card._settings_gas, "O2")
+    assert card._method_combo.currentText() == "Manual"
+    assert spin.value() == 15
+    _close_pool_sync(controller)
+
+
+def test_a_range_is_picked_by_its_span_and_needs_the_manual_method(
+    qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
+) -> None:
+    card = _card(qtbot, controller, op_provider, tmp_path)
+    sent: list[dict[str, Any]] = []
+    _run_async(card.refresh_readback())
+    _pick(card._settings_gas, "O2")
+    _pick(card._range_combo, "0–10 vol%")
+    card._apply_field = lambda field, **dispatch: sent.append(dispatch)  # type: ignore[method-assign]
+    card._on_apply_range()
+    assert sent == [{"kind": "set_range", "payload": {"channel": "CH3", "range": 2}}]
+
+    _ = _run_async(
+        card.dispatch(kind="set_range_method", payload={"channel": "CH3", "method": "auto"})
+    )
+    _run_async(card.refresh_readback())
+    card._on_apply_range()
+    assert len(sent) == 1
+    assert "O2's range method is Auto; set it to Manual first" in card._status_label.text()
+    _close_pool_sync(controller)
+
+
+def test_a_remote_range_method_is_shown_but_not_offered(
+    qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
+) -> None:
+    card = _card(qtbot, controller, op_provider, tmp_path)
+    _run_async(card.refresh_readback())
+    co2, co, o2 = card._snapshot.channels
+    card.apply_snapshot(
+        dataclasses.replace(
+            card._snapshot, channels=(co2, co, dataclasses.replace(o2, range_method="remote"))
+        )
+    )
+    _pick(card._settings_gas, "O2")
+    assert card._method_combo is not None
+    assert card._method_combo.currentText() == "Remote (contact input)"
+    card._on_apply_range_method()
+    assert "set at the analyzer" in card._status_label.text()
+    _close_pool_sync(controller)
+
+
+def test_the_calibration_gas_setting_shows_and_sets_the_selected_range(
+    qtbot: Any,
+    controller: RunController,
+    op_provider: OperatorIdProvider,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    card = _card(qtbot, controller, op_provider, tmp_path)
+    _run_async(card.refresh_readback())
+    value, unit = card._gas_setting_value, card._gas_setting_unit
+    assert value is not None and unit is not None
+    _pick(card._gas_setting_gas, "O2")
+    _pick(card._gas_setting_kind, "Span")
+    assert (_texts(card._gas_setting_range), value.value(), unit.text()) == (
+        ["0–25 vol%", "0–10 vol%"],
+        20.95,
+        "vol%",
+    )
+    # The operator's pick of range holds through a read-back.
+    _pick(card._gas_setting_range, "0–10 vol%")
+    _run_async(card.refresh_readback())
+    assert card._gas_setting_range is not None
+    assert card._gas_setting_range.currentText() == "0–10 vol%"
+    assert value.value() == 10.0
+
+    value.setValue(9.5)
+    asked = _say(monkeypatch, QMessageBox.StandardButton.Yes)
+    payload = {"channel": "CH3", "range": 2, "kind": "span", "value": 9.5, "unit": "vol%"}
+    _run_async(
+        card._apply_field_and_read_back(
+            "calibration_gas",
+            {"kind": "set_calibration_gas", "payload": payload, "destructive": True},
+        )
+    )
+    assert asked
+    assert _adapter_for(controller, "analyzer")._settings["ch3_range2_span_gas"] == 9.5
+    assert value.value() == 9.5
+    _close_pool_sync(controller)
+
+
+def test_the_calibration_gas_apply_names_the_gas_and_range(
+    qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
+) -> None:
+    card = _card(qtbot, controller, op_provider, tmp_path)
+    sent: list[tuple[str, dict[str, Any]]] = []
+    card._apply_field = lambda field, **dispatch: sent.append((field, dispatch))  # type: ignore[method-assign]
+    card._on_apply_calibration_gas()
+    assert sent == []
+    _run_async(card.refresh_readback())
+    _pick(card._gas_setting_gas, "CO2")
+    _pick(card._gas_setting_kind, "Span")
+    card._on_apply_calibration_gas()
+    field, dispatch = sent[0]
+    assert field == "calibration_gas"
+    assert dispatch["payload"] == {
+        "channel": "CH1",
+        "range": 1,
+        "kind": "span",
+        "value": 10.0,
+        "unit": "vol%",
+    }
+    assert dispatch["destructive_summary"] == (
+        "Set the span gas of CO2 0–10 vol% to 10 vol% on analyzer."
+    )
+    _close_pool_sync(controller)
+
+
+def test_a_gas_on_two_channels_is_named_with_its_channel(
+    qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
+) -> None:
+    card = _card(qtbot, controller, op_provider, tmp_path, channel_map={"CH1": "co", "CH2": "co"})
+    assert _texts(card._settings_gas) == ["CO (CH1)", "CO (CH2)"]
+    _close_pool_sync(controller)
+
+
+def test_the_readout_names_the_gas() -> None:
+    waiting = CalibrationStatus(
+        state="waiting",
+        channel="CH3",
+        kind="zero",
+        steady=False,
+        reasons=("O2: moving",),
+        readings={"CH3": 0.4},
+    )
+    text, _color = _calibration_text(waiting, {"CH3": "O2"})
+    assert text.startswith("zero of O2: waiting for the gas to settle (O2: moving).")
+    assert text.endswith("O2 0.4")
+
+
+def test_without_a_channel_map_the_gases_come_from_the_read_back(
+    qtbot: Any, controller: RunController, op_provider: OperatorIdProvider, tmp_path: Path
+) -> None:
+    cfg = _make_config((DeviceConfig(name="analyzer", adapter=SIM, params={}),))
+    _open_pool_sync(controller, cfg)
+    card = FujiCard(
+        spec=cfg.hardware.devices[0], controller=controller, operator_provider=op_provider
+    )
+    qtbot.addWidget(card)
+    assert _texts(card._settings_gas) == []
+    _run_async(card.refresh_readback())
+    assert _texts(card._settings_gas) == ["CO2", "CO", "O2"]
+    assert _texts(card._cal_channel) == ["CO2", "CO", "O2"]
+    assert card._response_spin is not None and card._response_spin.text() == "15 s"
+    _close_pool_sync(controller)

@@ -50,8 +50,10 @@ is still warming up.
 
 from __future__ import annotations
 
+import math
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Final, Literal
@@ -76,6 +78,7 @@ from fujilib import (
     LabelSource,
     OverflowPolicy,
     PollSourceAdapter,
+    RangeInfo,
     Reading,
     ReconnectPolicy,
     RegisterValue,
@@ -97,7 +100,8 @@ from fujilib.devices.panel import (
 )
 from fujilib.devices.steadiness import SteadinessRule
 from fujilib.devices.writes import WriteResult, describe
-from fujilib.registry.channels import coerce_channel_map
+from fujilib.registry.channels import MEASURED_CHANNELS, coerce_channel_map
+from fujilib.registry.enums import HoldMode, RangeIndex, RangeMethod
 from fujilib.streaming.recorder import record as fuji_record
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -122,6 +126,13 @@ from capa.devices.adapter import (
     DeviceCommand,
 )
 from capa.devices.fuji_calibration import IDLE, CalibrationRun, CalibrationStatus, plan_summary
+from capa.devices.fuji_labels import (
+    HOLD_MODE_NAMES,
+    RANGE_METHOD_NAMES,
+    channel_names,
+    range_name,
+    range_of,
+)
 from capa.devices.records import (
     DeviceEmission,
     DeviceEvent,
@@ -139,6 +150,12 @@ ADAPTER_ID: Final[str] = "fuji"
 Scalar = float | int | str | bool | None
 
 _AUTO_CALIBRATION_OPTIONS: Final = FujiCapability.AUTO_CALIBRATION | FujiCapability.AUTO_ZERO
+
+SETTINGS_MAX_AGE_S: Final[float] = 10.0
+"""How old the cached settings may be when :meth:`FujiAdapter.read_state_snapshot`
+answers: older ones are read again, so a change made at the front panel
+reaches the manual card within this time. A change made through capa is
+read back at once."""
 
 # What fujilib or the analyzer declines before anything changes: a value that
 # does not fit, the analyzer busy calibrating or in a menu, an option that is
@@ -178,6 +195,49 @@ class FujiReadback:
 
 
 @dataclass(frozen=True, slots=True)
+class FujiRange:
+    """One range of a measured channel, with its calibration gases."""
+
+    number: int
+    """1 or 2, as the analyzer numbers it."""
+    unit: str
+    full_scale: float
+    zero_gas: float | None = None
+    """The zero calibration gas, in :attr:`unit`; ``None`` if unreadable."""
+    span_gas: float | None = None
+    """The span calibration gas, in :attr:`unit`; ``None`` if unreadable."""
+
+    @property
+    def name(self) -> str:
+        """``"0–25 vol%"``: the range by its span."""
+        return range_name(self.unit, self.full_scale)
+
+
+@dataclass(frozen=True, slots=True)
+class FujiChannelSettings:
+    """The settings of one measured channel the channel map asserts."""
+
+    channel: str
+    """``"CH1"``."""
+    gas: str
+    """The asserted gas, ``"co2"``."""
+    name: str
+    """The channel as the operator reads it, ``"CO2"``."""
+    ranges: tuple[FujiRange, ...] = ()
+    current_range: int | None = None
+    """The range the channel measures on now."""
+    range_method: str | None = None
+    """``"manual"``, ``"auto"`` or ``"remote"``; ``None`` if not read."""
+    response_time_s: int | None = None
+    """The response time of the channel's slot; ``None`` when the channel
+    map does not say which slot is the channel's."""
+
+    def range(self, number: int | None) -> FujiRange | None:
+        """Range ``number``, if the channel has it."""
+        return next((r for r in self.ranges if r.number == number), None)
+
+
+@dataclass(frozen=True, slots=True)
 class FujiStateSnapshot:
     """One-shot readback of the operator-facing state of a Fuji analyzer.
 
@@ -190,9 +250,13 @@ class FujiStateSnapshot:
     readings: tuple[FujiReadback, ...] = ()
     """The latest reading of each established channel; empty when the
     analyzer could not be read."""
-    settings: Mapping[str, Scalar] = field(default_factory=dict)
-    """The analyzer's settings as last read, flattened as in the device
-    snapshot: response times, ranges, hold, calibration gases."""
+    channels: tuple[FujiChannelSettings, ...] = ()
+    """The settings of each measured channel the channel map asserts, in
+    channel order; empty until the settings have been read."""
+    output_hold: bool | None = None
+    """Whether the outputs, and the Modbus values, hold during a calibration."""
+    hold_mode: str | None = None
+    """What they hold: ``"last_value"`` or ``"setting"``."""
 
 
 # ---------------------------------------------------------------------------
@@ -343,8 +407,11 @@ class FujiAdapter:
         "_hold_channels",
         "_instrument_errors",
         "_metadata",
+        "_names",
         "_outage",
         "_quarantined",
+        "_range_methods",
+        "_settings_read_at",
         "_state",
         "_steadiness_rule",
         "_tracker",
@@ -386,7 +453,12 @@ class FujiAdapter:
         self._analyzer_factory: AnalyzerFactory | None = analyzer_factory
         self._analyzer: Analyzer | None = None
         self._device_info: DeviceInfo | None = None
+        # Each channel by its gas, for what the operator reads.
+        self._names: dict[str, str] = channel_names(params.channel_map)
+        # The settings as last read, and when (monotonic seconds).
         self._metadata: AnalyzerMetadata | None = None
+        self._range_methods: dict[ChannelId, str] = {}
+        self._settings_read_at: float = -math.inf
         self._channels: list[ChannelSpec] = []
         self._state = AdapterRuntimeState()
         # Channels whose reading's unit was not the unit the channel declares:
@@ -435,8 +507,9 @@ class FujiAdapter:
 
     @property
     def metadata(self) -> AnalyzerMetadata | None:
-        """The analyzer's settings as last read: at :meth:`open` and at the
-        start of each :meth:`stream`."""
+        """The analyzer's settings as last read: at :meth:`open`, at the
+        start of each :meth:`stream`, after each setting written through
+        capa, and by :meth:`read_state_snapshot` when they are old."""
         return self._metadata
 
     # ------------------------------------------------------------------ lifecycle
@@ -451,7 +524,7 @@ class FujiAdapter:
         try:
             self._analyzer = await self._build_analyzer()
             self._device_info = self._analyzer.info
-            self._metadata = await self._analyzer.read_metadata()
+            await self._read_settings(self._analyzer)
         except FujiError as exc:
             await self._safe_close_analyzer()
             self._analyzer = None
@@ -634,7 +707,7 @@ class FujiAdapter:
             out["serial"] = info.serial_number
             out["type_code"] = info.type_code.raw
         if self._metadata is not None:
-            out.update(_metadata_fields(self._metadata, self.params.gases()))
+            out.update(_metadata_fields(self._metadata, self.params.gases(), self._range_methods))
         return out
 
     # =====================================================================
@@ -671,6 +744,7 @@ class FujiAdapter:
         except _RefusedError as exc:
             return _not_accepted(f"{cmd.kind} refused: {exc}", clock)
         except _UncertainError as exc:
+            self._settings_read_at = -math.inf
             detail = f"{cmd.kind}: {exc}"
             self._queue_while_running(
                 self._event(
@@ -682,6 +756,9 @@ class FujiAdapter:
             )
             return _not_accepted(detail, clock)
         except (FujiVerificationError, FujiWriteOutcomeUnknownError) as exc:
+            # The analyzer may hold something else than the cache: the next
+            # read-back reads it.
+            self._settings_read_at = -math.inf
             outcome = "unknown" if isinstance(exc, FujiWriteOutcomeUnknownError) else "not verified"
             detail = f"{cmd.kind}: outcome {outcome}: {exc}"
             self._queue_while_running(
@@ -835,7 +912,7 @@ class FujiAdapter:
             channel, plan_kind = _need(cmd, "channel", "kind")
             plan = await analyzer.plan_manual_calibration(channel, plan_kind)
             notes = "".join(f". {note}" for note in plan.notes)
-            return f"calibration_plan: {plan_summary(plan)}{notes}"
+            return f"calibration_plan: {plan_summary(plan, self._names, self._ranges())}{notes}"
         if kind == "calibration_begin":
             return await self._begin_calibration(analyzer, cmd)
         if kind == "calibration_commit":
@@ -874,6 +951,8 @@ class FujiAdapter:
             interval_s=self._calibration_interval_s,
             timeout_s=self._calibration_timeout_s,
             on_end=self._calibration_ended,
+            names=self._names,
+            ranges=self._ranges(),
         )
         self._calibration = run
         status = await run.begin()
@@ -893,8 +972,8 @@ class FujiAdapter:
         self._queue_while_running(
             self._event(
                 "calibration",
-                f"a manual {status.kind} calibration of {status.channel} from the host ended: "
-                f"{status.outcome or 'not started'}"
+                f"a manual {status.kind} calibration of {status.channel_name or status.channel} "
+                f"from the host ended: {status.outcome or 'not started'}"
                 + (f" ({status.error})" if status.error else ""),
                 severity="info" if ok else "warning",
                 metadata={
@@ -912,11 +991,48 @@ class FujiAdapter:
         """The calibration under way, or the last one that ended."""
         return self._calibration.status if self._calibration is not None else IDLE
 
+    def _describe_write(self, result: WriteResult) -> str:
+        """``"O2 response time: 15 s -> 10 s"``, ``"CO2 range: 0–10 vol% ->
+        0–25 vol%"``: a write as the operator reads it, each channel by its
+        gas and each range by its span. A setting the card does not offer
+        keeps its register name."""
+        ranges = {info.channel: info for info in self._ranges()}
+        previous = _value_text(result.previous, ranges)
+        written = _value_text(result.requested, ranges)
+        return f"{self._setting_text(result.name)}: {previous} -> {written}"
+
+    def _setting_text(self, register: str) -> str:
+        """``"O2 response time"`` for ``"response_time.o2"``."""
+        parts = register.split(".")
+        if parts[0] == "response_time" and len(parts) == 2:
+            slot = _response_slots(self.params.gases()).get(parts[1])
+            who = self._names.get(slot.value, slot.value) if slot else parts[1].upper()
+            return f"{who} response time"
+        if register == "output_hold.enabled":
+            return "output hold"
+        if register == "hold.mode":
+            return "hold mode"
+        if len(parts) < 3 or not parts[1].startswith("ch") or not parts[1][2:].isdigit():
+            return register
+        channel = ChannelId.from_number(int(parts[1][2:])).value
+        gas = self._names.get(channel, channel)
+        if parts[0] == "range" and parts[2] == "selected":
+            return f"{gas} range"
+        if parts[0] == "range" and parts[2] == "method":
+            return f"{gas} range method"
+        if parts[0] == "hold" and parts[2] == "value":
+            return f"{gas} hold value"
+        if parts[0] == "calibration_gas" and len(parts) == 4 and parts[2].startswith("range"):
+            table = next((t for t in self._ranges() if t.channel.value == channel), None)
+            span = range_of(table, int(parts[2].removeprefix("range")))
+            return f"{gas} {span} {parts[3]} gas"
+        return register
+
     async def _written(self, analyzer: Analyzer, result: WriteResult) -> str:
         """Take in a verified setting write: refresh the cached settings and
         report the change."""
         await self._refresh_metadata(analyzer)
-        change = _describe_write(result)
+        change = self._describe_write(result)
         self._queue_while_running(
             self._event(
                 "setting_changed",
@@ -944,7 +1060,7 @@ class FujiAdapter:
             self._queue_while_running(
                 self._event(
                     "setting_changed",
-                    _describe_write(result),
+                    self._describe_write(result),
                     metadata={
                         "setting": result.name,
                         "previous": _shown(result.previous),
@@ -1222,12 +1338,14 @@ class FujiAdapter:
 
     async def read_state_snapshot(self) -> FujiStateSnapshot | None:
         """One-shot readback for the manual-control card: the calibration's
-        state, the latest readings and the cached settings.
+        state, the latest readings and the settings.
 
         Returns ``None`` when no analyzer is open. During a run the readings
         are the stream's latest, and during a calibration the latest of its
         own reads of the wait step; otherwise the analyzer is polled once,
         and a poll that fails leaves the readings empty rather than raising.
+        After a good poll, settings older than :data:`SETTINGS_MAX_AGE_S`
+        are read again; the snapshot shows them as last read.
         """
         analyzer = self._analyzer
         if analyzer is None:
@@ -1239,6 +1357,10 @@ class FujiAdapter:
                 frame = await analyzer.poll()
             except FujiError:
                 frame = None
+            if frame is not None and (
+                time.monotonic() - self._settings_read_at > SETTINGS_MAX_AGE_S
+            ):
+                await self._refresh_metadata(analyzer)
         readings = (
             tuple(
                 FujiReadback(
@@ -1253,12 +1375,18 @@ class FujiAdapter:
             if frame is not None
             else ()
         )
-        settings = (
-            _metadata_fields(self._metadata, self.params.gases())
-            if self._metadata is not None
-            else {}
+        metadata = self._metadata
+        if metadata is None:
+            return FujiStateSnapshot(calibration=self.calibration, readings=readings)
+        return FujiStateSnapshot(
+            calibration=self.calibration,
+            readings=readings,
+            channels=_channel_settings(
+                metadata, self.params.gases(), self._range_methods, self._names
+            ),
+            output_hold=metadata.output_hold,
+            hold_mode=_enum_text(metadata.hold_mode),
         )
-        return FujiStateSnapshot(calibration=self.calibration, readings=readings, settings=settings)
 
     async def read_settings(self) -> Mapping[str, RegisterValue]:
         """Read every setting of the analyzer, by its fujilib register name."""
@@ -1318,10 +1446,32 @@ class FujiAdapter:
             # Cleanup path: don't mask whatever the original failure was.
             return
 
+    async def _read_settings(self, analyzer: Analyzer) -> None:
+        """Read the settings snapshot and the measured channels' range
+        methods, which it does not carry.
+
+        Raises:
+            FujiError: a read failed; the cached settings are unchanged.
+        """
+        metadata = await analyzer.read_metadata()
+        measured = [c for c in self.params.gases() if c in MEASURED_CHANNELS]
+        names = [f"range.ch{c.number}.method" for c in measured]
+        methods = await analyzer.read_parameters(names) if names else {}
+        self._metadata = metadata
+        self._range_methods = {
+            channel: str(_shown(methods[name]))
+            for channel, name in zip(measured, names, strict=True)
+        }
+        self._settings_read_at = time.monotonic()
+
+    def _ranges(self) -> tuple[RangeInfo, ...]:
+        """The range tables as last read; empty before the first read."""
+        return self._metadata.ranges if self._metadata is not None else ()
+
     async def _refresh_metadata(self, analyzer: Analyzer) -> None:
         """Read the settings again; keep the last ones if the read fails."""
         try:
-            self._metadata = await analyzer.read_metadata()
+            await self._read_settings(analyzer)
         except FujiError as exc:
             self._queue_while_running(
                 self._event(
@@ -1557,9 +1707,11 @@ class FujiAdapter:
         previous, self._hold_channels = self._hold_channels, held
         if held == (previous or frozenset()):
             return
-        channels = ",".join(sorted(held, key=lambda name: ChannelId(name).number))
+        ordered = sorted(held, key=lambda name: ChannelId(name).number)
+        channels = ",".join(ordered)
         if held:
-            message = f"output hold is on for {channels}; the values are frozen"
+            gases = ", ".join(self._names.get(channel, channel) for channel in ordered)
+            message = f"output hold is on for {gases}; the values are frozen"
         else:
             message = "output hold is off"
         self._events.append(
@@ -1578,13 +1730,14 @@ class FujiAdapter:
         """A zero or span made at the analyzer's front panel, with its
         ``fujilib-calibration/1`` record."""
         channels = ",".join(channel.value for channel in calibration.channels)
+        gases = ", ".join(self._names.get(c.value, c.value) for c in calibration.channels)
         ok = calibration.outcome in {
             ManualCalibrationOutcome.COMPLETED,
             ManualCalibrationOutcome.CANCELLED,
         }
         return self._event(
             "calibration",
-            f"a manual {calibration.kind.value} calibration of {channels} at the front panel "
+            f"a manual {calibration.kind.value} calibration of {gases} at the front panel "
             f"ended: {calibration.outcome.value}",
             severity="info" if ok else "warning",
             t_mono_ns=t_mono_ns,
@@ -1646,7 +1799,7 @@ def _calibration_result(status: CalibrationStatus, *, committing: bool = False) 
     ``committing`` is for the command that calibrates: a run that ended
     cancelled, by another command or at the panel, did not do what it asked.
     """
-    what = f"{status.kind} of {status.channel}"
+    what = f"{status.kind} of {status.channel_name or status.channel}"
     if status.error is not None or status.clean is False or status.outcome is None:
         problem = status.error or "the front panel was not left clean"
         raise _UncertainError(f"{what} ended {status.outcome or 'without a result'}: {problem}")
@@ -1663,9 +1816,41 @@ def _shown(value: RegisterValue) -> Scalar:
     return shown.name.lower() if isinstance(shown, Enum) else shown
 
 
-def _describe_write(result: WriteResult) -> str:
-    """``"response_time.o2: 15 s -> 10 s"``."""
-    return f"{result.name}: {describe(result.previous)} -> {describe(result.requested)}"
+def _response_slots(gases: Mapping[ChannelId, Gas]) -> dict[str, ChannelId]:
+    """The measured channel each response-time slot serves, by fujilib's
+    rule: the O2 channel has the ``o2`` slot, and the n-th other channel
+    ``ndirn``, which needs every channel before it asserted."""
+    slots: dict[str, ChannelId] = {}
+    ndir = 0
+    gap = False
+    for channel in MEASURED_CHANNELS:
+        gas = gases.get(channel)
+        if gas is None:
+            gap = True
+        elif gas is Gas.O2:
+            slots["o2"] = channel
+        elif not gap:
+            ndir += 1
+            slots[f"ndir{ndir}"] = channel
+    return slots
+
+
+def _value_text(value: RegisterValue, ranges: Mapping[ChannelId, RangeInfo]) -> str:
+    """A setting's value as the operator reads it: a range by its span, a
+    method or hold mode by what it does, a flag as on or off."""
+    shown = value.value if value.value is not None else value.raw
+    if isinstance(shown, RangeIndex):
+        channel = value.spec.channel
+        return range_of(ranges.get(channel) if channel is not None else None, shown.number)
+    if isinstance(shown, RangeMethod):
+        return RANGE_METHOD_NAMES.get(shown.name.lower(), shown.name.lower()).lower()
+    if isinstance(shown, HoldMode):
+        return HOLD_MODE_NAMES.get(shown.name.lower(), shown.name.lower()).lower()
+    if isinstance(shown, bool):
+        return "on" if shown else "off"
+    if isinstance(shown, float):
+        return f"{shown:g}" + (f" {value.unit}" if value.unit else "")
+    return describe(value)
 
 
 def _unit_mismatch(spec: ChannelSpec, reading: Reading) -> bool:
@@ -1691,7 +1876,9 @@ def _enum_text(value: object) -> str:
 
 
 def _metadata_fields(
-    metadata: AnalyzerMetadata, gases: Mapping[ChannelId, Gas]
+    metadata: AnalyzerMetadata,
+    gases: Mapping[ChannelId, Gas],
+    range_methods: Mapping[ChannelId, str],
 ) -> dict[str, Scalar]:
     """Flatten the analyzer's settings to snapshot scalars.
 
@@ -1715,6 +1902,8 @@ def _metadata_fields(
             continue
         prefix = f"ch{channel.number}"
         out[f"{prefix}_range"] = current
+        if channel in range_methods:
+            out[f"{prefix}_range_method"] = range_methods[channel]
         if 1 <= current <= len(info.units):
             unit, full_scale, _decimals = info.of(current)
             out[f"{prefix}_unit"] = unit.value
@@ -1725,6 +1914,39 @@ def _metadata_fields(
                 continue
             out[f"{prefix}_range{number}_zero_gas"], out[f"{prefix}_range{number}_span_gas"] = gas
     return out
+
+
+def _channel_settings(
+    metadata: AnalyzerMetadata,
+    gases: Mapping[ChannelId, Gas],
+    range_methods: Mapping[ChannelId, str],
+    names: Mapping[str, str],
+) -> tuple[FujiChannelSettings, ...]:
+    """The settings of each asserted channel that has range registers
+    (channels 1-5), in channel order."""
+    tables = {info.channel: info for info in metadata.ranges}
+    out: list[FujiChannelSettings] = []
+    for channel in sorted(gases, key=lambda c: c.number):
+        table = tables.get(channel)
+        if table is None:
+            continue
+        ranges: list[FujiRange] = []
+        for number in range(1, min(table.count, len(table.units)) + 1):
+            unit, full_scale, _decimals = table.of(number)
+            zero, span = metadata.calibration_gas.get((channel, number), (None, None))
+            ranges.append(FujiRange(number, unit.value, full_scale, zero, span))
+        out.append(
+            FujiChannelSettings(
+                channel=channel.value,
+                gas=gases[channel].value,
+                name=names.get(channel.value, channel.value),
+                ranges=tuple(ranges),
+                current_range=metadata.current_range.get(channel),
+                range_method=range_methods.get(channel),
+                response_time_s=metadata.response_time_s.get(channel),
+            )
+        )
+    return tuple(out)
 
 
 def _suggested_channel_map(info: DeviceInfo) -> dict[str, str]:
@@ -1832,8 +2054,11 @@ async def discover(
 __all__ = [
     "ADAPTER_ID",
     "DESCRIPTOR",
+    "SETTINGS_MAX_AGE_S",
     "FujiAdapter",
     "FujiAdapterParams",
+    "FujiChannelSettings",
+    "FujiRange",
     "FujiReadback",
     "FujiStateSnapshot",
     "discover",
@@ -1843,6 +2068,7 @@ __all__ = [
 
 def _build_descriptor() -> AdapterDescriptor:
     from capa.devices._templates import FUJI_CO, FUJI_CO2, FUJI_O2  # noqa: PLC0415
+    from capa.devices.fuji_settings import FUJI_SETTINGS  # noqa: PLC0415
     from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
 
     return AdapterDescriptor(
@@ -1864,6 +2090,7 @@ def _build_descriptor() -> AdapterDescriptor:
                 Capability.HAS_INTERNAL_CAL,
             }
         ),
+        settings=FUJI_SETTINGS,
     )
 
 

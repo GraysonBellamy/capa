@@ -99,7 +99,7 @@ class TestSettings:
             result = await adapter.command(build("set_response_time", target="o2", seconds=10))
             snap = await adapter.snapshot()
         assert result.accepted
-        assert result.detail == "response_time.o2: 15 s -> 10 s"
+        assert result.detail == "O2 response time: 15 s -> 10 s"
         assert mock.register("response_time.o2") == (10,)
         assert len(_writes(mock)) == 1
         # The cached settings are read again, so the next snapshot shows the change.
@@ -251,7 +251,7 @@ class TestGuardedVerbs:
         assert not by_run.accepted
         assert "person's confirmation" in by_run.detail
         assert by_person.accepted, by_person.detail
-        assert "calibration_gas.ch3.range1.span" in by_person.detail
+        assert by_person.detail == "O2 0–21 vol% span gas: 20.95 vol% -> 20 vol%"
         assert not wrong_unit.accepted
 
     async def test_return_to_measurement(self) -> None:
@@ -381,7 +381,7 @@ class TestOutcomes:
         event = queued[0]
         assert isinstance(event, DeviceEvent)
         assert (event.kind, event.severity) == ("setting_changed", "info")
-        assert event.message == "response_time.o2: 15 s -> 10 s"
+        assert event.message == "O2 response time: 15 s -> 10 s"
         assert event.metadata == {"setting": "response_time.o2", "previous": 15, "written": 10}
 
 

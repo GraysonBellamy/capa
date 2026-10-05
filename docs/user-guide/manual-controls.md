@@ -93,7 +93,7 @@ The six card classes that ship today:
 | **HeaterCard** | Watlow temperature controllers | Setpoint, Heat-flux tune launcher |
 | **BalanceCard** | Sartorius balances | Tare, zero, internal cal, filter / auto-zero / display unit / tare behavior, save settings; shows those settings and the last calibration |
 | **AlicatCard** | Alicat MFCs and pressure devices | Flow setpoint, gas select, valve hold, totalizer reset; shows the device's active gas and setpoint |
-| **FujiCard** | Fuji ZP-series gas analyzers | Response time, range and range method, output hold, calibration-gas setting, a guarded zero or span with a live steadiness readout |
+| **FujiCard** | Fuji ZP-series gas analyzers | Per gas: response time, range (picked by its span, e.g. `0–25 vol%`) and range method; output hold and hold mode; calibration-gas setting; a guarded zero or span with a live steadiness readout. Everything is named by gas, not channel number, and every field shows the analyzer's current setting |
 | **FlirCard** | FLIR IR cameras | Temperature range (picked from the ranges the camera reports, in °C), NUC trigger, auto-NUC interval, radiometric parameters, palettes (choices read from the camera); every field shows the camera's current setting |
 | **WebcamCard** | USB / built-in cameras | Resolution, framerate; zoom, pan, tilt, focus, exposure, white balance and image adjustments, read live from the camera (Windows) |
 
@@ -171,18 +171,33 @@ reports, and stays empty until the device has reported it. Every field
 on an IR camera card — range, auto-NUC interval, radiometric values,
 both palettes — shows the camera's setting; one you have changed but
 not yet applied keeps your change through a refresh, and a command you
-cancel at its confirmation leaves it changed. These refresh:
+cancel at its confirmation leaves it changed.
+
+A gas analyzer card works the same way, and names everything as the
+bench does: each channel by its gas (`CO2`, not `CH1`; a gas on two
+channels as `CO (CH2)`), each range by its span (`0–25 vol%`, not `1`),
+and each option by what it does (`Last reading` / `Preset value`). Pick
+a gas under **Settings** to see its response time, range and range
+method. The subtitle shows the live concentrations; the calibration-gas
+setting shows the analyzer's gas for the gas, range and kind picked.
+
+These refresh:
 
 - **Once the pool reports ready**, asynchronously.
 - **After a command that changes them** — a setpoint, a gas, a balance
   setting or calibration — so the card shows what the device took.
 - **After device settings are applied** from the Device settings dialog.
+- **Every second, for a gas analyzer card** that is visible while no
+  run is active: the concentrations are polled each time, and the
+  settings are read again once they are 10 s old, so a change made at
+  the analyzer's front panel shows within that time.
 
 ## Setting devices from the experiment
 
 Settings you'd otherwise pick on these cards every time — the MFC's gas,
-the balance's stability settings, the IR camera's range and radiometric
-values, the webcam's zoom, pan, tilt, focus and exposure — can be declared in the experiment under
+the balance's stability settings, the gas analyzer's response times and
+ranges, the IR camera's range and radiometric values, the webcam's zoom,
+pan, tilt, focus and exposure — can be declared in the experiment under
 [`device_settings:`](../configuration/device-settings.md). When the
 config loads, capa compares the devices with the declaration and, if
 anything differs, lists it in a **Device settings** dialog; Apply sends

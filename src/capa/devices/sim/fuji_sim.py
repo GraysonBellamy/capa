@@ -11,10 +11,11 @@ simulator's own settings, and a manual zero or span reaches the wait step,
 becomes steady after ``settle_s``, and on commit pulls the channel's reading
 onto the named gas.
 
-What it does not model: every channel has one range, in vol%; the range
-method and the hold value are acknowledged and not kept, as is any verb it
-does not know; a calibration's record is a short one marked ``simulated``;
-and there are no outages, so no row is an error row or ``settling``.
+What it does not model: every range is in vol%, and a range change does
+not change the readings; the hold value is acknowledged and not kept, as is
+any verb it does not know; a calibration's record is a short one marked
+``simulated``; and there are no outages, so no row is an error row or
+``settling``.
 """
 
 from __future__ import annotations
@@ -41,8 +42,15 @@ from capa.devices.adapter import (
     CommandResult,
     DeviceCommand,
 )
-from capa.devices.fuji import FujiReadback, FujiStateSnapshot, Scalar
+from capa.devices.fuji import (
+    FujiChannelSettings,
+    FujiRange,
+    FujiReadback,
+    FujiStateSnapshot,
+    Scalar,
+)
 from capa.devices.fuji_calibration import IDLE, CalibrationStatus
+from capa.devices.fuji_labels import channel_names, is_measured, range_name
 from capa.devices.records import (
     DeviceEmission,
     DeviceSnapshot,
@@ -68,9 +76,15 @@ ADAPTER_ID: Final[str] = "fuji"
 _DEFAULT_CHANNEL_MAP: Final[dict[str, str]] = {"CH1": "co2", "CH2": "co", "CH3": "o2"}
 # Ambient air, as a three-component analyzer reads it.
 _AMBIENT: Final[dict[Gas, float]] = {Gas.CO2: 0.04, Gas.CO: 0.0, Gas.O2: 20.95}
-# Full scale and decimals per gas, as on the bench analyzer's first range.
-_FULL_SCALE: Final[dict[Gas, float]] = {Gas.CO2: 10.0, Gas.CO: 1.0, Gas.O2: 25.0}
+# Full scale of each range per gas, in vol%; the first as on the bench
+# analyzer's first range. A gas not listed has one range of 100 vol%.
+_RANGES: Final[dict[Gas, tuple[float, ...]]] = {
+    Gas.CO2: (10.0,),
+    Gas.CO: (1.0,),
+    Gas.O2: (25.0, 10.0),
+}
 _DECIMALS: Final[dict[Gas, int]] = {Gas.CO: 3}
+_RESPONSE_SLOTS: Final = frozenset({"o2", "ndir1", "ndir2", "ndir3", "ndir4"})
 # Verbs that need a person's confirmation on the real analyzer too.
 _NEEDS_PERSON: Final = frozenset({"set_calibration_gas", "calibration_begin", "calibration_commit"})
 _LATENCY_MS: Final = 2.0
@@ -106,13 +120,16 @@ class FujiSim:
     _clock: RunClock | None = None
     _seq: int = 0
     _gases: dict[ChannelId, Gas] = field(default_factory=dict)
+    _names: dict[str, str] = field(default_factory=dict)
     _settings: dict[str, Scalar] = field(default_factory=dict)
+    """The settings, flattened as in the real adapter's device snapshot."""
     _offsets: dict[ChannelId, float] = field(default_factory=dict)
     _calibration: CalibrationStatus = IDLE
     _calibration_began: float = 0.0
 
     def __post_init__(self) -> None:
         self._gases = dict(coerce_channel_map({c: g for c, g in self.channel_map.items()}))
+        self._names = channel_names(self.channel_map)
         self._settings = {
             "response_time_o2_s": 15,
             "hold_mode": "last_value",
@@ -121,15 +138,33 @@ class FujiSim:
         for slot in range(1, 5):
             self._settings[f"response_time_ndir{slot}_s"] = 15
         for channel, gas in self._gases.items():
+            if not is_measured(channel.value):
+                continue
             prefix = f"ch{channel.number}"
-            full_scale = _FULL_SCALE.get(gas, 100.0)
-            self._settings[f"{prefix}_range"] = 1
-            self._settings[f"{prefix}_unit"] = Unit.VOL_PERCENT.value
-            self._settings[f"{prefix}_full_scale"] = full_scale
-            self._settings[f"{prefix}_range1_zero_gas"] = 0.0
-            self._settings[f"{prefix}_range1_span_gas"] = (
-                _AMBIENT[Gas.O2] if gas is Gas.O2 else full_scale
-            )
+            self._settings[f"{prefix}_range_method"] = "manual"
+            for number, full_scale in enumerate(self._full_scales(channel), start=1):
+                self._settings[f"{prefix}_range{number}_zero_gas"] = 0.0
+                # Air spans an O2 range that reaches it; anything else spans full scale.
+                air = _AMBIENT[Gas.O2] if gas is Gas.O2 else full_scale
+                self._settings[f"{prefix}_range{number}_span_gas"] = min(air, full_scale)
+            self._select_range(channel, 1)
+
+    def _full_scales(self, channel: ChannelId) -> tuple[float, ...]:
+        return _RANGES.get(self._gases[channel], (100.0,))
+
+    def _select_range(self, channel: ChannelId, number: int) -> None:
+        prefix = f"ch{channel.number}"
+        self._settings[f"{prefix}_range"] = number
+        self._settings[f"{prefix}_unit"] = Unit.VOL_PERCENT.value
+        self._settings[f"{prefix}_full_scale"] = self._full_scales(channel)[number - 1]
+
+    def _slot(self, channel: ChannelId) -> str:
+        """The channel's response-time slot: ``o2``, or ``ndirn`` for the
+        n-th other channel."""
+        if self._gases[channel] is Gas.O2:
+            return "o2"
+        ndir = [c for c, g in self._gases.items() if g is not Gas.O2 and is_measured(c.value)]
+        return f"ndir{ndir.index(channel) + 1}"
 
     @classmethod
     def from_params(
@@ -344,25 +379,34 @@ class FujiSim:
         kind, payload = cmd.kind, cmd.payload
         if kind == "set_response_time":
             target = str(payload["target"]).lower()
-            slot = target if target in {"o2", "ndir1", "ndir2", "ndir3", "ndir4"} else None
-            if slot is None:
-                gas = self._gases[ChannelId(target.upper())]
-                ndir = [c for c, g in self._gases.items() if g is not Gas.O2]
-                slot = "o2" if gas is Gas.O2 else f"ndir{ndir.index(ChannelId(target.upper())) + 1}"
+            slot = (
+                target
+                if target in _RESPONSE_SLOTS
+                else self._slot(self._channel(payload, "target"))
+            )
             self._settings[f"response_time_{slot}_s"] = int(payload["seconds"])
         elif kind == "set_output_hold":
             self._settings["output_hold"] = bool(payload["enabled"])
         elif kind == "set_hold_mode":
             self._settings["hold_mode"] = str(payload["mode"])
         elif kind == "set_range":
-            self._settings[f"ch{self._number(payload)}_range"] = int(payload["range"])
+            channel = self._channel(payload)
+            if self._settings[f"ch{channel.number}_range_method"] != "manual":
+                raise ValueError(f"{channel.value}'s range method is not manual")
+            self._select_range(channel, self._range(channel, payload))
+        elif kind == "set_range_method":
+            channel, method = self._channel(payload), str(payload["method"])
+            if method not in {"manual", "auto"}:
+                raise ValueError(f"method must be 'manual' or 'auto', got {method!r}")
+            self._settings[f"ch{channel.number}_range_method"] = method
         elif kind == "set_calibration_gas":
-            key = f"ch{self._number(payload)}_range{int(payload['range'])}_{payload['kind']}_gas"
+            channel = self._channel(payload)
+            number = self._range(channel, payload)
+            key = f"ch{channel.number}_range{number}_{self._kind(payload)}_gas"
             self._settings[key] = float(payload["value"])
         elif kind == "calibration_plan":
-            number, cal_kind = self._number(payload), self._kind(payload)
-            setting = self._settings[f"ch{number}_range1_{cal_kind}_gas"]
-            return f"calibration_plan: {_plan_text(number, cal_kind, float(setting or 0.0))}"
+            channel, cal_kind = self._channel(payload), self._kind(payload)
+            return f"calibration_plan: {self._plan_text(channel, cal_kind, self._gas_setting(channel, cal_kind))}"
         elif kind == "calibration_begin":
             return self._begin(cmd)
         elif kind == "calibration_commit":
@@ -371,11 +415,29 @@ class FujiSim:
             return self._cancel()
         return f"sim ack {kind}"
 
-    def _number(self, payload: dict[str, Any]) -> int:
-        channel = ChannelId(str(payload["channel"]).upper())
-        if channel not in self._gases:
-            raise ValueError(f"{channel.value} is not in the channel map")
-        return channel.number
+    def _channel(self, payload: dict[str, Any], key: str = "channel") -> ChannelId:
+        channel = ChannelId(str(payload[key]).upper())
+        if channel not in self._gases or not is_measured(channel.value):
+            raise ValueError(f"{channel.value} is not a measured channel of the channel map")
+        return channel
+
+    def _range(self, channel: ChannelId, payload: dict[str, Any]) -> int:
+        number = int(payload["range"])
+        if not 1 <= number <= len(self._full_scales(channel)):
+            raise ValueError(f"{channel.value} has no range {number}")
+        return number
+
+    def _gas_setting(self, channel: ChannelId, kind: str) -> float:
+        """The calibration gas of the channel's current range."""
+        number = self._settings[f"ch{channel.number}_range"]
+        return float(self._settings[f"ch{channel.number}_range{number}_{kind}_gas"] or 0.0)
+
+    def _plan_text(self, channel: ChannelId, kind: str, gas: float) -> str:
+        """What a calibration reaches, worded as the real adapter words it."""
+        name = self._names.get(channel.value, channel.value)
+        number = int(self._settings[f"ch{channel.number}_range"] or 1)
+        span = range_name(Unit.VOL_PERCENT.value, self._full_scales(channel)[number - 1])
+        return f"{kind} of {name}: {name} {span} against {gas:g} vol%"
 
     @staticmethod
     def _kind(payload: dict[str, Any]) -> str:
@@ -390,19 +452,21 @@ class FujiSim:
         if self._calibration.state == "waiting":
             raise ValueError("a calibration is already under way")
         payload = cmd.payload
-        number = self._number(payload)
+        channel = self._channel(payload)
         kind = self._kind(payload)
         value = float(payload["gas_value"])
-        setting = self._settings[f"ch{number}_range1_{kind}_gas"]
+        setting = self._gas_setting(channel, kind)
+        name = self._names.get(channel.value, channel.value)
         if value != setting:
             raise ValueError(
-                f"the gas named ({value:g}) is not CH{number}'s {kind}-gas setting ({setting}); "
+                f"the gas named ({value:g}) is not {name}'s {kind}-gas setting ({setting:g}); "
                 "change the setting first"
             )
-        plan = _plan_text(number, kind, value)
+        plan = self._plan_text(channel, kind, value)
         self._calibration = CalibrationStatus(
             state="waiting",
-            channel=f"CH{number}",
+            channel=channel.value,
+            channel_name=name,
             kind=kind,
             gas_value=value,
             gas_unit=payload.get("gas_unit"),
@@ -419,7 +483,7 @@ class FujiSim:
         steady = waited >= self.settle_s
         reason = "steady" if steady else f"settling: {waited:.1f} s of {self.settle_s:g} s"
         return replace(
-            status, steady=steady, waited_s=waited, reasons=(f"{status.channel}: {reason}",)
+            status, steady=steady, waited_s=waited, reasons=(f"{status.channel_name}: {reason}",)
         )
 
     def _commit(self) -> str:
@@ -441,7 +505,7 @@ class FujiSim:
             clean=True,
             record=self._record(status, "completed"),
         )
-        return f"{status.kind} of {status.channel}: completed"
+        return f"{status.kind} of {status.channel_name}: completed"
 
     def _cancel(self) -> str:
         status = self.calibration
@@ -454,7 +518,7 @@ class FujiSim:
             clean=True,
             record=self._record(status, "cancelled"),
         )
-        return f"{status.kind} of {status.channel}: cancelled"
+        return f"{status.kind} of {status.channel_name}: cancelled"
 
     def _record(self, status: CalibrationStatus, outcome: str) -> MappingProxyType[str, object]:
         """A record in the shape of the real adapter's, marked as simulated."""
@@ -475,10 +539,14 @@ class FujiSim:
         }
         return MappingProxyType(record)
 
-    async def read_state_snapshot(self) -> FujiStateSnapshot:
-        """The manual-control card's read-back: calibration, readings, settings."""
+    async def read_state_snapshot(self) -> FujiStateSnapshot | None:
+        """The manual-control card's read-back: calibration, readings and
+        settings. ``None`` before :meth:`open`, like the real adapter."""
+        if self._lifecycle.state == "closed":
+            return None
         clock = self._clock or RunClock.now()
         frame = self._frame(clock.t_mono())
+        hold_mode = self._settings["hold_mode"]
         return FujiStateSnapshot(
             calibration=self.calibration,
             readings=tuple(
@@ -491,13 +559,44 @@ class FujiSim:
                 )
                 for reading in frame.readings
             ),
-            settings=MappingProxyType(dict(self._settings)),
+            channels=tuple(
+                self._channel_settings(channel)
+                for channel in sorted(self._gases, key=lambda c: c.number)
+                if is_measured(channel.value)
+            ),
+            output_hold=bool(self._settings["output_hold"]),
+            hold_mode=str(hold_mode) if hold_mode is not None else None,
+        )
+
+    def _channel_settings(self, channel: ChannelId) -> FujiChannelSettings:
+        prefix = f"ch{channel.number}"
+        settings = self._settings
+        ranges = tuple(
+            FujiRange(
+                number=number,
+                unit=Unit.VOL_PERCENT.value,
+                full_scale=full_scale,
+                zero_gas=_float(settings[f"{prefix}_range{number}_zero_gas"]),
+                span_gas=_float(settings[f"{prefix}_range{number}_span_gas"]),
+            )
+            for number, full_scale in enumerate(self._full_scales(channel), start=1)
+        )
+        current = settings[f"{prefix}_range"]
+        method = settings[f"{prefix}_range_method"]
+        seconds = settings[f"response_time_{self._slot(channel)}_s"]
+        return FujiChannelSettings(
+            channel=channel.value,
+            gas=self._gases[channel].value,
+            name=self._names.get(channel.value, channel.value),
+            ranges=ranges,
+            current_range=int(current) if current is not None else None,
+            range_method=str(method) if method is not None else None,
+            response_time_s=int(seconds) if seconds is not None else None,
         )
 
 
-def _plan_text(number: int, kind: str, gas: float) -> str:
-    """What a calibration reaches, worded as the real adapter words it."""
-    return f"{kind} of CH{number}: CH{number} range 1 against {gas:g} vol%"
+def _float(value: Scalar) -> float | None:
+    return None if value is None or isinstance(value, str) else float(value)
 
 
 __all__ = ["ADAPTER_ID", "DESCRIPTOR", "FujiSim"]
@@ -505,6 +604,7 @@ __all__ = ["ADAPTER_ID", "DESCRIPTOR", "FujiSim"]
 
 def _build_descriptor() -> AdapterDescriptor:
     from capa.devices._templates import FUJI_CO, FUJI_CO2, FUJI_O2  # noqa: PLC0415
+    from capa.devices.fuji_settings import FUJI_SETTINGS  # noqa: PLC0415
     from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
 
     return AdapterDescriptor(
@@ -516,6 +616,7 @@ def _build_descriptor() -> AdapterDescriptor:
         supported_binding_sources=("fuji_channel",),
         default_params={},
         channel_templates=(FUJI_CO2, FUJI_CO, FUJI_O2),
+        settings=FUJI_SETTINGS,
     )
 
 

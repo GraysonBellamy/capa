@@ -255,7 +255,7 @@ class TestCalibration:
         plan = await sim.command(_run("calibration_plan", channel="CH3", kind="span"))
         bad = await sim.command(_run("calibration_plan", channel="CH3", kind="both"))
         assert plan.accepted
-        assert plan.detail == "calibration_plan: span of CH3: CH3 range 1 against 20.95 vol%"
+        assert plan.detail == "calibration_plan: span of O2: O2 0–25 vol% against 20.95 vol%"
         assert not bad.accepted
         assert sim.calibration.state == "idle"
 
@@ -284,7 +284,7 @@ class TestCalibration:
         )
         no_run = await sim.command(_person("calibration_commit"))
         assert [r.accepted for r in (by_run, wrong_gas, wrong_kind, no_run)] == [False] * 4
-        assert "not CH3's span-gas setting" in wrong_gas.detail
+        assert "not O2's span-gas setting" in wrong_gas.detail
         first = await sim.command(
             _person("calibration_begin", channel="CH3", kind="zero", gas_value=0.0)
         )

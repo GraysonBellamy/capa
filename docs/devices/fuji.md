@@ -21,6 +21,7 @@ description: Recording CO2, CO and O2 from a Fuji ZP-series gas analyzer (also s
 | Channel binding | [`fuji_channel`](../configuration/channel-bindings.md#fuji_channel) |
 | Emission shape | `wide_row` — one row per poll, every channel in it |
 | Default poll rate | 1 Hz |
+| Declarable settings | Per gas: response time, range method, range; output hold and hold mode — see [Device settings](../configuration/device-settings.md) |
 
 ## Supported hardware
 
@@ -79,7 +80,7 @@ is `extra="forbid"`.
 | `channel_map` | required | The gas on each analyzer channel, `CH1`–`CH12`. Asserted by you: see [The channel map](#the-channel-map-is-asserted). Only channels named here can be bound. |
 | `rate_hz` | `1.0` | Up to 5. One poll is two Modbus transactions and takes about 0.12 s; the analyzer's own filter makes more than a few polls a second pointless. |
 | `timeout_s` | `0.5` | Per-reply timeout. |
-| `snapshot_period_s` | `30.0` | Health-ping cadence. The snapshot carries the analyzer's settings. |
+| `snapshot_period_s` | `30.0` | Health-ping cadence. The snapshot carries the analyzer's settings, the range method of each measured channel among them (`ch3_range_method`). |
 | `auto_reconnect` | `true` | A connection failure does not end the stream: every tick of the outage is an error row and the port is reopened on a back-off. Toggles `SUPPORTS_AUTO_RECONNECT`. |
 | `overflow` | `"block"` | `"block"` or `"drop_newest"`. |
 | `options` | `[]` | Analyzer options you assert are fitted, e.g. `["auto_calibration", "auto_zero"]` for a unit whose calibration gases are plumbed through its valve contacts. Without them the automatic-calibration commands are refused. |
@@ -262,7 +263,10 @@ command's authorization allows.
 What comes back:
 
 - **Accepted** — the write read back as written (or the command did what
-  it says). The detail names the change, e.g. `response_time.o2: 15 s -> 10 s`.
+  it says). The detail names the change by gas and range span, as the
+  `setting_changed` event does: `O2 response time: 15 s -> 10 s`,
+  `O2 range: 0–21 vol% -> 0–25 vol%`, `CO2 0–10 vol% span gas: 0.2 vol% -> 0.25 vol%`.
+  The event's metadata keeps fujilib's register name (`response_time.o2`).
 - **Refused** (`accepted=False`) — capa's gate, the tier rule, a bad
   payload, or fujilib or the analyzer declining: a value that does not
   fit, the analyzer calibrating or in a menu, an option not fitted, an
@@ -281,13 +285,16 @@ calibration keys over Modbus; the operator switches the gas.
 
 1. **Put the gas at the inlet.** capa does not switch valves.
 2. **Plan** (optional) reads what the calibration would reach: every
-   channel and range, and the calibration gas of each. A zero can cover
-   more than one channel when the analyzer is set to zero them together.
-3. **Begin…** — pick the channel, zero or span, and name the gas: its
-   value, unit and a label (cylinder, lot) for the record. The gas named
-   must equal the analyzer's calibration-gas setting; change the setting
-   first if it does not. After a confirmation, the panel is taken to its
-   wait step. Nothing is calibrated yet.
+   gas and range, and the calibration gas of each, e.g. `span of O2: O2
+   0–21 vol% against 20.95 vol%`. A zero can cover more than one gas
+   when the analyzer is set to zero them together.
+3. **Begin…** — pick the gas, zero or span, and name the gas at the
+   inlet: its value and a label (cylinder, lot) for the record. The unit
+   is that of the range the gas measures on, and the analyzer's
+   calibration-gas setting is shown beside the value: the gas named must
+   equal it; change the setting first if it does not. After a
+   confirmation, the panel is taken to its wait step. Nothing is
+   calibrated yet.
 4. **Wait for steady.** The card shows whether the reading is steady on
    the named gas: it must move no more than 0.5 % of full scale over at
    least 30 s (longer for a long response time) and lie within 10 % of
@@ -407,8 +414,10 @@ a signal per channel (ambient air without one), `tick_period_s`,
 `hold_from_s` to switch output hold on part-way, and `settle_s`, how long
 a simulated calibration takes to read steady. The settings verbs change
 its own settings and a zero or span runs through the same three commands,
-so the card can be exercised offline. It models one range per channel, no
-outages and no `settling`. See [Simulators](simulators.md).
+so the card and declared device settings can be exercised offline. Its
+ranges are all in vol%: one per gas, two for O2 (0–25 and 0–10 vol%); a
+range change does not change the readings. It models no outages and no
+`settling`. See [Simulators](simulators.md).
 
 ## See also
 
@@ -416,6 +425,7 @@ outages and no `settling`. See [Simulators](simulators.md).
 - [Hardware TOML](../configuration/hardware-toml.md) — how `[[devices]]` blocks are parsed.
 - [Channel bindings](../configuration/channel-bindings.md#fuji_channel) — the `fuji_channel` source schema.
 - [Manual controls](../user-guide/manual-controls.md) — the analyzer's card.
+- [Device settings](../configuration/device-settings.md) — declaring the analyzer's settings in an experiment.
 - [Destructive operations](../safety/destructive-operations.md) — which analyzer writes ask for confirmation.
 - [Authorization gates](../safety/authorization-gates.md) — the contract for any device write.
 - [Discovery](discovery.md) — cross-cutting Setup-tab and CLI behavior.
