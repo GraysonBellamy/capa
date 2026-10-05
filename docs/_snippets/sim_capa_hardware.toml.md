@@ -39,6 +39,14 @@ start = 303.0
 end = 873.0
 duration_s = 0.2
 
+# --- One [[cameras]] entry per camera ---
+
+[[cameras]]
+name = "ir_cam0"
+adapter = "capa.devices.sim.flir_ir_sim"
+kind = "ir"
+on_failure = "warn"
+
 # --- One [[channels]] entry per named scientific signal ---
 
 [[channels]]

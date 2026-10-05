@@ -417,6 +417,12 @@ class ExperimentConfig(BaseModel):
     storage: StoragePolicy = Field(default_factory=StoragePolicy)
     safety: SafetyPolicy = Field(default_factory=SafetyPolicy)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    device_settings: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    """Settings to apply to devices and cameras when the config loads,
+    keyed by device or camera name — e.g. ``{"purge_mfc": {"gas": "N2"}}``.
+    Each entry is validated against its adapter's settings model
+    (:attr:`~capa.devices.registry.AdapterDescriptor.settings`) by config
+    validation, and again when applied (:mod:`capa.runtime.device_settings`)."""
     operator: OperatorRef
     sample: SampleInfo
     run_options: RunOptions = Field(default_factory=RunOptions)

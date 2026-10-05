@@ -160,6 +160,7 @@ The runtime distinguishes config changes that require tearing down the
 | Change anything under `domain_profile.metadata` | yes — hot | profile metadata is read at arm |
 | Change the procedure id or config | yes — hot | procedure is constructed at arm |
 | Change method steps | yes — hot | method is loaded at arm |
+| Change `device_settings` | yes — hot | compared with the devices on load, on File → Apply Device Settings…, and at Start |
 
 The Apply & Connect action in the Setup tab is what triggers the
 rebuild when needed. Between runs the WorkerPool stays open so the

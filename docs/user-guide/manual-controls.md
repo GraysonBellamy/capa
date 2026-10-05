@@ -176,6 +176,19 @@ cancel at its confirmation leaves it changed. These refresh:
 - **Once the pool reports ready**, asynchronously.
 - **After a command that changes them** — a setpoint, a gas, a balance
   setting or calibration — so the card shows what the device took.
+- **After device settings are applied** from the Device settings dialog.
+
+## Setting devices from the experiment
+
+Settings you'd otherwise pick on these cards every time — the MFC's gas,
+the balance's stability settings, the IR camera's range and radiometric
+values — can be declared in the experiment under
+[`device_settings:`](../configuration/device-settings.md). When the
+config loads, capa compares the devices with the declaration and, if
+anything differs, lists it in a **Device settings** dialog; Apply sends
+the ticked changes the same way these cards do, and the cards refresh
+to show them. **File → Apply Device Settings…** runs the check again on
+demand.
 
 If the read-back fails (typically because the pool is mid-rebuild after
 a cold reload), the card logs at debug level and leaves the previous

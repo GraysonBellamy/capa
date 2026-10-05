@@ -166,6 +166,8 @@ def _loc_to_section_and_path(loc: tuple[Any, ...]) -> tuple[Section, tuple[str |
         return ("storage", tuple(_normalise_path_part(p) for p in loc[1:]))
     if head == "safety":
         return ("safety", tuple(_normalise_path_part(p) for p in loc[1:]))
+    if head == "device_settings":
+        return ("device_settings", tuple(_normalise_path_part(p) for p in loc))
     return ("experiment", tuple(_normalise_path_part(p) for p in loc))
 
 
@@ -260,6 +262,72 @@ def _layer2_referential(config: Any, document: ConfigDocument) -> list[ConfigPro
 
     problems.extend(_layer2_nidaq_join(hardware, document))
     problems.extend(_layer2_fuji_join(hardware, document))
+    problems.extend(_layer2_device_settings(config, document))
+    return problems
+
+
+def _layer2_device_settings(config: Any, document: ConfigDocument) -> list[ConfigProblem]:
+    """``device_settings`` entries name a device or camera whose adapter
+    declares settings, and validate against that adapter's settings model.
+
+    An adapter that isn't registered (a plugin camera that isn't
+    installed) is skipped here; ``devices.unknown_adapter`` reports it
+    for devices, and the entry fails when applied.
+    """
+    from capa.devices.registry import get_descriptor  # noqa: PLC0415
+
+    hardware = config.hardware
+    adapter_ids = {dev.name: dev.adapter for dev in hardware.devices}
+    adapter_ids.update({cam.name: cam.adapter for cam in hardware.cameras})
+    problems: list[ConfigProblem] = []
+
+    def _error(code: str, message: str, path: tuple[str | int, ...]) -> ConfigProblem:
+        return ConfigProblem(
+            severity="error",
+            code=code,
+            message=message,
+            section="device_settings",
+            path=("device_settings", *path),
+            source_file=document.experiment_path,
+        )
+
+    for name, raw in config.device_settings.items():
+        adapter_id = adapter_ids.get(name)
+        if adapter_id is None:
+            problems.append(
+                _error(
+                    "device_settings.unknown_device",
+                    f"device_settings names {name!r}, which is not a device or camera "
+                    "in the hardware",
+                    (name,),
+                )
+            )
+            continue
+        descriptor = get_descriptor(adapter_id)
+        if descriptor is None:
+            continue
+        if descriptor.settings is None:
+            problems.append(
+                _error(
+                    "device_settings.unsupported_adapter",
+                    f"{name!r} ({descriptor.label}) has no settings an experiment can declare",
+                    (name,),
+                )
+            )
+            continue
+        try:
+            descriptor.settings.model.model_validate(raw)
+        except ValidationError as exc:
+            for err in exc.errors():
+                loc = tuple(_normalise_path_part(p) for p in err.get("loc", ()))
+                where = ".".join(str(p) for p in (name, *loc))
+                problems.append(
+                    _error(
+                        f"device_settings.{err.get('type', 'invalid')}",
+                        f"device_settings.{where}: {err.get('msg', 'invalid')}",
+                        (name, *loc),
+                    )
+                )
     return problems
 
 
@@ -538,6 +606,7 @@ def _layer3_domain(config: Any, document: ConfigDocument) -> list[ConfigProblem]
             )
     problems.extend(_capa_metadata_problems(profile_ref.metadata, document))
     problems.extend(_capa_sample_problems(config, profile_ref.metadata, document))
+    problems.extend(_capa_purge_gas_problems(config, profile_ref.metadata, document))
     return problems
 
 
@@ -600,6 +669,65 @@ def _capa_sample_problems(
             )
         )
     return problems
+
+
+def _capa_purge_gas_problems(
+    config: Any, metadata: Any, document: ConfigDocument
+) -> list[ConfigProblem]:
+    """Warn when the purge MFC is set to a different gas than the profile's
+    ``atmosphere.purge.species`` records.
+
+    The purge MFC is the device behind the ``purge_gas_flow`` channel.
+    Both names go through that device's settings model, so ``"nitrogen"``
+    and ``"N2"`` agree; a species the model doesn't know as a gas (a
+    mixture such as ``"5% O2/N2"``) is not checked.
+    """
+    from capa.devices.registry import get_descriptor  # noqa: PLC0415
+
+    atmosphere = metadata.get("atmosphere") if isinstance(metadata, Mapping) else None
+    purge = atmosphere.get("purge") if isinstance(atmosphere, Mapping) else None
+    species = purge.get("species") if isinstance(purge, Mapping) else None
+    if not isinstance(species, str):
+        return []
+    purge_device = next(
+        (
+            getattr(ch.source, "device", None)
+            for ch in config.hardware.channels
+            if (ch.metadata or {}).get("capa_group") == "purge_gas_flow"
+        ),
+        None,
+    )
+    entry = config.device_settings.get(purge_device) if purge_device else None
+    gas = entry.get("gas") if isinstance(entry, Mapping) else None
+    if not isinstance(gas, str):
+        return []
+    device = next((d for d in config.hardware.devices if d.name == purge_device), None)
+    descriptor = get_descriptor(device.adapter) if device is not None else None
+    if descriptor is None or descriptor.settings is None:
+        return []
+    model = descriptor.settings.model
+    if "gas" not in model.model_fields:
+        return []
+    try:
+        declared = model.model_validate({"gas": gas}).gas  # type: ignore[attr-defined]
+        recorded = model.model_validate({"gas": species}).gas  # type: ignore[attr-defined]
+    except ValidationError:
+        return []
+    if declared == recorded:
+        return []
+    return [
+        ConfigProblem(
+            severity="warning",
+            code="capa_profile.purge_gas_mismatch",
+            message=(
+                f"device_settings sets {purge_device!r} to {gas!r}, but the CAPA profile "
+                f"records the purge gas as {species!r}"
+            ),
+            section="device_settings",
+            path=("device_settings", purge_device, "gas"),
+            source_file=document.experiment_path,
+        )
+    ]
 
 
 def _shown(value: Any) -> str:

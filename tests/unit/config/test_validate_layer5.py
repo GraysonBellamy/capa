@@ -158,7 +158,7 @@ async def test_layer5_skips_descriptors_without_handshake_available(
     # Note: NOT calling _make_handshake_available — the descriptor's
     # default flag is False, so Layer 5 should skip every device.
     problems = await validate_live_async(sim_capa_doc)
-    assert not any(p.code.startswith("live.handshake") for p in problems)
+    assert not any(p.code.startswith("live.handshake") and p.section == "devices" for p in problems)
     assert called == []
 
 

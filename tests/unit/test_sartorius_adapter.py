@@ -12,7 +12,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from sartoriuslib.devices.models import CalRecord, Reading
+from sartoriuslib.devices.models import CalRecord, ParameterEntry, Reading
 from sartoriuslib.errors import SartoriusError
 from sartoriuslib.protocol.base import ProtocolKind
 from sartoriuslib.registry.aliases import (
@@ -21,7 +21,14 @@ from sartoriuslib.registry.aliases import (
     resolve_tare_behavior,
     resolve_unit,
 )
-from sartoriuslib.registry.modes import AutoZeroMode, FilterMode, TareBehavior
+from sartoriuslib.registry.modes import (
+    AppFilter,
+    AutoZeroMode,
+    FilterMode,
+    StabilityDelay,
+    StabilityRange,
+    TareBehavior,
+)
 from sartoriuslib.registry.units import Sign, Unit
 
 from capa.channels.calibration import Identity
@@ -89,6 +96,7 @@ class StubBalance:
         self.set_tare_behavior_calls: list[dict[str, Any]] = []
         self.save_menu_calls: list[dict[str, Any]] = []
         self.reload_menu_calls: list[dict[str, Any]] = []
+        self.write_parameter_calls: list[dict[str, Any]] = []
         self.last_cal_record_calls = 0
         # Menu state reported by the typed getters; a getter whose name is in
         # ``raise_on_get`` raises instead (parameter missing on this family).
@@ -96,6 +104,14 @@ class StubBalance:
         self.auto_zero = AutoZeroMode.ON
         self.display_unit = Unit.G
         self.tare_behavior = TareBehavior.WITH_STABILITY
+        # Raw parameter table (p-index → wire byte) for the menu entries
+        # sartoriuslib has no typed accessor for; ``raise_on_get`` names
+        # them ``"p<index>"``.
+        self.parameters: dict[int, int] = {
+            2: AppFilter.FINAL_READING,
+            3: StabilityRange.ACCURATE,
+            4: StabilityDelay.SHORT,
+        }
         self.cal_record = CalRecord(
             temperature_celsius=22.4,
             signature=b"\x01" * 9,
@@ -203,6 +219,14 @@ class StubBalance:
     async def get_tare_behavior(self) -> TareBehavior:
         self._maybe_raise("tare_behavior")
         return self.tare_behavior
+
+    async def read_parameter(self, index: int) -> ParameterEntry:
+        self._maybe_raise(f"p{index}")
+        return ParameterEntry(index=index, current=self.parameters[index], max=6, raw=b"")
+
+    async def write_parameter(self, index: int, value: int, *, confirm: bool = False) -> None:
+        self.write_parameter_calls.append({"index": index, "value": value, "confirm": confirm})
+        self.parameters[index] = value
 
     def _maybe_raise(self, what: str) -> None:
         if what in self.raise_on_get:
@@ -492,6 +516,62 @@ class TestParameterWrites:
             await adapter.close()
 
 
+class TestRawMenuParameterWrites:
+    """p02–p04 have no typed sartoriuslib accessor; the adapter encodes them."""
+
+    async def _send(self, adapter: SartoriusAdapter, kind: str, mode: object) -> Any:
+        from capa.devices.adapter import DeviceCommand
+
+        return await adapter.command(
+            DeviceCommand(
+                kind=kind, payload={"mode": mode}, issued_by="alice", confirmed_by="alice"
+            )
+        )
+
+    @pytest.mark.parametrize(
+        ("kind", "mode", "index", "wire"),
+        [
+            ("set_app_filter", "filling", 2, AppFilter.FILLING),
+            ("set_stability_range", "very accurate", 3, StabilityRange.VERY_ACCURATE),
+            ("set_stability_range", "MAX_FAST", 3, StabilityRange.MAX_FAST),
+            ("set_stability_delay", 4, 4, StabilityDelay.LONG),
+        ],
+    )
+    async def test_writes_encoded_parameter(
+        self, kind: str, mode: object, index: int, wire: int
+    ) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            result = await self._send(adapter, kind, mode)
+            assert result.accepted is True
+            assert stub.write_parameter_calls == [{"index": index, "value": wire, "confirm": True}]
+        finally:
+            await adapter.close()
+
+    @pytest.mark.parametrize("mode", ["sticky", 0, 42])
+    async def test_unknown_mode_is_refused_before_the_wire(self, mode: object) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            with pytest.raises(AdapterError, match="expected one of"):
+                await self._send(adapter, "set_stability_delay", mode)
+            assert stub.write_parameter_calls == []
+        finally:
+            await adapter.close()
+
+    async def test_write_reads_back(self) -> None:
+        adapter, _ = _make_adapter()
+        await adapter.open()
+        try:
+            await self._send(adapter, "set_stability_range", "fast")
+            snapshot = await adapter.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.stability_range == "fast"
+        finally:
+            await adapter.close()
+
+
 class TestMenuPersistence:
     async def test_save_menu(self) -> None:
         adapter, stub = _make_adapter()
@@ -539,6 +619,9 @@ class TestReadStateSnapshot:
         try:
             assert await adapter.read_state_snapshot() == SartoriusStateSnapshot(
                 filter_mode="stable",
+                app_filter="final reading",
+                stability_range="accurate",
+                stability_delay="short",
                 auto_zero="on",
                 display_unit="g",
                 tare_behavior="with stability",
@@ -550,13 +633,17 @@ class TestReadStateSnapshot:
 
     async def test_unsupported_and_unknown_values_are_none(self) -> None:
         adapter, stub = _make_adapter()
-        stub.raise_on_get = {"tare_behavior", "last_cal_record"}
+        stub.raise_on_get = {"tare_behavior", "last_cal_record", "p3"}
         stub.filter_mode = FilterMode.UNKNOWN
+        stub.parameters[4] = 99  # a byte sartoriuslib doesn't model
         await adapter.open()
         try:
             snapshot = await adapter.read_state_snapshot()
             assert snapshot is not None
             assert snapshot.filter_mode is None
+            assert snapshot.stability_range is None
+            assert snapshot.stability_delay is None
+            assert snapshot.app_filter == "final reading"
             assert snapshot.tare_behavior is None
             assert snapshot.cal_temperature_c is None
             assert snapshot.cal_on_record is None
@@ -591,11 +678,14 @@ class TestReadStateSnapshot:
 def test_balance_card_choices_resolve_and_match_snapshot_labels() -> None:
     """Every value the balance card offers must be one sartoriuslib accepts,
     and every mode the adapter can report must be one the card offers."""
-    from capa.devices.sartorius import _mode_label
+    from capa.devices.sartorius import _encode_mode, _mode_label
     from capa.ui.manual.cards.balance import (
+        APP_FILTERS,
         AUTO_ZERO_MODES,
         DISPLAY_UNITS,
         FILTER_MODES,
+        STABILITY_DELAYS,
+        STABILITY_RANGES,
         TARE_BEHAVIORS,
     )
 
@@ -607,8 +697,14 @@ def test_balance_card_choices_resolve_and_match_snapshot_labels() -> None:
     ):
         for choice in choices:
             resolve(choice)
+    for choices, index in ((APP_FILTERS, 2), (STABILITY_RANGES, 3), (STABILITY_DELAYS, 4)):
+        for choice in choices:
+            _encode_mode(index, choice)
     for choices, enum in (
         (FILTER_MODES, FilterMode),
+        (APP_FILTERS, AppFilter),
+        (STABILITY_RANGES, StabilityRange),
+        (STABILITY_DELAYS, StabilityDelay),
         (AUTO_ZERO_MODES, AutoZeroMode),
         (TARE_BEHAVIORS, TareBehavior),
     ):

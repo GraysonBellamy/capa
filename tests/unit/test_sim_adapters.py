@@ -17,6 +17,7 @@ from capa.channels.spec import (
     SartoriusReading,
     WatlowParameter,
 )
+from capa.core.errors import AdapterError
 from capa.devices.adapter import DeviceCommand
 from capa.devices.records import ChannelSample, SourceRecord
 from capa.devices.sim._signals import Constant, Ramp, Sine
@@ -191,8 +192,76 @@ class TestAlicatSim:
         assert samples[0].source_field == "Mass_Flow"
         assert samples[0].value == 50.0
 
+    async def test_set_gas_reads_back(self) -> None:
+        sim = AlicatSim(name="purge_mfc")
+        assert await sim.read_state_snapshot() is None  # closed, like the real adapter
+        await sim.open()
+        snapshot = await sim.read_state_snapshot()
+        assert snapshot is not None
+        assert snapshot.gas == "Air"
+        assert "N2" in snapshot.gas_list
+        result = await sim.command(
+            DeviceCommand(
+                kind="set_gas", payload={"gas": "nitrogen"}, issued_by="op", confirmed_by="op"
+            )
+        )
+        assert result.accepted
+        snapshot = await sim.read_state_snapshot()
+        assert snapshot is not None
+        assert snapshot.gas == "N2"
+
+    @pytest.mark.parametrize("gas", ["N3", "SF6"])
+    async def test_set_gas_refuses_unknown_or_unoffered_gas(self, gas: str) -> None:
+        sim = AlicatSim(name="purge_mfc")
+        await sim.open()
+        with pytest.raises(AdapterError):
+            await sim.command(
+                DeviceCommand(
+                    kind="set_gas", payload={"gas": gas}, issued_by="op", confirmed_by="op"
+                )
+            )
+        snapshot = await sim.read_state_snapshot()
+        assert snapshot is not None
+        assert snapshot.gas == "Air"
+
+    async def test_setpoint_reads_back(self) -> None:
+        sim = AlicatSim(name="purge_mfc")
+        await sim.open()
+        await sim.set_flow_setpoint(2.5, confirmed_by="op")
+        snapshot = await sim.read_state_snapshot()
+        assert snapshot is not None
+        assert (snapshot.setpoint, snapshot.setpoint_unit) == (2.5, "SLPM")
+
 
 class TestSartoriusSim:
+    async def test_menu_settings_read_back(self) -> None:
+        sim = SartoriusSim(name="balance", mass_signal=Constant(5.0))
+        assert await sim.read_state_snapshot() is None
+        await sim.open()
+        for kind, mode in (("set_filter_mode", "very stable"), ("set_stability_range", "MAX_FAST")):
+            result = await sim.command(
+                DeviceCommand(kind=kind, payload={"mode": mode}, issued_by="op", confirmed_by="op")
+            )
+            assert result.accepted
+        snapshot = await sim.read_state_snapshot()
+        assert snapshot is not None
+        assert snapshot.filter_mode == "very stable"
+        assert snapshot.stability_range == "max fast"
+        assert snapshot.display_unit == "g"
+
+    async def test_unknown_mode_is_refused(self) -> None:
+        sim = SartoriusSim(name="balance", mass_signal=Constant(5.0))
+        await sim.open()
+        with pytest.raises(AdapterError, match="expected one of"):
+            await sim.command(
+                DeviceCommand(
+                    kind="set_stability_delay",
+                    payload={"mode": "forever"},
+                    issued_by="op",
+                    confirmed_by="op",
+                )
+            )
+
     async def test_single_value_row(self) -> None:
         sim = SartoriusSim(
             name="balance",

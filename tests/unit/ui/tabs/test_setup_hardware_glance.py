@@ -28,14 +28,14 @@ def test_glance_summarises_counts(qtbot: Any) -> None:
     text = section._summary.text()
     assert "4 device(s)" in text
     assert "6 channel(s)" in text
-    assert "0 camera(s)" in text
+    assert "1 camera(s)" in text
 
 
 def test_glance_populates_tables(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
     assert section._devices_model.rowCount() == 4
     assert section._channels_model.rowCount() == 6
-    assert section._cameras_model.rowCount() == 0
+    assert section._cameras_model.rowCount() == 1
 
 
 def test_glance_edit_button_emits_target_section(qtbot: Any) -> None:

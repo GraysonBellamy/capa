@@ -25,8 +25,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import enum
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
@@ -44,6 +45,15 @@ from capa.runtime.conductor import (
     Conductor,
     ConductorConfig,
     RunResult,
+)
+from capa.runtime.device_settings import (
+    ChangeResult,
+    Outcome,
+    SettingsPlan,
+    SettingsReport,
+    apply_device_settings,
+    plan_device_settings,
+    pool_readback,
 )
 from capa.runtime.dispatch import ManualClient, PoolDispatcher
 from capa.runtime.emissions import ProcedureTick, WorkerEmission
@@ -217,6 +227,9 @@ class RunController(QObject):
     * :attr:`manual_event` — manual-command events synthesized by the
       cards on each dispatch (out-of-run only; in-run commands go
       through the conductor and appear via :attr:`event_received`).
+    * :attr:`device_settings_planned` / :attr:`device_settings_applied` —
+      the experiment's ``device_settings`` compared with the devices on
+      load, and the outcome of applying them.
     """
 
     state_changed = Signal(object)
@@ -249,6 +262,14 @@ class RunController(QObject):
     """Terminal ``ConfigLoadProgress`` for ready or failed initialization."""
     hardware_ready_changed = Signal(bool)
     """``True`` when the loaded config's worker pool is open and usable."""
+    device_settings_planned = Signal(object)
+    """:class:`SettingsPlan` — the loaded config's ``device_settings``
+    compared with the freshly opened devices. Emitted just before the
+    READY ``config_load_finished``, and only when the config declares
+    device settings."""
+    device_settings_applied = Signal(object)
+    """:class:`SettingsReport` — emitted when an
+    :meth:`apply_device_settings` task finishes."""
 
     def __init__(
         self,
@@ -314,6 +335,11 @@ class RunController(QObject):
         # :meth:`_stop_preview_drainers` on pool-close.
         self._preview_drainers: dict[str, asyncio.Task[None]] = {}
 
+        # Device-settings check/apply for the loaded config. One at a
+        # time; cancelled when the pool is swapped or closed.
+        self._settings_task: asyncio.Task[Any] | None = None
+        self._settings_applying: bool = False
+
     # ------------------------------------------------------------------ properties
 
     @property
@@ -355,6 +381,12 @@ class RunController(QObject):
         """``True`` once the current config's pool is open and dispatchable."""
         pool = self._worker_pool
         return self._hardware_ready or (pool is not None and pool.state is PoolState.OPEN)
+
+    @property
+    def device_settings_busy(self) -> bool:
+        """``True`` while device settings are being checked or applied."""
+        task = self._settings_task
+        return task is not None and not task.done()
 
     @property
     def config_load_state(self) -> ConfigLoadState:
@@ -485,6 +517,7 @@ class RunController(QObject):
         if self._shutdown_requested:
             _logger.info("ui.controller.set_active_config_during_shutdown_ignored")
             return
+        self._cancel_settings_task()
         old_pool = self._worker_pool
         old_manual_client = self._manual_client
         old_ready = self._hardware_ready
@@ -568,7 +601,7 @@ class RunController(QObject):
         # well-defined case; cancelling mid-open could leak threads).
         if loop is not None:
             open_task = loop.create_task(
-                self._open_pool(new_pool, old_close_task),
+                self._open_pool(new_pool, old_close_task, config),
                 name="ui-pool-open",
             )
             self._lifecycle.register(
@@ -582,7 +615,7 @@ class RunController(QObject):
             # "coroutine was never awaited" RuntimeWarning. Tests that
             # construct a controller without a loop are doing pure
             # bookkeeping work; they don't need the pool open task.
-            self._open_pool(new_pool, old_close_task).close()
+            self._open_pool(new_pool, old_close_task, config).close()
 
     async def _close_old_pool(self, old_pool: WorkerPool) -> None:
         """Tear down the previous config's pool before the new pool's
@@ -606,6 +639,7 @@ class RunController(QObject):
         self,
         new_pool: WorkerPool,
         old_close_task: asyncio.Task[None] | None,
+        config: ExperimentConfig,
     ) -> None:
         # 1. Await the old-pool close task if any. We don't share
         #    teardown with the close task itself — that's its own
@@ -679,12 +713,31 @@ class RunController(QObject):
                 task,
                 critical=False,
             )
+
+        # 5. Compare the experiment's device settings with the devices,
+        #    before Start or the manual cards unlock. Reads only — the
+        #    operator confirms any change from the dialog this feeds.
+        #    A settings problem never fails the load.
+        settings_plan: SettingsPlan | None = None
+        if config.device_settings:
+            self._emit_config_progress(
+                ConfigLoadState.READING_SETTINGS,
+                "Reading device settings",
+            )
+            settings_plan = await plan_device_settings(config, pool_readback(new_pool))
+            if self._shutdown_requested or self._worker_pool is not new_pool:
+                # Superseded by a newer load or by shutdown while reading;
+                # whoever replaced the pool is closing this one.
+                return
+
         self._manual_client = ManualClient(
             pool=new_pool,
             conductor_provider=lambda: self._conductor,
         )
         self.pool_changed.emit(new_pool)
         self._set_hardware_ready(True)
+        if settings_plan is not None:
+            self.device_settings_planned.emit(settings_plan)
         ready = self._progress_snapshot(
             ConfigLoadState.READY,
             "All devices initialized",
@@ -736,6 +789,7 @@ class RunController(QObject):
         bound. Exceptions are not swallowed — shutdown-critical results
         must reach the coordinator.
         """
+        self._cancel_settings_task()
         old = self._worker_pool
         self._worker_pool = None
         self._manual_client = None
@@ -752,6 +806,135 @@ class RunController(QObject):
     def emit_manual_event(self, event: DeviceEvent) -> None:
         """Surface a manual-command :class:`DeviceEvent` to the events dock."""
         self.manual_event.emit(event)
+
+    # ------------------------------------------------------------------ device settings
+
+    def check_device_settings(self) -> asyncio.Task[SettingsPlan] | None:
+        """Read the devices and compare them with the loaded config's
+        ``device_settings``, as a background task.
+
+        ``None`` when there is nothing to check (no config, hardware not
+        ready, no settings declared) or a check or apply is already
+        running.
+        """
+        config = self._active_config
+        client = self._manual_client
+        if (
+            config is None
+            or client is None
+            or not config.device_settings
+            or self._shutdown_requested
+            or self.device_settings_busy
+        ):
+            return None
+        task = asyncio.get_running_loop().create_task(
+            plan_device_settings(config, client.device_readback),
+            name="ui-device-settings-check",
+        )
+        self._track_settings_task(task, "device-settings-check")
+        return task
+
+    def apply_device_settings(
+        self,
+        plan: SettingsPlan,
+        selected: Collection[tuple[str, str]],
+        *,
+        operator_id: str,
+        on_progress: Callable[[ChangeResult], None] | None = None,
+    ) -> asyncio.Task[SettingsReport] | None:
+        """Apply the ``selected`` ``(device, setting)`` changes of ``plan``
+        as manual overrides confirmed by ``operator_id``.
+
+        Runs as a background task; each change is mirrored to the events
+        dock and :attr:`device_settings_applied` fires with the report.
+        ``None`` when it can't run now: a run is active, the hardware
+        isn't ready, or a check or apply is already running.
+        """
+        client = self._manual_client
+        if (
+            client is None
+            or self.is_active
+            or self._shutdown_requested
+            or self.device_settings_busy
+        ):
+            return None
+
+        def _progress(result: ChangeResult) -> None:
+            self._emit_settings_event(result)
+            if on_progress is not None:
+                on_progress(result)
+
+        async def _apply() -> SettingsReport:
+            self._settings_applying = True
+            try:
+                report = await apply_device_settings(
+                    plan,
+                    selected,
+                    dispatch=client.dispatch,
+                    readback=client.device_readback,
+                    operator_id=operator_id,
+                    on_progress=_progress,
+                )
+            finally:
+                self._settings_applying = False
+            self.device_settings_applied.emit(report)
+            return report
+
+        task = asyncio.get_running_loop().create_task(_apply(), name="ui-device-settings-apply")
+        self._track_settings_task(task, "device-settings-apply")
+        return task
+
+    def record_device_settings_skipped(self, plan: SettingsPlan) -> None:
+        """Note in the events dock which declared settings the operator
+        chose not to apply."""
+        for device in plan.devices:
+            for change in device.changes:
+                current = change.current if change.current is not None else "unknown"
+                self.manual_event.emit(
+                    DeviceEvent(
+                        adapter="device_settings",
+                        device=device.name,
+                        t_mono_ns=0,
+                        t_utc=datetime.now(UTC),
+                        kind="manual.device_settings_skipped",
+                        message=f"{change.label} left at {current} (declared {change.desired})",
+                        severity="warning",
+                        metadata={"manual": True},
+                    )
+                )
+
+    def _track_settings_task(self, task: asyncio.Task[Any], name: str) -> None:
+        self._settings_task = task
+        self._lifecycle.register(LifecycleKind.MANUAL_COMMAND, name, task, critical=False)
+
+    def _cancel_settings_task(self) -> None:
+        task = self._settings_task
+        self._settings_task = None
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _emit_settings_event(self, result: ChangeResult) -> None:
+        change = result.change
+        severity = {
+            Outcome.VERIFIED: "info",
+            Outcome.UNVERIFIED: "warning",
+            Outcome.STILL_DIFFERS: "warning",
+        }.get(result.outcome, "error")
+        message = f"{change.label} → {change.desired}: {result.outcome.value.replace('_', ' ')}"
+        if result.detail:
+            message = f"{message} ({result.detail})"
+        self.manual_event.emit(
+            DeviceEvent(
+                adapter="device_settings",
+                device=result.device,
+                t_mono_ns=0,
+                t_utc=datetime.now(UTC),
+                kind=f"manual.{change.kind}",
+                message=message,
+                severity=severity,
+                metadata={"manual": True},
+            )
+        )
 
     # ------------------------------------------------------------------ operator commands
 
@@ -793,8 +976,17 @@ class RunController(QObject):
 
     # ------------------------------------------------------------------ control
 
-    def start(self, config: ExperimentConfig) -> None:
+    def start(
+        self,
+        config: ExperimentConfig,
+        *,
+        device_settings_observed: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
         """Schedule a new run on the asyncio loop. Returns immediately.
+
+        ``device_settings_observed`` — each device's declarable settings as
+        read just before Start (:meth:`SettingsPlan.observed`) — is recorded
+        in the bundle's ``equipment.toml``.
 
         Raises :class:`RuntimeError` if a run is already in flight, no
         pool has been built yet, or the pool's async ``open()`` has not
@@ -808,6 +1000,8 @@ class RunController(QObject):
             raise RuntimeError("shutdown in progress; cannot start a new run")
         if self.is_active:
             raise RuntimeError("a run is already active; abort it first")
+        if self._settings_applying:
+            raise RuntimeError("device settings are being applied; wait for them to finish")
         pool = self._worker_pool
         if pool is None:
             raise RuntimeError("no config loaded — open a config first")
@@ -817,7 +1011,7 @@ class RunController(QObject):
                 "to finish loading before starting a run"
             )
         loop = asyncio.get_running_loop()
-        self._task = loop.create_task(self._run(config), name="ui-run")
+        self._task = loop.create_task(self._run(config, device_settings_observed), name="ui-run")
         self._lifecycle.register(
             LifecycleKind.RUN,
             "run",
@@ -870,7 +1064,11 @@ class RunController(QObject):
 
     # ------------------------------------------------------------------ internal
 
-    async def _run(self, config: ExperimentConfig) -> None:
+    async def _run(
+        self,
+        config: ExperimentConfig,
+        device_settings_observed: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
         """Build the conductor stack and drive one run end-to-end."""
         pool = self._worker_pool
         assert pool is not None, "start() guarded by pool presence"
@@ -902,6 +1100,7 @@ class RunController(QObject):
             adapter_by_device=adapter_by_device,
             adapter_by_camera=adapter_by_camera,
             catalog=self._catalog,
+            device_settings=device_settings_observed,
         )
 
         # Build the conductor with a deferred runner factory. The factory

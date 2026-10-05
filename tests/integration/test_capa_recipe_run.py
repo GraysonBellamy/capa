@@ -76,6 +76,18 @@ async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> N
     assert profile_meta["specimen"]["material"] == "PMMA"
     assert profile_meta["atmosphere"]["mode"] == "inert"
     assert profile_meta["atmosphere"]["purge"]["species"] == "N2"
+    # The declared device settings ride along in the config snapshot …
+    assert config_snapshot["device_settings"]["purge_mfc"] == {"gas": "N2"}
+    # … and what each device reported once they were applied lands in
+    # equipment.toml.
+    equipment = tomllib.loads((bundle / "equipment.toml").read_text())
+    devices = {d["name"]: d for d in equipment["devices"]}
+    assert devices["purge_mfc"]["settings"] == {"gas": "N2"}
+    assert devices["balance"]["settings"]["filter_mode"] == "very stable"
+    assert "settings" not in devices["heater"]
+    cameras = {c["name"]: c for c in equipment["cameras"]}
+    assert cameras["ir_cam0"]["settings"]["temperature_range"] == {"min_c": 0.0, "max_c": 650.0}
+    assert cameras["ir_cam0"]["settings"]["distance_m"] == 0.5
 
     # dedicated per-profile snapshot.
     snapshot_path = bundle / "profiles" / "capa_pyrolysis.toml"
@@ -113,3 +125,19 @@ async def test_capa_recipe_run_seals_bundle_with_full_audit(tmp_path: Path) -> N
         meta = json.loads(meta_json)
         assert meta.get("authorization_id"), meta
         assert meta.get("issued_by") == "abr"
+
+
+@pytest.mark.anyio
+async def test_unappliable_device_setting_aborts_before_a_bundle(tmp_path: Path) -> None:
+    """A declared setting the device can't take stops the run before
+    anything records — no bundle, an ``aborted`` status, and the reason."""
+    config = _load_smoke_config(EXPERIMENT_PATH)
+    settings = {**config.device_settings, "purge_mfc": {"gas": "SF6"}}
+    config = config.model_copy(update={"device_settings": settings})
+
+    result = await run_headless(config, runs_root=tmp_path)
+
+    assert result.run_status == "aborted"
+    assert result.bundle_path is None
+    assert result.exit_reason == "device_settings: purge_mfc gas: the device doesn't offer SF6"
+    assert list(tmp_path.iterdir()) == []

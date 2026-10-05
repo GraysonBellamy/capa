@@ -1,5 +1,5 @@
 ---
-description: Field reference for capa experiment YAML — hardware, procedure, calibration_set, method, domain_profile, operator, sample, storage, safety, runtime, tags.
+description: Field reference for capa experiment YAML — hardware, procedure, calibration_set, method, domain_profile, operator, sample, storage, safety, runtime, device_settings, tags.
 ---
 
 # Experiment YAML
@@ -40,6 +40,7 @@ extension.
 | `storage` | no | `StoragePolicy()` defaults |
 | `safety` | no | `SafetyPolicy()` defaults |
 | `runtime` | no | `RuntimeConfig()` defaults |
+| `device_settings` | no | `{}` (devices left as they are) |
 | `run_options` | no | `RunOptions()` defaults |
 | `tags` | no | `[]` |
 | `custom` | no | `{}` |
@@ -288,6 +289,25 @@ runtime:
 | `loop_lag_warn_ms` | `50.0` | Threshold at which the per-loop heartbeat starts warning. Surfaced in the status-bar latency badge. |
 | `ui_bridge_capacity` | `4096` | Capacity of the Conductor → UI bridge. `DROP_OLDEST` policy so the conductor never blocks on a slow UI subscriber. |
 
+## `device_settings:`
+
+Settings to apply to devices and cameras when the config loads — the
+Alicat's gas, the balance's stability settings, the IR camera's range
+and radiometric parameters — keyed by device or camera name:
+
+```yaml
+device_settings:
+  purge_mfc:
+    gas: N2
+  ir_cam0:
+    temperature_range: {min_c: 0.0, max_c: 650.0}
+```
+
+Each entry is validated against that adapter's settings model. On load
+capa compares the devices with the declaration and asks before changing
+anything. See [Device settings](device-settings.md) for the fields per
+adapter and the load, Start and headless behavior.
+
 ## `run_options:`
 
 Per-run knobs that are *not* part of the saved recipe. The Run tab
@@ -360,6 +380,8 @@ immutable thereafter.
 - [Hardware TOML](hardware-toml.md) — the hardware-profile fields the
   inline form mirrors.
 - [Method TOML](method-toml.md) — the step kinds.
+- [Device settings](device-settings.md) — the `device_settings:` fields
+  per adapter.
 - [CAPA profile fields](capa-profile.md) — the `domain_profile.metadata`
   shape for `capa.profiles.capa_pyrolysis`.
 - [What is a procedure](../procedures/what-is-a-procedure.md) —

@@ -34,9 +34,11 @@ from PySide6.QtWidgets import (
 from capa.core.errors import CapaError
 from capa.experiment.config import ExperimentConfig
 from capa.experiment.procedures.base import procedure_uses_method
+from capa.runtime.device_settings import SettingsPlan
 from capa.runtime.shutdown import PoolCloseResult
 from capa.storage.catalog import RunCatalog
 from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState, HardwareInitDialog
+from capa.ui.device_settings_dialog import DeviceSettingsDialog
 from capa.ui.docks.camera_preview import CameraPreviewDock
 from capa.ui.docks.diagnostics import DiagnosticsDock
 from capa.ui.docks.events import EventsDock
@@ -104,7 +106,12 @@ class MainWindow(QMainWindow):
         self._shutdown_complete: bool = False
         self._config_loading: bool = False
         self._open_config_action: QAction | None = None
+        self._apply_settings_action: QAction | None = None
         self._hardware_dialog: HardwareInitDialog | None = None
+        # The loaded config's device_settings compared with the devices;
+        # offered once the hardware dialog closes.
+        self._pending_settings_plan: SettingsPlan | None = None
+        self._device_settings_dialog: DeviceSettingsDialog | None = None
         # Reference to the fire-and-forget pool-close task from
         # _on_close_config; held to prevent premature garbage collection.
         self._close_pool_task: asyncio.Future[PoolCloseResult | None] | None = None
@@ -141,7 +148,11 @@ class MainWindow(QMainWindow):
 
         self._setup_tab = SetupTab(controller=self._controller, parent=self)
         self._method_tab = MethodTab(self)
-        self._run_tab = RunTab(controller=self._controller, parent=self)
+        self._run_tab = RunTab(
+            controller=self._controller,
+            operator_provider=self._operator_provider,
+            parent=self,
+        )
         self._setup_tab.deviceActionRequested.connect(self._on_device_action)
 
         # Setup ↔ Method coordinator. Keeps the experiment's
@@ -250,6 +261,7 @@ class MainWindow(QMainWindow):
         self._controller.config_load_progress.connect(self._on_config_load_progress)
         self._controller.config_load_finished.connect(self._on_config_load_finished)
         self._controller.hardware_ready_changed.connect(self._on_hardware_ready_changed)
+        self._controller.device_settings_planned.connect(self._on_device_settings_planned)
 
         # Status bar.
         status = CapaStatusBar(
@@ -302,6 +314,17 @@ class MainWindow(QMainWindow):
         close_action.triggered.connect(self._on_close_config)
         file_menu.addAction(close_action)
         self._close_config_action = close_action
+
+        file_menu.addSeparator()
+
+        apply_settings_action = QAction("Apply &Device Settings…", self)
+        apply_settings_action.setStatusTip(
+            "Compare the devices with the experiment's device_settings and apply what differs"
+        )
+        apply_settings_action.triggered.connect(self._on_apply_device_settings)
+        file_menu.addAction(apply_settings_action)
+        self._apply_settings_action = apply_settings_action
+        file_menu.aboutToShow.connect(self._sync_apply_settings_action)
 
         file_menu.addSeparator()
 
@@ -698,6 +721,7 @@ class MainWindow(QMainWindow):
         self._manual_dock.reveal(name)
 
     def _on_config_load_started(self, progress: object) -> None:
+        self._pending_settings_plan = None
         if not self._config_load_ui_available():
             return
         self._set_config_loading_ui(True)
@@ -725,6 +749,9 @@ class MainWindow(QMainWindow):
                 # pills — clear the "Preparing hardware…" message that
                 # was set in _on_config_load_started.
                 self._status.clearMessage()
+            if progress.state is ConfigLoadState.READY and self._hardware_dialog is None:
+                # No hardware dialog to wait for (no running loop).
+                self._offer_device_settings()
         else:
             self._status.clearMessage()
         self._set_config_loading_ui(False)
@@ -744,6 +771,7 @@ class MainWindow(QMainWindow):
                 and not self._controller.shutdown_requested
             )
         self._manual_dock.setEnabled(hardware_ready and not loading)
+        self._sync_apply_settings_action()
 
     def _register_dock_view_action(
         self,
@@ -801,6 +829,79 @@ class MainWindow(QMainWindow):
 
     def _on_hardware_dialog_finished(self, _result: int = 0) -> None:
         self._hardware_dialog = None
+        self._offer_device_settings()
+
+    # ------------------------------------------------------------------ device settings
+
+    def _on_device_settings_planned(self, plan: object) -> None:
+        if isinstance(plan, SettingsPlan):
+            self._pending_settings_plan = plan
+
+    def _offer_device_settings(self) -> None:
+        """After a load: ask about the settings that differ, if any."""
+        plan = self._pending_settings_plan
+        self._pending_settings_plan = None
+        if plan is None:
+            return
+        self._show_device_settings(plan)
+
+    def _show_device_settings(self, plan: SettingsPlan) -> None:
+        if not plan.needs_attention:
+            self._status.showMessage("Device settings match the experiment.", 4000)
+            return
+        dialog = DeviceSettingsDialog(
+            plan=plan,
+            controller=self._controller,
+            operator_provider=self._operator_provider,
+            mode="load",
+            parent=self,
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.finished.connect(self._on_device_settings_dialog_finished)
+        self._device_settings_dialog = dialog
+        dialog.open()
+
+    def _on_device_settings_dialog_finished(self, _result: int = 0) -> None:
+        self._device_settings_dialog = None
+
+    def _on_apply_device_settings(self) -> None:
+        """File → Apply Device Settings…: check now, ask about what differs."""
+        if self._controller.is_active:
+            self._status.showMessage("Stop the run before changing device settings.", 4000)
+            return
+        task = self._controller.check_device_settings()
+        if task is None:
+            self._status.showMessage(
+                "Nothing to check: load a config that declares device_settings "
+                "and wait for the hardware.",
+                5000,
+            )
+            return
+        self._status.showMessage("Reading device settings…")
+        task.add_done_callback(self._on_device_settings_checked)
+
+    def _on_device_settings_checked(self, task: asyncio.Task[SettingsPlan]) -> None:
+        self._status.clearMessage()
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            self._status.showMessage(f"Reading device settings failed: {exc}", 8000)
+            return
+        self._show_device_settings(task.result())
+
+    def _sync_apply_settings_action(self) -> None:
+        action = self._apply_settings_action
+        if action is None:
+            return
+        config = self._controller.active_config
+        action.setEnabled(
+            config is not None
+            and bool(config.device_settings)
+            and self._controller.hardware_ready
+            and not self._controller.is_active
+            and not self._config_loading
+        )
 
     def _update_method_tab_title(self) -> None:
         """Decorate the Method tab label with the loaded method's name so

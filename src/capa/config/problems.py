@@ -26,6 +26,7 @@ Section = Literal[
     "devices",
     "channels",
     "cameras",
+    "device_settings",
     "storage",
     "safety",
     "files",

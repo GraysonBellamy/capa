@@ -27,6 +27,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from capa.devices.settings import DeviceSettingsSpec
+
 # ---------------------------------------------------------------------------
 # Channel templates.
 # ---------------------------------------------------------------------------
@@ -165,6 +167,11 @@ class AdapterDescriptor:
     static set here is the *upper bound* that the Setup editor uses to
     check procedure-required capabilities; the runtime-actual set is
     still read from the constructed adapter instance."""
+
+    settings: DeviceSettingsSpec | None = None
+    """The settings an experiment can declare for this adapter under
+    ``device_settings:`` and have applied on load. ``None`` for adapters
+    without declarative settings."""
 
 
 # ---------------------------------------------------------------------------

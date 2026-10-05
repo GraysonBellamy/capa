@@ -21,6 +21,7 @@ from capa.devices.camera.base import (
     IrCameraStateSnapshot,
     IrRadiometricParams,
 )
+from capa.devices.camera.ir_settings import range_label
 from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.experiment.config import (
     CalibrationSetRef,
@@ -30,7 +31,7 @@ from capa.experiment.config import (
     ProcedureRef,
     SampleInfo,
 )
-from capa.ui.manual.cards.camera import FlirCard, _range_label
+from capa.ui.manual.cards.camera import FlirCard
 from capa.ui.state import RunController, RunUiState
 from capa.ui.statusbar import OperatorIdProvider
 from tests.unit.test_manual_control_cards import _close_pool_sync, _open_pool_sync, _run_async
@@ -272,8 +273,8 @@ def test_an_unknown_active_range_selects_nothing(
 def test_a_kelvin_read_back_is_labelled_in_round_degrees() -> None:
     # 253.15 K and 393.15 K convert to -19.999999999999972 and 120.00000000000003.
     kelvin = CameraTemperatureRange(min_c=253.15 - 273.15, max_c=393.15 - 273.15)
-    assert _range_label(kelvin) == "-20 to 120 °C"
-    assert _range_label(CameraTemperatureRange(min_c=-1e-12, max_c=650.0)) == "0 to 650 °C"
+    assert range_label(kelvin) == "-20 to 120 °C"
+    assert range_label(CameraTemperatureRange(min_c=-1e-12, max_c=650.0)) == "0 to 650 °C"
 
 
 # ---------------------------------------------------------------------------

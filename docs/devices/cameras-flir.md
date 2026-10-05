@@ -187,6 +187,30 @@ gate](../safety/authorization-gates.md).
 | `read_battery_percent()` | Where supported. |
 | `read_camera_information()` | Identity / firmware dict. |
 
+Each successful write emits a `param_changed` camera event. The event
+stream is drained only while a run records, so between runs it can
+fill (16 events); further events are dropped rather than blocking the
+write.
+
+### Declaring settings in the experiment
+
+An experiment can declare the range, the radiometric kit and the
+auto-NUC interval under `device_settings:` and have them applied when
+the config loads. The range is given in °C and matched against the
+camera's own list within 1 °C, because its position in that list is
+camera-specific:
+
+```yaml
+device_settings:
+  ir_cam0:
+    temperature_range: {min_c: 0.0, max_c: 650.0}
+    emissivity: 0.95
+    distance_m: 0.5
+```
+
+The range is applied first, then the radiometric parameters, then the
+auto-NUC interval. The same settings work against `flir_ir_sim`.
+
 ## Discovery
 
 `FlirIrAdapter.discover()` uses Atlas's discovery API. The Setup tab

@@ -38,6 +38,7 @@ from capa.experiment.config import (
 )
 from capa.runtime.lifecycle import PoolState
 from capa.ui.state import RunUiResult, RunUiState
+from capa.ui.statusbar import OperatorIdProvider
 from capa.ui.tabs.run import RunTab
 
 
@@ -111,8 +112,15 @@ class _FakeController(QObject):
 
     # The real RunController exposes start/abort but RunTab tests don't
     # exercise them — leave as no-ops to keep the seam minimal.
-    def start(self, _config: Any) -> None:
+    def start(self, _config: Any, *, device_settings_observed: Any = None) -> None:
+        self.started_with = device_settings_observed
         self.is_active = True
+
+    def check_device_settings(self) -> Any:
+        return self.settings_check
+
+    settings_check: Any = None
+    started_with: Any = "not started"
 
     def request_abort(self, *, mode: str) -> None:
         pass
@@ -130,7 +138,7 @@ def test_plot_pane_rebound_to_controller_buffers_on_running(
     :meth:`load_config` with :attr:`RunController.buffers` once the
     engine reaches ``RUNNING`` — otherwise the live plot stays bound to
     a registry that no producer ever writes to."""
-    tab = RunTab(controller=fake_controller)  # type: ignore[arg-type]
+    tab = RunTab(controller=fake_controller, operator_provider=OperatorIdProvider("op"))  # type: ignore[arg-type]
     qtbot.addWidget(tab)
     tab.load_config(_config())
 
@@ -159,7 +167,7 @@ def test_start_button_reenables_after_seal_via_singleshot(
     ``QTimer.singleShot(0, ...)`` defer, the button re-enables on the
     next event-loop tick.
     """
-    tab = RunTab(controller=fake_controller)  # type: ignore[arg-type]
+    tab = RunTab(controller=fake_controller, operator_provider=OperatorIdProvider("op"))  # type: ignore[arg-type]
     qtbot.addWidget(tab)
     tab.load_config(_config())
 
@@ -196,3 +204,115 @@ def test_start_button_reenables_after_seal_via_singleshot(
     # Pump the Qt event loop until the singleShot callback re-enables
     # the button — without the fix this never happens.
     qtbot.waitUntil(lambda: tab._start_btn.isEnabled() is True, timeout=1000)
+
+
+# ---------------------------------------------------------------------------
+# Device settings are checked before Start
+# ---------------------------------------------------------------------------
+
+
+def _tab(qtbot: Any, controller: _FakeController) -> RunTab:
+    tab = RunTab(controller=controller, operator_provider=OperatorIdProvider("op"))  # type: ignore[arg-type]
+    qtbot.addWidget(tab)
+    tab.load_config(_config())
+    return tab
+
+
+def _plan(*, differs: bool) -> Any:
+    from capa.devices.settings import SettingChange
+    from capa.runtime.device_settings import DevicePlan, SettingsPlan
+
+    change = SettingChange(
+        field="gas", label="Gas", current="Air", desired="N2", kind="set_gas", payload={}
+    )
+    return SettingsPlan(
+        devices=(
+            DevicePlan(
+                name="purge_mfc",
+                changes=(change,) if differs else (),
+                observed={"gas": "Air" if differs else "N2"},
+            ),
+        )
+    )
+
+
+def test_start_without_declared_settings_starts_at_once(
+    qtbot: Any, fake_controller: _FakeController
+) -> None:
+    tab = _tab(qtbot, fake_controller)
+    tab._on_start_clicked()
+    assert fake_controller.started_with is None
+
+
+@pytest.mark.anyio
+async def test_matching_settings_start_and_are_recorded(
+    qtbot: Any, fake_controller: _FakeController
+) -> None:
+    import asyncio
+
+    check = asyncio.get_running_loop().create_future()
+    fake_controller.settings_check = check
+    tab = _tab(qtbot, fake_controller)
+    tab._on_start_clicked()
+    assert not tab._start_btn.isEnabled()
+    assert fake_controller.started_with == "not started"
+
+    check.set_result(_plan(differs=False))
+    await asyncio.sleep(0)
+    assert fake_controller.started_with == {"purge_mfc": {"gas": "N2"}}
+
+
+@pytest.mark.anyio
+async def test_drifted_settings_ask_before_starting(
+    qtbot: Any, fake_controller: _FakeController, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from capa.ui.device_settings_dialog import DeviceSettingsDialog
+
+    opened: list[DeviceSettingsDialog] = []
+
+    def _open(dialog: DeviceSettingsDialog) -> None:
+        opened.append(dialog)
+
+    monkeypatch.setattr(DeviceSettingsDialog, "open", _open)
+    check = asyncio.get_running_loop().create_future()
+    fake_controller.settings_check = check
+    tab = _tab(qtbot, fake_controller)
+    tab._on_start_clicked()
+    check.set_result(_plan(differs=True))
+    await asyncio.sleep(0)
+
+    (dialog,) = opened
+    assert dialog._mode == "start"
+    assert fake_controller.started_with == "not started"
+    assert not tab.can_start()
+
+    dialog.startRequested.emit()  # Start anyway
+    assert fake_controller.started_with == {"purge_mfc": {"gas": "Air"}}
+
+
+@pytest.mark.anyio
+async def test_cancelling_the_settings_dialog_does_not_start(
+    qtbot: Any, fake_controller: _FakeController, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from capa.ui.device_settings_dialog import DeviceSettingsDialog
+
+    opened: list[DeviceSettingsDialog] = []
+
+    def _open(dialog: DeviceSettingsDialog) -> None:
+        opened.append(dialog)
+
+    monkeypatch.setattr(DeviceSettingsDialog, "open", _open)
+    check = asyncio.get_running_loop().create_future()
+    fake_controller.settings_check = check
+    tab = _tab(qtbot, fake_controller)
+    tab._on_start_clicked()
+    check.set_result(_plan(differs=True))
+    await asyncio.sleep(0)
+
+    opened[0].reject()
+    assert fake_controller.started_with == "not started"
+    assert tab._start_btn.isEnabled()

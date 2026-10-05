@@ -159,6 +159,14 @@ If you get a red ✗ instead:
 The Setup tab refuses to leave the FAILED state until you edit the
 draft or retry — there's no flash-and-fade misread to worry about.
 
+If the experiment declares [device
+settings](../configuration/device-settings.md) — the MFC's gas, the
+balance's stability settings, the IR camera's range — and a device
+currently differs, a **Device settings** dialog lists what would
+change once the hardware is up. Check the rows against the rig (is N₂
+really what's plumbed to the MFC?) and click **Apply selected**; each
+row then shows whether the device took it.
+
 ---
 
 ## 6. Switch to the Run tab

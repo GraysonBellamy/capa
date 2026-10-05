@@ -719,6 +719,9 @@ class TestBalanceCardReadback:
         qtbot.addWidget(card)
         assert set(card._param_combos) == {
             "filter_mode",
+            "app_filter",
+            "stability_range",
+            "stability_delay",
             "auto_zero",
             "display_unit",
             "tare_behavior",
@@ -793,6 +796,9 @@ class TestBalanceCardReadback:
         card.apply_snapshot(
             SartoriusStateSnapshot(
                 filter_mode="very unstable",
+                app_filter="filling",
+                stability_range="max fast",
+                stability_delay="long",
                 auto_zero="off",
                 display_unit="lb",
                 tare_behavior="at stability",
@@ -802,6 +808,9 @@ class TestBalanceCardReadback:
         )
         assert {k: c.currentText() for k, c in card._param_combos.items()} == {
             "filter_mode": "very unstable",
+            "app_filter": "filling",
+            "stability_range": "max fast",
+            "stability_delay": "long",
             "auto_zero": "off",
             # Not a preset choice: added so the read-back still shows.
             "display_unit": "lb",

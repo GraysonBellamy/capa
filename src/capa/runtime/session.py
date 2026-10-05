@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -141,6 +142,7 @@ class RealRunSession:
         "_config",
         "_config_path",
         "_configure_logging_for_bundle",
+        "_device_settings",
         "_engine_version",
         "_exit_reason",
         "_extra_queue_health",
@@ -172,6 +174,7 @@ class RealRunSession:
         engine_version: str = "conductor",
         configure_logging_for_bundle: bool = True,
         config_path: Path | None = None,
+        device_settings: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         self._config = config
         self._runs_root = runs_root
@@ -190,6 +193,11 @@ class RealRunSession:
         self._engine_version = engine_version
         self._configure_logging_for_bundle = configure_logging_for_bundle
         self._config_path = config_path
+        # Each device's declarable settings as read just before the run
+        # (``SettingsPlan.observed()``); lands in equipment.toml.
+        self._device_settings = {
+            name: dict(settings) for name, settings in (device_settings or {}).items()
+        }
 
         self._bundle_writer: RunBundleWriter | None = None
         self._writer_thread: WriterThread | None = None
@@ -584,7 +592,9 @@ class RealRunSession:
         """Walk ``config.hardware.devices`` (canonical order) and pair each
         with its live adapter for identity introspection.
 
-        Emits one ``equipment.toml`` block per device in canonical order.
+        Emits one ``equipment.toml`` block per device in canonical order,
+        with a ``settings`` table for a device whose declarable settings
+        were read before the run.
         """
         blocks: list[dict[str, Any]] = []
         for dev in self._config.hardware.devices:
@@ -600,6 +610,8 @@ class RealRunSession:
                     extracted = _identity_from_device_info(info)
                     if extracted:
                         block["identity"] = extracted
+            if dev.name in self._device_settings:
+                block["settings"] = self._device_settings[dev.name]
             blocks.append(block)
         return blocks
 
@@ -619,6 +631,8 @@ class RealRunSession:
                     extracted = _identity_from_device_info(info)
                     if extracted:
                         block["identity"] = extracted
+            if cam.name in self._device_settings:
+                block["settings"] = self._device_settings[cam.name]
             blocks.append(block)
         return blocks
 

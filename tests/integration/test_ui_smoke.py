@@ -127,8 +127,9 @@ async def test_run_controller_run_completes_and_populates_buffers(
     try:
         # Drive the controller's async path directly. start() is the
         # event-loop-task-spawning variant the GUI uses; under
-        # pytest-anyio we simply await the work coroutine.
-        await controller._run(config)
+        # pytest-anyio we simply await the work coroutine. The settings
+        # the Run tab read before Start ride along into equipment.toml.
+        await controller._run(config, {"heater": {"mode": "auto"}})
     finally:
         await pool.close()
 
@@ -137,6 +138,10 @@ async def test_run_controller_run_completes_and_populates_buffers(
     assert result.run_status == "completed"
     assert result.bundle_status == "sealed"
     assert result.bundle_path is not None and result.bundle_path.is_dir()
+    import tomllib
+
+    equipment = tomllib.loads((result.bundle_path / "equipment.toml").read_text())
+    assert equipment["devices"][0]["settings"] == {"mode": "auto"}
 
     # Both expected channels saw at least one sample. With duration_s=0.15
     # and a 50 Hz sim feed, decimated to 20 Hz, we should have ~3 samples
@@ -318,4 +323,46 @@ def test_main_window_open_dialog_path_handling(qtbot: Any, tmp_path: Path) -> No
     # No config loaded → can_start() must be False.
     assert window.run_tab.can_start() is False
     assert window.numerics_dock is None  # built lazily on config load
+    window.close()
+
+
+def test_main_window_offers_device_settings_only_when_they_differ(
+    qtbot: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from capa.devices.settings import SettingChange
+    from capa.runtime.device_settings import DevicePlan, SettingsPlan
+    from capa.ui.device_settings_dialog import DeviceSettingsDialog
+    from capa.ui.main_window import MainWindow
+
+    opened: list[DeviceSettingsDialog] = []
+
+    def _open(dialog: DeviceSettingsDialog) -> None:
+        opened.append(dialog)
+
+    monkeypatch.setattr(DeviceSettingsDialog, "open", _open)
+    window = MainWindow(runs_root=tmp_path, configure_logging_for_bundle=False)
+    qtbot.addWidget(window)
+
+    matching = SettingsPlan(devices=(DevicePlan(name="purge_mfc"),))
+    window._on_device_settings_planned(matching)
+    window._offer_device_settings()
+    assert opened == []
+    assert "match" in window._status.currentMessage()
+
+    change = SettingChange(
+        field="gas", label="Gas", current="Air", desired="N2", kind="set_gas", payload={}
+    )
+    differing = SettingsPlan(devices=(DevicePlan(name="purge_mfc", changes=(change,)),))
+    window._on_device_settings_planned(differing)
+    window._offer_device_settings()
+    assert len(opened) == 1
+    assert window._device_settings_dialog is opened[0]
+    # Offered once per load.
+    window._offer_device_settings()
+    assert len(opened) == 1
+
+    # Nothing loaded: the menu action is off.
+    window._sync_apply_settings_action()
+    assert window._apply_settings_action is not None
+    assert not window._apply_settings_action.isEnabled()
     window.close()

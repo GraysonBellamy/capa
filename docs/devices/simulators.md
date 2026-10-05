@@ -115,8 +115,8 @@ them apart by feature surface.
 | Sim adapter | Mirrors | Emission shape | Signal-key schema | Use it to exercise |
 |---|---|---|---|---|
 | [`capa.devices.sim.watlow_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/watlow_sim.py) | [Watlow](watlow.md) | `long_row` | `{"<parameter>/<instance>": spec}` | Heater PV/SP rendering, setpoint command path, ramp UI. |
-| [`capa.devices.sim.alicat_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/alicat_sim.py) | [Alicat](alicat.md) | `wide_row` | `{"<Frame_Field>": spec}` | Flow plots, gas-select UI, totalizer surfaces. |
-| [`capa.devices.sim.sartorius_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/sartorius_sim.py) | [Sartorius](sartorius.md) | `single_value_row` | single `mass_signal` spec | Mass loss curves, tare/zero plumbing, stability flag propagation. |
+| [`capa.devices.sim.alicat_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/alicat_sim.py) | [Alicat](alicat.md) | `wide_row` | `{"<Frame_Field>": spec}` | Flow plots, gas-select UI, totalizer surfaces, applying a declared gas. |
+| [`capa.devices.sim.sartorius_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/sartorius_sim.py) | [Sartorius](sartorius.md) | `single_value_row` | single `mass_signal` spec | Mass loss curves, tare/zero plumbing, stability flag propagation, the menu settings. |
 | [`capa.devices.sim.fuji_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/fuji_sim.py) | [Fuji](fuji.md) | `wide_row` | `{"<CHn>": spec}`, in vol% | Gas plots, validity states, the settings verbs, a zero or span from the manual card. |
 | [`capa.devices.sim.nidaq_polled_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/nidaq_polled_sim.py) | [NI-DAQ polled](nidaq.md#polled-mode) | `wide_row` | `{"<channel>": spec}` | TC channels, polled binding kind. |
 | [`capa.devices.sim.nidaq_block_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/nidaq_block_sim.py) | [NI-DAQ block](nidaq.md#hardware-clocked-block-mode) | `block` | `{"<channel>": spec}` | Block sidecar, kHz path, downsampled channels. |
@@ -127,6 +127,25 @@ fields specific to its sim — what `tick_period_s` defaults to, which
 `Capability` flags are advertised, and any sim-only escape hatches
 (e.g. `wire_temperature_unit=None` on the Watlow sim suppresses the
 drift check).
+
+### State the sims keep
+
+Most sims acknowledge any command without effect. The settings an
+experiment can declare under `device_settings:` are the exception, so
+applying them and reading them back works the same as on hardware:
+
+- **`alicat_sim`** keeps the active gas (default `"Air"`, or the
+  `gas` param) and the setpoint. `set_gas` refuses a gas outside its
+  list (`Air`, `Ar`, `CO2`, `He`, `N2`, `O2`), as a real device
+  refuses one it doesn't offer.
+- **`sartorius_sim`** keeps the runtime menu: filter mode, application
+  filter, stability range and delay, auto-zero and tare behavior.
+  `save_menu` / `reload_menu` are no-ops.
+- **`flir_ir_sim`** keeps its temperature range, radiometric
+  parameters, auto-NUC interval and palettes.
+
+All three answer `read_state_snapshot()` like their real adapters, so
+the manual cards show the simulated state.
 
 ## Sim-only environment flags
 

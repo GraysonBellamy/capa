@@ -254,3 +254,25 @@ def test_save_as_extract_hardware_to_external(tmp_path: Path, configs_dir: Path)
     assert reloaded.hardware_path == new_hw_path.resolve()
     # The experiment file must reference hardware by relative path.
     assert "extracted_hardware.toml" in new_exp_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("experiment_format", ["yaml", "toml"])
+def test_device_settings_survive_save(
+    tmp_path: Path, configs_dir: Path, experiment_format: str
+) -> None:
+    """``device_settings`` — nested tables included — round-trips through
+    both experiment formats."""
+    doc = ConfigDocument.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+    declared = doc.build_config().device_settings
+    exp = tmp_path / f"exp.{experiment_format}"
+    doc.experiment_path = exp
+    doc.experiment_format = experiment_format  # type: ignore[assignment]
+    doc.hardware_path = tmp_path / "exp_hardware.toml"
+    doc.hardware_format = "toml"
+    doc.method_path = tmp_path / "exp_method.toml"
+    doc.method_format = "toml"
+    doc.save()
+
+    saved = ConfigDocument.load(exp).build_config().device_settings
+    assert saved == declared
+    assert saved["ir_cam0"]["temperature_range"] == {"min_c": 0.0, "max_c": 650.0}

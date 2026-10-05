@@ -74,8 +74,9 @@ SECTIONS: tuple[OutlineEntry, ...] = (
             OutlineEntry("devices", "Devices"),
             OutlineEntry("channels", "Channels"),
             OutlineEntry("cameras", "Cameras"),
+            OutlineEntry("device_settings", "Device settings"),
         ),
-        rolls_up=("devices", "channels", "cameras"),
+        rolls_up=("devices", "channels", "cameras", "device_settings"),
     ),
     OutlineEntry(
         "recording",

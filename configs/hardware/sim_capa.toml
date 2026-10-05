@@ -59,6 +59,13 @@ start = 303.0
 end = 873.0
 duration_s = 0.2
 
+# --- Simulated IR camera (stands in for the FLIR E85) ---
+[[cameras]]
+name = "ir_cam0"
+adapter = "capa.devices.sim.flir_ir_sim"
+kind = "ir"
+on_failure = "warn"
+
 # --- Controller channels ---
 
 [[channels]]

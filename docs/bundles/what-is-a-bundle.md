@@ -172,6 +172,23 @@ as adapters report firmware versions, serial numbers, and reachable
 addresses. Distinct from `config.toml`: `config.toml` records *what
 we asked for*, `equipment.toml` records *what answered*.
 
+A device or camera the experiment declares [device
+settings](../configuration/device-settings.md) for also gets a
+`settings` table: its declarable settings as read just before the run
+started (after any were applied), e.g.
+
+```toml
+[[devices]]
+name = "purge_mfc"
+adapter = "capa.devices.alicat"
+
+[devices.settings]
+gas = "N2"
+```
+
+Compare it with `config.toml`'s `device_settings` to see whether a run
+started with a setting other than the one declared ("Start anyway").
+
 ### `calibration.json`
 
 Reference snapshot of the active calibration set — name and

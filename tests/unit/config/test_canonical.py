@@ -86,3 +86,5 @@ def test_hardware_orderings_constants() -> None:
     assert HARDWARE_KEY_ORDER == ("name", "devices", "cameras", "channels")
     assert EXPERIMENT_KEY_ORDER[0] == "hardware"
     assert "procedure" in EXPERIMENT_KEY_ORDER
+    order = EXPERIMENT_KEY_ORDER
+    assert order.index("runtime") < order.index("device_settings") < order.index("tags")
