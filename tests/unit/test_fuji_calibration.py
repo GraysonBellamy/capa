@@ -23,7 +23,10 @@ from fujilib.testing import DEFAULT_ZPA_BANK, FaultKind, MockAnalyzer, mock_tran
 
 from capa.devices.adapter import Capability, CommandResult, DeviceCommand
 from capa.devices.fuji import (
+    SETTINGS_MAX_AGE_S,
     FujiAdapter,
+    FujiChannelSettings,
+    FujiRange,
     FujiStateSnapshot,
     _calibration_result,
     _RefusedError,
@@ -115,7 +118,7 @@ async def test_a_zero_from_begin_to_commit() -> None:
         begun = await _begin(adapter, gas_value=0.0, gas_label="N2, cylinder 1234")
         assert begun.accepted, begun.detail
         assert begun.detail == (
-            "calibration_begin: zero of CH3: CH3 range 1 against 0 vol%; on the wait step"
+            "calibration_begin: zero of O2: O2 0–21 vol% against 0 vol%; on the wait step"
         )
         waiting = adapter.calibration
         assert (waiting.state, waiting.channel, waiting.kind) == ("waiting", "CH3", "zero")
@@ -130,7 +133,7 @@ async def test_a_zero_from_begin_to_commit() -> None:
         committed = await adapter.commit_calibration(issued_by="op", confirmed_by="op")
         ended = adapter.calibration
     assert committed.accepted, committed.detail
-    assert committed.detail == "zero of CH3: completed"
+    assert committed.detail == "zero of O2: completed"
     assert (ended.state, ended.outcome, ended.clean, ended.error) == (
         "ended",
         "completed",
@@ -159,7 +162,7 @@ async def test_cancel_leaves_the_wait_step_without_calibrating() -> None:
         ended = adapter.calibration
         again = await adapter.cancel_calibration(issued_by="op", confirmed_by="op")
     assert cancelled.accepted, cancelled.detail
-    assert cancelled.detail == "zero of CH3: cancelled"
+    assert cancelled.detail == "zero of O2: cancelled"
     assert (ended.state, ended.outcome, ended.clean) == ("ended", "cancelled", True)
     assert _keys(mock) == [ZERO, DOWN, ENT, ESC]
     assert ended.record is not None
@@ -460,10 +463,67 @@ async def test_read_state_snapshot() -> None:
         ("CH2", "co", "vol%", "ok"),
         ("CH3", "o2", "vol%", "ok"),
     ]
-    assert idle.settings["response_time_o2_s"] == 15
+    assert idle.channels == (
+        FujiChannelSettings(
+            channel="CH1",
+            gas="co2",
+            name="CO2",
+            ranges=(FujiRange(1, "vol%", 10.0, 0.0, 0.2),),
+            current_range=1,
+            range_method="manual",
+            response_time_s=15,
+        ),
+        FujiChannelSettings(
+            channel="CH2",
+            gas="co",
+            name="CO",
+            ranges=(FujiRange(1, "vol%", 1.0, 0.0, 0.02),),
+            current_range=1,
+            range_method="manual",
+            response_time_s=15,
+        ),
+        FujiChannelSettings(
+            channel="CH3",
+            gas="o2",
+            name="O2",
+            ranges=(FujiRange(1, "vol%", 21.0, 0.0, 20.95), FujiRange(2, "vol%", 25.0, 0.0, 20.01)),
+            current_range=1,
+            range_method="manual",
+            response_time_s=15,
+        ),
+    )
+    assert [r.name for r in idle.channels[2].ranges] == ["0–21 vol%", "0–25 vol%"]
+    assert (idle.output_hold, idle.hold_mode) == (False, "last_value")
     assert waiting is not None
     assert waiting.calibration.state == "waiting"
+    assert waiting.calibration.channel_name == "O2"
     assert {r.channel: r.state for r in waiting.readings}["CH3"] == "calibrating"
+
+
+async def test_old_settings_are_read_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock = _bench()
+    async with _adapter_on(mock) as adapter:
+        # Changed at the front panel: the cached settings still say 15 s.
+        mock.set_register("response_time.o2", 20)
+        fresh = await adapter.read_state_snapshot()
+        reads: list[str] = []
+        analyzer = adapter._analyzer
+        assert analyzer is not None
+        read_metadata = analyzer.read_metadata
+
+        async def counted(*args: Any, **kwargs: Any) -> Any:
+            reads.append("metadata")
+            return await read_metadata(*args, **kwargs)
+
+        monkeypatch.setattr(analyzer, "read_metadata", counted)
+        still = await adapter.read_state_snapshot()
+        adapter._settings_read_at -= SETTINGS_MAX_AGE_S + 1
+        old = await adapter.read_state_snapshot()
+    assert fresh is not None and still is not None and old is not None
+    assert fresh.channels[2].response_time_s == 15
+    assert still.channels[2].response_time_s == 15
+    assert reads == ["metadata"]
+    assert old.channels[2].response_time_s == 20
 
 
 async def test_the_read_back_during_a_calibration_costs_no_poll(
@@ -514,7 +574,7 @@ async def test_the_plan_is_read_without_touching_the_panel() -> None:
         )
         writes = [t for t in mock.transactions() if t[0] in (FC06, 16)]
     assert plan.accepted, plan.detail
-    assert plan.detail.startswith("calibration_plan: span of CH3: CH3 range 1 against ")
+    assert plan.detail.startswith("calibration_plan: span of O2: O2 0–21 vol% against ")
     assert not bad.accepted
     assert writes == []
     assert adapter.calibration is IDLE
@@ -533,4 +593,5 @@ async def test_read_state_snapshot_survives_a_failed_poll(monkeypatch: pytest.Mo
         snap = await adapter.read_state_snapshot()
     assert snap is not None
     assert snap.readings == ()
-    assert snap.settings["response_time_o2_s"] == 15
+    # The settings as last read are still shown.
+    assert {c.name: c.response_time_s for c in snap.channels} == {"CO2": 15, "CO": 15, "O2": 15}

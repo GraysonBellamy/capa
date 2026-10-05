@@ -35,14 +35,14 @@ CAPA_EXPERIMENTS = sorted(
 def test_current_capa_mappings_extracts_groups() -> None:
     channels = [
         {"name": "heater.pv", "metadata": {"capa_group": "heater_pv"}},
-        {"name": "TC_top_1", "metadata": {"capa_group": "sample_temperature"}},
-        {"name": "TC_top_2", "metadata": {"capa_group": "sample_temperature"}},
+        {"name": "purge.flow", "metadata": {"capa_group": "purge_gas_flow"}},
+        {"name": "purge.flow_b", "metadata": {"capa_group": "purge_gas_flow"}},
         {"name": "noise", "metadata": {}},
     ]
     mappings = current_capa_mappings(channels)
     assert mappings == {
         "heater_pv": ["heater.pv"],
-        "sample_temperature": ["TC_top_1", "TC_top_2"],
+        "purge_gas_flow": ["purge.flow", "purge.flow_b"],
     }
 
 
@@ -50,12 +50,12 @@ def test_required_groups_present_for_pyrolysis() -> None:
     assert {
         "heater_setpoint",
         "heater_pv",
-        "sample_temperature",
         "purge_gas_flow",
         "mass",
     } == set(CAPA_REQUIRED_GROUPS)
     assert "reactor_pressure" not in CAPA_OPTIONAL_GROUPS
     assert "mass" not in CAPA_OPTIONAL_GROUPS
+    assert "sample_temperature" not in CAPA_OPTIONAL_GROUPS
 
 
 # ---------------------------------------------------------------------------

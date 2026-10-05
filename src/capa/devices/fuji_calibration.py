@@ -32,16 +32,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Final, Literal
 
 import structlog
-from fujilib import Analyzer, DeviceInfo, FujiAnalyzerStateError, FujiError
+from fujilib import Analyzer, ChannelId, DeviceInfo, FujiAnalyzerStateError, FujiError, RangeInfo
 from fujilib.devices.keys import CalibrationGas, RemoteCalibration, RunState
 from fujilib.devices.panel import ManualCalibrationPlan
 from fujilib.devices.steadiness import SteadinessRule, SteadinessVerdict
+
+from capa.devices.fuji_labels import range_of
 
 __all__ = [
     "IDLE",
@@ -72,6 +74,8 @@ class CalibrationStatus:
 
     state: CalibrationState = "idle"
     channel: str | None = None
+    channel_name: str | None = None
+    """The channel by its gas, as the operator reads it: ``"O2"``."""
     kind: str | None = None
     """``"zero"`` or ``"span"``."""
     gas_value: float | None = None
@@ -82,9 +86,9 @@ class CalibrationStatus:
     steady: bool | None = None
     """Whether the last read found the gas steady; ``None`` before the first."""
     reasons: tuple[str, ...] = ()
-    """Per channel, why the gas is or is not steady."""
+    """Per channel, by its gas, why the gas is or is not steady."""
     readings: Mapping[str, float | None] = field(default_factory=lambda: MappingProxyType({}))
-    """The last reading of each channel the run calibrates."""
+    """The last reading of each channel the run calibrates, by channel id."""
     waited_s: float | None = None
     outcome: str | None = None
     """How the pass ended: ``completed``, ``failed``, ``cancelled`` or
@@ -102,16 +106,29 @@ IDLE: Final = CalibrationStatus()
 """The status when no calibration has been begun."""
 
 
-def plan_summary(plan: ManualCalibrationPlan) -> str:
-    """``"span of CH3: CH3 range 1 against 20.95 vol%"``."""
+def plan_summary(
+    plan: ManualCalibrationPlan,
+    names: Mapping[str, str] | None = None,
+    ranges: Sequence[RangeInfo] = (),
+) -> str:
+    """``"span of O2: O2 0–25 vol% against 20.95 vol%"``.
+
+    Each channel by its gas in ``names`` and each range by its span in
+    ``ranges``; by the analyzer's numbers where they do not say.
+    """
+    named = names or {}
+    tables = {info.channel: info for info in ranges}
     parts: list[str] = []
     for target in plan.targets:
         gases = target.zero_gas if plan.kind.value == "zero" else target.span_gas
+        channel = named.get(target.channel.value, target.channel.value)
         for number, gas, unit in zip(target.ranges, gases, target.units, strict=False):
             shown = "an unreadable gas setting" if gas is None else f"{gas:g} {unit}"
             note = "" if target.established else " (not established)"
-            parts.append(f"{target.channel.value} range {number} against {shown}{note}")
-    return f"{plan.kind.value} of {plan.channel.value}: " + "; ".join(parts)
+            span = range_of(tables.get(target.channel), number)
+            parts.append(f"{channel} {span} against {shown}{note}")
+    selected = named.get(plan.channel.value, plan.channel.value)
+    return f"{plan.kind.value} of {selected}: " + "; ".join(parts)
 
 
 class CalibrationRun:
@@ -132,16 +149,21 @@ class CalibrationRun:
         timeout_s: float = 900.0,
         cleanup_timeout_s: float = CLEANUP_TIMEOUT_S,
         on_end: Callable[[CalibrationStatus], None] | None = None,
+        names: Mapping[str, str] | None = None,
+        ranges: Sequence[RangeInfo] = (),
     ) -> None:
         """Prepare a run of ``plan`` against ``gas``; nothing is sent yet.
 
         ``operator`` goes into the record. ``timeout_s`` is how long the run
         may sit on the wait step before it cancels itself. ``on_end`` is
-        called once, on the event loop, with the final status.
+        called once, on the event loop, with the final status. ``names``
+        (channel id to gas) and ``ranges`` word what the status shows.
         """
         self._analyzer = analyzer
         self._plan = plan
         self._gas = gas
+        self._names: Mapping[str, str] = MappingProxyType(dict(names or {}))
+        self._ranges = tuple(ranges)
         self._operator = operator
         self._info = info
         self._port = port
@@ -180,16 +202,18 @@ class CalibrationRun:
         """The run as it stands."""
         verdict = self._verdict
         unit = self._gas.unit
+        channel = self._plan.channel.value
         return CalibrationStatus(
             state=self._state,
-            channel=self._plan.channel.value,
+            channel=channel,
+            channel_name=self._names.get(channel, channel),
             kind=self._plan.kind.value,
             gas_value=self._gas.value,
             gas_unit=str(unit) if unit is not None else None,
             gas_label=self._gas.label,
-            plan=plan_summary(self._plan),
+            plan=plan_summary(self._plan, self._names, self._ranges),
             steady=verdict.steady if verdict is not None else None,
-            reasons=verdict.reasons if verdict is not None else (),
+            reasons=self._reasons(verdict),
             readings=self._readings,
             waited_s=verdict.elapsed_s if verdict is not None else None,
             outcome=self._outcome,
@@ -236,7 +260,7 @@ class CalibrationRun:
             raise FujiAnalyzerStateError("no calibration is on its wait step")
         verdict = self._verdict
         if verdict is None or not verdict.steady:
-            reasons = "; ".join(verdict.reasons) if verdict is not None else "no read yet"
+            reasons = "; ".join(self._reasons(verdict)) or "no read yet"
             raise FujiAnalyzerStateError(f"the reading is not steady on the gas: {reasons}")
         self._refusal = None
         self._refused.clear()
@@ -255,6 +279,18 @@ class CalibrationRun:
         if refusal is not None and not self._done.is_set():
             raise refusal
         return self.status
+
+    def _reasons(self, verdict: SteadinessVerdict | None) -> tuple[str, ...]:
+        """Each channel's reason, prefixed with the channel's gas."""
+        if verdict is None:
+            return ()
+        return tuple(
+            f"{self._name(channel)}: {steadiness.reason}"
+            for channel, steadiness in verdict.channels.items()
+        )
+
+    def _name(self, channel: ChannelId) -> str:
+        return self._names.get(channel.value, channel.value)
 
     def _refused_with(self) -> FujiError | None:
         """What the owner task refused the last request with, if it did.

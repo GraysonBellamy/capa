@@ -277,13 +277,12 @@ Two related knobs control how often samples flow:
 
 Domain profiles declare `required_channel_groups` against
 `ChannelSpec.metadata["capa_group"]`. The CAPA-pyrolysis profile
-requires five groups:
+requires four groups:
 
 | Group | Acceptable kinds | Min count |
 |---|---|---|
 | `heater_setpoint` | `setpoint`, `process_var` | 1 |
 | `heater_pv` | `process_var` | 1 |
-| `sample_temperature` | `tc`, `process_var` | 1 |
 | `mass` | `mass` | 1 |
 | `purge_gas_flow` | `mfc_flow`, `setpoint` | 1 |
 

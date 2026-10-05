@@ -43,7 +43,7 @@ def test_overview_renders_capa_mapping_rows_for_pyrolysis(qtbot: Any) -> None:
     assert any("heater.pv" in t for t in field_texts)
     assert any("heater.setpoint" in t for t in field_texts)
     assert any("purge.flow" in t for t in field_texts)
-    assert any("TC_sample_top" in t for t in field_texts)
+    assert any("balance.mass" in t for t in field_texts)
 
 
 def test_overview_shows_placeholder_for_non_capa_profile(qtbot: Any) -> None:

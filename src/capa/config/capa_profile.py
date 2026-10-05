@@ -32,7 +32,6 @@ importing the profile module (and its channel-spec dependencies)."""
 CAPA_REQUIRED_GROUPS: dict[str, tuple[str, ...]] = {
     "heater_setpoint": ("setpoint",),
     "heater_pv": ("process_var",),
-    "sample_temperature": ("tc", "thermocouple", "process_var"),
     "purge_gas_flow": ("mfc_flow",),
     "mass": ("mass",),
 }
@@ -63,9 +62,8 @@ config — the profile's own validation reports the bad value."""
 def current_capa_mappings(channels: Iterable[object]) -> dict[str, list[str]]:
     """Walk raw channel dicts; return ``{group_name: [channel_name, ...]}``.
 
-    Multi-channel groups (a sample_temperature TC array) appear with
-    every matched channel; single-channel groups appear with a length-1
-    list. Groups with no mapping aren't included in the return — callers
+    A group mapped to several channels appears with every matched
+    channel; single-channel groups appear with a length-1 list. Groups with no mapping aren't included in the return — callers
     that want a complete picture should iterate :data:`CAPA_REQUIRED_GROUPS`
     and look up by key.
 

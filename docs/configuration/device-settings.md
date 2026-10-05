@@ -1,5 +1,5 @@
 ---
-description: Declare device settings (Alicat gas, balance stability, IR camera range and radiometric parameters, webcam zoom, pan, tilt, focus and exposure) in an experiment and have capa apply them when the config loads.
+description: Declare device settings (Alicat gas, balance stability, gas analyzer response times and ranges, IR camera range and radiometric parameters, webcam zoom, pan, tilt, focus and exposure) in an experiment and have capa apply them when the config loads.
 ---
 
 # Device settings
@@ -24,6 +24,10 @@ device_settings:
   balance:                    # Sartorius
     filter_mode: very stable
     stability_range: accurate
+  gas_analyzer:               # Fuji ZP gas analyzer
+    o2_response_time_s: 10
+    o2_range_method: manual
+    o2_range: {full_scale: 25, unit: vol%}
   ir_cam0:                    # FLIR IR camera
     temperature_range: {min_c: 0.0, max_c: 650.0}
     emissivity: 0.95
@@ -46,7 +50,8 @@ nothing is shown beyond a status-bar note.
 
 Writes are **session-only**: nothing is saved to device EEPROM. A device
 that is power-cycled reverts to its saved settings, which is why the
-settings are checked again before Start.
+settings are checked again before Start. The gas analyzer is the
+exception: it keeps every setting it takes, through a power cycle.
 
 ## Settings per adapter
 
@@ -68,6 +73,36 @@ settings are checked again before Start.
 | `tare_behavior` | `without stability`, `with stability`, `at stability` | p05 |
 
 Written to the balance's runtime menu; never saved with `save_menu`.
+
+### Fuji gas analyzer (`capa.devices.fuji`, `capa.devices.sim.fuji_sim`)
+
+Settings are declared per gas, by the gas the device's `channel_map`
+asserts (`co2_…`, not `CH1`). `<gas>` is one of `co2`, `co`, `o2`,
+`ch4`, `so2`, `no`, `nox`.
+
+| Field | Values | Notes |
+|---|---|---|
+| `output_hold` | `true` / `false` | Hold the outputs, and the recorded values, during a calibration. |
+| `hold_mode` | `last reading`, `preset value` | What the outputs hold. |
+| `<gas>_response_time_s` | 0 – 60 s | The gas's response-time filter; `0` switches it off. |
+| `<gas>_range_method` | `manual`, `auto` | `auto` switches up at 90 % of the low range and back below 80 %. |
+| `<gas>_range` | `{full_scale, unit}` | The range by its span, e.g. `{full_scale: 25, unit: vol%}`; `unit` is `vol%`, `ppm`, `mg/m3` or `g/m3`. Matched against the analyzer's ranges for that gas. |
+
+- **The analyzer keeps them.** Unlike the other adapters' settings,
+  these survive a power cycle.
+- **Range and method.** A range is selected only while the method is
+  `manual`, so a gas's method is applied before its range. Declaring
+  `auto` together with a range is a validation error
+  (`device_settings.value_error`). A range declared without a method,
+  on a gas the analyzer has on `auto`, is refused when applied.
+- **Unit.** A range in another unit stops a capa channel declared in
+  the old unit for the rest of a run (`unit_mismatch`); change the
+  channel's `unit` with it.
+- **Checked when read.** A gas the channel map doesn't assert, or a span
+  the analyzer doesn't offer for it, is listed as a setting that can't
+  be applied, with the ranges it does offer.
+- **Not declarable.** The calibration gases: the next calibration is
+  computed from them, so they are set deliberately on the manual card.
 
 ### IR cameras (`capa_flir.flir_ir`, `capa.devices.sim.flir_ir_sim`)
 
@@ -119,8 +154,8 @@ value is an integer in the camera's own units.
   declared webcam setting is listed as unappliable with the reason. A
   headless run is aborted.
 
-Other adapters (Watlow, Fuji, NI-DAQ) have no declarable settings;
-naming one under `device_settings:` is a validation error.
+Other adapters (Watlow, NI-DAQ) have no declarable settings; naming one
+under `device_settings:` is a validation error.
 
 ## On load, in the GUI
 

@@ -63,7 +63,9 @@ def test_validate_metadata_oxidative_with_reactive() -> None:
 
 def test_required_channel_groups_cover_minimum_capa_rig() -> None:
     groups = {req.group for req in cap.REQUIRED_CHANNEL_GROUPS}
-    assert {"heater_setpoint", "heater_pv", "sample_temperature", "purge_gas_flow"} <= groups
+    assert {"heater_setpoint", "heater_pv", "purge_gas_flow", "mass"} == groups
+    optional = {req.group for req in cap.OPTIONAL_CHANNEL_GROUPS}
+    assert "sample_temperature" not in groups | optional
 
 
 def test_preflight_check_ids_are_unique() -> None:

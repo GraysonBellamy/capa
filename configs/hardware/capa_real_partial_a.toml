@@ -151,7 +151,7 @@ kind = "identity"
 input_unit = "slpm"
 output_unit = "slpm"
 
-# --- Sample-thermocouples (sim NI-DAQ) ---
+# --- Thermocouples (sim NI-DAQ) ---
 
 [[channels]]
 name = "TC_sample_top"
@@ -159,8 +159,6 @@ kind = "tc"
 unit = "K"
 derived_unit = "K"
 plot_group = "temperatures"
-[channels.metadata]
-capa_group = "sample_temperature"
 [channels.source]
 source = "nidaq_reading_field"
 device = "cdaq1"
@@ -177,8 +175,6 @@ kind = "tc"
 unit = "K"
 derived_unit = "K"
 plot_group = "temperatures"
-[channels.metadata]
-capa_group = "sample_temperature"
 [channels.source]
 source = "nidaq_reading_field"
 device = "cdaq1"

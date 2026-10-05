@@ -11,7 +11,7 @@ A *domain profile* layers scientific metadata + preflight checks on top of the g
 
 - **specimen fields** — id, material, mass, form, holder geometry
 - **method fields** — heater program (target heat flux + heater setpoint), atmosphere composition, optional secondary gas
-- **required channel groups** — heater pair, sample TC, mass, purge MFC
+- **required channel groups** — heater pair, mass, purge MFC
 - **preflight checks** — heater PV safe range, purge flow established, balance stability
 
 The profile sits at `experiment.domain_profile.id = "capa.profiles.capa_pyrolysis"` in the experiment YAML. When set, the Setup tab's CAPA Profile section edits all the fields below; its forms are built from the profile's models, so the editor and this schema cannot disagree.
@@ -162,7 +162,6 @@ The profile requires the following [channel groups](channel-bindings.md) to be m
 |---|---|---|---|
 | `heater_setpoint` | `setpoint` | 1 | The write target. |
 | `heater_pv` | `process_var` | 1 | The Watlow's live PV reading. |
-| `sample_temperature` | `thermocouple` or `analog_in` | 1 | At least one TC inside or close to the sample. Multi-TC arrays appear in this group too. |
 | `purge_gas_flow` | `mfc_flow` or `analog_in` | 1 | The inert/sweep gas MFC. |
 | `mass` | `mass` | 1 | Load cell reading the specimen. |
 
