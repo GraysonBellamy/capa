@@ -31,9 +31,6 @@ domain_profile:
         purity: "UHP 5.0"
         target_flow_slpm: 100.0
 
-calibration_set:
-  name: default
-
 operator:
   id: abr
   display_name: A. Researcher

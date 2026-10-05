@@ -28,7 +28,6 @@ from capa.channels.spec import ChannelSpec, WatlowParameter
 from capa.core.ringbuffer import RingBufferRegistry
 from capa.devices.sim._signals import Sine
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -74,7 +73,6 @@ def _config() -> ExperimentConfig:
             ),
         ),
         procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="op"),
         sample=SampleInfo(id="UI-RT"),
     )

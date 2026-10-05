@@ -27,7 +27,6 @@ from capa.channels.calibration import Identity
 from capa.channels.spec import AlicatFrameField, ChannelKind, ChannelSpec
 from capa.devices.alicat import AlicatAdapter
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -135,7 +134,6 @@ class TestRealAlicatEngineRun:
                 version="0.1",
                 config={"duration_s": 5.0},
             ),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id=_operator_id()),
             sample=SampleInfo(id="HW-SMOKE-ALICAT-001"),
             tags=("hardware", "alicat", "smoke"),

@@ -1,5 +1,5 @@
 ---
-description: Tour of a capa run bundle directory — manifest.json, scalars.parquet, device_records, events.sqlite, video/, calibration.json, equipment.toml, and env lockfile.
+description: Tour of a capa run bundle directory — manifest.json, scalars.parquet, device_records, events.sqlite, video/, equipment.toml, and env lockfile.
 ---
 
 # What's in a bundle
@@ -40,7 +40,6 @@ runs/<run_id>/
 ├── profiles/
 │   └── capa_pyrolysis.toml    # frozen domain-profile metadata
 ├── equipment.toml             # what was actually opened (firmware, serial #s)
-├── calibration.json           # CalibrationSet reference snapshot
 └── env/
     ├── uv.lock                # exact Python dep tree at run-start
     └── packages.json          # installed distribution metadata
@@ -188,13 +187,6 @@ gas = "N2"
 
 Compare it with `config.toml`'s `device_settings` to see whether a run
 started with a setting other than the one declared ("Start anyway").
-
-### `calibration.json`
-
-Reference snapshot of the active calibration set — name and
-revision. The resolved per-channel curves snapshot will land here
-once the calibration runtime is wired in; until then the reference
-is enough to re-locate the source on disk.
 
 ### `env/`
 

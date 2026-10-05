@@ -49,9 +49,6 @@ device_settings:
     emissivity: 0.95
     distance_m: 0.5
 
-calibration_set:
-  name: default
-
 operator:
   id: abr
   display_name: A. Researcher

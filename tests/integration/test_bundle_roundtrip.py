@@ -36,7 +36,6 @@ from capa.devices.sim.nidaq_polled_sim import NIDAQPolledSim
 from capa.devices.sim.sartorius_sim import SartoriusSim
 from capa.devices.sim.watlow_sim import WatlowSim
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -115,7 +114,6 @@ def _config() -> ExperimentConfig:
         hardware=_hardware(),
         method=None,
         procedure=ProcedureRef(id="capa.builtin.free_run", version="0.1"),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="abr", display_name="A. Researcher"),
         sample=SampleInfo(id="SIM-S001", material="paint-A", notes="synthetic"),
         tags=("sim", "freerun", "p0b-roundtrip"),
@@ -239,7 +237,6 @@ class TestBundleStructure:
         assert (sealed_bundle / "manifest.sha256").is_file()
         assert (sealed_bundle / "config.toml").is_file()
         assert (sealed_bundle / "equipment.toml").is_file()
-        assert (sealed_bundle / "calibration.json").is_file()
         assert (sealed_bundle / "scalars.parquet").is_file()
         assert (sealed_bundle / "events.sqlite").is_file()
         assert (sealed_bundle / "status.sqlite").is_file()
@@ -383,10 +380,16 @@ class TestConfigSnapshot:
         # tuple-typed `tags` round-trips as list under TOML
         assert "sim" in data["tags"]
 
-    def test_calibration_json_present(self, sealed_bundle: Path) -> None:
-        with open(sealed_bundle / "calibration.json") as fp:
-            data = json.load(fp)
-        assert data["name"] == "default"
+    def test_config_toml_records_each_channel_calibration(self, sealed_bundle: Path) -> None:
+        with open(sealed_bundle / "config.toml", "rb") as fp:
+            data = tomllib.load(fp)
+        calibrations = {ch["name"]: ch["calibration"] for ch in data["hardware"]["channels"]}
+        assert calibrations["MFC_air.flow"] == {
+            "kind": "identity",
+            "input_unit": "slpm",
+            "output_unit": "slpm",
+        }
+        assert set(calibrations) == {"heater.pv", "MFC_air.flow", "balance.value", "ai0"}
 
 
 class TestEquipmentToml:

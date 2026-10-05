@@ -33,7 +33,6 @@ State invariants:
 from __future__ import annotations
 
 import datetime as _dt
-import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -247,17 +246,6 @@ class RunBundleWriter:
             equipment_stub["devices"].append({"name": dev.name, "adapter": dev.adapter})
         (self._bundle_path / "equipment.toml").write_text(
             tomli_w.dumps(equipment_stub), encoding="utf-8"
-        )
-
-        # calibration.json — current reference snapshot. Records the
-        # calibration-set name + revision; the resolved curves snapshot
-        # lands when the calibration runtime is wired in.
-        calibration_block = {
-            "name": self._config.calibration_set.name,
-            "revision": self._config.calibration_set.revision,
-        }
-        (self._bundle_path / "calibration.json").write_text(
-            _json_dumps(calibration_block), encoding="utf-8"
         )
 
         # Open sinks.
@@ -628,11 +616,6 @@ def _toml_safe(value: Any) -> Any:
     ):
         return value
     return str(value)
-
-
-def _json_dumps(value: Any) -> str:
-    """Stable JSON dump, two-space indent, trailing newline."""
-    return json.dumps(value, indent=2, sort_keys=False) + "\n"
 
 
 __all__ = [

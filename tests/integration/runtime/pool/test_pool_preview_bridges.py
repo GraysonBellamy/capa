@@ -21,7 +21,6 @@ import pytest
 from capa.core.clock import RunClock
 from capa.devices.camera.base import CameraSpec
 from capa.experiment.config import (
-    CalibrationSetRef,
     ExperimentConfig,
     HardwareProfile,
     OperatorRef,
@@ -87,7 +86,6 @@ def _make_config(cameras: tuple[CameraSpec, ...]) -> ExperimentConfig:
             cameras=cameras,
         ),
         procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="opA", display_name="Op A"),
         sample=SampleInfo(id="S"),
     )

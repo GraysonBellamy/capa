@@ -27,7 +27,6 @@ from capa.storage.manifest import BundleManifest
 
 _FREE_RUN_TOML = """
 procedure = {{ id = "capa.builtin.free_run", config = {{ duration_s = {duration} }} }}
-calibration_set = {{ name = "default" }}
 operator = {{ id = "abr", display_name = "A. Researcher" }}
 sample = {{ id = "{sample_id}" }}
 tags = ["sim", "p0c"]

@@ -24,7 +24,6 @@ from capa.devices.camera.base import (
 from capa.devices.camera.ir_settings import range_label
 from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.experiment.config import (
-    CalibrationSetRef,
     ExperimentConfig,
     HardwareProfile,
     OperatorRef,
@@ -68,7 +67,6 @@ def _config() -> ExperimentConfig:
             cameras=(CameraSpec(name="ir_cam0", adapter=SIM, kind="ir"),),
         ),
         procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="opA", display_name="Op A"),
         sample=SampleInfo(id="S"),
     )

@@ -77,7 +77,6 @@ def test_load_setup_with_no_method_clears_method_tab(qtbot: Any, tmp_path: Path)
     yaml_path.write_text(
         f"hardware: {hw_path.name}\n"
         "procedure:\n  id: capa.builtin.recipe_runner\n  config: {}\n"
-        "calibration_set:\n  name: default\n"
         "operator:\n  id: tester\n"
         "sample:\n  id: ZZ-1\n",
         encoding="utf-8",

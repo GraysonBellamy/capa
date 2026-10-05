@@ -15,7 +15,7 @@ A tune artifact is **not** a channel calibration. It records a heater-setpoint�
 
 ```
 configs/calibrations/
-    sim_default.toml                  ← channel-cal (different subsystem)
+    thermocouples_2026Q2.toml         ← channel-cal (different subsystem)
     flux/
         capa_flux_2026-05-17.toml     ← one artifact per save
         capa_flux_2026-05-18.toml

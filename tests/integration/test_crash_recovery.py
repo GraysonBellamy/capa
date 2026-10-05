@@ -28,7 +28,6 @@ from capa.core.clock import RunClock
 from capa.devices.sim._signals import Sine
 from capa.devices.sim.watlow_sim import WatlowSim
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -66,7 +65,6 @@ def _config() -> ExperimentConfig:
         hardware=hardware,
         method=None,
         procedure=ProcedureRef(id="capa.builtin.free_run"),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="abr"),
         sample=SampleInfo(id="CRASH-001"),
     )

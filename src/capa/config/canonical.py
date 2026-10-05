@@ -26,7 +26,6 @@ EXPERIMENT_KEY_ORDER: tuple[str, ...] = (
     "method",
     "procedure",
     "domain_profile",
-    "calibration_set",
     "operator",
     "sample",
     "storage",

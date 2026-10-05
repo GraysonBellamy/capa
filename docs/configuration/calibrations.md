@@ -26,18 +26,10 @@ The four configuration "kinds" in capa are:
 | Experiment | `*.yaml` | Stitches the others together for one run. See [Experiment YAML](experiment-yaml.md). |
 | **Calibrations** | `configs/calibrations/*.toml` | **This page.** |
 
-An experiment YAML references a calibration set by path:
-
-```yaml
-experiment:
-  calibration_set: configs/calibrations/thermocouples_2026Q2.toml
-```
-
-At run-arm the set's curves overwrite (non-destructively, in memory) whatever
-the channels in the hardware profile originally declared. The current bundle
-writer records the selected set reference in `calibration.json` (`name` and
-`revision`). Full resolved-curve snapshots are planned, but are not wired into
-the storage path yet.
+An experiment YAML doesn't reference a calibration set. Each channel's curve
+lives on the channel in the hardware profile; a set is a file of curves the
+Setup tab's Calibration section copies onto channels, or exports them to. The
+bundle's `config.toml` records every channel's curve as the run used it.
 
 A tune artifact is **not** referenced from the experiment YAML directly — operators cite it (free-form) inside the [CAPA profile](capa-profile.md#heaterprogram)'s `HeaterProgram.flux_calibration_ref` field, and the tune-procedure itself reads `configs/calibrations/flux/latest.toml` to pick its initial-setpoint prior.
 

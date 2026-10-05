@@ -1,5 +1,5 @@
 ---
-description: Field reference for capa experiment YAML — hardware, procedure, calibration_set, method, domain_profile, operator, sample, storage, safety, runtime, device_settings, tags.
+description: Field reference for capa experiment YAML — hardware, procedure, method, domain_profile, operator, sample, storage, safety, runtime, device_settings, tags.
 ---
 
 # Experiment YAML
@@ -32,7 +32,6 @@ extension.
 |---|:-:|---|
 | `hardware` | yes | — |
 | `procedure` | yes | — |
-| `calibration_set` | yes | — |
 | `operator` | yes | — |
 | `sample` | yes | — |
 | `method` | no | `None` (procedure must accept method-less runs) |
@@ -136,26 +135,6 @@ The CAPA-pyrolysis profile's `metadata` schema (specimen, program,
 atmosphere blocks) is documented in [CAPA profile
 fields](capa-profile.md). Cone-calorimeter and any future profiles
 have their own `metadata` shape — switch on `id`.
-
-## `calibration_set:`
-
-Pointer to a CalibrationSet on disk:
-
-```yaml
-calibration_set:
-  name: default
-  revision: "2026-05-24"
-```
-
-| Field | Required | Notes |
-|---|:-:|---|
-| `name` | yes | Logical set name; resolved against `configs/calibrations/`. |
-| `revision` | no | Pin a specific revision. `None` = latest. |
-
-The current bundle writer records the referenced set's `name` and
-`revision` in `calibration.json`. Full resolved-curve snapshots are
-planned, but are not wired into the storage path yet. See
-[Calibrations on disk](calibrations.md).
 
 ## `operator:` and `sample:`
 

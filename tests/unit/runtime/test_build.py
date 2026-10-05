@@ -229,7 +229,6 @@ class TestResolveDeviceAdapters:
             WatlowParameter,
         )
         from capa.experiment.config import (
-            CalibrationSetRef,
             DeviceConfig,
             ExperimentConfig,
             HardwareProfile,
@@ -269,7 +268,6 @@ class TestResolveDeviceAdapters:
                 ),
             ),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id="op"),
             sample=SampleInfo(id="S1"),
         )
@@ -324,7 +322,6 @@ class TestBuildWorkersOnFailurePropagation:
         )
         from capa.devices.materialize import materialize_adapters
         from capa.experiment.config import (
-            CalibrationSetRef,
             DeviceConfig,
             ExperimentConfig,
             HardwareProfile,
@@ -370,7 +367,6 @@ class TestBuildWorkersOnFailurePropagation:
                 ),
             ),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id="op"),
             sample=SampleInfo(id="S1"),
         )
@@ -391,7 +387,6 @@ class TestBuildWorkersOnFailurePropagation:
         )
         from capa.devices.materialize import materialize_adapters
         from capa.experiment.config import (
-            CalibrationSetRef,
             DeviceConfig,
             ExperimentConfig,
             HardwareProfile,
@@ -436,7 +431,6 @@ class TestBuildWorkersOnFailurePropagation:
                 ),
             ),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id="op"),
             sample=SampleInfo(id="S1"),
         )

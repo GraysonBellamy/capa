@@ -41,9 +41,6 @@ device_settings:                   # applied to the devices when the config load
     emissivity: 0.95
     distance_m: 0.5
 
-calibration_set:
-  name: default
-
 operator:
   id: abr
   display_name: A. Researcher

@@ -1,4 +1,4 @@
-"""Experiment section — operator / sample / tags / calibration / custom.
+"""Experiment section — operator / sample / tags / custom.
 
 A single auto-form over a small view-model that mirrors the
 operator-editable slice of :class:`ExperimentConfig`. The section
@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from capa.config.capa_profile import is_capa_profile
-from capa.experiment.config import CalibrationSetRef, OperatorRef, SampleInfo
+from capa.experiment.config import OperatorRef, SampleInfo
 from capa.ui.forms import build_form
 from capa.ui.tabs.setup_sections._base import SectionWidget
 
@@ -31,7 +31,7 @@ class _ExperimentMetadataView(BaseModel):
     """View model for the Experiment section's auto-form.
 
     Mirrors only the editable top-level fields the section is
-    responsible for: operator, sample, calibration_set, tags, custom.
+    responsible for: operator, sample, tags, custom.
     Everything else (hardware, method, procedure, domain_profile,
     storage, safety) lives in its own section.
     """
@@ -40,9 +40,6 @@ class _ExperimentMetadataView(BaseModel):
 
     operator: OperatorRef = Field(default_factory=lambda: OperatorRef(id=""))
     sample: SampleInfo = Field(default_factory=lambda: SampleInfo(id=""))
-    calibration_set: CalibrationSetRef = Field(
-        default_factory=lambda: CalibrationSetRef(name="default")
-    )
     tags: tuple[str, ...] = Field(
         default_factory=tuple,
         json_schema_extra={
@@ -59,14 +56,13 @@ class _ExperimentMetadataView(BaseModel):
 _OWNED_KEYS: tuple[str, ...] = (
     "operator",
     "sample",
-    "calibration_set",
     "tags",
     "custom",
 )
 
 
 class ExperimentSection(SectionWidget):
-    """Operator / sample / tags / calibration / custom editor."""
+    """Operator / sample / tags / custom editor."""
 
     editSectionRequested = Signal(str)  # noqa: N815 — Qt signal naming convention
     """Section id the operator asked to jump to (``"capa_profile"`` from

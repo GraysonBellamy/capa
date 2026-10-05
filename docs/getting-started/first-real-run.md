@@ -153,8 +153,6 @@ If you get a red ✗ instead:
 - **Wrong COM port** for the Watlow. Fix in Devices, retry.
 - **NI-DAQ chassis not powered.** Power up, retry.
 - **Camera in use by another process.** Close the other process.
-- **Calibration set references a channel that doesn't exist.** Re-pick
-  in the Channels section.
 
 The Setup tab refuses to leave the FAILED state until you edit the
 draft or retry — there's no flash-and-fade misread to worry about.

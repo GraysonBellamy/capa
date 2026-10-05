@@ -21,7 +21,7 @@ contents for the rest of the Configuration section.
 | Calibration set | TOML | `configs/calibrations/<family>/*.toml` | calibration runtime types | [Calibrations on disk](calibrations.md) |
 
 A run starts from **one** experiment file. The experiment file
-*references* a hardware profile and a calibration set, plus optionally a
+*references* a hardware profile, plus optionally a
 method and a domain profile (the CAPA-pyrolysis scientific layer or any
 future variant).
 
@@ -37,8 +37,6 @@ experiment YAML  ────────────────►  hardware T
        │                                        a device adapter family)
        │
        ├──► method TOML            (only when procedure.uses_method = True)
-       │
-       ├──► calibration_set        (by name; resolved against configs/calibrations/)
        │
        ├──► procedure.id           (procedure plugin id; production uses plugins.lock)
        │
@@ -73,9 +71,6 @@ hardware:
 ```
 
 Relative paths resolve against the experiment file's directory.
-`calibration_set.name` is a logical name. The current bundle writer records
-the chosen set's name and revision in `calibration.json`; full resolved-curve
-snapshots are planned but not wired yet.
 
 When the UI auto-loads an external method via a string ref, the
 `method_source_path` on the resulting `ExperimentConfig` records the

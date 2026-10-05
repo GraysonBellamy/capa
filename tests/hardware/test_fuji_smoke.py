@@ -32,7 +32,6 @@ from capa.channels.calibration import Identity
 from capa.channels.spec import ChannelKind, ChannelSpec, FujiChannel
 from capa.devices.fuji import FujiAdapter, discover, handshake
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -150,7 +149,6 @@ class TestRealFujiEngineRun:
                 version="0.1",
                 config={"duration_s": 5.0},
             ),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id=_operator_id()),
             sample=SampleInfo(id="HW-SMOKE-FUJI-001"),
             tags=("hardware", "fuji", "smoke"),

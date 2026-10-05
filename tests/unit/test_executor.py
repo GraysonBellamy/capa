@@ -18,7 +18,6 @@ from capa.devices.adapter import CommandResult, DeviceCommand
 from capa.devices.records import ChannelSample
 from capa.experiment.authorization import Authorization
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -97,7 +96,6 @@ def _make_ctx(
         ),
         method=None,
         procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="abr"),
         sample=SampleInfo(id="S-EX"),
     )

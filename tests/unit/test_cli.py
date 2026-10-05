@@ -16,7 +16,6 @@ from capa.storage.catalog import RunCatalog
 
 _FREE_RUN_TOML = """
 procedure = {{ id = "capa.builtin.free_run", config = {{ duration_s = {duration} }} }}
-calibration_set = {{ name = "default" }}
 operator = {{ id = "abr", display_name = "A. R." }}
 sample = {{ id = "{sample_id}" }}
 

@@ -20,7 +20,6 @@ from capa.storage.manifest import BundleManifest
 
 _EXPERIMENT_TOML = """
 procedure = { id = "capa.builtin.free_run", config = { duration_s = 0.6 } }
-calibration_set = { name = "default" }
 operator = { id = "abr", display_name = "A. Researcher" }
 sample = { id = "FUJI-SIM-1" }
 tags = ["sim", "fuji"]
