@@ -113,9 +113,8 @@ def _numeric_constraints(field: FieldInfo) -> dict[str, float]:
     return out
 
 
-# Unit-suffix → decimal-place table for float spinboxes. Order matters:
-# longer suffixes must come first so ``_mm`` doesn't lose to ``_m``.
-# Reasoning per group: a heat flux of 12.3 kW/m² doesn't need .000123; a
+# Unit-suffix → decimal-place table for float spinboxes. The longest
+# matching suffix wins, so ``_kw_m2`` beats ``_m2``. Reasoning per group: a heat flux of 12.3 kW/m² doesn't need .000123; a
 # sample mass of 1.2345 g does (sub-mg matters). When in doubt the
 # default below is 3 — fine for most operator-facing values, easy to
 # override per-field via ``Field(json_schema_extra={"capa_decimals": N})``.
@@ -204,16 +203,59 @@ _DECIMALS_BY_SUFFIX: tuple[tuple[str, int], ...] = (
 )
 
 
+_RATE_TAILS: tuple[str, ...] = (
+    "_per_minute",
+    "_per_second",
+    "_per_hour",
+    "_per_min",
+    "_per_sec",
+    "_per_s",
+)
+
+
+def _unit_suffix(field_name: str) -> tuple[str, int] | None:
+    """The unit suffix ``field_name`` ends with, and its decimal count.
+
+    ``target_heat_flux_kw_m2`` → ``("_kw_m2", 1)``. A rate tail belongs to
+    the suffix but the base unit sets the precision:
+    ``ramp_rate_c_per_min`` → ``("_c_per_min", 1)``. ``None`` when the
+    name ends in no known unit.
+    """
+    lowered = field_name.lower()
+    tail = next((t for t in _RATE_TAILS if lowered.endswith(t)), "")
+    base = lowered[: len(lowered) - len(tail)]
+    matches = [(s, d) for s, d in _DECIMALS_BY_SUFFIX if base.endswith(s)]
+    if not matches:
+        return None
+    suffix, decimals = max(matches, key=lambda match: len(match[0]))
+    return suffix + tail, decimals
+
+
+def _label_for(field_name: str, field: FieldInfo) -> str:
+    """A form row's label: ``Field(title=...)``, else the humanized name.
+
+    A field that declares its unit (``capa_unit``) gets the unit appended
+    to its label as ``[g]``, so the unit spelled into the name is dropped:
+    ``initial_mass_g`` → ``"Initial mass"``, not ``"Initial mass g"``.
+    """
+    if field.title:
+        return field.title
+    name = field_name
+    suffix = _unit_suffix(name) if _unit_from_field(field) else None
+    if suffix is not None and len(suffix[0]) < len(name):
+        name = name[: -len(suffix[0])]
+    return _humanize(name)
+
+
 def _decimals_for_field(field_name: str | None, field: FieldInfo) -> int:
     """Pick a decimal count for a ``QDoubleSpinBox``.
 
     Priority:
 
     1. Explicit ``Field(json_schema_extra={"capa_decimals": N})``.
-    2. Suffix lookup against :data:`_DECIMALS_BY_SUFFIX`. A trailing
-       ``_per_min`` / ``_per_s`` is treated as a rate and stripped before
-       the suffix match so ``ramp_rate_c_per_min`` reads as a per-minute
-       temperature rate (2 decimals on the °C side).
+    2. The name's unit suffix (:func:`_unit_suffix`), so
+       ``ramp_rate_c_per_min`` reads as a per-minute temperature rate
+       (1 decimal on the °C side).
     3. Default ``3`` — tighter than the operator-frustrating ``6`` and
        loose enough that nobody-cares fields read cleanly.
 
@@ -225,16 +267,6 @@ def _decimals_for_field(field_name: str | None, field: FieldInfo) -> int:
         override = extra.get("capa_decimals")
         if isinstance(override, int) and 0 <= override <= 12:
             return override
-    if field_name:
-        lowered = field_name.lower()
-        # Rate-per-time fields like ``ramp_rate_c_per_min`` —— strip
-        # the ``_per_<unit>`` tail before suffix matching so the base
-        # unit (``_c``) drives precision rather than ``_min``.
-        for tail in ("_per_min", "_per_minute", "_per_s", "_per_sec", "_per_second", "_per_hour"):
-            if lowered.endswith(tail):
-                lowered = lowered[: -len(tail)]
-                break
-        for suffix, decimals in _DECIMALS_BY_SUFFIX:
-            if lowered.endswith(suffix):
-                return decimals
+    if field_name and (suffix := _unit_suffix(field_name)) is not None:
+        return suffix[1]
     return 3

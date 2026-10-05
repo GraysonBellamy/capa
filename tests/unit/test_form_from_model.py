@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QLineEdit, Q
 from capa.experiment.profiles.capa_pyrolysis import CapaPyrolysisMetadata
 from capa.ui.forms import build_form
 from capa.ui.forms.widgets import CollapsibleGroup
+from capa.ui.forms.widgets._helpers import _decimals_for_field, _label_for
 
 
 class _Demo(BaseModel):
@@ -132,6 +133,31 @@ def test_required_numbers_start_unset_and_are_omitted(qtbot: Any) -> None:
     errors = form.validate()
     assert {err["loc"][0] for err in errors} == {"mass_g", "flow_sccm", "count"}
     assert {err["type"] for err in errors} == {"missing"}
+
+
+class _Units(BaseModel):
+    initial_mass_g: float = Field(json_schema_extra={"capa_unit": "g"})
+    target_heat_flux_kw_m2: float = Field(json_schema_extra={"capa_unit": "kW/m²"})
+    ramp_rate_c_per_min: float = Field(json_schema_extra={"capa_unit": "°C/min"})
+    flow_sccm: float
+    hold_s: float = Field(title="Hold time", json_schema_extra={"capa_unit": "s"})
+
+
+@pytest.mark.parametrize(
+    ("name", "label", "decimals"),
+    [
+        ("initial_mass_g", "Initial mass", 4),
+        ("target_heat_flux_kw_m2", "Target heat flux", 1),
+        ("ramp_rate_c_per_min", "Ramp rate", 1),
+        # No declared unit, so nothing else says it: the name keeps it.
+        ("flow_sccm", "Flow sccm", 2),
+        ("hold_s", "Hold time", 2),
+    ],
+)
+def test_label_drops_a_unit_the_row_shows_in_brackets(name: str, label: str, decimals: int) -> None:
+    info = _Units.model_fields[name]
+    assert _label_for(name, info) == label
+    assert _decimals_for_field(name, info) == decimals
 
 
 def test_required_number_round_trips_and_resets_to_unset(qtbot: Any) -> None:
