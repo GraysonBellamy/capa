@@ -2,7 +2,9 @@
 
 One collapsible form per device or camera whose adapter declares
 settings (:attr:`AdapterDescriptor.settings`), built from that adapter's
-settings model. Every field is optional: its **Set** box decides whether
+settings model, less the fields the device as configured can't take
+(:attr:`DeviceSettingsSpec.unused`, e.g. a gas the analyzer doesn't
+measure). Every field is optional: its **Set** box decides whether
 the experiment declares it; an unticked field is left as the device has
 it. Devices are read from the raw hardware payload, so the list keeps up
 with unsaved edits in Devices / Cameras.
@@ -54,7 +56,7 @@ class DeviceSettingsSection(SectionWidget):
         self._suppress_signals = False
         self._forms: dict[str, tuple[DeviceSettingsSpec, ModelForm]] = {}
         self._orphans: dict[str, Mapping[str, Any]] = {}
-        self._layout_key: tuple[tuple[str, str], ...] | None = None
+        self._layout_key: tuple[tuple[str, str, frozenset[str]], ...] | None = None
         self._hardware_names: frozenset[str] = frozenset()
 
         outer = QVBoxLayout(self)
@@ -124,7 +126,9 @@ class DeviceSettingsSection(SectionWidget):
         devices = _settings_devices(document.hardware_payload)
         self._hardware_names = _hardware_names(document.hardware_payload)
         orphans = {name: raw for name, raw in declared.items() if name not in devices}
-        layout_key = tuple((name, adapter) for name, (adapter, _spec) in devices.items())
+        layout_key = tuple(
+            (name, adapter, unused) for name, (adapter, _spec, unused) in devices.items()
+        )
         self._suppress_signals = True
         try:
             if layout_key != self._layout_key or set(orphans) != set(self._orphans):
@@ -152,7 +156,7 @@ class DeviceSettingsSection(SectionWidget):
 
     def _rebuild(
         self,
-        devices: Mapping[str, tuple[str, DeviceSettingsSpec]],
+        devices: Mapping[str, tuple[str, DeviceSettingsSpec, frozenset[str]]],
         declared: Mapping[str, Any],
         orphans: Mapping[str, Any],
     ) -> None:
@@ -164,19 +168,24 @@ class DeviceSettingsSection(SectionWidget):
         if not devices and not orphans:
             empty = QLabel(
                 "No device in this hardware has settings an experiment can declare "
-                "(Alicat MFCs, Sartorius balances, IR cameras and USB webcams do).",
+                "(Alicat MFCs, Sartorius balances, Fuji gas analyzers, IR cameras and "
+                "USB webcams do).",
                 self._body,
             )
             empty.setWordWrap(True)
             empty.setStyleSheet(f"color: {COLOR_IDLE.name()};")
             self._body_layout.addWidget(empty)
-        for name, (adapter_id, spec) in devices.items():
+        for name, (adapter_id, spec, unused) in devices.items():
             descriptor = get_descriptor(adapter_id)
             label = descriptor.label if descriptor is not None else adapter_id
             group = CollapsibleGroup(
                 name, subtitle=label, default_open=name in declared, parent=self._body
             )
-            form = build_form(spec.model, parent=group)
+            # A field the experiment declares stays, so saving doesn't drop
+            # it unseen; applying reports it as one the device can't take.
+            raw = declared.get(name)
+            hidden = unused - set(raw) if isinstance(raw, Mapping) else unused
+            form = build_form(spec.model, parent=group, hidden_fields=hidden)
             form.valuesChanged.connect(self._on_form_changed)
             group.add_widget(form)
             self._body_layout.addWidget(group)
@@ -286,10 +295,11 @@ def _hardware_names(hardware: Mapping[str, Any]) -> frozenset[str]:
 
 def _settings_devices(
     hardware: Mapping[str, Any],
-) -> dict[str, tuple[str, DeviceSettingsSpec]]:
-    """``{name: (adapter id, spec)}`` for every device and camera in the
-    raw hardware payload whose adapter declares settings, devices first."""
-    out: dict[str, tuple[str, DeviceSettingsSpec]] = {}
+) -> dict[str, tuple[str, DeviceSettingsSpec, frozenset[str]]]:
+    """``{name: (adapter id, spec, unused fields)}`` for every device and
+    camera in the raw hardware payload whose adapter declares settings,
+    devices first."""
+    out: dict[str, tuple[str, DeviceSettingsSpec, frozenset[str]]] = {}
     for key in ("devices", "cameras"):
         rows = hardware.get(key)
         if not isinstance(rows, Sequence) or isinstance(rows, str):
@@ -301,8 +311,16 @@ def _settings_devices(
             if not isinstance(name, str) or not name or not isinstance(adapter_id, str):
                 continue
             descriptor = get_descriptor(adapter_id)
-            if descriptor is not None and descriptor.settings is not None:
-                out[name] = (adapter_id, descriptor.settings)
+            if descriptor is None or descriptor.settings is None:
+                continue
+            spec = descriptor.settings
+            params = row.get("params")
+            unused = (
+                spec.unused(params)
+                if spec.unused is not None and isinstance(params, Mapping)
+                else frozenset()
+            )
+            out[name] = (adapter_id, spec, unused)
     return out
 
 

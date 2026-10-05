@@ -27,7 +27,6 @@ from capa.core.clock import RunClock
 from capa.devices.camera.base import CameraSpec, FrameReceipt
 from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.experiment.config import (
-    CalibrationSetRef,
     ExperimentConfig,
     HardwareProfile,
     OperatorRef,
@@ -65,7 +64,6 @@ def _config(*camera_specs: CameraSpec) -> ExperimentConfig:
         hardware=HardwareProfile(name="rig", cameras=camera_specs),
         method=None,
         procedure=ProcedureRef(id="capa.builtin.free_run", version="0.1"),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="abr"),
         sample=SampleInfo(id="S001"),
     )

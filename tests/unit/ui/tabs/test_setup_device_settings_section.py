@@ -98,6 +98,46 @@ def test_new_device_in_hardware_gets_a_form(qtbot: Any) -> None:
     assert "o2_mfc" in section._forms
 
 
+def _add_analyzer(tab: SetupTab, channel_map: dict[str, str]) -> None:
+    tab.draft.document.hardware_payload["devices"].append(
+        {
+            "name": "analyzer",
+            "adapter": "capa.devices.sim.fuji_sim",
+            "params": {"channel_map": channel_map},
+        }
+    )
+
+
+def test_an_analyzer_form_offers_only_the_gases_it_measures(qtbot: Any) -> None:
+    tab, section = _tab(qtbot)
+    _add_analyzer(tab, {"CH1": "co2", "CH2": "co", "CH3": "o2"})
+    section.refresh()
+    _spec, form = section._forms["analyzer"]
+    gases = {name.split("_", 1)[0] for name in form._fields if name.endswith("_range")}
+    assert gases == {"co2", "co", "o2"}
+    assert "output_hold" in form._fields
+
+    tab.draft.document.hardware_payload["devices"][-1]["params"]["channel_map"]["CH4"] = "ch4"
+    section.refresh()
+    _spec, form = section._forms["analyzer"]
+    assert "ch4_range" in form._fields
+
+
+def test_a_declared_setting_for_a_gas_the_analyzer_lacks_is_kept(qtbot: Any) -> None:
+    tab, section = _tab(qtbot)
+    _add_analyzer(tab, {"CH1": "co2", "CH2": "co", "CH3": "o2"})
+    tab.draft.document.experiment_payload["device_settings"]["analyzer"] = {
+        "ch4_response_time_s": 10
+    }
+    section.refresh()
+    _spec, form = section._forms["analyzer"]
+    assert "ch4_response_time_s" in form._fields
+    assert "ch4_range" not in form._fields
+    assert section.payload()["device_settings"]["analyzer"] == {  # type: ignore[index]
+        "ch4_response_time_s": 10
+    }
+
+
 def test_problem_navigates_to_the_section(qtbot: Any) -> None:
     tab, _ = _tab(qtbot)
     tab._on_problem_activated(

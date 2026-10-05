@@ -4,7 +4,7 @@ description: capa channel-calibration TOML format — CalibrationSet curves, lin
 
 # Calibration sets
 
-**Audience:** calibration authors writing `configs/calibrations/*.toml` files; operators applying a set in the Setup tab; analysts parsing `calibration.json` out of a bundle.
+**Audience:** calibration authors writing `configs/calibrations/*.toml` files; operators applying a set in the Setup tab; analysts reading channel curves out of a bundle.
 **Scope:** the on-disk TOML format of a `CalibrationSet`, every supported transform kind, the `UncertaintySpec` discipline, and the diff workflow used to apply a set to a draft.
 
 This page covers **channel-level calibration** — the transform that turns a raw adapter sample into an engineering-unit channel sample. The orthogonal heat-flux *tune* artifact (which records a heater-setpoint↔delivered-flux mapping) is documented under [Tune artifacts](tune-artifacts.md). See [Calibration overview](overview.md) for why they are separate.
@@ -15,14 +15,13 @@ This page covers **channel-level calibration** — the transform that turns a ra
 
 ```
 configs/calibrations/
-    sim_default.toml                  ← a CalibrationSet (this page)
-    thermocouples_2026Q2.toml         ← another CalibrationSet
+    thermocouples_2026Q2.toml         ← a CalibrationSet (this page)
     flux/
         capa_flux_2026-05-24.toml     ← a HeatFluxTuneArtifact (different subsystem)
         latest.toml
 ```
 
-One TOML file per set. Filenames are free-form; the `name` inside the file is what gets recorded into the bundle. Conventional naming: `<channel-group>_<period>.toml` (e.g. `thermocouples_2026Q2.toml`) or `<rig>_<purpose>.toml` (e.g. `sim_default.toml`).
+One TOML file per set. Filenames are free-form; the `name` inside the file identifies the set. Conventional naming: `<channel-group>_<period>.toml` (e.g. `thermocouples_2026Q2.toml`).
 
 ---
 
@@ -59,8 +58,8 @@ notes = "two-point at ice and 250 °C oil bath"
 
 | Field | Notes |
 |---|---|
-| `name` | The set's identifier. Recorded into `calibration.json` so the bundle can name which set it captured. |
-| `revision` | Free-form revision string. Bump when curves change so a later analyst can trace which revision a bundle used. |
+| `name` | The set's identifier. |
+| `revision` | Free-form revision string. Bump when curves change. |
 | `[curves.<channel-name>]` | One table per channel. The key is the channel name as it appears in the hardware profile. |
 
 Every curve table carries:
@@ -204,7 +203,7 @@ Reference to an installed callable. A custom calibration must name an entry poin
 | `parameters` | Serialized parameters passed to the callable. Scalars only (`float`, `int`, `str`, `bool`). |
 | `test_vectors` | `(raw, expected_value)` pairs. The callable must reproduce these at calibration-load time — used as a self-test. |
 
-`evaluate()` raises if called without the plugin runtime resolved — `CustomCallable` validates its *schema* in isolation, but actually computing values requires the procedure plugin runtime. Today that callable metadata stays in the source calibration TOML and any resolved config snapshot that carries it; it is not yet copied into `calibration.json`.
+`evaluate()` raises if called without the plugin runtime resolved — `CustomCallable` validates its *schema* in isolation, but actually computing values requires the procedure plugin runtime. The callable metadata travels with the channel's curve, so the bundle's `config.toml` records it.
 
 This is **the only calibration variant gated by the plugins lockfile.** Built-in variants (`identity`, `linear_two_point`, etc.) don't need lockfile admission because their algebra is part of capa itself.
 
@@ -264,24 +263,14 @@ The whole block is optional. Hand-typed calibrations skip it entirely. The point
 
 ---
 
-## How an experiment references a set
+## How a set reaches a run
 
-In the experiment YAML:
-
-```yaml
-experiment:
-  calibration_set: configs/calibrations/thermocouples_2026Q2.toml
-```
-
-At run-arm:
-
-1. The file is loaded via [`load_calibration_set`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/config/calibration_set_io.py).
-2. Each `[curves.<name>]` entry is applied to the channel of that name in the active hardware profile, *overwriting* whatever curve the channel originally declared.
-3. The current bundle writer records the selected set's `name` and
-   `revision` in `calibration.json`. Full merged-curve snapshots are planned,
-   but are not wired into the storage path yet.
-
-Step 2 is destructive at apply time but **non-destructive on disk** — the hardware TOML stays as written; the calibration set's curves win at runtime only. This means the same hardware profile can be used with different calibration sets without editing the hardware file.
+An experiment doesn't reference a calibration set. Each channel carries its
+own curve in the hardware profile (`[channels.calibration]`), and that is the
+curve the run uses. A set moves curves onto channels in bulk: the Setup tab's
+Calibration section applies a set to the draft's channels (below), and exports
+the draft's current curves as a new set. Once applied and saved, the curves
+are part of the hardware TOML.
 
 ---
 
@@ -305,24 +294,11 @@ The dialog renders all five classes so the operator sees the **full picture**, n
 
 ## In the bundle
 
-At run-seal time the current bundle writer stores a reference snapshot in
-`calibration.json`:
-
-```json
-{
-  "name": "thermocouples_2026Q2",
-  "revision": "3"
-}
-```
-
-It does not yet serialize per-channel curves, `uncertainty`, or
-`fit_metadata` into the bundle. That full `CalibrationSet` payload is the
-planned shape once the calibration runtime is wired into storage.
-
-The reference lives in `calibration.json`, not in `manifest.json`. Two bundles
-with the same `(name, revision)` are claiming to have used identical curves;
-bumping the `revision` field when you edit a set is the discipline that makes
-that claim trustworthy.
+The bundle's `config.toml` holds the frozen hardware profile, so it records
+every channel's curve as the run used it — `kind`, parameters, `uncertainty`
+and `fit_metadata` — under `hardware.channels[*].calibration`. Which set the
+curves came from is not recorded; give a curve `fit_metadata` when its origin
+matters.
 
 ---
 

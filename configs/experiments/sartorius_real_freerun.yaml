@@ -19,9 +19,6 @@ procedure:
   config:
     duration_s: 30.0
 
-calibration_set:
-  name: default
-
 operator:
   id: abr
   display_name: A. Researcher

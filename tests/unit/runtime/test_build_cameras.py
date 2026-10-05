@@ -30,7 +30,6 @@ from capa.devices.materialize import (
     materialize_adapters,
 )
 from capa.experiment.config import (
-    CalibrationSetRef,
     ExperimentConfig,
     HardwareProfile,
     OperatorRef,
@@ -61,7 +60,6 @@ def _config_with_cameras(camera_blocks: list[dict[str, object]]) -> ExperimentCo
             cameras=camera_blocks,
         ),
         procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="op_test"),
         sample=SampleInfo(id="sample_test"),
     )
@@ -215,7 +213,6 @@ class TestBuildWorkersWithCameras:
                 ],
             ),
             procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id="op_test"),
             sample=SampleInfo(id="sample_test"),
         )

@@ -20,9 +20,6 @@ procedure:
   config:
     duration_s: 30.0   # short demo run; remove to make it interruptable-only
 
-calibration_set:
-  name: default
-
 operator:
   id: abr
   display_name: A. Researcher

@@ -28,7 +28,7 @@ domain_profile:
       purge:
         species: N2
         purity: "UHP 5.0"
-        target_flow_sccm: 100.0
+        target_flow_slpm: 100.0
 
 device_settings:                   # applied to the devices when the config loads
   purge_mfc:
@@ -40,9 +40,6 @@ device_settings:                   # applied to the devices when the config load
     temperature_range: {min_c: 0.0, max_c: 650.0}
     emissivity: 0.95
     distance_m: 0.5
-
-calibration_set:
-  name: default
 
 operator:
   id: abr

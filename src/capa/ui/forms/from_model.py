@@ -57,7 +57,7 @@ from PySide6.QtWidgets import (
 
 from capa.ui.forms.widgets import CollapsibleGroup, FieldWidget, build_field_widget
 from capa.ui.forms.widgets._channels import ChannelOption
-from capa.ui.forms.widgets._helpers import _help_from_field, _unit_from_field
+from capa.ui.forms.widgets._helpers import _help_from_field, _label_for, _unit_from_field
 
 # Discriminator-style fields that the form should never render — the
 # enclosing tagged union picks the model class, not the user.
@@ -68,14 +68,6 @@ _HIDDEN_FIELD_NAMES: frozenset[str] = frozenset({"kind"})
 # because the resolution path checks for the json_schema_extra key, not
 # the value's collision with this sentinel.
 _PRIMARY_GROUP: str = "__primary__"
-
-
-def _humanize(name: str) -> str:
-    return name.replace("_", " ").strip().capitalize()
-
-
-def _label_for(field_name: str, field: FieldInfo) -> str:
-    return field.title or _humanize(field_name)
 
 
 class _HelpButton(QLabel):

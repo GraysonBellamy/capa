@@ -34,7 +34,6 @@ from capa.channels.calibration import Identity
 from capa.channels.spec import ChannelSpec, WatlowParameter
 from capa.devices.sim._signals import Sine
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -85,7 +84,6 @@ def _make_config(
             channels=tuple(chans),
         ),
         procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": duration_s}),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="abr", display_name="A. Researcher"),
         sample=SampleInfo(id=sample_id),
     )

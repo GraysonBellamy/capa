@@ -8,9 +8,8 @@ variant carries an :class:`UncertaintySpec` (or an explicit ``None`` declaring
 transform plus, when meaningful, an analytical or Monte-Carlo uncertainty
 propagation.
 
-The current bundle writer records the active calibration-set reference
-(name + revision) in ``calibration.json``. Full resolved-curve snapshots are
-planned, but are not wired into the storage path yet.
+Each channel's calibration lives on its binding in the hardware profile, so
+a bundle's ``config.toml`` records every curve a run used.
 """
 
 from __future__ import annotations
@@ -361,9 +360,9 @@ the ``kind`` discriminator at deserialization time.
 class CalibrationSet(BaseModel):
     """Collection of calibration curves keyed by channel name.
 
-    The set is validated and applied in memory. The current bundle writer
-    records the set reference in ``calibration.json``; a full resolved-curve
-    snapshot is planned but not wired yet.
+    A file the Setup tab's Calibration section copies onto channels, or
+    exports their curves to. An experiment doesn't reference a set: each
+    channel carries its own curve.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

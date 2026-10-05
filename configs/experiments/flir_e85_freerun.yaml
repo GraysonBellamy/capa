@@ -20,9 +20,6 @@ procedure:
   config:
     duration_s: 60.0   # 60-s gate, ~1800 frames at 30 Hz
 
-calibration_set:
-  name: default
-
 operator:
   id: abr
   display_name: A. Researcher

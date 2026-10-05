@@ -159,14 +159,14 @@ def test_capa_profile_unset_required_number_is_omitted(qtbot: Any) -> None:
     validation reports it missing instead of accepting a placeholder."""
     section, draft = _make_section(qtbot)
     del draft.document.experiment_payload["domain_profile"]["metadata"]["atmosphere"]["purge"][
-        "target_flow_sccm"
+        "target_flow_slpm"
     ]
     section.refresh()
 
     payload = section.payload()
     assert payload is not None
     purge = _metadata(payload)["atmosphere"]["purge"]
-    assert "target_flow_sccm" not in purge
+    assert "target_flow_slpm" not in purge
 
 
 def test_capa_profile_refresh_replaces_previous_draft_values(qtbot: Any) -> None:
@@ -276,6 +276,30 @@ def test_capa_profile_specimen_pane_round_trips(qtbot: Any) -> None:
     assert specimen["material"] == "PMMA"
     assert specimen["initial_mass_g"] == 25.0
     assert specimen["thickness_mm"] == 10.0
+
+
+def test_capa_profile_gas_sampling_round_trips(qtbot: Any) -> None:
+    """A declared gas-sampling block loads into the form and comes back out
+    unchanged; without one, the payload leaves the key out."""
+    section, draft = _make_section(qtbot)
+    assert "gas_sampling" not in _metadata(section.payload())
+
+    gas_sampling = {
+        "probe_location": "exhaust duct, centerline",
+        "probe_height_mm": 450.0,
+        "sample_flow_slpm": 1.0,
+        "line_length_m": 3.0,
+        "conditioning": "particulate filter, chiller",
+        "transport_delay_s": 12.5,
+    }
+    draft.document.experiment_payload["domain_profile"]["metadata"]["gas_sampling"] = dict(
+        gas_sampling
+    )
+    section.refresh()
+
+    metadata = _metadata(section.payload())
+    assert metadata["gas_sampling"] == gas_sampling
+    CapaPyrolysisMetadata.model_validate(metadata)
 
 
 def test_capa_profile_compose_preserves_unmanaged_capa_group(qtbot: Any) -> None:

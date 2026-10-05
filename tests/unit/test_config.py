@@ -15,7 +15,6 @@ from capa.channels.spec import (
 )
 from capa.core.errors import ConfigError
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     FailurePolicy,
@@ -113,7 +112,6 @@ class TestExperimentConfig:
             hardware=_hp_min(),
             method=method,
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id="abr"),
             sample=SampleInfo(id="S001"),
         )
@@ -225,7 +223,6 @@ class TestRuntimeConfig:
         ec = ExperimentConfig(
             hardware=_hp_min(),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id="abr"),
             sample=SampleInfo(id="S001"),
         )
@@ -235,7 +232,6 @@ class TestRuntimeConfig:
         ec = ExperimentConfig(
             hardware=_hp_min(),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id="abr"),
             sample=SampleInfo(id="S001"),
             runtime=RuntimeConfig(shutdown_grace_s=8.0, ui_bridge_capacity=512),

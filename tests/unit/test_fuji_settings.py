@@ -89,6 +89,32 @@ def test_what_the_model_refuses(entry: dict[str, Any]) -> None:
         FujiSettings.model_validate(entry)
 
 
+def test_a_gas_the_channel_map_does_not_measure_is_unused() -> None:
+    unused = FUJI_SETTINGS.unused
+    assert unused is not None
+    names = unused({"channel_map": {"CH1": "co2", "CH2": "co", "CH3": "o2"}})
+    assert set(FujiSettings.model_fields) - names == {
+        "output_hold",
+        "hold_mode",
+        *(
+            f"{gas}_{suffix}"
+            for gas in ("co2", "co", "o2")
+            for suffix in ("response_time_s", "range_method", "range")
+        ),
+    }
+    # An O2-corrected channel has no range or response time of its own.
+    assert "co_range" in unused({"channel_map": {"CH1": "o2", "CH6": "co"}})
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{}, {"channel_map": {"CH1": "xx"}}, {"channel_map": {"CH1": None}}, {"channel_map": "co2"}],
+)
+def test_a_channel_map_that_does_not_parse_leaves_every_gas(params: dict[str, Any]) -> None:
+    assert FUJI_SETTINGS.unused is not None
+    assert FUJI_SETTINGS.unused(params) == frozenset()
+
+
 async def test_capture_names_everything_by_gas_and_span() -> None:
     sim = await _opened()
     captured = capture_settings(FUJI_SETTINGS, await _snapshot(sim))

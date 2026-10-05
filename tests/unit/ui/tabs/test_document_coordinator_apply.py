@@ -101,7 +101,6 @@ def test_method_tab_empty_with_method_mode_none_omits_method(qtbot: Any, tmp_pat
     yaml_path.write_text(
         f"hardware: {hw_path.name}\n"
         "procedure:\n  id: capa.builtin.recipe_runner\n  config: {}\n"
-        "calibration_set:\n  name: default\n"
         "operator:\n  id: tester\n"
         "sample:\n  id: ZZ-1\n",
         encoding="utf-8",

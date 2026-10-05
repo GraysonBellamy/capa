@@ -32,7 +32,6 @@ from capa.core.clock import RunClock
 from capa.devices.nidaq import NIDAQAdapter
 from capa.devices.records import ChannelSample, SourceRecord
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -199,7 +198,6 @@ class TestRealNIDAQEngineRun:
                 version="0.1",
                 config={"duration_s": 5.0},
             ),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id=_operator_id()),
             sample=SampleInfo(id="HW-SMOKE-NIDAQ-001"),
             tags=("hardware", "nidaq", "smoke"),

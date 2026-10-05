@@ -268,8 +268,8 @@ once the executor loads the plugin.
 kind = "custom"
 handler_id = "my_lab.purge_check"
 [steps.params]
-target_flow_sccm = 100.0
-tolerance_sccm = 5.0
+target_flow_slpm = 100.0
+tolerance_slpm = 5.0
 window_s = 10.0
 ```
 

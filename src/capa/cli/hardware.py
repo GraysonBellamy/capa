@@ -28,7 +28,6 @@ _HARDWARE_VALIDATE_STUB_EXPERIMENT: dict[str, Any] = {
     "operator": {"id": "_hardware_validate_stub"},
     "sample": {"id": "_hardware_validate_stub"},
     "procedure": {"id": "capa.builtin.recipe_runner", "version": "0.1"},
-    "calibration_set": {"name": "default"},
 }
 """Placeholder experiment-side fields injected by ``capa hardware
 validate`` so the layered pipeline can run against a hardware-only

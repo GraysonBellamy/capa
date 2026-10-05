@@ -29,7 +29,7 @@ domain_profile:
       purge:
         species: N2
         purity: "UHP 5.0"
-        target_flow_sccm: 100.0
+        target_flow_slpm: 100.0
     # The capa.heater_pv_in_safe_range gate defaults to a 1000 °C
     # rig-survival ceiling, so the sim's 600 °C ramp passes without
     # an explicit override. Add ``_safe_arm.max_heater_pv_c`` here if
@@ -48,9 +48,6 @@ device_settings:
     temperature_range: {min_c: 0.0, max_c: 650.0}
     emissivity: 0.95
     distance_m: 0.5
-
-calibration_set:
-  name: default
 
 operator:
   id: abr

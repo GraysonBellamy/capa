@@ -30,7 +30,6 @@ from capa.core.clock import RunClock
 from capa.devices.camera.base import CameraSpec
 from capa.devices.camera.webcam import WebcamAdapter
 from capa.experiment.config import (
-    CalibrationSetRef,
     ExperimentConfig,
     HardwareProfile,
     OperatorRef,
@@ -147,7 +146,6 @@ class TestRealWebcamEngineRun:
                 version="0.1",
                 config={"duration_s": 5.0},
             ),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id=_operator_id()),
             sample=SampleInfo(id="HW-SMOKE-WEBCAM-001"),
             tags=("hardware", "webcam", "smoke"),

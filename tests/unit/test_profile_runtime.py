@@ -123,7 +123,7 @@ async def test_purge_silent_warns_before_adapters_started() -> None:
     from capa.experiment.profiles.runtime import _purge_flow_established
 
     ctx = _ctx(adapters_started=False)
-    ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_sccm": 100.0}}}
+    ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_slpm": 100.0}}}
 
     problem = await _purge_flow_established(ctx)
     assert problem is not None
@@ -134,12 +134,12 @@ async def test_purge_silent_warns_before_adapters_started() -> None:
 
 @pytest.mark.anyio
 async def test_purge_zero_target_is_explicit_optout() -> None:
-    """target_flow_sccm == 0 declares a no-flow run; the check should
+    """target_flow_slpm == 0 declares a no-flow run; the check should
     no-op even when adapters are started and no samples arrive."""
     from capa.experiment.profiles.runtime import _purge_flow_established
 
     ctx = _ctx(adapters_started=True)
-    ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_sccm": 0.0}}}
+    ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_slpm": 0.0}}}
 
     problem = await _purge_flow_established(ctx)
     assert problem is None
@@ -152,7 +152,7 @@ async def test_purge_silent_blocks_after_adapters_started() -> None:
     from capa.experiment.profiles.runtime import _purge_flow_established
 
     ctx = _ctx(adapters_started=True)
-    ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_sccm": 100.0}}}
+    ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_slpm": 100.0}}}
 
     problem = await _purge_flow_established(ctx)
     assert problem is not None

@@ -24,9 +24,7 @@ domain_profile:
       purge:
         species: Air
         purity: UHP 5.0
-        target_flow_sccm: 0.0
-calibration_set:
-  name: default
+        target_flow_slpm: 0.0
 operator:
   id: abr
   display_name: A. Researcher

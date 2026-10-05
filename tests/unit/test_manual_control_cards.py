@@ -26,7 +26,6 @@ from capa.channels.calibration import Identity
 from capa.channels.spec import ChannelSpec, WatlowParameter
 from capa.devices.sim._signals import Sine
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -68,7 +67,6 @@ def _make_config(devices: tuple[DeviceConfig, ...]) -> ExperimentConfig:
             channels=(),
         ),
         procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="opA", display_name="Op A"),
         sample=SampleInfo(id="S"),
     )
@@ -866,7 +864,6 @@ def _heater_cfg(*, procedure: ProcedureRef | None = None) -> ExperimentConfig:
             ),
         ),
         procedure=procedure,
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="opA", display_name="Op A"),
         sample=SampleInfo(id="S"),
     )
@@ -1091,7 +1088,6 @@ class TestManualControlDock:
                 ),
             ),
             procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id="op", display_name="Op"),
             sample=SampleInfo(id="S"),
         )
@@ -1272,7 +1268,6 @@ class TestWebcamCard:
                 cameras=(cam,),
             ),
             procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id="opA", display_name="Op A"),
             sample=SampleInfo(id="S"),
         )

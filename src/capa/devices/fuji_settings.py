@@ -20,8 +20,11 @@ Shared by :class:`~capa.devices.fuji.FujiAdapter` and the simulator.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Any, Final, Literal, Self, get_args
 
+from fujilib import FujiValidationError
+from fujilib.registry.channels import MEASURED_CHANNELS, coerce_channel_map
 from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 from capa.devices.fuji import FujiChannelSettings, FujiRange, FujiStateSnapshot
@@ -235,6 +238,25 @@ def _gas_setting_fields(gas: str) -> tuple[SettingField, ...]:
     )
 
 
+def _unmapped_gas_fields(params: Mapping[str, Any]) -> frozenset[str]:
+    """The settings of every gas no measured channel of the analyzer's
+    ``channel_map`` asserts. Nothing while the map doesn't parse: the
+    form can't tell which gases the analyzer has."""
+    raw = params.get("channel_map")
+    if not isinstance(raw, Mapping) or not all(
+        isinstance(channel, str) and isinstance(gas, str) for channel, gas in raw.items()
+    ):
+        return frozenset()
+    try:
+        resolved = coerce_channel_map(dict(raw))
+    except FujiValidationError:
+        return frozenset()
+    measured = {gas.value for channel, gas in resolved.items() if channel in MEASURED_CHANNELS}
+    return frozenset(
+        name for gas, group in GASES if gas not in measured for name in _gas_fields(gas, group)
+    )
+
+
 def _set_output_hold(enabled: bool, _snapshot: FujiStateSnapshot) -> tuple[str, dict[str, Any]]:
     return "set_output_hold", {"enabled": enabled}
 
@@ -268,6 +290,7 @@ FUJI_SETTINGS: Final = DeviceSettingsSpec(
         *(field for gas, _group in GASES for field in _gas_setting_fields(gas)),
     ),
     snapshot_type=FujiStateSnapshot,
+    unused=_unmapped_gas_fields,
 )
 """Shared by :class:`~capa.devices.fuji.FujiAdapter` and the simulator."""
 

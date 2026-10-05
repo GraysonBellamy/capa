@@ -1,5 +1,5 @@
 ---
-description: Field reference for `capa.profiles.capa_pyrolysis` domain profile — specimen, HeaterProgram, Atmosphere, DownstreamAnalyzer, preflight checks for pyrolysis.
+description: Field reference for `capa.profiles.capa_pyrolysis` domain profile — specimen, HeaterProgram, Atmosphere, GasSampling, SOP revision, preflight checks for pyrolysis.
 ---
 
 # CAPA profile fields
@@ -11,6 +11,7 @@ A *domain profile* layers scientific metadata + preflight checks on top of the g
 
 - **specimen fields** — id, material, mass, form, holder geometry
 - **method fields** — heater program (target heat flux + heater setpoint), atmosphere composition, optional secondary gas
+- **gas-sampling fields** — optional, for a rig with a gas analyzer: probe position, sample flow, sample line, transport delay
 - **required channel groups** — heater pair, mass, purge MFC
 - **preflight checks** — heater PV safe range, purge flow established, balance stability
 
@@ -33,7 +34,7 @@ domain_profile:
     specimen: { ... }      # CapaSpecimen
     program: { ... }       # HeaterProgram
     atmosphere: { ... }    # Atmosphere (purge + optional reactive)
-    analyzer: { ... }      # DownstreamAnalyzer (optional)
+    gas_sampling: { ... }  # GasSampling (optional)
     sop_revision: "..."    # optional
 ```
 
@@ -124,7 +125,7 @@ Controls the gas atmosphere the specimen sees during the run.
 | `purity` | Grade / purity: `"UHP 5.0"`, `"99.999%"`, `"zero-grade air"`. |
 | `supplier` | Optional. |
 | `cylinder_lot` | Optional. |
-| `target_flow_sccm` | Operator's intended setpoint. **The MFC channel is the actual source of truth.** Setting this to 0 opts out of the `capa.purge_flow_established` preflight. |
+| `target_flow_slpm` | Operator's intended setpoint. **The MFC channel is the actual source of truth.** Setting this to 0 opts out of the `capa.purge_flow_established` preflight. |
 
 ### `ReactiveGas`
 
@@ -132,19 +133,29 @@ Same shape as `PurgeGas` plus an optional `target_mole_fraction` (0–1) recordi
 
 ---
 
-## Downstream analyzer (`DownstreamAnalyzer`, optional)
+## Gas sampling (`GasSampling`, optional) { #gassampling }
 
-CAPA pyrolysis is often paired with FTIR / GC / MS / NDIR for qualitative product identification. The analyzer is **not** a capa-controlled device — its data lives outside the bundle — but the pedigree fields are captured here so the run record cross-references the right external file.
+How the gas analyzer's sample is drawn from the exhaust and carried to it. Set it when the rig has a gas analyzer (the Fuji); leave it out otherwise.
 
-| Field | Notes |
-|---|---|
-| `kind` | `ftir` \| `gc` \| `ms` \| `gc_ms` \| `ndir` \| `other` |
-| `serial` | Optional analyzer serial. |
-| `sampling_line_delay_s` | Transport delay from sample point to analyzer detector. Used to time-align analyzer output with capa channels. |
-| `response_time_s` | Analyzer's 90% step response time — the instrument's measurement time constant, distinct from the sampling-line delay. |
-| `external_file_ref` | Pointer to the analyzer's data file/dataset. Free-form path or URI; captured into the bundle so a later analyst can re-locate the correlated data. |
+| Field | Unit | Required | Notes |
+|---|---|---|---|
+| `probe_location` | — | yes | Where the probe inlet sits, e.g. `"exhaust duct, 300 mm above the hood, centerline"`. |
+| `probe_height_mm` | mm | no | Height of the probe inlet above the specimen surface. |
+| `probe_radial_offset_mm` | mm | no | Distance of the probe inlet from the duct centerline; 0 on it. |
+| `sample_flow_slpm` | slpm | yes | Sample flow drawn through the analyzer, as set on the sample-line flowmeter. Must be > 0. |
+| `line_length_m` | m | no | Sample-line length from the probe to the analyzer inlet. |
+| `line_inner_diameter_mm` | mm | no | Sample-line inner diameter. |
+| `line_material` | — | no | e.g. `"PTFE"`, `"stainless steel"`. |
+| `line_temperature_c` | °C | no | Heated-line temperature. Leave unset for an unheated line. |
+| `conditioning` | — | no | What the sample passes through between the probe and the analyzer, in flow order: filters, chiller or dryer, dilution. |
+| `transport_delay_s` | s | no | Time for gas to travel from the probe inlet to the analyzer, e.g. from a step test. |
+| `notes` | — | no | Free text. |
 
-CAPA does **not** do oxygen-depletion calorimetry by default — the analyzer block is shaped for "qualitative product analysis," not "quantitative HRR." Use the `cone_calorimeter` profile for the HRR / O₂-depletion workflow.
+### Why these are captured
+
+The analyzer reads the gas at the end of the sample line, not at the specimen. To line gas readings up with mass loss, an analyst shifts them back by the transport delay. Sample flow, line length and line diameter let them check or estimate that delay when no step test was run. Probe position and conditioning explain why the measured concentrations differ from the gas at the specimen: dilution in the duct, water removed by the chiller.
+
+The analyzer's own settings (ranges, response-time filters, calibration gases) are not repeated here. capa reads them from the analyzer and records them in the bundle's `status.sqlite` with its periodic snapshots.
 
 ---
 
@@ -184,7 +195,7 @@ The profile contributes the following preflight checks, evaluated when the run i
 | `capa.required_channel_mappings` | yes | Every required channel group has at least `min_count` members. |
 | `capa.atmosphere_consistency` | yes | Declared atmosphere mode is consistent with declared channels: `oxidative` / `reactive_blend` modes must declare a `reactive_gas_flow`. |
 | `capa.heater_pv_in_safe_range` | yes | Heater PV reading is within the rig-survival ceiling (< 1000 °C by default). Catches sensor runaway / miswired channel; **not** a cold-start gate. |
-| `capa.purge_flow_established` | yes | Purge gas flow has been seen ≥ `target × 0.5` for ≥ 3 s. Skip by setting `purge.target_flow_sccm = 0`. |
+| `capa.purge_flow_established` | yes | Purge gas flow has been seen ≥ `target × 0.5` for ≥ 3 s. Skip by setting `purge.target_flow_slpm = 0`. |
 | `capa.flux_calibration_freshness` | no | When `target_heat_flux_kw_m2` is declared, `flux_calibration_ref` is set, and the on-disk tune artifact it points to is within the recency window (default 7 days). |
 | `capa.balance_stability` | no | When a mass channel is declared, it reports stable for ≥ 5 s prior to arming. |
 | `capa.disk_projection` | yes | Projected bundle size leaves ≥ 1.5× margin on the bundle volume. |
@@ -205,7 +216,6 @@ The high-level differences:
 | Required atmosphere channels | Purge MFC (inert) | Exhaust flow + O₂ analyzer |
 | Specimen geometry fields | Disk-shaped, holder cup geometry | Thickness + exposed area + orientation |
 | Standard reference | Lab SOPs (free-form) | ASTM E1354 / ISO 5660 (built-in standard refs) |
-| Analyzer block | Optional FTIR / GC / MS (qualitative) | Required O₂ + CO + CO₂ analyzers (quantitative) |
 
 A run can declare either profile against the same procedure (most often [Recipe runner](../procedures/builtin-recipe-runner.md)); the procedure does not change based on which profile is attached. The profile only changes *what metadata is required* and *what preflight checks run*.
 

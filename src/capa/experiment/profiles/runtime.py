@@ -360,11 +360,11 @@ def _method_heater_setpoint_c(profile_metadata: dict[str, Any]) -> float | None:
 @register("capa.purge_flow_established", category="dynamic")
 async def _purge_flow_established(ctx: ProfilePreflightContext) -> Problem | None:
     """Purge flow has been seen at >= target * 0.5 for >=3 s."""
-    target = ctx.profile_metadata.get("atmosphere", {}).get("purge", {}).get("target_flow_sccm")
+    target = ctx.profile_metadata.get("atmosphere", {}).get("purge", {}).get("target_flow_slpm")
     if target is None:
         return Problem(
             code="capa.purge_target_missing",
-            message="atmosphere.purge.target_flow_sccm not declared",
+            message="atmosphere.purge.target_flow_slpm not declared",
             severity="warning",
             blocking=False,
         )
@@ -393,12 +393,12 @@ async def _purge_flow_established(ctx: ProfilePreflightContext) -> Problem | Non
         return Problem(
             code="capa.purge_below_target",
             message=(
-                f"purge flow held below {threshold:.2f} sccm for "
+                f"purge flow held below {threshold:.2f} slpm for "
                 f"{len(last_below)}/{len(samples)} samples in last 3 s"
             ),
             severity="error",
             blocking=True,
-            metadata={"threshold_sccm": threshold},
+            metadata={"threshold_slpm": threshold},
         )
     return None
 

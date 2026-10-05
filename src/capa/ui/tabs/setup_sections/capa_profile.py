@@ -1,8 +1,8 @@
 """CAPA Profile section — the profile metadata editor.
 
-Four metadata panes (Specimen / Heater program / Atmosphere / Analyzer
-& SOP) sit above the required-mapping panel that ties each CAPA group
-to a hardware channel. Every pane is built from the profile's own
+Four metadata panes (Specimen / Heater program / Atmosphere / Gas
+sampling & SOP) sit above the required-mapping panel that ties each
+CAPA group to a hardware channel. Every pane is built from the profile's own
 models (:class:`CapaSpecimen`, :class:`HeaterProgram`,
 :class:`Atmosphere`, and the remaining top-level fields of
 :class:`CapaPyrolysisMetadata`), so what the form writes is exactly
@@ -102,9 +102,9 @@ _RecordView: type[BaseModel] = create_model(
         if name not in {key for key, _title, _model in _PANES}
     },  # type: ignore[call-overload]
 )
-"""The top-level metadata fields without a dedicated pane (the
-downstream analyzer and SOP revision). Derived from the model so a new
-top-level field gets an editor without touching this module."""
+"""The top-level metadata fields without a dedicated pane (gas sampling
+and the SOP revision). Derived from the model so a new top-level field
+gets an editor without touching this module."""
 
 
 _DEFAULT_FLUX_DIR = "configs/calibrations/flux"
@@ -248,7 +248,7 @@ class CapaProfileSection(SectionWidget):
                 box.addLayout(self._build_tune_row(frame))
             editor_box.addWidget(frame)
 
-        record_frame, record_box = _bordered("Analyzer & SOP")
+        record_frame, record_box = _bordered("Gas sampling & SOP")
         self._record_form = build_form(_RecordView, parent=record_frame)
         self._record_form.valuesChanged.connect(self._on_metadata_changed)
         record_box.addWidget(self._record_form)

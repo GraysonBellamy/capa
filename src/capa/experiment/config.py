@@ -154,20 +154,6 @@ class DomainProfileRef(BaseModel):
     """Profile-specific metadata (cone-profile specimen fields go here)."""
 
 
-class CalibrationSetRef(BaseModel):
-    """Pointer to a CalibrationSet on disk.
-
-    The current bundle writer records this reference (name + revision) in
-    ``calibration.json``. Full resolved-curve snapshots are a planned
-    extension of the calibration runtime.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    name: str
-    revision: str | None = None
-
-
 # ---------------------------------------------------------------------------
 # Storage / safety / sample / operator.
 # ---------------------------------------------------------------------------
@@ -413,7 +399,6 @@ class ExperimentConfig(BaseModel):
     Mirrors :attr:`method_source_path`. Excluded from serialisation."""
     procedure: ProcedureRef
     domain_profile: DomainProfileRef | None = None
-    calibration_set: CalibrationSetRef
     storage: StoragePolicy = Field(default_factory=StoragePolicy)
     safety: SafetyPolicy = Field(default_factory=SafetyPolicy)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
@@ -489,7 +474,6 @@ class ExperimentConfig(BaseModel):
 
 
 __all__ = [
-    "CalibrationSetRef",
     "DeviceConfig",
     "DomainProfileRef",
     "ExperimentConfig",

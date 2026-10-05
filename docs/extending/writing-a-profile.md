@@ -70,7 +70,7 @@ class CapaPyrolysisMetadata(BaseModel):
     specimen: CapaSpecimen
     program: HeaterProgram
     atmosphere: Atmosphere
-    analyzer: DownstreamAnalyzer | None = None
+    gas_sampling: GasSampling | None = None
     sop_revision: str | None = None
 ```
 

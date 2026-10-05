@@ -14,7 +14,6 @@ from capa.core.clock import RunClock
 from capa.core.databus import DataBus
 from capa.experiment.authorization import Authorization
 from capa.experiment.config import (
-    CalibrationSetRef,
     ExperimentConfig,
     HardwareProfile,
     OperatorRef,
@@ -47,7 +46,6 @@ def _ctx(stop: anyio.Event, *, with_method: bool = False) -> ProcedureContext:
         hardware=HardwareProfile(name="empty", devices=(), channels=()),
         method=method,
         procedure=ProcedureRef(id="capa.builtin.free_run"),
-        calibration_set=CalibrationSetRef(name="default"),
         operator=OperatorRef(id="abr"),
         sample=SampleInfo(id="S-1"),
     )

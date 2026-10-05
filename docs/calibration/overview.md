@@ -20,7 +20,7 @@ capa has **two** subsystems whose names both contain "calibration." They share a
 | Lives on disk as | `configs/calibrations/<name>.toml` | `configs/calibrations/flux/<id>.toml` |
 | Python model | [`CalibrationSet`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/calibration.py) of [`Calibration`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/calibration.py) curves | [`HeatFluxTuneArtifact`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/calibration/tune_artifact.py) of [`HeatFluxTunePoint`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/calibration/tune_artifact.py) rows |
 | Created by | Operator authoring; lab calibration procedure against a reference instrument | The [`capa.builtin.heat_flux_tune`](../procedures/builtin-heat-flux-tune.md) procedure |
-| Bundle state today | `calibration.json` records the selected set's `name` and `revision`; full resolved-curve snapshots are planned | Tune-session config and audit events are in the bundle; the artifact TOML is currently an operational file under `persist_dir` |
+| Bundle state today | Every channel's curve is in `config.toml`, on its channel in the frozen hardware profile | Tune-session config and audit events are in the bundle; the artifact TOML is currently an operational file under `persist_dir` |
 | Code lives in | [`src/capa/channels/calibration.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/channels/calibration.py) | [`src/capa/calibration/tune_artifact.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/calibration/tune_artifact.py) |
 | Reference page | [Calibration sets](calibration-sets.md) | [Tune artifacts](tune-artifacts.md) |
 
@@ -62,9 +62,7 @@ Every `Calibration` also carries an [`UncertaintySpec`](calibration-sets.md#unce
 
 ### Versioned and recorded
 
-A `CalibrationSet` is read from a file like `configs/calibrations/thermocouples_2026Q2.toml` and applied to channels at run-arm. Today, the bundle records the selected set's `name` and `revision` in `calibration.json`; it does not yet embed the full resolved per-channel curve payload.
-
-The practical discipline is to bump the set `revision` whenever curves change and keep the source calibration TOML under version control or archived with the run. The full immutable curve snapshot is planned, but should not be assumed when reading current bundles.
+Each channel's curve lives on its binding in the hardware profile. A `CalibrationSet` file like `configs/calibrations/thermocouples_2026Q2.toml` is a way to copy curves onto channels in bulk, from the Setup tab's Calibration section; the experiment doesn't reference one. The bundle's `config.toml` freezes the hardware profile, so it records every curve the run used, with its uncertainty and fit metadata.
 
 ---
 

@@ -26,7 +26,6 @@ from capa.channels.calibration import Identity
 from capa.channels.spec import ChannelKind, ChannelSpec, SartoriusReading
 from capa.devices.sartorius import SartoriusAdapter
 from capa.experiment.config import (
-    CalibrationSetRef,
     DeviceConfig,
     ExperimentConfig,
     HardwareProfile,
@@ -133,7 +132,6 @@ class TestRealSartoriusEngineRun:
                 version="0.1",
                 config={"duration_s": 5.0},
             ),
-            calibration_set=CalibrationSetRef(name="default"),
             operator=OperatorRef(id=_operator_id()),
             sample=SampleInfo(id="HW-SMOKE-SARTORIUS-001"),
             tags=("hardware", "sartorius", "smoke"),

@@ -48,7 +48,6 @@ bundle](../bundles/what-is-a-bundle.md).
 | TOML | `method.toml` | Frozen `Method` (present only when one was loaded). | [Method TOML](../configuration/method-toml.md) |
 | TOML | `profiles/<short_id>.toml` | Frozen domain-profile metadata. | [CAPA profile fields](../configuration/capa-profile.md) |
 | TOML | `equipment.toml` | What was actually opened (firmware, serial #s). | [What's in a bundle](../bundles/what-is-a-bundle.md#equipmenttoml) |
-| JSON | `calibration.json` | CalibrationSet reference snapshot. | [Calibrations on disk](../configuration/calibrations.md) |
 | TOML | `env/uv.lock` | Verbatim copy of the lockfile at run-start. Hash recorded in `manifest.json` under `lockfile.sha256`. | [What's in a bundle](../bundles/what-is-a-bundle.md#env) |
 | JSON | `env/packages.json` | Installed distribution metadata gathered by `gather_provenance`. | [What's in a bundle](../bundles/what-is-a-bundle.md#env) |
 
@@ -76,8 +75,9 @@ bundle directory, under `configs/calibrations/flux/`:
 | TOML | `capa_flux_YYYY-MM-DD.toml` | One tune session's per-target flux/setpoint pairs plus fit metadata. | [Tune artifacts](../calibration/tune-artifacts.md) |
 | TOML | `latest.toml` | Symlink-equivalent pointer to the most recent artifact. | [Tune artifacts](../calibration/tune-artifacts.md) |
 
-Subsequent runs read these via `calibration_set: name = flux` (with an
-optional `revision:` pin).
+An experiment cites one in the CAPA profile's
+`program.flux_calibration_ref`; the tune procedure reads `latest.toml` for its
+starting setpoint.
 
 ## Format choice rationale
 
