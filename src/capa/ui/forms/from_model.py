@@ -38,6 +38,7 @@ Validation errors inside a collapsed group auto-open that group via
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -55,6 +56,7 @@ from PySide6.QtWidgets import (
 )
 
 from capa.ui.forms.widgets import CollapsibleGroup, FieldWidget, build_field_widget
+from capa.ui.forms.widgets._channels import ChannelOption
 from capa.ui.forms.widgets._helpers import _help_from_field, _unit_from_field
 
 # Discriminator-style fields that the form should never render — the
@@ -337,6 +339,11 @@ class ModelForm(QWidget):
         a focused field).
         """
         return self._field_group.get(field_name)
+
+    def set_channel_options(self, options: Sequence[ChannelOption]) -> None:
+        """List ``options`` in every channel picker, nested forms included."""
+        for widget in self.findChildren(FieldWidget):
+            widget.set_channel_options(options)
 
     def field_widget(self, field_name: str) -> FieldWidget | None:
         """Return the rendered widget for ``field_name`` when present.

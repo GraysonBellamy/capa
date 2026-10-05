@@ -38,6 +38,7 @@ from PySide6.QtCore import QObject
 
 from capa.core.errors import CapaError
 from capa.experiment.method import Method
+from capa.ui.forms import ChannelOption, channel_options_from_hardware
 
 if TYPE_CHECKING:
     from capa.experiment.config import ExperimentConfig
@@ -75,6 +76,7 @@ class DocumentCoordinator(QObject):
         self._setup_tab.draftLoaded.connect(self._on_setup_draft_loaded)
         self._method_tab.methodChanged.connect(self._on_method_tab_changed)
         self._method_tab.methodSaved.connect(self.on_method_tab_saved)
+        self._method_tab.set_channel_options_source(self._channel_options)
 
         # Initial sync (in case the tabs were already populated before
         # the coordinator was wired in).
@@ -174,6 +176,10 @@ class DocumentCoordinator(QObject):
             return
 
     # ----------------------------------------------------------------- internal
+
+    def _channel_options(self) -> tuple[ChannelOption, ...]:
+        """The Setup draft's channels, for the Method tab's pickers."""
+        return channel_options_from_hardware(self._setup_tab.draft.document.hardware_payload)
 
     def _on_setup_draft_loaded(self) -> None:
         """A fresh draft arrived in Setup — push its method into MethodTab."""

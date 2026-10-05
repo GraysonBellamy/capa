@@ -20,6 +20,7 @@ multi-axis plots.
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ import pyqtgraph as pg
 import tomli_w
 from pydantic import ValidationError
 from PySide6.QtCore import QItemSelectionModel, Qt, Signal
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -57,7 +59,7 @@ from capa.experiment.method import (
     Step,
     WaitStep,
 )
-from capa.ui.forms import build_form
+from capa.ui.forms import ChannelOption, ModelForm, build_form
 from capa.ui.tabs.method_graph import render_method_graph
 from capa.ui.tabs.method_table import MethodTableModel
 
@@ -127,7 +129,9 @@ class MethodTab(QWidget):
 
     Construct via ``MethodTab(parent=main_window)``. The tab owns its
     own model state; it does not reach into the controller or live run
-    state. Methods are loaded/saved via :class:`QFileDialog`."""
+    state. Methods are loaded/saved via :class:`QFileDialog`. The
+    channel pickers in the step form list whatever
+    :meth:`set_channel_options_source` supplies."""
 
     methodChanged = Signal()  # noqa: N815 - Qt signal naming convention
     """Emitted whenever the displayed method changes (load, clear, or
@@ -146,7 +150,8 @@ class MethodTab(QWidget):
         self._method_description: str = ""
 
         self._model = MethodTableModel()
-        self._detail_widget: QWidget | None = None
+        self._detail_widget: ModelForm | None = None
+        self._channel_options: Callable[[], Sequence[ChannelOption]] = tuple
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
@@ -359,6 +364,20 @@ class MethodTab(QWidget):
         state returns ``False``."""
         return self._model.rowCount() > 0
 
+    def set_channel_options_source(self, source: Callable[[], Sequence[ChannelOption]]) -> None:
+        """Set where the step form's channel pickers get their list.
+
+        Called on every step selection and whenever the tab is shown,
+        so channel edits made in the Setup tab show up without a push.
+        """
+        self._channel_options = source
+        self._refresh_channel_options()
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        """Qt event handler — see :class:`PySide6.QtWidgets.QWidget`."""
+        super().showEvent(event)
+        self._refresh_channel_options()
+
     # ------------------------------------------------------------------ slots
 
     def _on_open(self) -> None:
@@ -470,6 +489,7 @@ class MethodTab(QWidget):
                 w = item.widget()
                 if w is not None:
                     w.deleteLater()
+        self._detail_widget = None
 
         if row is None:
             return
@@ -479,6 +499,7 @@ class MethodTab(QWidget):
 
         step_cls = type(step)
         form = build_form(step_cls, initial=step)
+        form.set_channel_options(self._channel_options())
         # Stash on self so tests can reach the live form widget.
         self._detail_widget = form
 
@@ -503,7 +524,10 @@ class MethodTab(QWidget):
 
     def _reset_detail(self) -> None:
         self._build_detail_for_row(None)
-        self._detail_widget = None
+
+    def _refresh_channel_options(self) -> None:
+        if self._detail_widget is not None:
+            self._detail_widget.set_channel_options(self._channel_options())
 
     # ------------------------------------------------------------------ helpers
 

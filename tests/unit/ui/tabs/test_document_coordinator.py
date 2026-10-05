@@ -11,6 +11,7 @@ Covers:
   Setup.methodRefChanged → MethodTab.load → MethodTab.methodChanged →
   Setup refresh does not produce a new Setup.methodRefChanged emit.
 * MethodTab.methodChanged updates the Setup draft's method_payload.
+* The Method tab's channel pickers list the Setup draft's channels.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from typing import Any
 
 from capa.experiment.method import HoldStep, Method
 from capa.ui.document_coordinator import DocumentCoordinator
+from capa.ui.forms.widgets._channels import ChannelCombo
 from capa.ui.tabs.method import MethodTab
 from capa.ui.tabs.setup import SetupTab
 
@@ -198,3 +200,25 @@ def test_method_tab_edit_updates_setup_payload(qtbot: Any, tmp_path: Path) -> No
     assert setup.draft.document.method_payload.get("name") == "overridden"
     # Files section is marked dirty because the payload changed.
     assert "files" in setup.draft.dirty_sections
+
+
+# ---------------------------------------------------------------------------
+# Channel pickers.
+# ---------------------------------------------------------------------------
+
+
+def test_method_target_picker_lists_setup_channels(qtbot: Any) -> None:
+    setup, method_tab, _coord = _make_pair(qtbot)
+    setup.load_path(SIM_CAPA_EXP)
+    method_tab._select_row(0)
+    assert method_tab._detail_widget is not None
+    combo = method_tab._detail_widget.findChild(ChannelCombo)
+    assert combo is not None
+    assert [combo.itemText(i) for i in range(combo.count())] == ["heater.setpoint", "purge.flow"]
+
+    # A channel added in Setup shows up once the Method tab is shown again.
+    setup.draft.document.hardware_payload["channels"].append(
+        {"name": "reactive.flow", "kind": "mfc_flow", "unit": "slpm"}
+    )
+    method_tab.show()
+    assert combo.findText("reactive.flow") >= 0

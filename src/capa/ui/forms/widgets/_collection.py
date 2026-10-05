@@ -8,7 +8,7 @@ factory does not recognize.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from capa.ui.forms.widgets._base import FieldWidget
+from capa.ui.forms.widgets._channels import ChannelCombo, ChannelOption, ChannelRole
 
 if TYPE_CHECKING:
     from capa.ui.forms.from_model import ModelForm
@@ -170,12 +171,18 @@ class _DictStrFloatField(FieldWidget):
 
     Each row is a key/value pair; Add appends an empty pair, Remove
     drops selected. Keys edited inline; values via a small spinbox.
+    With a ``channel_role`` the keys are channel names, picked from a
+    :class:`ChannelCombo` instead of typed into a line edit.
     Implementation note: keep this simple — the 10% case for
     SafeShutdownStep doesn't justify a fancy table model."""
 
-    def __init__(self, *, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, *, channel_role: ChannelRole | None = None, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
-        self._rows: list[tuple[QLineEdit, QDoubleSpinBox]] = []
+        self._channel_role = channel_role
+        self._channel_options: tuple[ChannelOption, ...] = ()
+        self._rows: list[tuple[QLineEdit | ChannelCombo, QDoubleSpinBox]] = []
         self._rows_layout = QVBoxLayout()
         self._rows_layout.setContentsMargins(0, 0, 0, 0)
         outer = QVBoxLayout(self)
@@ -195,7 +202,15 @@ class _DictStrFloatField(FieldWidget):
         row_widget = QWidget(self)
         row_layout = QHBoxLayout(row_widget)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        key_edit = QLineEdit(key, row_widget)
+        key_edit: QLineEdit | ChannelCombo
+        if self._channel_role is None:
+            key_edit = QLineEdit(key, row_widget)
+            key_edit.textChanged.connect(self.valueChanged)
+        else:
+            key_edit = ChannelCombo(role=self._channel_role, parent=row_widget)
+            key_edit.set_options(self._channel_options)
+            key_edit.setEditText(key)
+            key_edit.editTextChanged.connect(self.valueChanged)
         val_spin = QDoubleSpinBox(row_widget)
         # Free-form dict — we don't know the unit, so 3 decimals is a
         # cleaner compromise than the previous noisy 6.
@@ -206,7 +221,6 @@ class _DictStrFloatField(FieldWidget):
         row_layout.addWidget(val_spin)
         self._rows_layout.addWidget(row_widget)
         self._rows.append((key_edit, val_spin))
-        key_edit.textChanged.connect(self.valueChanged)
         val_spin.valueChanged.connect(self.valueChanged)
         self.valueChanged.emit()
 
@@ -221,7 +235,8 @@ class _DictStrFloatField(FieldWidget):
 
     def value(self) -> dict[str, float]:
         """Current value held by this widget, coerced to the model-side type."""
-        return {k.text(): float(v.value()) for k, v in self._rows if k.text()}
+        keyed = ((_key_text(k), v) for k, v in self._rows)
+        return {key: float(v.value()) for key, v in keyed if key}
 
     def set_value(self, v: Any) -> None:
         # Reset the rows list and lay out new ones.
@@ -233,6 +248,19 @@ class _DictStrFloatField(FieldWidget):
         self._rows.clear()
         for key, val in (v or {}).items():
             self._on_add(key=str(key), val=float(val))
+
+    def set_channel_options(self, options: Sequence[ChannelOption]) -> None:
+        """List ``options`` in each key's dropdown, including rows added later."""
+        if self._channel_role is None:
+            return
+        self._channel_options = tuple(options)
+        for key_edit, _ in self._rows:
+            if isinstance(key_edit, ChannelCombo):
+                key_edit.set_options(self._channel_options)
+
+
+def _key_text(key_edit: QLineEdit | ChannelCombo) -> str:
+    return key_edit.currentText() if isinstance(key_edit, ChannelCombo) else key_edit.text()
 
 
 class _JsonFallbackField(FieldWidget):
