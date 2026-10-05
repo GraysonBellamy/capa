@@ -73,6 +73,12 @@ class DeviceSettingsSpec:
     snapshot_type: type[Any]
     """What the adapter's ``read_state_snapshot()`` returns."""
 
+    unused: Callable[[Mapping[str, Any]], frozenset[str]] | None = None
+    """``device params → fields this device can't take``, for settings that
+    depend on how the device is configured, e.g. an analyzer's settings for
+    gases its channel map doesn't assert. The Setup form leaves them out.
+    ``None`` when every field applies to every device."""
+
 
 @dataclass(frozen=True, slots=True)
 class SettingChange:
