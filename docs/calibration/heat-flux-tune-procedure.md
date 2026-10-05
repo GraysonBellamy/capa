@@ -282,7 +282,7 @@ A tune that converges from a good prior typically finishes a single target in 5�
 
 ## What the bundle records
 
-The procedure narrows the recording plan to **only the three required channels** and **suppresses every camera** (`plan_capture` in [controller.py](https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/procedures/builtin/heat_flux_tune/controller.py)). The resulting bundle is a calibration receipt, not a science run — no PMMA video, no purge MFC, no sample TCs.
+The procedure narrows the recording plan to **only the three required channels** and **suppresses every camera** (`plan_capture` in [controller.py](https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/procedures/builtin/heat_flux_tune/controller.py)). The resulting bundle is a calibration receipt, not a science run — no PMMA video, no purge MFC, no wall TCs.
 
 ### Event taxonomy
 

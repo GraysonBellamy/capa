@@ -61,13 +61,11 @@ def test_layer3_capa_missing_required_group(configs_dir: Path) -> None:
     problems = validate(doc)
     missing_codes = {p.code for p in problems if p.code == "capa_profile.missing_required_group"}
     assert "capa_profile.missing_required_group" in missing_codes
-    # All four required groups should report missing.
+    # Every required group should report missing.
     missing_groups = {
         p.path[-1] for p in problems if p.code == "capa_profile.missing_required_group"
     }
-    assert {"heater_setpoint", "heater_pv", "sample_temperature", "purge_gas_flow"}.issubset(
-        missing_groups
-    )
+    assert {"heater_setpoint", "heater_pv", "purge_gas_flow", "mass"} == missing_groups
 
 
 def test_layer3_skipped_when_profile_is_not_capa(configs_dir: Path) -> None:

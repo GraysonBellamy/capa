@@ -406,7 +406,7 @@ Domain profiles are optional schema/preflight bundles layered on top of the gene
 - method fields: heater program summary (target heat flux at the specimen surface in kW/m², heater setpoint °C chosen to deliver that flux via the day-of calibration, optional `flux_calibration_ref`, optional ramp rate for the minority dynamic-program runs), atmosphere mode (inert / oxidative / reducing / reactive_blend)
 - atmosphere metadata: purge-gas spec (species, purity, supplier, cylinder lot, target purge flow), optional reactive-gas spec (species, purity, target flow, target mole fraction) for partial-oxidation runs
 - optional downstream-analyzer block (reserved for future setups; the current CAPA rig does not route gases to an analyzer): kind (FTIR / GC / MS / GC-MS / NDIR / other), serial, sampling-line delay, response time, external-file ref. If a future rig adds one, the analyzer is not capa-controlled — its data lives outside the bundle — but the pedigree fields are captured so the run record cross-references the right external dataset
-- required channel groups: `heater_setpoint`, `heater_pv`, `sample_temperature`, `purge_gas_flow`. Optional: `mass` (load-cell rigs), `reactive_gas_flow`, `reactor_pressure`
+- required channel groups: `heater_setpoint`, `heater_pv`, `purge_gas_flow`. Optional: `mass` (load-cell rigs), `reactive_gas_flow`, `reactor_pressure`
 - preflight checks: static — required channel mappings, atmosphere consistency (oxidative/blend mode requires a reactive-gas channel), disk projection; dynamic (after adapters start, inside the task group) — heater PV in safe startup range, purge flow established, balance stability when mass is present. A silent live-data channel post-start is a blocking error, not a downgraded warning.
 
 The profile snapshot lands in `profiles/capa_pyrolysis.toml` and is referenced from `manifest.json.domain_profile`. The profile does not make `capa` a standards-certification tool; it ensures the run bundle captures the metadata a researcher or later analyzer needs.
@@ -1297,7 +1297,7 @@ Headless mode is the primary substrate for integration tests and for any future 
 - Finalize-in-place: kill mid-run, run `capa finalize`, assert the resulting bundle reads cleanly and `inferred_ended_utc` is set.
 - Procedure plugin loading (entry-point + dev folder; version constraints; bad plugin fails at *load*, not arm).
 - Plugin trust policy: production mode refuses unlocked plugins; dev-folder loading is gated; `plugins.lock` hash drift is visible.
-- CAPA pyrolysis profile validation: missing required channel groups (heater_setpoint, heater_pv, sample_temperature, purge_gas_flow), atmosphere-mode/reactive-gas inconsistency, missing leak-test timestamp, and absent specimen form fail preflight.
+- CAPA pyrolysis profile validation: missing required channel groups (heater_setpoint, heater_pv, purge_gas_flow), atmosphere-mode/reactive-gas inconsistency, missing leak-test timestamp, and absent specimen form fail preflight.
 - Ring buffer decimation and wrap-around.
 - Backpressure policy enforcement (BLOCK actually blocks; DROP_OLDEST actually drops; saturation deadline trips a safe_shutdown).
 - External event ingest: events submitted via the UDS / HTTP loopback land in `events.sqlite` with correct timestamps.

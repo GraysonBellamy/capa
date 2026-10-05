@@ -23,7 +23,6 @@ This profile contributes:
 - **required channel groups**:
 
   * ``heater_setpoint`` / ``heater_pv`` — the controller pair
-  * ``sample_temperature`` — at least one TC inside or close to the sample
   * ``mass`` — load cell reading the specimen mass
   * ``purge_gas_flow`` — the inert/sweep gas MFC
 - **gas-analysis metadata** — purge-gas spec (purity grade, supplier,
@@ -345,11 +344,6 @@ REQUIRED_CHANNEL_GROUPS: tuple[ChannelRequirement, ...] = (
     ChannelRequirement(
         group="heater_pv",
         kinds=(ChannelKind.PROCESS_VAR.value,),
-        min_count=1,
-    ),
-    ChannelRequirement(
-        group="sample_temperature",
-        kinds=(ChannelKind.THERMOCOUPLE.value, ChannelKind.ANALOG_IN.value),
         min_count=1,
     ),
     ChannelRequirement(

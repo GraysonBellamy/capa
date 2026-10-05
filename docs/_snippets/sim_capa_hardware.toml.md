@@ -87,8 +87,6 @@ name = "TC_sample_top"
 kind = "tc"
 unit = "K"
 plot_group = "temperatures"
-[channels.metadata]
-capa_group = "sample_temperature"
 [channels.source]
 source = "nidaq_reading_field"
 device = "cdaq1"

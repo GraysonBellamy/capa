@@ -41,7 +41,7 @@ class ChannelTemplate:
     The Setup editor reads this and produces a draft :class:`ChannelSpec`
     populated for the operator's currently-selected device. ``capa_group``
     is the metadata key that ties the channel to a CAPA profile slot
-    (``"heater_pv"``, ``"sample_temperature"``, etc.); ``plot_group`` is
+    (``"heater_pv"``, ``"mass"``, etc.); ``plot_group`` is
     the UI-side bucket the Numerics dock uses to group plots.
 
     ``source_factory`` builds the :class:`SourceBinding` variant for the
