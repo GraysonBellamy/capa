@@ -25,11 +25,8 @@ This profile contributes:
   * ``heater_setpoint`` / ``heater_pv`` — the controller pair
   * ``mass`` — load cell reading the specimen mass
   * ``purge_gas_flow`` — the inert/sweep gas MFC
-- **gas-analysis metadata** — purge-gas spec (purity grade, supplier,
-  cylinder lot), sweep flow target, optional downstream analyzer (FTIR / GC
-  / MS) entry-point + serial + sampling-line delay. CAPA does *not* do
-  oxygen-depletion calorimetry by default, so the analyzer block is shaped
-  for "qualitative product analysis" rather than "quantitative HRR".
+- **purge-gas metadata** — purge-gas spec (purity grade, supplier,
+  cylinder lot) and sweep flow target.
 - **preflight checks** — heater PV in safe range, purge gas flow
   established and stable, balance stability when present,
   required channel mappings.
@@ -266,48 +263,6 @@ class Atmosphere(BaseModel):
     reactive: ReactiveGas | None = None
 
 
-class DownstreamAnalyzer(BaseModel):
-    """Optional downstream analyzer attached to the reactor exhaust.
-
-    CAPA pyrolysis is often paired with FTIR / GC / MS for qualitative
-    product identification. The analyzer is *not* a capa-controlled device
-    — its data lives outside the bundle — but the pedigree fields are
-    captured here so the run record cross-references the right external
-    file/notebook.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    kind: Literal["ftir", "gc", "ms", "gc_ms", "ndir", "other"]
-    serial: str | None = None
-    sampling_line_delay_s: float = Field(
-        default=0.0,
-        ge=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": (
-                "Transport delay from sample point to analyzer detector. "
-                "Used to time-align analyzer output with capa channels."
-            ),
-        },
-    )
-    response_time_s: float | None = Field(
-        default=None,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": (
-                "Analyzer 90% step response time — the time-constant of the "
-                "instrument's measurement, not the sampling-line delay."
-            ),
-        },
-    )
-    external_file_ref: str | None = None
-    """Pointer to the analyzer's data file/dataset. Free-form path or URI;
-    captured into the bundle so a later analyzer can re-locate the
-    correlated data."""
-
-
 # ---------------------------------------------------------------------------
 # Top-level metadata model.
 # ---------------------------------------------------------------------------
@@ -325,8 +280,16 @@ class CapaPyrolysisMetadata(BaseModel):
     specimen: CapaSpecimen
     program: HeaterProgram
     atmosphere: Atmosphere
-    analyzer: DownstreamAnalyzer | None = None
-    sop_revision: str | None = None
+    sop_revision: str | None = Field(
+        default=None,
+        title="SOP revision",
+        json_schema_extra={
+            "capa_help": (
+                "The lab's standard operating procedure the run followed, "
+                'e.g. "CAPA-SOP-2026-03". Free-form.'
+            ),
+        },
+    )
     """Lab SOP identifier (``"CAPA-SOP-2026-03"``, etc.). Free-form."""
 
 
@@ -456,7 +419,6 @@ __all__ = [
     "AtmosphereMode",
     "CapaPyrolysisMetadata",
     "CapaSpecimen",
-    "DownstreamAnalyzer",
     "HeaterProgram",
     "PurgeGas",
     "ReactiveGas",

@@ -1,5 +1,5 @@
 ---
-description: Field reference for `capa.profiles.capa_pyrolysis` domain profile — specimen, HeaterProgram, Atmosphere, DownstreamAnalyzer, preflight checks for pyrolysis.
+description: Field reference for `capa.profiles.capa_pyrolysis` domain profile — specimen, HeaterProgram, Atmosphere, SOP revision, preflight checks for pyrolysis.
 ---
 
 # CAPA profile fields
@@ -33,7 +33,6 @@ domain_profile:
     specimen: { ... }      # CapaSpecimen
     program: { ... }       # HeaterProgram
     atmosphere: { ... }    # Atmosphere (purge + optional reactive)
-    analyzer: { ... }      # DownstreamAnalyzer (optional)
     sop_revision: "..."    # optional
 ```
 
@@ -132,22 +131,6 @@ Same shape as `PurgeGas` plus an optional `target_mole_fraction` (0–1) recordi
 
 ---
 
-## Downstream analyzer (`DownstreamAnalyzer`, optional)
-
-CAPA pyrolysis is often paired with FTIR / GC / MS / NDIR for qualitative product identification. The analyzer is **not** a capa-controlled device — its data lives outside the bundle — but the pedigree fields are captured here so the run record cross-references the right external file.
-
-| Field | Notes |
-|---|---|
-| `kind` | `ftir` \| `gc` \| `ms` \| `gc_ms` \| `ndir` \| `other` |
-| `serial` | Optional analyzer serial. |
-| `sampling_line_delay_s` | Transport delay from sample point to analyzer detector. Used to time-align analyzer output with capa channels. |
-| `response_time_s` | Analyzer's 90% step response time — the instrument's measurement time constant, distinct from the sampling-line delay. |
-| `external_file_ref` | Pointer to the analyzer's data file/dataset. Free-form path or URI; captured into the bundle so a later analyst can re-locate the correlated data. |
-
-CAPA does **not** do oxygen-depletion calorimetry by default — the analyzer block is shaped for "qualitative product analysis," not "quantitative HRR." Use the `cone_calorimeter` profile for the HRR / O₂-depletion workflow.
-
----
-
 ## `sop_revision` (optional)
 
 Lab SOP identifier (`"CAPA-SOP-2026-03"`, etc.). Free-form string captured into the bundle so the run can be cross-referenced against the procedure document the operator was working from.
@@ -205,7 +188,6 @@ The high-level differences:
 | Required atmosphere channels | Purge MFC (inert) | Exhaust flow + O₂ analyzer |
 | Specimen geometry fields | Disk-shaped, holder cup geometry | Thickness + exposed area + orientation |
 | Standard reference | Lab SOPs (free-form) | ASTM E1354 / ISO 5660 (built-in standard refs) |
-| Analyzer block | Optional FTIR / GC / MS (qualitative) | Required O₂ + CO + CO₂ analyzers (quantitative) |
 
 A run can declare either profile against the same procedure (most often [Recipe runner](../procedures/builtin-recipe-runner.md)); the procedure does not change based on which profile is attached. The profile only changes *what metadata is required* and *what preflight checks run*.
 

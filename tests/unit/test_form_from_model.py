@@ -237,7 +237,7 @@ def test_round_trip_capa_pyrolysis_metadata(qtbot: Any) -> None:
 
     This exercises the recursive nested-model path
     (CapaSpecimen, HeaterProgram, Atmosphere → PurgeGas) and the
-    optional-field handling (sop_revision, analyzer)."""
+    optional-field handling (sop_revision)."""
     initial = CapaPyrolysisMetadata.model_validate(
         {
             "specimen": {
