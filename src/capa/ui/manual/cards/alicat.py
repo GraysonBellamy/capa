@@ -13,11 +13,15 @@ The setpoint widget is the only one that carries a payload value. Everything
 else is a button or a small combo. We don't auto-generate the form from
 Pydantic — the verb table is stable and small, and hand-laying the controls
 keeps the labels precise.
+
+The active gas, the gas list and the setpoint are read from the device via
+:meth:`ManualClient.device_readback` (the adapter's ``read_state_snapshot``)
+once the pool is open, and again after each gas / setpoint command.
 """
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final
 
 import structlog
 from PySide6.QtWidgets import (
@@ -30,23 +34,16 @@ from PySide6.QtWidgets import (
 )
 
 from capa.devices.adapter import Capability
+from capa.devices.alicat import AlicatStateSnapshot
 from capa.experiment.config import DeviceConfig
-from capa.ui.manual.cards.base import DeviceCard
+from capa.ui.manual.cards.base import DeviceCard, select_or_add
 from capa.ui.state import RunController
 from capa.ui.statusbar import OperatorIdProvider
 
 _logger = structlog.get_logger("capa.ui.manual.alicat")
 
 
-SETPOINT_UNITS: Final[tuple[str, ...]] = (
-    "SCCM",
-    "SLPM",
-    "CCS",
-    "Pa",
-    "kPa",
-    "psia",
-    "psig",
-)
+_UNKNOWN_SETPOINT_UNIT: Final[str] = "device units"
 
 RELEVANT_CAPABILITIES: Final[tuple[Capability, ...]] = (
     Capability.HAS_SETPOINT,
@@ -67,11 +64,13 @@ def is_alicat_device(spec: DeviceConfig) -> bool:
 class AlicatCard(DeviceCard):
     """Per-Alicat manual-control card.
 
-    Capabilities are populated from the live adapter when it's already
-    open; otherwise we render *all* possible sections and let the adapter
-    reject unsupported verbs at command-time. The reject lands in the
-    status label, so the operator gets a clear "this device is a meter,
-    not a controller" message instead of a silently broken button.
+    Capabilities come from the live adapter once the pool has opened it.
+    Before that the adapter doesn't yet know whether the device is a
+    controller (``open()`` adds ``HAS_SETPOINT`` / ``HAS_VALVE_HOLD``), so
+    we render *all* possible sections and let the adapter reject
+    unsupported verbs at command-time. The first readback after the pool
+    opens rebuilds the sections from the live flagset, so a meter loses
+    its Setpoint / Valves sections.
     """
 
     def __init__(
@@ -90,24 +89,16 @@ class AlicatCard(DeviceCard):
             parent=parent,
         )
         self._spec: DeviceConfig = spec
-        # Pool-hosted adapter feeds the real capability set; fall back
-        # to the Alicat default flags when the pool hasn't finished
-        # opening.
-        caps: frozenset[Capability] = frozenset()
-        pool = controller.worker_pool
-        if pool is not None:
-            try:
-                worker = pool.worker_for(spec.name)
-                opened = worker.adapters.get(spec.name)
-            except Exception:
-                opened = None
-            if opened is not None:
-                caps = getattr(opened, "capabilities", frozenset())
-        if not caps:
-            caps = _default_alicat_capabilities()
-        self._capabilities: frozenset[Capability] = caps
-        self.set_subtitle(f"Device: {spec.name}   Adapter: {spec.adapter.rsplit('.', 1)[-1]}")
+        self._capabilities: frozenset[Capability] = (
+            self._live_capabilities() or _default_alicat_capabilities()
+        )
+        self.set_subtitle(f"Device: {spec.name}   Adapter: {self._adapter_label()}")
         self._gas_combo: QComboBox | None = None
+        self._setpoint_spin: QDoubleSpinBox | None = None
+        self._setpoint_unit_label: QLabel | None = None
+        # The device's setpoint unit from the last read-back; sent with each
+        # setpoint so a unit changed on the device since is refused.
+        self._setpoint_unit: str | None = None
         self._build_capability_sections()
 
     # ------------------------------------------------------------------ build
@@ -137,32 +128,32 @@ class AlicatCard(DeviceCard):
         spin.setRange(-1_000_000.0, 1_000_000.0)
         spin.setDecimals(3)
         spin.setSingleStep(1.0)
-        spin.setToolTip(
-            "Setpoint value in the selected unit. Engineering-unit "
-            "conversion is the adapter's responsibility."
-        )
+        spin.setToolTip("Setpoint value, in the device's engineering units shown beside it.")
         row.addWidget(spin)
-        unit_combo = QComboBox(self)
-        unit_combo.addItems(list(SETPOINT_UNITS))
-        unit_combo.setToolTip(
-            "Engineering unit — passed through to alicatlib without "
-            "client-side conversion. The device must accept the unit "
-            "or the command rejects."
+        # The device applies the value in its own engineering units; there is
+        # no conversion, so the unit is shown, not chosen.
+        unit_label = QLabel(self._setpoint_unit or _UNKNOWN_SETPOINT_UNIT, self)
+        unit_label.setToolTip(
+            "The device's setpoint unit, read from the device. Change it on "
+            "the device itself; the setpoint is refused if the device's unit "
+            "has changed since it was read."
         )
-        row.addWidget(unit_combo)
+        row.addWidget(unit_label)
         btn = QPushButton("Set", self)
 
         def _apply() -> None:
-            self.schedule_dispatch(
-                kind="set_setpoint",
-                payload={"value": spin.value(), "unit": unit_combo.currentText()},
-            )
+            payload: dict[str, Any] = {"value": spin.value()}
+            if self._setpoint_unit is not None:
+                payload["unit"] = self._setpoint_unit
+            self.schedule_dispatch_and_read_back(kind="set_setpoint", payload=payload)
 
         btn.clicked.connect(_apply)
         row.addWidget(btn)
         row.addStretch(1)
         body.addLayout(row)
-        for w in (spin, unit_combo, btn):
+        self._setpoint_spin = spin
+        self._setpoint_unit_label = unit_label
+        for w in (spin, btn):
             self.register_action_widget(w)
 
     def _build_gas_section(self) -> None:
@@ -175,25 +166,31 @@ class AlicatCard(DeviceCard):
         combo = QComboBox(self)
         combo.setEditable(True)
         combo.setToolTip(
-            "Wire code or fluid name. The list is populated from the "
-            "device on first acquire — until then, type a known name "
-            "(e.g. 'N2', 'Air', 'CO2')."
+            "Gas to select. The list and the active gas are read from the "
+            "device once it is connected; you can also type a wire code or "
+            "fluid name (e.g. 'N2', 'Air', 'CO2')."
         )
-        # Populate with common defaults so the operator has something to
-        # click on before the live read_gas_list() returns.
-        combo.addItems(["N2", "Air", "Ar", "He", "CO2", "O2", "H2"])
+        # Empty until the device reports its gases: a placeholder entry
+        # would read as the active gas.
+        line_edit = combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setPlaceholderText("not read from device yet")
         row.addWidget(combo)
         self._gas_combo = combo
         btn_set = QPushButton("Set (session)", self)
         btn_set_persist = QPushButton("Set + save (EEPROM)", self)
 
         def _apply(*, save: bool) -> None:
-            self.schedule_dispatch(
+            gas = combo.currentText().strip()
+            if not gas:
+                self._set_status("pick or type a gas first", level="warn")
+                return
+            self.schedule_dispatch_and_read_back(
                 kind="set_gas",
-                payload={"gas": combo.currentText(), "save": save},
+                payload={"gas": gas, "save": save},
                 destructive=save,
                 destructive_summary=(
-                    f"Set gas to {combo.currentText()!r} AND persist to "
+                    f"Set gas to {gas!r} AND persist to "
                     "EEPROM. Wears flash — only do this when the device "
                     "should boot with this gas after power-cycle."
                 )
@@ -339,18 +336,21 @@ class AlicatCard(DeviceCard):
     # ------------------------------------------------------------------ live readback
 
     async def refresh_readback(self) -> None:
-        """Refresh the gas combo from ``read_gas_list``. Skipped while a
-        run is active (the adapter is busy streaming)."""
-        if self._engine_blocks_writes() or self._gas_combo is None:
+        """Re-sync the sections to the opened adapter, then show its state.
+
+        The dock calls this when the card is built and again once the pool
+        has opened. Skipped while a run is active (the adapter is busy
+        streaming) and while the pool is still opening — there is no
+        client to ask yet, and the pool-open call follows.
+        """
+        if self._engine_blocks_writes():
             return
-        adapter = await self._ensure_adapter()
-        if adapter is None:
+        client = self._controller.manual_client
+        if client is None:
             return
-        reader = getattr(adapter, "read_gas_list", None)
-        if not callable(reader):
-            return
+        self._sync_capability_sections()
         try:
-            gases = await reader()
+            snapshot = await client.device_readback(self._spec.name)
         except Exception as exc:
             _logger.debug(
                 "manual.alicat_readback_failed",
@@ -358,19 +358,68 @@ class AlicatCard(DeviceCard):
                 error=str(exc),
             )
             return
-        if not gases:
+        if isinstance(snapshot, AlicatStateSnapshot):
+            self.apply_snapshot(snapshot)
+
+    def apply_snapshot(self, snapshot: AlicatStateSnapshot) -> None:
+        """Show a read-back: active gas and setpoint in the subtitle, the
+        gas list and active gas in the combo, the setpoint and its unit
+        beside the spinbox."""
+        combo = self._gas_combo
+        if combo is not None:
+            if snapshot.gas_list:
+                combo.clear()
+                combo.addItems(list(snapshot.gas_list))
+            if snapshot.gas is not None:
+                select_or_add(combo, snapshot.gas)
+            else:
+                # Adding items selects the first; that isn't the device's gas.
+                combo.setCurrentIndex(-1)
+        if snapshot.setpoint is not None and self._setpoint_spin is not None:
+            self._setpoint_spin.setValue(snapshot.setpoint)
+        self._setpoint_unit = snapshot.setpoint_unit
+        if self._setpoint_unit_label is not None:
+            self._setpoint_unit_label.setText(snapshot.setpoint_unit or _UNKNOWN_SETPOINT_UNIT)
+        parts = [f"Device: {self._spec.name}", f"Adapter: {self._adapter_label()}"]
+        if snapshot.gas is not None:
+            parts.append(f"Gas: {snapshot.gas}")
+        if snapshot.setpoint is not None:
+            parts.append(f"Setpoint: {snapshot.setpoint:g} {snapshot.setpoint_unit or ''}".rstrip())
+        self.set_subtitle("   ".join(parts))
+
+    # ------------------------------------------------------------------ capabilities
+
+    def _live_capabilities(self) -> frozenset[Capability]:
+        """The opened adapter's flagset, or empty until the pool is open.
+
+        Before ``open()`` identifies the device the adapter's flagset lacks
+        the controller-only flags, so it can't gate the sections yet.
+        """
+        pool = self._controller.worker_pool
+        if pool is None or not self._hardware_ready_for_writes():
+            return frozenset()
+        try:
+            adapter = pool.worker_for(self._spec.name).adapters.get(self._spec.name)
+        except Exception:
+            return frozenset()
+        return frozenset(getattr(adapter, "capabilities", frozenset()))
+
+    def _sync_capability_sections(self) -> None:
+        """Rebuild the sections if the opened adapter's flags differ from
+        the ones the card was built with."""
+        relevant = frozenset(RELEVANT_CAPABILITIES)
+        live = self._live_capabilities()
+        if not live or live & relevant == self._capabilities & relevant:
             return
-        # Replace the combo's items, preserving the current text.
-        current = self._gas_combo.currentText()
-        self._gas_combo.clear()
-        for _, label in sorted(gases.items()):
-            self._gas_combo.addItem(label)
-        # Restore selection if the operator's current pick is in the list.
-        idx = self._gas_combo.findText(current)
-        if idx >= 0:
-            self._gas_combo.setCurrentIndex(idx)
-        else:
-            self._gas_combo.setEditText(current)
+        self._capabilities = live
+        self.clear_sections()
+        self._gas_combo = None
+        self._setpoint_spin = None
+        self._setpoint_unit_label = None
+        self._build_capability_sections()
+
+    def _adapter_label(self) -> str:
+        return self._spec.adapter.rsplit(".", 1)[-1]
 
 
 def _default_alicat_capabilities() -> frozenset[Capability]:

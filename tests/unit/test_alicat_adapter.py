@@ -16,12 +16,13 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from alicatlib import Reading
+from alicatlib import AlicatTimeoutError, AlicatUnsupportedCommandError, Reading, Statistic
 from alicatlib.devices.flow_controller import FlowController
 from alicatlib.devices.reading import (
     DataFrameFormat,
     DataFrameFormatFlavor,
 )
+from alicatlib.registry import unit_registry
 
 from capa.channels.calibration import Identity
 from capa.channels.spec import (
@@ -35,6 +36,7 @@ from capa.devices.alicat import (
     ADAPTER_ID,
     AlicatAdapter,
     AlicatAdapterParams,
+    AlicatStateSnapshot,
 )
 from capa.devices.records import (
     ChannelSample,
@@ -66,7 +68,7 @@ class StubAlicatDevice:
     def __init__(
         self,
         *,
-        values: dict[str, float] | None = None,
+        values: dict[str, float | str] | None = None,
         info: Any | None = None,
         is_controller: bool = True,
     ) -> None:
@@ -95,6 +97,14 @@ class StubAlicatDevice:
         self.totalizer_reset_peak_calls: list[dict[str, Any]] = []
         self.totalizer_save_calls: list[dict[str, Any]] = []
         self.gas_list_calls = 0
+        # Device state reported by the ``gas()`` / ``setpoint()`` query forms.
+        self.active_gas = "Air"
+        self.setpoint_requested = 5.0
+        self.setpoint_unit_label: str | None = "SLPM"
+        self.gas_query_calls = 0
+        self.raise_on_gas_query: BaseException | None = None
+        self.raise_on_setpoint_query: BaseException | None = None
+        self.statistic_values: dict[Statistic, float | str | None] = {}
         # Controller-only trackers (used by ``StubAlicatController`` only)
         self.setpoint_source_calls: list[dict[str, Any]] = []
         self.loop_control_variable_calls: list[Any] = []
@@ -115,7 +125,7 @@ class StubAlicatDevice:
             unit_id="A",
             reading_format=_EMPTY_FORMAT,
             values=MappingProxyType(dict(self._values)),
-            values_by_statistic=MappingProxyType({}),
+            values_by_statistic=MappingProxyType(dict(self.statistic_values)),
             status=frozenset(),
             received_at=datetime.now(UTC),
             t_mono_ns=time.monotonic_ns(),
@@ -123,14 +133,30 @@ class StubAlicatDevice:
 
     async def setpoint(self, value: float | None = None, unit: Any = None) -> Any:
         self.setpoint_calls.append({"value": value, "unit": unit})
-        # Return a minimal SetpointState-like object
+        if value is None and self.raise_on_setpoint_query is not None:
+            raise self.raise_on_setpoint_query
+        # Return a minimal SetpointState-like object. Like ``LS``, the query
+        # reports the measured flow as ``current`` and the target as
+        # ``requested``.
         state = MagicMock()
-        state.current = value
-        state.requested = value
+        state.current = 4.2
+        state.requested = self.setpoint_requested if value is None else value
+        state.unit_label = self.setpoint_unit_label
+        state.unit = (
+            unit_registry.coerce(self.setpoint_unit_label) if self.setpoint_unit_label else None
+        )
         return state
 
-    async def gas(self, name: Any, *, save: bool = False) -> None:
+    async def gas(self, name: Any = None, *, save: bool | None = None) -> Any:
+        if name is None:
+            self.gas_query_calls += 1
+            if self.raise_on_gas_query is not None:
+                raise self.raise_on_gas_query
+            state = MagicMock()
+            state.label = self.active_gas
+            return state
         self.gas_calls.append({"gas": name, "save": save})
+        return MagicMock()
 
     async def tare_flow(self) -> Any:
         self.tare_flow_calls += 1
@@ -254,7 +280,7 @@ class StubAlicatController(StubAlicatDevice, FlowController):  # type: ignore[mi
     def __init__(
         self,
         *,
-        values: dict[str, float] | None = None,
+        values: dict[str, float | str] | None = None,
         info: Any | None = None,
     ) -> None:
         # ``StubAlicatDevice.__init__`` writes to ``self.info``, which is a
@@ -359,7 +385,7 @@ def _make_adapter(
     snapshot_period_s: float = 1e6,
     auto_reconnect: bool = True,
     is_controller: bool = True,
-    values: dict[str, float] | None = None,
+    values: dict[str, float | str] | None = None,
     controller_stub: bool = False,
 ) -> tuple[AlicatAdapter, StubAlicatDevice]:
     """Build an adapter wired to a stub.
@@ -898,6 +924,163 @@ class TestReadOnlyHelpers:
         adapter = AlicatAdapter(name="mfc", port="/dev/null")
         with pytest.raises(AdapterError, match="requires open"):
             await adapter.read_gas_list()
+
+
+class TestReadStateSnapshot:
+    async def test_controller_reports_gas_list_and_setpoint_target(self) -> None:
+        adapter, stub = _make_adapter(controller_stub=True)
+        await adapter.open()
+        try:
+            snapshot = await adapter.read_state_snapshot()
+            # The setpoint is LS's ``requested`` (target), not ``current``
+            # (the measured flow).
+            assert snapshot == AlicatStateSnapshot(
+                gas="Air",
+                gas_list=("Air", "N2"),
+                setpoint=5.0,
+                setpoint_unit="SLPM",
+            )
+            assert stub.gas_query_calls == 1
+            # Reads only — nothing was set.
+            assert stub.gas_calls == []
+        finally:
+            await adapter.close()
+
+    async def test_meter_skips_setpoint(self) -> None:
+        adapter, stub = _make_adapter()
+        await adapter.open()
+        try:
+            snapshot = await adapter.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.gas == "Air"
+            assert snapshot.setpoint is None
+            assert stub.setpoint_calls == []
+        finally:
+            await adapter.close()
+
+    async def test_legacy_firmware_reads_gas_from_frame_by_statistic(self) -> None:
+        adapter, stub = _make_adapter(controller_stub=True)
+        stub.raise_on_gas_query = AlicatUnsupportedCommandError("legacy G is set-only")
+        stub.statistic_values = {Statistic.FLUID_NAME: "CO2"}
+        await adapter.open()
+        try:
+            snapshot = await adapter.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.gas == "CO2"
+        finally:
+            await adapter.close()
+
+    async def test_legacy_firmware_reads_gas_from_frame_by_name(self) -> None:
+        # V1_V7 frames carry no stat codes; the column is named "Gas".
+        adapter, stub = _make_adapter(values={"Mass_Flow": 1.0, "Gas": "Ar"})
+        stub.raise_on_gas_query = AlicatUnsupportedCommandError("legacy G is set-only")
+        await adapter.open()
+        try:
+            snapshot = await adapter.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.gas == "Ar"
+        finally:
+            await adapter.close()
+
+    async def test_failed_reads_leave_fields_empty(self) -> None:
+        adapter, stub = _make_adapter(controller_stub=True)
+        stub.raise_on_gas_query = AlicatTimeoutError("no reply")
+        stub.raise_on_setpoint_query = AlicatTimeoutError("no reply")
+        await adapter.open()
+        try:
+            snapshot = await adapter.read_state_snapshot()
+            # The frame has no gas column, so the gas stays unknown; the
+            # gas list still comes through.
+            assert snapshot == AlicatStateSnapshot(gas=None, gas_list=("Air", "N2"))
+        finally:
+            await adapter.close()
+
+    async def test_returns_none_before_open(self) -> None:
+        adapter = AlicatAdapter(name="mfc", port="/dev/null")
+        assert await adapter.read_state_snapshot() is None
+
+
+def _setpoint_cmd(payload: dict[str, Any]) -> Any:
+    from capa.devices.adapter import DeviceCommand
+
+    return DeviceCommand(
+        kind="set_setpoint",
+        payload=payload,
+        issued_by="alice",
+        confirmed_by="alice",
+    )
+
+
+class TestSetpointUnit:
+    """alicatlib applies a setpoint in the device's engineering units and
+    drops any unit it's given; the adapter refuses a unit that isn't the
+    device's instead of writing the number in the wrong unit."""
+
+    async def test_without_unit_writes_in_device_units(self) -> None:
+        adapter, stub = _make_adapter(controller_stub=True)
+        await adapter.open()
+        try:
+            result = await adapter.command(_setpoint_cmd({"value": 12.0}))
+            assert result.accepted is True
+            # One write, no unit query.
+            assert stub.setpoint_calls == [{"value": 12.0, "unit": None}]
+        finally:
+            await adapter.close()
+
+    async def test_matching_unit_is_checked_then_written(self) -> None:
+        adapter, stub = _make_adapter(controller_stub=True)
+        await adapter.open()
+        try:
+            # Case-insensitive: the device reports "SLPM".
+            result = await adapter.command(_setpoint_cmd({"value": 12.0, "unit": "slpm"}))
+            assert result.accepted is True
+            assert stub.setpoint_calls == [
+                {"value": None, "unit": None},
+                {"value": 12.0, "unit": None},
+            ]
+        finally:
+            await adapter.close()
+
+    async def test_mismatched_unit_is_refused_before_writing(self) -> None:
+        adapter, stub = _make_adapter(controller_stub=True)
+        await adapter.open()
+        try:
+            with pytest.raises(AdapterError, match="doesn't match the device's setpoint unit"):
+                await adapter.command(_setpoint_cmd({"value": 50.0, "unit": "SCCM"}))
+            assert {"value": 50.0, "unit": None} not in stub.setpoint_calls
+        finally:
+            await adapter.close()
+
+    async def test_unknown_unit_is_refused(self) -> None:
+        adapter, stub = _make_adapter(controller_stub=True)
+        await adapter.open()
+        try:
+            with pytest.raises(AdapterError, match="unknown setpoint unit"):
+                await adapter.command(_setpoint_cmd({"value": 1.0, "unit": "furlongs"}))
+            assert stub.setpoint_calls == []
+        finally:
+            await adapter.close()
+
+    async def test_unit_refused_when_firmware_cannot_report_it(self) -> None:
+        adapter, stub = _make_adapter(controller_stub=True)
+        stub.raise_on_setpoint_query = AlicatUnsupportedCommandError("legacy S is set-only")
+        await adapter.open()
+        try:
+            with pytest.raises(AdapterError, match="can't report its setpoint unit"):
+                await adapter.command(_setpoint_cmd({"value": 1.0, "unit": "SLPM"}))
+        finally:
+            await adapter.close()
+
+    async def test_detail_reports_the_setpoint_not_the_measured_flow(self) -> None:
+        adapter, _ = _make_adapter(controller_stub=True)
+        await adapter.open()
+        try:
+            result = await adapter.command(_setpoint_cmd({"value": 12.0}))
+            # The stub's LS reply measures 4.2 while the setpoint is 12.0.
+            assert "setpoint=12.0 SLPM" in result.detail
+            assert "4.2" not in result.detail
+        finally:
+            await adapter.close()
 
 
 class TestUnknownCommandKind:

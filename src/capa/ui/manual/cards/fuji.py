@@ -396,12 +396,7 @@ class FujiCard(DeviceCard):
         The buttons follow the calibration's state, and a finished run's
         record is saved from the read-back, so neither waits for the timer.
         """
-        if schedule_bg(self._dispatch_and_read_back(dispatch)) is None:
-            self._set_status("no event loop — UI not running?", level="error")
-
-    async def _dispatch_and_read_back(self, dispatch: dict[str, Any]) -> None:
-        if await self.dispatch(**dispatch) is not None:
-            await self.refresh_readback()
+        self.schedule_dispatch_and_read_back(**dispatch)
 
     # ------------------------------------------------------------------ helpers
 

@@ -212,8 +212,8 @@ class RunController(QObject):
     * :attr:`run_finished` — :class:`RunUiResult` once the run is sealed
       (or failed).
     * :attr:`pool_changed` — fires with the active :class:`WorkerPool`
-      when a config loads, or ``None`` when the pool is closed. Manual-
-      control dock listens for this to rebuild cards.
+      when a config loads, or ``None`` when the pool is closed. The
+      manual-control dock listens for this to refresh its cards' read-back.
     * :attr:`manual_event` — manual-command events synthesized by the
       cards on each dispatch (out-of-run only; in-run commands go
       through the conductor and appear via :attr:`event_received`).

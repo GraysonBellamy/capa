@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QPushButton, QWidget
+from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QPushButton, QWidget
 
 from capa.channels.calibration import Identity
 from capa.channels.spec import ChannelSpec, WatlowParameter
@@ -148,6 +148,80 @@ def _adapter_for(controller: RunController, name: str) -> Any:
     assert pool is not None
     worker = pool.worker_for(name)
     return worker.adapters[name]
+
+
+def _load_like_main_window(
+    controller: RunController, dock: ManualControlDock, cfg: ExperimentConfig
+) -> None:
+    """Apply ``cfg`` in :meth:`MainWindow._apply_loaded_config`'s order.
+
+    ``set_active_config`` only *schedules* the pool open, and the dock
+    builds its cards (and fires their first readback) before it finishes.
+    Runs until the pool is open and every task it spawned (the dock's
+    pool-open readback included) is done.
+    """
+
+    async def _apply() -> None:
+        controller.set_active_config(cfg)
+        dock.load_config(cfg)
+        await _wait_hardware_ready(controller)
+        await _drain_tasks()
+
+    _run_async(_apply())
+
+
+async def _wait_hardware_ready(controller: RunController) -> None:
+    for _ in range(500):
+        if controller.hardware_ready:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("pool never opened")
+
+
+async def _drain_tasks() -> None:
+    """Wait for every other task on the loop — the dispatch and read-back
+    a card schedules from a button slot included."""
+    pending = asyncio.all_tasks() - {asyncio.current_task()}
+    if pending:
+        await asyncio.wait(pending, timeout=5.0)
+
+
+def _click(card: Any, text: str) -> None:
+    """Click ``card``'s button labelled ``text`` on a running loop and wait
+    for what it schedules."""
+    button = next(b for b in card.findChildren(QPushButton) if b.text() == text)
+
+    async def _go() -> None:
+        button.click()
+        await _drain_tasks()
+
+    _run_async(_go())
+
+
+def _section_titles(card: Any) -> list[str]:
+    layout = card._sections_layout
+    titles = []
+    for i in range(layout.count()):
+        widget = layout.itemAt(i).widget()
+        if isinstance(widget, QLabel):
+            titles.append(widget.text().strip("─ "))
+    return titles
+
+
+_ALICAT_METER_FLAGS = [
+    "HAS_TARE",
+    "HAS_GAS_SELECT",
+    "HAS_PARAMETER_CONFIG",
+    "HAS_DISPLAY_CONTROL",
+    "HAS_TOTALIZER",
+]
+"""What the real :class:`AlicatAdapter` advertises before ``open()``; it
+adds ``HAS_SETPOINT`` / ``HAS_VALVE_HOLD`` once it identifies a controller."""
+_ALICAT_CONTROLLER_FLAGS = [*_ALICAT_METER_FLAGS, "HAS_SETPOINT", "HAS_VALVE_HOLD"]
+
+
+def _stub_alicat_config(name: str = "purge_mfc", **params: Any) -> DeviceConfig:
+    return DeviceConfig(name=name, adapter=STUB_ALICAT, params=params)
 
 
 # ============================================================================
@@ -305,13 +379,16 @@ class TestBalanceCard:
 
 
 class TestAlicatCard:
-    def test_setpoint_button_carries_value_and_unit(
+    def test_set_sends_value_in_the_read_back_unit(
         self,
         qtbot: Any,
         controller: RunController,
         op_provider: OperatorIdProvider,
     ) -> None:
-        cfg = _make_config((_stub_device_config("mfc.purge", family="alicat"),))
+        # alicatlib applies a setpoint in the device's units and drops any
+        # unit it's given, so the card shows the device's unit and sends it
+        # for the adapter to check, rather than offering a unit to pick.
+        cfg = _make_config((_stub_alicat_config(setpoint=5.0, setpoint_unit="SLPM"),))
         _open_pool_sync(controller, cfg)
         card = AlicatCard(
             spec=cfg.hardware.devices[0],
@@ -319,21 +396,73 @@ class TestAlicatCard:
             operator_provider=op_provider,
         )
         qtbot.addWidget(card)
+        adapter = _adapter_for(controller, "purge_mfc")
+        assert card._setpoint_unit_label is not None
+        assert card._setpoint_unit_label.text() == "device units"
 
-        result = _run_async(
-            card.dispatch(
-                kind="set_setpoint",
-                payload={"value": 50.0, "unit": "SCCM"},
-            )
-        )
-        assert result is not None and result.accepted
+        card.apply_snapshot(adapter.state)
+        assert card._setpoint_unit_label.text() == "SLPM"
+        assert card._setpoint_spin is not None
+        card._setpoint_spin.setValue(50.0)
+        _click(card, "Set")
 
-        adapter = _adapter_for(controller, "mfc.purge")
         cmd = adapter.commands_received[0]
         assert cmd.kind == "set_setpoint"
-        assert cmd.payload == {"value": 50.0, "unit": "SCCM"}
+        assert cmd.payload == {"value": 50.0, "unit": "SLPM"}
+        # The card re-read the device after the command.
+        assert adapter.readback_count == 1
 
-        _close_pool_sync(controller)
+    def test_set_before_any_read_back_sends_no_unit(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config((_stub_alicat_config(),))
+        _open_pool_sync(controller, cfg)
+        card = AlicatCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        assert card._setpoint_spin is not None
+        card._setpoint_spin.setValue(3.0)
+        _click(card, "Set")
+        assert _adapter_for(controller, "purge_mfc").commands_received[0].payload == {"value": 3.0}
+
+    def test_refused_set_re_reads_the_device(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # A refusal usually means the card was out of date — here the unit
+        # changed on the front panel — so the card re-reads either way.
+        from capa.core.errors import AdapterError
+        from capa.devices.alicat import AlicatStateSnapshot
+
+        cfg = _make_config((_stub_alicat_config(setpoint=5.0, setpoint_unit="SLPM"),))
+        _open_pool_sync(controller, cfg)
+        card = AlicatCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        adapter = _adapter_for(controller, "purge_mfc")
+        card.apply_snapshot(adapter.state)
+        adapter.state = AlicatStateSnapshot(gas="Air", setpoint=5.0, setpoint_unit="SCCM")
+
+        async def _refuse(cmd: Any) -> Any:
+            raise AdapterError("setpoint unit doesn't match", device="purge_mfc")
+
+        monkeypatch.setattr(adapter, "command", _refuse)
+        _click(card, "Set")
+        assert "failed" in card._status_label.text()
+        assert card._setpoint_unit_label is not None
+        assert card._setpoint_unit_label.text() == "SCCM"
 
     def test_destructive_dispatch_with_confirm_yes_proceeds(
         self,
@@ -370,6 +499,320 @@ class TestAlicatCard:
         assert cmd.kind == "hold_valves_closed"
 
         _close_pool_sync(controller)
+
+    def test_gas_combo_shows_no_gas_until_read(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        # A preset first entry used to read as the device's active gas.
+        card = AlicatCard(
+            spec=_stub_alicat_config(),
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        assert card._gas_combo is not None
+        assert card._gas_combo.count() == 0
+        assert card._gas_combo.currentText() == ""
+
+    def test_set_gas_without_a_gas_does_not_dispatch(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config((_stub_alicat_config(),))
+        _open_pool_sync(controller, cfg)
+        card = AlicatCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        set_btn = next(b for b in card.findChildren(QPushButton) if b.text() == "Set (session)")
+        set_btn.click()
+        assert "pick or type a gas" in card._status_label.text()
+        assert _adapter_for(controller, "purge_mfc").commands_received == []
+
+    def test_apply_snapshot_selects_active_gas_not_first_listed(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        from capa.devices.alicat import AlicatStateSnapshot
+
+        card = AlicatCard(
+            spec=_stub_alicat_config(),
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        card.apply_snapshot(
+            AlicatStateSnapshot(
+                gas="Air",
+                gas_list=("N2", "Air", "Ar"),
+                setpoint=12.5,
+                setpoint_unit="SLPM",
+            )
+        )
+        assert card._gas_combo is not None
+        assert card._gas_combo.currentText() == "Air"
+        assert [card._gas_combo.itemText(i) for i in range(3)] == ["N2", "Air", "Ar"]
+        assert card._setpoint_spin is not None
+        assert card._setpoint_spin.value() == 12.5
+        assert card._setpoint_unit_label is not None
+        assert card._setpoint_unit_label.text() == "SLPM"
+        assert "Gas: Air" in card._subtitle_label.text()
+        assert "Setpoint: 12.5 SLPM" in card._subtitle_label.text()
+
+        # A device that doesn't report its gas leaves none selected.
+        card.apply_snapshot(AlicatStateSnapshot(gas=None, gas_list=("N2", "Air")))
+        assert card._gas_combo.currentText() == ""
+
+
+class TestAlicatCardLoadOrder:
+    """The card as :class:`MainWindow` builds it: before the pool has
+    finished opening the adapter, then refreshed once it has."""
+
+    def test_reads_gas_and_setpoint_from_device(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config(
+            (
+                _stub_alicat_config(
+                    gas="Air",
+                    gas_list=["N2", "Air", "Ar"],
+                    setpoint=5.0,
+                    setpoint_unit="SLPM",
+                ),
+            )
+        )
+        dock = ManualControlDock(controller=controller, operator_provider=op_provider)
+        qtbot.addWidget(dock)
+        _load_like_main_window(controller, dock, cfg)
+
+        card = dock.card_for("purge_mfc")
+        assert isinstance(card, AlicatCard)
+        assert card._gas_combo is not None
+        assert card._gas_combo.currentText() == "Air"
+        assert card._setpoint_spin is not None
+        assert card._setpoint_spin.value() == 5.0
+        assert "Gas: Air" in card._subtitle_label.text()
+        # The readback that ran while the pool was opening stayed quiet.
+        assert card._status_label.text() == "idle"
+
+    def test_controller_keeps_setpoint_and_valve_sections(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        # The adapter only reports HAS_SETPOINT / HAS_VALVE_HOLD after
+        # open(); a card that trusted its pre-open flags dropped both.
+        cfg = _make_config(
+            (
+                _stub_alicat_config(
+                    capabilities=_ALICAT_METER_FLAGS,
+                    capabilities_after_open=_ALICAT_CONTROLLER_FLAGS,
+                ),
+            )
+        )
+        dock = ManualControlDock(controller=controller, operator_provider=op_provider)
+        qtbot.addWidget(dock)
+        _load_like_main_window(controller, dock, cfg)
+
+        card = dock.card_for("purge_mfc")
+        assert card is not None
+        titles = _section_titles(card)
+        assert "Setpoint" in titles
+        assert "Valves" in titles
+
+    def test_meter_loses_setpoint_and_valve_sections_once_open(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config((_stub_alicat_config(capabilities=_ALICAT_METER_FLAGS),))
+        dock = ManualControlDock(controller=controller, operator_provider=op_provider)
+        qtbot.addWidget(dock)
+        _load_like_main_window(controller, dock, cfg)
+
+        card = dock.card_for("purge_mfc")
+        assert isinstance(card, AlicatCard)
+        titles = _section_titles(card)
+        assert "Setpoint" not in titles
+        assert "Valves" not in titles
+        assert "Gas / fluid" in titles
+        # The rebuilt gas section still got the read-back.
+        assert card._gas_combo is not None
+        assert card._gas_combo.currentText() == "Air"
+
+    def test_balance_card_reads_settings_and_last_cal(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        # The balance card's read-back used to ask the dispatch client for
+        # ``read_last_cal_record``, which it doesn't have: nothing was read.
+        cfg = _make_config((_stub_device_config("balance.main", family="balance"),))
+        dock = ManualControlDock(controller=controller, operator_provider=op_provider)
+        qtbot.addWidget(dock)
+        _load_like_main_window(controller, dock, cfg)
+
+        card = dock.card_for("balance.main")
+        assert isinstance(card, BalanceCard)
+        assert card._param_combos["filter_mode"].currentText() == "stable"
+        assert card._param_combos["tare_behavior"].currentText() == "with stability"
+        assert "Last cal: 22.4 °C" in card._subtitle_label.text()
+        assert card._status_label.text() == "idle"
+
+
+class TestDispatchTargetWhileOpening:
+    def test_status_says_initializing_not_no_config(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config((_stub_device_config("balance.main", family="balance"),))
+        card = BalanceCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        assert _run_async(card._ensure_adapter()) is None
+        assert card._status_label.text() == "no config loaded — open a config first"
+
+        async def _go() -> None:
+            controller.set_active_config(cfg)
+            assert await card._ensure_adapter() is None
+            assert card._status_label.text() == "hardware initializing — manual writes disabled"
+            await _wait_hardware_ready(controller)
+            await _drain_tasks()
+
+        _run_async(_go())
+        # The hardware-ready transition clears the initializing message.
+        assert card._status_label.text() == "ready"
+
+
+class TestBalanceCardReadback:
+    def test_parameters_show_nothing_until_read(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        card = BalanceCard(
+            spec=_stub_device_config("balance.main", family="balance"),
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        assert set(card._param_combos) == {
+            "filter_mode",
+            "auto_zero",
+            "display_unit",
+            "tare_behavior",
+        }
+        for combo in card._param_combos.values():
+            assert combo.currentIndex() == -1
+        assert "Use any control to connect" not in card._subtitle_label.text()
+
+    def test_apply_with_nothing_selected_does_not_dispatch(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config((_stub_device_config("balance.main", family="balance"),))
+        _open_pool_sync(controller, cfg)
+        card = BalanceCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        _click(card, "Apply")
+        assert "first" in card._status_label.text()
+        assert _adapter_for(controller, "balance.main").commands_received == []
+
+    def test_apply_sends_selection_then_reads_back(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        cfg = _make_config((_stub_device_config("balance.main", family="balance"),))
+        _open_pool_sync(controller, cfg)
+        card = BalanceCard(
+            spec=cfg.hardware.devices[0],
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        combo = card._param_combos["tare_behavior"]
+        combo.setCurrentIndex(combo.findText("at stability"))
+        # Rows are built in order; the tare-behavior row's Apply is last.
+        buttons = [b for b in card.findChildren(QPushButton) if b.text() == "Apply"]
+
+        async def _go() -> None:
+            buttons[-1].click()
+            await _drain_tasks()
+
+        _run_async(_go())
+        adapter = _adapter_for(controller, "balance.main")
+        cmd = adapter.commands_received[0]
+        assert (cmd.kind, cmd.payload) == ("set_tare_behavior", {"mode": "at stability"})
+        # Re-read after the write: the stub still reports "with stability".
+        assert adapter.readback_count == 1
+        assert combo.currentText() == "with stability"
+
+    def test_apply_snapshot_selects_values_and_shows_last_cal(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+    ) -> None:
+        from capa.devices.sartorius import SartoriusStateSnapshot
+
+        card = BalanceCard(
+            spec=_stub_device_config("balance.main", family="balance"),
+            controller=controller,
+            operator_provider=op_provider,
+        )
+        qtbot.addWidget(card)
+        card.apply_snapshot(
+            SartoriusStateSnapshot(
+                filter_mode="very unstable",
+                auto_zero="off",
+                display_unit="lb",
+                tare_behavior="at stability",
+                cal_temperature_c=21.7,
+                cal_on_record=True,
+            )
+        )
+        assert {k: c.currentText() for k, c in card._param_combos.items()} == {
+            "filter_mode": "very unstable",
+            "auto_zero": "off",
+            # Not a preset choice: added so the read-back still shows.
+            "display_unit": "lb",
+            "tare_behavior": "at stability",
+        }
+        assert "Last cal: 21.7 °C" in card._subtitle_label.text()
+
+        card.apply_snapshot(SartoriusStateSnapshot(cal_temperature_c=21.0, cal_on_record=False))
+        for combo in card._param_combos.values():
+            assert combo.currentIndex() == -1
+        assert "Last cal: none since power-up" in card._subtitle_label.text()
 
 
 # ============================================================================
@@ -517,7 +960,7 @@ class TestHeaterCardSafeCool:
         """A 'Cancel' on the safe-cool confirm dialog must not dispatch.
 
         Watlow sim doesn't expose a ``commands_received`` log, so we
-        observe via the card's own ``schedule_dispatch`` — a clean
+        observe via the card's own ``schedule_dispatch_and_read_back`` — a clean
         seam since the test cares about whether the dispatch was
         scheduled, not what the sim adapter did afterwards.
         """
@@ -535,7 +978,7 @@ class TestHeaterCardSafeCool:
         dispatched: list[dict[str, Any]] = []
         monkeypatch.setattr(
             card,
-            "schedule_dispatch",
+            "schedule_dispatch_and_read_back",
             lambda **kw: dispatched.append(kw),
         )
         monkeypatch.setattr(
@@ -575,7 +1018,7 @@ class TestHeaterCardSafeCool:
         dispatched: list[dict[str, Any]] = []
         monkeypatch.setattr(
             card,
-            "schedule_dispatch",
+            "schedule_dispatch_and_read_back",
             lambda **kw: dispatched.append(kw),
         )
         monkeypatch.setattr(

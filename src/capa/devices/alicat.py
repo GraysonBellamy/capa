@@ -19,6 +19,8 @@ Architecture:
 * ``command`` enforces the authorization gate and dispatches
   :meth:`Device.setpoint`, :meth:`Device.gas`, :meth:`Device.tare_flow` /
   :meth:`Device.tare_absolute_pressure` / :meth:`Device.tare_gauge_pressure`.
+* ``read_state_snapshot`` reads the active gas, gas list and setpoint for
+  the manual-control card.
 
 For tests, an opt-in ``device_factory`` kwarg lets the adapter run against an
 in-process stub without touching a serial port.
@@ -26,21 +28,27 @@ in-process stub without touching a serial port.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import alicatlib
+import structlog
 from alicatlib import (
     AlicatError,
+    AlicatUnsupportedCommandError,
     OverflowPolicy,
     PollSourceAdapter,
+    Statistic,
     sample_to_row,
 )
 from alicatlib.devices.base import Device as AlicatDevice
 from alicatlib.devices.flow_controller import FlowController
 from alicatlib.devices.models import DeviceInfo, StpNtpMode, TimeUnit, TotalizerId
 from alicatlib.devices.pressure_controller import PressureController
+from alicatlib.registry import unit_registry
 from alicatlib.streaming.recorder import record as alicat_record
 from alicatlib.transport.base import SerialSettings
 from pydantic import BaseModel, ConfigDict, Field
@@ -76,6 +84,8 @@ if TYPE_CHECKING:
     from capa.devices.registry import AdapterDescriptor
 
 ADAPTER_ID: Final[str] = "alicat"
+
+_logger = structlog.get_logger("capa.devices.alicat")
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +142,28 @@ class AlicatAdapterParams(BaseModel):
         return OverflowPolicy.BLOCK if self.overflow == "block" else OverflowPolicy.DROP_NEWEST
 
 
+@dataclass(frozen=True, slots=True)
+class AlicatStateSnapshot:
+    """One-shot readback of the operator-facing state of an Alicat.
+
+    Built by :meth:`AlicatAdapter.read_state_snapshot` on the worker loop and
+    consumed by the manual-control card on the qasync loop. ``None`` / empty
+    fields mean the device did not report that value.
+    """
+
+    gas: str | None = None
+    """Short label of the active gas, e.g. ``"Air"``."""
+
+    gas_list: tuple[str, ...] = ()
+    """Labels of every gas the device offers, in wire-code order."""
+
+    setpoint: float | None = None
+    """Current setpoint in the device's engineering units. Controllers only."""
+
+    setpoint_unit: str | None = None
+    """Unit label the device reports for :attr:`setpoint`, e.g. ``"SLPM"``."""
+
+
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
@@ -165,7 +197,7 @@ class AlicatAdapter:
       ``AdapterRuntimeState`` helper.
     * **Command surface** — ``command`` (authorization gate),
       ``_dispatch_command``, typed wrappers, and the read-only
-      ``read_gas_list``.
+      ``read_gas_list`` / ``read_state_snapshot``.
     * **Vendor protocol** — alicatlib-specific code: device construction,
       sample → ``SourceRecord`` conversion, channel routing.
     """
@@ -459,7 +491,10 @@ class AlicatAdapter:
         Setpoint & gas:
 
         * ``"set_setpoint"`` / ``"set_flow_setpoint"`` — payload
-          ``{"value": float, "unit": str | None}``. Controller-only.
+          ``{"value": float, "unit": str | None}``. Controller-only. The
+          value is always in the device's engineering units (alicatlib does
+          not convert); a ``unit`` refuses the command unless it matches
+          the device's setpoint unit.
         * ``"set_gas"`` — payload ``{"gas": str | int, "save": bool = False}``.
 
         Tares:
@@ -511,9 +546,16 @@ class AlicatAdapter:
         if kind in ("set_setpoint", "set_flow_setpoint"):
             controller = self._require_controller(kind)
             value = float(cmd.payload["value"])
-            unit_arg = cmd.payload.get("unit")
-            state = await controller.setpoint(value=value, unit=unit_arg)
-            return f"set_setpoint value={value} -> {state.current!r}"
+            unit = cmd.payload.get("unit")
+            if unit is not None:
+                await self._require_setpoint_unit(controller, str(unit))
+            state = await controller.setpoint(value=value)
+            # ``current`` is the measured value of the controlled variable;
+            # ``requested`` is the setpoint the device took.
+            return (
+                f"set_setpoint value={value} -> setpoint={state.requested!r} "
+                f"{state.unit_label or ''}"
+            ).rstrip()
         if kind == "set_gas":
             gas = cmd.payload["gas"]
             gas_save = bool(cmd.payload.get("save", False))
@@ -669,6 +711,44 @@ class AlicatAdapter:
             )
         return self._device
 
+    async def _require_setpoint_unit(
+        self, controller: FlowController | PressureController, unit: str
+    ) -> None:
+        """Refuse a setpoint whose ``unit`` isn't the device's setpoint unit.
+
+        alicatlib writes the value in the device's engineering units and
+        discards any unit it's given, so a mismatch would silently apply
+        the number in a different unit. The device's unit comes from the
+        ``LS`` query; firmware without ``LS`` can't confirm it.
+        """
+        try:
+            requested = unit_registry.coerce(unit)
+        except AlicatError as exc:
+            raise AdapterError(
+                f"alicat {self.name!r}: unknown setpoint unit {unit!r}", device=self.name
+            ) from exc
+        try:
+            state = await controller.setpoint()
+        except AlicatUnsupportedCommandError as exc:
+            raise AdapterError(
+                f"alicat {self.name!r}: this firmware can't report its setpoint unit, "
+                f"so a setpoint in {unit!r} can't be checked; send it without a unit "
+                "to use the device's units",
+                device=self.name,
+            ) from exc
+        device_unit = state.unit
+        if device_unit is None and state.unit_label:
+            with contextlib.suppress(AlicatError):
+                device_unit = unit_registry.coerce(state.unit_label)
+        if device_unit != requested:
+            shown = state.unit_label or (device_unit.value if device_unit else "unknown")
+            raise AdapterError(
+                f"alicat {self.name!r}: setpoint unit {unit!r} doesn't match the "
+                f"device's setpoint unit {shown!r}; the device would apply the value "
+                f"in {shown!r}",
+                device=self.name,
+            )
+
     # Typed helpers — IDE-friendly parallels to ``.command()``.
     async def set_setpoint(
         self,
@@ -679,8 +759,10 @@ class AlicatAdapter:
         authorization_id: str | None = None,
         confirmed_by: str | None = None,
     ) -> CommandResult:
-        """Set the controller's flow setpoint to ``value`` (in ``unit`` if given).
+        """Set the controller's setpoint to ``value``, in the device's units.
 
+        alicatlib does not convert units: pass ``unit`` to have the command
+        refused unless it matches the device's setpoint unit.
         Controller-only; meters reject the command. Authorization rules
         match :meth:`command` — supply either ``authorization_id`` (run-armed)
         or ``confirmed_by`` (manual override).
@@ -907,6 +989,71 @@ class AlicatAdapter:
                 f"alicat {self.name!r} read_gas_list failed: {exc}", device=self.name
             ) from exc
 
+    async def read_state_snapshot(self) -> AlicatStateSnapshot | None:
+        """One-shot read of active gas, gas list and setpoint for the manual card.
+
+        Returns ``None`` when no device is open (card built before the pool
+        finished its initial open()). Individual reads that fail are captured
+        as empty fields rather than raising — one unsupported query shouldn't
+        hide the rest of the snapshot.
+
+        The setpoint comes from the ``LS`` query, which reports the unit with
+        it; it stays empty on meters and on firmware without ``LS``.
+
+        No authorization gate (read-only). alicatlib serializes I/O on the
+        port, so this won't interleave with the streaming recorder.
+        """
+        device = self._device
+        if device is None:
+            return None
+        gas = await self._read_active_gas(device)
+        gas_list: tuple[str, ...] = ()
+        try:
+            gases = await device.gas_list()
+            gas_list = tuple(label for _, label in sorted(gases.items()))
+        except AlicatError as exc:
+            _logger.debug("alicat.read_gas_list_failed", device=self.name, error=str(exc))
+        setpoint: float | None = None
+        setpoint_unit: str | None = None
+        if isinstance(device, FlowController | PressureController):
+            try:
+                state = await device.setpoint()
+                # LS reports ``current`` as the measured value of the
+                # controlled variable; ``requested`` is the setpoint.
+                setpoint = state.requested
+                setpoint_unit = state.unit_label
+            except AlicatError as exc:
+                _logger.debug("alicat.read_setpoint_failed", device=self.name, error=str(exc))
+        return AlicatStateSnapshot(
+            gas=gas,
+            gas_list=gas_list,
+            setpoint=setpoint,
+            setpoint_unit=setpoint_unit,
+        )
+
+    async def _read_active_gas(self, device: AlicatDevice) -> str | None:
+        """Label of the active gas, or ``None`` when the device won't say.
+
+        Prefers the ``GS`` query. Firmware older than 10v05 only has the
+        set-only ``G``, so there the label is read from the gas column of
+        one polled data frame instead.
+        """
+        try:
+            return (await device.gas()).label
+        except AlicatError as exc:
+            _logger.debug("alicat.query_gas_failed", device=self.name, error=str(exc))
+        try:
+            frame = await device.poll()
+        except AlicatError as exc:
+            _logger.debug("alicat.poll_failed", device=self.name, error=str(exc))
+            return None
+        # V8+ frames tag the gas column with the fluid-name statistic; V1_V7
+        # frames carry no stat codes, so fall back to the wire name.
+        label = frame.get_statistic(Statistic.FLUID_NAME)
+        if label is None:
+            label = frame.values.get("Gas")
+        return label if isinstance(label, str) and label else None
+
     # =====================================================================
     # SECTION 3 — Vendor protocol: alicatlib-specific device / sample / channels
     # =====================================================================
@@ -1068,6 +1215,7 @@ __all__ = [
     "DESCRIPTOR",
     "AlicatAdapter",
     "AlicatAdapterParams",
+    "AlicatStateSnapshot",
     "discover",
     "handshake",
 ]

@@ -102,7 +102,7 @@ What `stop()` actually does varies by adapter:
 | Adapter | What `stop()` does |
 |---|---|
 | Watlow | Requests the streaming loop to exit; the next batch arrival from `watlowlib.record` lets the stream observe the request and break out. **Does NOT drive the heater to a safe setpoint** — the controller keeps its last commanded setpoint. ([`watlow.py:414`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/watlow.py#L414)) |
-| Alicat | Same pattern — exit the streaming loop. Valves stay wherever the procedure left them. ([`alicat.py:300`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/alicat.py#L300)) |
+| Alicat | Same pattern — exit the streaming loop. Valves stay wherever the procedure left them. ([`alicat.py:335`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/alicat.py#L335)) |
 | Sartorius balance | Stream exit; no destructive write. ([`sartorius.py:292`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sartorius.py#L292)) |
 | NI-DAQ | Stop the streaming task. Read-only adapter; nothing to drive to safe. ([`nidaq.py:427`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/nidaq.py#L427)) |
 | Simulator adapters | Match their real-hardware counterparts for parity. |

@@ -21,8 +21,10 @@ from typing import Any, Final
 import structlog
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QGroupBox,
     QLabel,
+    QLayout,
     QMessageBox,
     QVBoxLayout,
     QWidget,
@@ -159,6 +161,15 @@ class DeviceCard(QGroupBox):
         self._action_widgets.append(widget)
         widget.setEnabled(self._manual_controls_enabled())
 
+    def clear_sections(self) -> None:
+        """Remove every section added via :meth:`add_section`.
+
+        For cards whose capability set is only final once the pool has
+        opened the adapter: they clear and rebuild from the live flagset.
+        """
+        self._action_widgets.clear()
+        _clear_layout(self._sections_layout)
+
     # ------------------------------------------------------------------ adapter handle
 
     async def _ensure_adapter(self) -> CommandTarget | None:
@@ -178,7 +189,12 @@ class DeviceCard(QGroupBox):
         """
         client = self._controller.manual_client
         if client is None:
-            self._set_status("no config loaded — open a config first", level="warn")
+            if self._controller.worker_pool is None:
+                self._set_status("no config loaded — open a config first", level="warn")
+            else:
+                # Config loaded but the pool is still opening; the
+                # hardware-ready transition clears this message.
+                self._set_status("hardware initializing — manual writes disabled", level="warn")
             return None
         # Return the client itself as the sentinel — callers (camera
         # subclasses) override this method when they need a real handle.
@@ -324,6 +340,25 @@ class DeviceCard(QGroupBox):
         if task is None:
             self._set_status("no event loop — UI not running?", level="error")
 
+    def schedule_dispatch_and_read_back(self, **dispatch: Any) -> None:
+        """:meth:`schedule_dispatch`, then :meth:`refresh_readback`, so the
+        card shows the state the device now holds.
+
+        Re-reads whether or not the command went through: a refused or
+        failed command often means the card was out of date (a unit changed
+        on the device's front panel, say), and a read is harmless otherwise.
+        """
+        if schedule_bg(self._dispatch_and_read_back(dispatch)) is None:
+            self._set_status("no event loop — UI not running?", level="error")
+
+    async def _dispatch_and_read_back(self, dispatch: dict[str, Any]) -> None:
+        await self.dispatch(**dispatch)
+        await self.refresh_readback()
+
+    async def refresh_readback(self) -> None:
+        """Re-read the device and show its state. Cards with a read-back
+        override this; the dock calls it on card build and pool open."""
+
     # ------------------------------------------------------------------ state surface
 
     def _engine_blocks_writes(self, state: RunUiState | None = None) -> bool:
@@ -398,6 +433,31 @@ class DeviceCard(QGroupBox):
         self._controller.emit_manual_event(event)
 
 
+def select_or_add(combo: QComboBox, text: str) -> None:
+    """Select ``text`` in ``combo`` (case-insensitive), appending it first
+    when the combo doesn't list it — a read-back value the card's preset
+    choices don't cover still shows."""
+    idx = combo.findText(text, Qt.MatchFlag.MatchFixedString)
+    if idx < 0:
+        combo.addItem(text)
+        idx = combo.count() - 1
+    combo.setCurrentIndex(idx)
+
+
+def _clear_layout(layout: QLayout) -> None:
+    """Empty ``layout``, deleting its widgets and nested layouts."""
+    while (item := layout.takeAt(0)) is not None:
+        widget = item.widget()
+        if widget is not None:
+            widget.hide()
+            widget.deleteLater()
+            continue
+        child = item.layout()
+        if child is not None:
+            _clear_layout(child)
+            child.deleteLater()
+
+
 def has_any_capability(capabilities: frozenset[Capability], flags: list[Capability]) -> bool:
     """Convenience: ``True`` if any of ``flags`` is in ``capabilities``.
 
@@ -408,4 +468,4 @@ def has_any_capability(capabilities: frozenset[Capability], flags: list[Capabili
     return any(f in capabilities for f in flags)
 
 
-__all__ = ["DeviceCard", "has_any_capability"]
+__all__ = ["DeviceCard", "has_any_capability", "select_or_add"]

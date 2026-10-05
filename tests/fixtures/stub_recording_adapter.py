@@ -13,7 +13,6 @@ import asyncio
 import time
 from collections.abc import AsyncIterable
 from datetime import UTC, datetime
-from typing import Any
 
 from capa.devices.adapter import (
     AdapterLifecycle,
@@ -111,18 +110,6 @@ class StubRecordingAdapter:
             t_mono_ns=time.monotonic_ns(),
             t_utc=datetime.now(UTC),
         )
-
-    # Optional read-back hooks used by BalanceCard / AlicatCard refresh.
-    async def read_last_cal_record(self) -> Any:
-        return _CalRecord()
-
-    async def read_gas_list(self) -> dict[int, str]:
-        return {0: "Air", 1: "N2", 2: "Ar"}
-
-
-class _CalRecord:
-    timestamp = datetime(2026, 4, 22, 14, 30, tzinfo=UTC)
-    result = "OK"
 
 
 DESCRIPTOR = AdapterDescriptor(

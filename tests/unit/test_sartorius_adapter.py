@@ -12,9 +12,16 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from sartoriuslib.devices.models import Reading
+from sartoriuslib.devices.models import CalRecord, Reading
 from sartoriuslib.errors import SartoriusError
 from sartoriuslib.protocol.base import ProtocolKind
+from sartoriuslib.registry.aliases import (
+    resolve_auto_zero,
+    resolve_filter_mode,
+    resolve_tare_behavior,
+    resolve_unit,
+)
+from sartoriuslib.registry.modes import AutoZeroMode, FilterMode, TareBehavior
 from sartoriuslib.registry.units import Sign, Unit
 
 from capa.channels.calibration import Identity
@@ -34,6 +41,7 @@ from capa.devices.sartorius import (
     ADAPTER_ID,
     SartoriusAdapter,
     SartoriusAdapterParams,
+    SartoriusStateSnapshot,
 )
 from tests._adapter_helpers import make_start_ctx
 
@@ -82,6 +90,20 @@ class StubBalance:
         self.save_menu_calls: list[dict[str, Any]] = []
         self.reload_menu_calls: list[dict[str, Any]] = []
         self.last_cal_record_calls = 0
+        # Menu state reported by the typed getters; a getter whose name is in
+        # ``raise_on_get`` raises instead (parameter missing on this family).
+        self.filter_mode = FilterMode.STABLE
+        self.auto_zero = AutoZeroMode.ON
+        self.display_unit = Unit.G
+        self.tare_behavior = TareBehavior.WITH_STABILITY
+        self.cal_record = CalRecord(
+            temperature_celsius=22.4,
+            signature=b"\x01" * 9,
+            counters=b"\x00\x02\x00",
+            padding=0,
+            raw=b"",
+        )
+        self.raise_on_get: set[str] = set()
 
         info = MagicMock()
         info.model = "MSE1203S"
@@ -161,9 +183,30 @@ class StubBalance:
     async def reload_menu(self, *, confirm: bool = False) -> None:
         self.reload_menu_calls.append({"confirm": confirm})
 
-    async def last_cal_record(self) -> Any:
+    async def last_cal_record(self) -> CalRecord:
         self.last_cal_record_calls += 1
-        return MagicMock(name="cal_record")
+        self._maybe_raise("last_cal_record")
+        return self.cal_record
+
+    async def get_filter_mode(self) -> FilterMode:
+        self._maybe_raise("filter_mode")
+        return self.filter_mode
+
+    async def get_auto_zero(self) -> AutoZeroMode:
+        self._maybe_raise("auto_zero")
+        return self.auto_zero
+
+    async def get_display_unit(self) -> Unit:
+        self._maybe_raise("display_unit")
+        return self.display_unit
+
+    async def get_tare_behavior(self) -> TareBehavior:
+        self._maybe_raise("tare_behavior")
+        return self.tare_behavior
+
+    def _maybe_raise(self, what: str) -> None:
+        if what in self.raise_on_get:
+            raise SartoriusError(f"{what} not supported")
 
     async def close(self) -> None:
         self.close_calls += 1
@@ -487,6 +530,90 @@ class TestReadOnlyHelpers:
         adapter = SartoriusAdapter(name="bal", port="/dev/null")
         with pytest.raises(AdapterError, match="requires open"):
             await adapter.read_last_cal_record()
+
+
+class TestReadStateSnapshot:
+    async def test_reports_menu_settings_and_last_cal(self) -> None:
+        adapter, _ = _make_adapter()
+        await adapter.open()
+        try:
+            assert await adapter.read_state_snapshot() == SartoriusStateSnapshot(
+                filter_mode="stable",
+                auto_zero="on",
+                display_unit="g",
+                tare_behavior="with stability",
+                cal_temperature_c=22.4,
+                cal_on_record=True,
+            )
+        finally:
+            await adapter.close()
+
+    async def test_unsupported_and_unknown_values_are_none(self) -> None:
+        adapter, stub = _make_adapter()
+        stub.raise_on_get = {"tare_behavior", "last_cal_record"}
+        stub.filter_mode = FilterMode.UNKNOWN
+        await adapter.open()
+        try:
+            snapshot = await adapter.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.filter_mode is None
+            assert snapshot.tare_behavior is None
+            assert snapshot.cal_temperature_c is None
+            assert snapshot.cal_on_record is None
+            # One failed read doesn't hide the rest.
+            assert snapshot.auto_zero == "on"
+            assert snapshot.display_unit == "g"
+        finally:
+            await adapter.close()
+
+    async def test_cold_boot_cal_record_is_not_on_record(self) -> None:
+        adapter, stub = _make_adapter()
+        stub.cal_record = CalRecord(
+            temperature_celsius=21.0,
+            signature=bytes(9),
+            counters=bytes(3),
+            padding=0,
+            raw=b"",
+        )
+        await adapter.open()
+        try:
+            snapshot = await adapter.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.cal_on_record is False
+        finally:
+            await adapter.close()
+
+    async def test_returns_none_before_open(self) -> None:
+        adapter = SartoriusAdapter(name="bal", port="/dev/null")
+        assert await adapter.read_state_snapshot() is None
+
+
+def test_balance_card_choices_resolve_and_match_snapshot_labels() -> None:
+    """Every value the balance card offers must be one sartoriuslib accepts,
+    and every mode the adapter can report must be one the card offers."""
+    from capa.devices.sartorius import _mode_label
+    from capa.ui.manual.cards.balance import (
+        AUTO_ZERO_MODES,
+        DISPLAY_UNITS,
+        FILTER_MODES,
+        TARE_BEHAVIORS,
+    )
+
+    for choices, resolve in (
+        (FILTER_MODES, resolve_filter_mode),
+        (AUTO_ZERO_MODES, resolve_auto_zero),
+        (DISPLAY_UNITS, resolve_unit),
+        (TARE_BEHAVIORS, resolve_tare_behavior),
+    ):
+        for choice in choices:
+            resolve(choice)
+    for choices, enum in (
+        (FILTER_MODES, FilterMode),
+        (AUTO_ZERO_MODES, AutoZeroMode),
+        (TARE_BEHAVIORS, TareBehavior),
+    ):
+        reported = {_mode_label(member) for member in enum} - {None}
+        assert reported == set(choices)
 
 
 class TestUnknownCommandKind:
