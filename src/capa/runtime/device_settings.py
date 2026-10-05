@@ -245,6 +245,10 @@ class SettingsReport:
     plan_after: SettingsPlan
     """The plan as it stands now: devices that were sent changes are read
     again; the rest carry over unchanged."""
+    moved: tuple[tuple[str, SettingChange], ...] = ()
+    """``(device, change)`` for each setting that matched before the apply
+    and differs after it: one of the sent changes moved it (a webcam's zoom
+    shifting its pan, say)."""
 
     @property
     def ok(self) -> bool:
@@ -272,6 +276,7 @@ async def apply_device_settings(
     authorization = Authorization(operator_id=operator_id, run_id="manual")
     results: list[ChangeResult] = []
     after: list[DevicePlan] = []
+    moved: list[tuple[str, SettingChange]] = []
     for device in plan.devices:
         picked = [
             change
@@ -309,6 +314,12 @@ async def apply_device_settings(
             device.name, device.spec, device.desired, readback, read_timeout_s
         )
         after.append(replanned)
+        differed = {change.field for change in device.changes}
+        moved += [
+            (device.name, change)
+            for change in replanned.changes
+            if change.field not in differed and change.current is not None
+        ]
         remaining = {change.field: change for change in replanned.changes}
         device_results = [*failed]
         for change, detail in sent:
@@ -318,7 +329,11 @@ async def apply_device_settings(
             results.append(change_result)
             if on_progress is not None:
                 on_progress(change_result)
-    return SettingsReport(results=tuple(results), plan_after=SettingsPlan(devices=tuple(after)))
+    return SettingsReport(
+        results=tuple(results),
+        plan_after=SettingsPlan(devices=tuple(after)),
+        moved=tuple(moved),
+    )
 
 
 def _verify(

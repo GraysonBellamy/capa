@@ -82,6 +82,7 @@ from capa.devices.camera.base import (
     CameraHealth,
     CameraSpec,
     IrCameraStateSnapshot,
+    WebcamStateSnapshot,
 )
 from capa.devices.camera.metadata import WebcamMetadata
 from capa.devices.records import DeviceSnapshot
@@ -638,21 +639,22 @@ class CameraDeviceAdapter:
             return None
         return result
 
-    async def read_state_snapshot(self) -> IrCameraStateSnapshot | None:
-        """Forward the camera's ``read_state_snapshot()`` for manual cards.
+    async def read_state_snapshot(self) -> IrCameraStateSnapshot | WebcamStateSnapshot | None:
+        """Forward the camera's ``read_state_snapshot()`` for manual cards
+        and ``device_settings``.
 
         The worker's :meth:`~capa.runtime.worker.Worker.device_readback`
         probes the hosted adapter for this method, so the wrapper must
         carry it for a camera's read-back to reach its card. Same
         capability-style probe as :meth:`camera_metadata`: IR cameras (the
-        FLIR adapter and its sim) return an :class:`IrCameraStateSnapshot`;
-        others return ``None``.
+        FLIR adapter and its sim) return an :class:`IrCameraStateSnapshot`,
+        webcams a :class:`WebcamStateSnapshot`; anything else is ``None``.
         """
         probe = getattr(self._camera, "read_state_snapshot", None)
         if not callable(probe):
             return None
         result = await probe()
-        if not isinstance(result, IrCameraStateSnapshot):
+        if not isinstance(result, IrCameraStateSnapshot | WebcamStateSnapshot):
             return None
         return result
 

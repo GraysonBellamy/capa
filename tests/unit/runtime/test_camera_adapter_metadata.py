@@ -1,8 +1,10 @@
-""":class:`CameraDeviceAdapter.camera_metadata` unit tests.
+""":class:`CameraDeviceAdapter.camera_metadata` and
+:meth:`~CameraDeviceAdapter.read_state_snapshot` unit tests.
 
 Exercises the capability-style probe forwarding: cameras that expose
 ``snapshot_metadata`` return a typed :class:`WebcamMetadata`; cameras
 that don't (FLIR sim today, plus any future IR adapter) return ``None``.
+A webcam's :class:`WebcamStateSnapshot` read-back is forwarded likewise.
 The wrapper itself never reads camera attributes directly — it's all
 ``getattr``-probed so a new camera adapter doesn't have to touch this
 file to opt in.
@@ -17,8 +19,10 @@ import pytest
 from capa.devices.camera.base import (
     CameraCapability,
     CameraSpec,
+    WebcamControlState,
+    WebcamStateSnapshot,
 )
-from capa.devices.camera.metadata import UvcRangeMetadata, WebcamMetadata
+from capa.devices.camera.metadata import WebcamMetadata
 from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.runtime.camera_adapter import CameraDeviceAdapter, _ClockProxy, make_camera_adapter
 
@@ -74,17 +78,6 @@ def _sample_metadata() -> WebcamMetadata:
         supported_resolutions=((640, 480), (1280, 720)),
         resolution_hint=(1280, 720),
         resolution_fps_caps=MappingProxyType({(640, 480): 30.0, (1280, 720): 30.0}),
-        uvc_ranges=MappingProxyType(
-            {
-                "set_exposure": UvcRangeMetadata(
-                    minimum=-13,
-                    maximum=-1,
-                    step=1,
-                    default=-6,
-                    current=-6,
-                )
-            }
-        ),
     )
 
 
@@ -128,3 +121,39 @@ class TestCameraMetadata:
             clock_proxy=_ClockProxy(),
         )
         assert wrapper.camera_metadata() is None
+
+
+class _ReadingWebcam:
+    """Stand-in whose ``read_state_snapshot`` returns whatever it's given."""
+
+    spec = _vis_spec()
+    kind = "visible"
+    resource_id = "fake:reading"
+    capabilities: frozenset[CameraCapability] = frozenset()
+
+    def __init__(self, snapshot: object) -> None:
+        self._snapshot = snapshot
+
+    async def read_state_snapshot(self) -> object:
+        return self._snapshot
+
+
+class TestReadStateSnapshot:
+    async def test_forwards_a_webcam_snapshot(self) -> None:
+        snapshot = WebcamStateSnapshot(
+            controls={"zoom": WebcamControlState(value=265, minimum=100, maximum=500, step=1)}
+        )
+        wrapper = CameraDeviceAdapter(
+            camera=_ReadingWebcam(snapshot),  # type: ignore[arg-type]
+            spec=_vis_spec(),
+            clock_proxy=_ClockProxy(),
+        )
+        assert await wrapper.read_state_snapshot() is snapshot
+
+    async def test_drops_a_read_back_of_another_type(self) -> None:
+        wrapper = CameraDeviceAdapter(
+            camera=_ReadingWebcam({"zoom": 265}),  # type: ignore[arg-type]
+            spec=_vis_spec(),
+            clock_proxy=_ClockProxy(),
+        )
+        assert await wrapper.read_state_snapshot() is None

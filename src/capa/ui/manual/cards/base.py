@@ -96,6 +96,9 @@ class DeviceCard(QGroupBox):
         # Track every section widget so we can disable them en masse when
         # the engine is in a write-blocked state.
         self._action_widgets: list[QWidget] = []
+        # Fields changed since their last Apply (see :meth:`_apply_field`):
+        # a read-back fills every other field and leaves these alone.
+        self._unapplied_edits: set[str] = set()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -379,6 +382,20 @@ class DeviceCard(QGroupBox):
 
     async def _dispatch_and_read_back(self, dispatch: dict[str, Any]) -> None:
         await self.dispatch(**dispatch)
+        await self.refresh_readback()
+
+    def _apply_field(self, field: str, **dispatch: Any) -> None:
+        """Send the command for ``field``, then re-read the device."""
+        if schedule_bg(self._apply_field_and_read_back(field, dispatch)) is None:
+            self._set_status("no event loop — UI not running?", level="error")
+
+    async def _apply_field_and_read_back(self, field: str, dispatch: dict[str, Any]) -> None:
+        """Once the command has reached the device, accepted or not, the
+        field shows what the device holds again. One that never went out —
+        a declined confirmation, no operator id — keeps the operator's
+        change."""
+        if await self.dispatch(**dispatch) is not None:
+            self._unapplied_edits.discard(field)
         await self.refresh_readback()
 
     async def refresh_readback(self) -> None:

@@ -41,6 +41,9 @@ device_settings:
   ir_cam0:
     temperature_range: {min_c: 0.0, max_c: 650.0}
     emissivity: 0.95
+  visible_cam0:
+    zoom: 265
+    tilt: 5
 
 calibration_set:
   name: default

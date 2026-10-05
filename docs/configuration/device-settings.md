@@ -1,5 +1,5 @@
 ---
-description: Declare device settings (Alicat gas, balance stability, IR camera range and radiometric parameters) in an experiment and have capa apply them when the config loads.
+description: Declare device settings (Alicat gas, balance stability, IR camera range and radiometric parameters, webcam zoom, pan, tilt, focus and exposure) in an experiment and have capa apply them when the config loads.
 ---
 
 # Device settings
@@ -28,6 +28,11 @@ device_settings:
     temperature_range: {min_c: 0.0, max_c: 650.0}
     emissivity: 0.95
     distance_m: 0.5
+  visible_cam0:               # USB webcam
+    zoom: 265
+    tilt: 3600
+    auto_exposure: false
+    exposure: -6
 ```
 
 Keys are device or camera names from the hardware profile. Every field
@@ -80,8 +85,42 @@ Written to the balance's runtime menu; never saved with `save_menu`.
 The range is applied first, then the radiometric parameters, then the
 auto-NUC interval.
 
-Other adapters (Watlow, Fuji, NI-DAQ, webcams) have no declarable
-settings; naming one under `device_settings:` is a validation error.
+### USB webcams (`capa.devices.camera.webcam`)
+
+Windows only: the camera's controls are reached through duvc-ctl. Every
+value is an integer in the camera's own units.
+
+| Field | Values | Notes |
+|---|---|---|
+| `zoom` | camera range | Shown as "Optical zoom". Applied before pan and tilt. |
+| `digital_zoom` | camera range | |
+| `pan`, `tilt` | camera range | Arc-seconds on most cameras (3600 = 1°); 0 is centered. |
+| `auto_focus` | `true` / `false` | |
+| `focus` | camera range | Turns auto focus off. |
+| `auto_exposure` | `true` / `false` | |
+| `exposure` | camera range | UVC log2 seconds (−6 ≈ 1/64 s). Turns auto exposure off. |
+| `auto_white_balance` | `true` / `false` | |
+| `white_balance` | K | Turns auto white balance off. |
+| `brightness`, `contrast`, `saturation`, `sharpness`, `gamma`, `hue`, `gain`, `backlight_compensation` | camera range | |
+
+- **Range and step.** A value outside the range the camera reports, or
+  off its step (pan and tilt often move in steps of 3600), is listed as
+  a setting that can't be applied, with the nearest values it takes.
+  The manual card shows each control's range.
+- **Auto modes.** A control the camera is driving itself shows as
+  `auto` in the dialog. Declaring `auto_exposure: true` together with
+  `exposure` is a validation error (`device_settings.value_error`); the
+  same goes for focus and white balance.
+- **Order.** Zoom is applied before pan and tilt, because digital-PTZ
+  cameras such as the C930e limit pan and tilt to the zoomed view. Each
+  auto toggle is applied before its value.
+- **Other platforms.** Off Windows, or when duvc-ctl can't find the
+  camera (check `model_hint` or `serial` in the hardware profile), every
+  declared webcam setting is listed as unappliable with the reason. A
+  headless run is aborted.
+
+Other adapters (Watlow, Fuji, NI-DAQ) have no declarable settings;
+naming one under `device_settings:` is a validation error.
 
 ## On load, in the GUI
 
@@ -120,8 +159,10 @@ reports at that moment is recorded in the bundle.
 `capa run` applies the declared settings right after the devices open,
 without asking — launching the run with this config is the
 confirmation, and the commands are issued and confirmed as the config's
-`operator.id`. If any setting can't be applied or doesn't take, the run
-is aborted before a bundle is created, with an exit reason such as:
+`operator.id`. If any setting can't be applied or doesn't take, or a
+setting that already matched was moved by another (a webcam's zoom
+shifting its tilt, say), the run is aborted before a bundle is created,
+with an exit reason such as:
 
 ```text
 device_settings: purge_mfc gas: the device doesn't offer SF6
@@ -133,7 +174,7 @@ device_settings: purge_mfc gas: the device doesn't offer SF6
 |---|---|---|
 | `device_settings.unknown_device` | error | The key isn't a device or camera in the hardware profile. |
 | `device_settings.unsupported_adapter` | error | That device's adapter has no declarable settings. |
-| `device_settings.<pydantic type>` | error | A field is unknown or its value is invalid, e.g. `device_settings.extra_forbidden`, `device_settings.literal_error`. |
+| `device_settings.<pydantic type>` | error | A field is unknown or its value is invalid, e.g. `device_settings.extra_forbidden`, `device_settings.literal_error`, `device_settings.int_type` (a webcam value that isn't a whole number), `device_settings.value_error` (a webcam auto toggle declared on together with its value). |
 | `capa_profile.purge_gas_mismatch` | warning | Under the CAPA profile, the purge MFC's declared gas differs from `atmosphere.purge.species`. Skipped when the species isn't a gas name the MFC knows (a mixture such as `5% O2/N2`). |
 
 Values that depend on the device itself — whether the MFC offers the

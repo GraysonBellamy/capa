@@ -128,7 +128,7 @@ class TestPlan:
     async def test_bad_entries_become_errors_not_exceptions(
         self, config: ExperimentConfig, rig: _Rig
     ) -> None:
-        settings = {
+        settings: dict[str, dict[str, Any]] = {
             "purge_mcf": {"gas": "N2"},
             "heater": {"setpoint": 600},
             "purge_mfc": {"gas": "N3"},
@@ -206,6 +206,38 @@ class TestApply:
         # The range goes before the radiometric parameters.
         ir_kinds = [cmd.kind for name, cmd in rig.sent if name == "ir_cam0"]
         assert ir_kinds == ["set_temperature_range", "set_distance_m"]
+
+    async def test_reports_a_setting_another_change_moved(
+        self, config: ExperimentConfig, rig: _Rig
+    ) -> None:
+        """Emissivity matched before; switching the range knocks it off."""
+
+        async def dispatch(name: str, cmd: DeviceCommand) -> CommandResult:
+            result = await rig.dispatch(name, cmd)
+            if cmd.kind == "set_temperature_range":
+                knock = cmd.model_copy(
+                    update={"kind": "set_emissivity", "payload": {"emissivity": 0.5}}
+                )
+                await rig.devices[name].command(knock)
+            return result
+
+        plan = await plan_device_settings(config, rig.readback)
+        report = await apply_device_settings(
+            plan, None, dispatch=dispatch, readback=rig.readback, operator_id="abr"
+        )
+        assert report.ok  # every sent change took
+        assert [(device, c.field, c.current, c.desired) for device, c in report.moved] == [
+            ("ir_cam0", "emissivity", "0.5", "0.95")
+        ]
+
+    async def test_nothing_moved_when_only_sent_settings_change(
+        self, config: ExperimentConfig, rig: _Rig
+    ) -> None:
+        plan = await plan_device_settings(config, rig.readback)
+        report = await apply_device_settings(
+            plan, None, dispatch=rig.dispatch, readback=rig.readback, operator_id="abr"
+        )
+        assert report.moved == ()
 
     async def test_sends_only_the_selected_changes(
         self, config: ExperimentConfig, rig: _Rig

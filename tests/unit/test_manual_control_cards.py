@@ -1283,7 +1283,7 @@ class TestWebcamCard:
         assert dock.card_for("vis0") is not None
         assert isinstance(dock.card_for("vis0"), WebcamCard)
 
-    def test_apply_metadata_rewrites_combo_and_spinboxes(
+    def test_apply_metadata_rewrites_combo_and_fps_cap(
         self,
         qtbot: Any,
         controller: RunController,
@@ -1292,11 +1292,11 @@ class TestWebcamCard:
         """After ``_apply_metadata`` runs (driven on the UI loop by the
         :meth:`ManualClient.camera_metadata` round-trip), the resolution
         combo reflects the camera-reported list, the matching entry is
-        selected from ``resolution_hint``, and each spinbox picks up the
-        snapshot range + current value (or the default when no current
-        is cached).
+        selected from ``resolution_hint``, and the fps spinbox is capped for
+        the selected resolution. UVC controls come from the read-back
+        (``tests/unit/test_webcam_card.py``).
         """
-        from capa.devices.camera.metadata import UvcRangeMetadata, WebcamMetadata
+        from capa.devices.camera.metadata import WebcamMetadata
         from capa.ui.manual.cards.webcam import WebcamCard
 
         card = WebcamCard(
@@ -1314,30 +1314,6 @@ class TestWebcamCard:
                 (1280, 720): 30.0,
                 (1920, 1080): 15.0,
             },
-            uvc_ranges={
-                "set_exposure": UvcRangeMetadata(
-                    minimum=-11,
-                    maximum=-2,
-                    step=1,
-                    default=-6,
-                    current=-5,
-                ),
-                # Focus has no cached current → default applies
-                "set_focus": UvcRangeMetadata(
-                    minimum=0,
-                    maximum=250,
-                    step=5,
-                    default=100,
-                    current=None,
-                ),
-                "set_brightness": UvcRangeMetadata(
-                    minimum=0,
-                    maximum=255,
-                    step=1,
-                    default=128,
-                    current=200,
-                ),
-            },
         )
 
         card._apply_metadata(metadata)
@@ -1346,26 +1322,6 @@ class TestWebcamCard:
         assert combo is not None
         assert combo.count() == 3
         assert combo.itemData(combo.currentIndex()) == (1280, 720)
-
-        exposure_spin = card._spinboxes["set_exposure"]
-        assert exposure_spin.minimum() == -11
-        assert exposure_spin.maximum() == -2
-        assert exposure_spin.value() == -5  # cached current wins
-
-        focus_spin = card._spinboxes["set_focus"]
-        assert focus_spin.minimum() == 0
-        assert focus_spin.maximum() == 250
-        assert focus_spin.singleStep() == 5
-        assert focus_spin.value() == 100  # falls back to default
-
-        brightness_spin = card._spinboxes["set_brightness"]
-        assert brightness_spin.value() == 200
-
-        # Spinbox for a property with no cached range is left at the
-        # safe wide default (no narrowing happened).
-        zoom_spin = card._spinboxes["set_zoom"]
-        assert zoom_spin.minimum() == -32768
-        assert zoom_spin.maximum() == 32767
 
         # FPS spinbox is capped to the per-resolution cap for the
         # currently-selected resolution (1280×720 → 30 fps in the stub).

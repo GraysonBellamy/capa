@@ -293,7 +293,8 @@ runtime:
 
 Settings to apply to devices and cameras when the config loads — the
 Alicat's gas, the balance's stability settings, the IR camera's range
-and radiometric parameters — keyed by device or camera name:
+and radiometric parameters, the webcam's zoom, pan, tilt, focus and
+exposure — keyed by device or camera name:
 
 ```yaml
 device_settings:
@@ -301,6 +302,8 @@ device_settings:
     gas: N2
   ir_cam0:
     temperature_range: {min_c: 0.0, max_c: 650.0}
+  visible_cam0:
+    zoom: 265
 ```
 
 Each entry is validated against that adapter's settings model. On load

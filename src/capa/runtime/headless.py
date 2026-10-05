@@ -426,6 +426,10 @@ async def _apply_device_settings(
         for r in report.results
         if not r.ok
     ]
+    failures += [
+        f"{device} {change.label.lower()}: moved to {change.current} by the other settings"
+        for device, change in report.moved
+    ]
     return ("; ".join(failures) if failures else None), report.plan_after.observed()
 
 

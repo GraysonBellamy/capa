@@ -95,7 +95,7 @@ The six card classes that ship today:
 | **AlicatCard** | Alicat MFCs and pressure devices | Flow setpoint, gas select, valve hold, totalizer reset; shows the device's active gas and setpoint |
 | **FujiCard** | Fuji ZP-series gas analyzers | Response time, range and range method, output hold, calibration-gas setting, a guarded zero or span with a live steadiness readout |
 | **FlirCard** | FLIR IR cameras | Temperature range (picked from the ranges the camera reports, in °C), NUC trigger, auto-NUC interval, radiometric parameters, palettes (choices read from the camera); every field shows the camera's current setting |
-| **WebcamCard** | USB / built-in cameras | Resolution, framerate, codec |
+| **WebcamCard** | USB / built-in cameras | Resolution, framerate; zoom, pan, tilt, focus, exposure, white balance and image adjustments, read live from the camera (Windows) |
 
 ---
 
@@ -182,7 +182,7 @@ cancel at its confirmation leaves it changed. These refresh:
 
 Settings you'd otherwise pick on these cards every time — the MFC's gas,
 the balance's stability settings, the IR camera's range and radiometric
-values — can be declared in the experiment under
+values, the webcam's zoom, pan, tilt, focus and exposure — can be declared in the experiment under
 [`device_settings:`](../configuration/device-settings.md). When the
 config loads, capa compares the devices with the declaration and, if
 anything differs, lists it in a **Device settings** dialog; Apply sends

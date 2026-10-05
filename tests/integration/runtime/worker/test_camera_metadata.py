@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Callable
 import pytest
 
 from capa.devices.adapter import Capability
-from capa.devices.camera.metadata import UvcRangeMetadata, WebcamMetadata
+from capa.devices.camera.metadata import WebcamMetadata
 from capa.runtime.errors import UnknownDeviceError
 from capa.runtime.runner import InlineRunner, ThreadedRunner, WorkerRunner
 from capa.runtime.worker import Worker
@@ -88,15 +88,6 @@ def _sample_metadata() -> WebcamMetadata:
     return WebcamMetadata(
         supported_resolutions=((640, 480),),
         resolution_hint=(640, 480),
-        uvc_ranges={
-            "set_exposure": UvcRangeMetadata(
-                minimum=-13,
-                maximum=-1,
-                step=1,
-                default=-6,
-                current=-5,
-            ),
-        },
     )
 
 

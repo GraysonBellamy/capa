@@ -124,8 +124,6 @@ class _FakeDeviceCapabilities:
         video_supported: list[str],
         video_ranges: dict[str, _FakePropRange] | None = None,
         camera_ranges: dict[str, _FakePropRange] | None = None,
-        camera_currents: dict[str, int] | None = None,
-        video_currents: dict[str, int] | None = None,
     ) -> None:
         # supported_camera_properties / supported_video_properties return
         # "duvc enum values" — we use strings since the wrapper only reads
@@ -134,8 +132,6 @@ class _FakeDeviceCapabilities:
         self._video_supported = [_FakeProp(n) for n in video_supported]
         self._camera_ranges = camera_ranges or {}
         self._video_ranges = video_ranges or {}
-        self._camera_currents = camera_currents or {}
-        self._video_currents = video_currents or {}
 
     def supported_camera_properties(self) -> list[Any]:
         return self._camera_supported
@@ -154,31 +150,19 @@ class _FakeDeviceCapabilities:
     def get_camera_capability(self, prop_enum: Any) -> _FakePropertyCapability | None:
         key = self._prop_key(prop_enum)
         rng = self._camera_ranges.get(key)
-        current_val = self._camera_currents.get(key)
-        current = (
-            _FakePropSetting(current_val, _FakeCamMode.Manual)
-            if current_val is not None
-            else (_FakePropSetting(0, _FakeCamMode.Manual) if rng else None)
-        )
         return _FakePropertyCapability(
             supported=rng is not None,
             range=rng,
-            current=current,
+            current=_FakePropSetting(0, _FakeCamMode.Manual) if rng else None,
         )
 
     def get_video_capability(self, prop_enum: Any) -> _FakePropertyCapability | None:
         key = self._prop_key(prop_enum)
         rng = self._video_ranges.get(key)
-        current_val = self._video_currents.get(key)
-        current = (
-            _FakePropSetting(current_val, _FakeCamMode.Manual)
-            if current_val is not None
-            else (_FakePropSetting(0, _FakeCamMode.Manual) if rng else None)
-        )
         return _FakePropertyCapability(
             supported=rng is not None,
             range=rng,
-            current=current,
+            current=_FakePropSetting(0, _FakeCamMode.Manual) if rng else None,
         )
 
 
@@ -451,13 +435,12 @@ class TestVerbTables:
         )
 
 
-class TestCachedRangesAndCurrents:
-    """``probe_capabilities`` populates per-property range + current caches
-    off the same ``DeviceCapabilities`` snapshot so the UI can build spinbox
-    bounds and seed initial values without paying a per-property DirectShow
-    round-trip on every refresh."""
+class TestCachedRanges:
+    """``probe_capabilities`` caches each property's range off the same
+    ``DeviceCapabilities`` snapshot, so a read-back doesn't pay a
+    per-property DirectShow round-trip for something the device fixes."""
 
-    async def test_camera_property_range_and_current_cached(self, fake_duvc: Any) -> None:
+    async def test_camera_property_range_cached(self, fake_duvc: Any) -> None:
         from capa.devices.camera._uvc import UvcController, UvcGroup, UvcProperty
 
         device = _FakeDevice(name="X", path="p")
@@ -470,7 +453,6 @@ class TestCachedRangesAndCurrents:
                 camera_ranges={
                     "Focus": _FakePropRange(0, 250, 5, 100, _FakeCamMode.Manual),
                 },
-                camera_currents={"Focus": 175},
             )
         )
 
@@ -484,7 +466,6 @@ class TestCachedRangesAndCurrents:
         assert rng.maximum == 250
         assert rng.step == 5
         assert rng.default == 100
-        assert ctrl.get_cached_current(UvcProperty("Focus", UvcGroup.CAMERA)) == 175
 
     async def test_video_property_range_cached(self, fake_duvc: Any) -> None:
         from capa.devices.camera._uvc import UvcController, UvcGroup, UvcProperty
@@ -499,7 +480,6 @@ class TestCachedRangesAndCurrents:
                 video_ranges={
                     "Brightness": _FakePropRange(0, 255, 1, 128, _FakeCamMode.Manual),
                 },
-                video_currents={"Brightness": 200},
             )
         )
 
@@ -510,7 +490,6 @@ class TestCachedRangesAndCurrents:
         rng = ctrl.get_cached_range(UvcProperty("Brightness", UvcGroup.VIDEO))
         assert rng is not None
         assert (rng.minimum, rng.maximum, rng.step, rng.default) == (0, 255, 1, 128)
-        assert ctrl.get_cached_current(UvcProperty("Brightness", UvcGroup.VIDEO)) == 200
 
     async def test_unprobed_property_returns_none(self, fake_duvc: Any) -> None:
         from capa.devices.camera._uvc import UvcController, UvcGroup, UvcProperty
@@ -527,4 +506,71 @@ class TestCachedRangesAndCurrents:
         await ctrl.probe_capabilities()
 
         assert ctrl.get_cached_range(UvcProperty("Zoom", UvcGroup.CAMERA)) is None
-        assert ctrl.get_cached_current(UvcProperty("Zoom", UvcGroup.CAMERA)) is None
+
+
+class TestLiveRead:
+    """``get`` reads a property's value and mode from the camera itself."""
+
+    async def _controller(self, fake_duvc: Any, cam: _FakeCamera) -> Any:
+        from capa.devices.camera._uvc import UvcController
+
+        fake_duvc.list_devices = lambda: [cam.device]
+        fake_duvc.open_camera = lambda d: _FakeResult(value=cam)
+        ctrl = await UvcController.find(model_hint=None, serial=None)
+        assert ctrl is not None
+        return ctrl
+
+    async def test_camera_property_value_and_auto_mode(self, fake_duvc: Any) -> None:
+        from capa.devices.camera._uvc import UvcGroup, UvcProperty, UvcPropertyState
+
+        cam = _FakeCamera(
+            _FakeDevice(name="X", path="p"),
+            camera_props={"Exposure": _FakePropSetting(-6, _FakeCamMode.Auto)},
+        )
+        ctrl = await self._controller(fake_duvc, cam)
+        state = await ctrl.get(UvcProperty("Exposure", UvcGroup.CAMERA))
+        assert state == UvcPropertyState(value=-6, auto=True)
+
+    async def test_video_property_value_and_manual_mode(self, fake_duvc: Any) -> None:
+        from capa.devices.camera._uvc import UvcGroup, UvcProperty, UvcPropertyState
+
+        cam = _FakeCamera(
+            _FakeDevice(name="X", path="p"),
+            video_props={"Brightness": _FakePropSetting(200, _FakeCamMode.Manual)},
+        )
+        ctrl = await self._controller(fake_duvc, cam)
+        state = await ctrl.get(UvcProperty("Brightness", UvcGroup.VIDEO))
+        assert state == UvcPropertyState(value=200, auto=False)
+
+    async def test_a_raising_read_is_none(self, fake_duvc: Any) -> None:
+        """duvc-ctl raises when the camera drops off the bus mid-read."""
+        from capa.devices.camera._uvc import UvcGroup, UvcProperty
+
+        class _Unplugged(_FakeCamera):
+            def get(self, prop_enum: str) -> _FakeResult:
+                raise RuntimeError("DeviceNotFoundError")
+
+        ctrl = await self._controller(fake_duvc, _Unplugged(_FakeDevice(name="X", path="p")))
+        assert await ctrl.get(UvcProperty("Zoom", UvcGroup.CAMERA)) is None
+
+    async def test_concurrent_first_reads_open_the_camera_once(self, fake_duvc: Any) -> None:
+        import anyio
+
+        from capa.devices.camera._uvc import UvcController, UvcGroup, UvcProperty
+
+        device = _FakeDevice(name="X", path="p")
+        cam = _FakeCamera(device, camera_props={"Zoom": _FakePropSetting(100, _FakeCamMode.Manual)})
+        opened: list[object] = []
+
+        def _open(d: object) -> _FakeResult:
+            opened.append(d)
+            return _FakeResult(value=cam)
+
+        fake_duvc.list_devices = lambda: [device]
+        fake_duvc.open_camera = _open
+        ctrl = await UvcController.find(model_hint=None, serial=None)
+        assert ctrl is not None
+        async with anyio.create_task_group() as tg:
+            for _ in range(3):
+                tg.start_soon(ctrl.get, UvcProperty("Zoom", UvcGroup.CAMERA))
+        assert len(opened) == 1
