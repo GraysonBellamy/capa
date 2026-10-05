@@ -176,6 +176,7 @@ gate](../safety/authorization-gates.md).
 | `read_nuc_state()` | Current NUC state name. |
 | `read_auto_nuc_interval_s()` / `set_auto_nuc_interval_s(seconds)` | Auto-NUC scheduler. `0` disables. |
 | `read_temperature_ranges()` / `read_temperature_range_index()` / `set_temperature_range(index)` | Range enumeration + switch. Refused mid-recording. |
+| `read_state_snapshot()` | The manual card's read-back (`IrCameraStateSnapshot`): the ranges converted to °C and the active index, the radiometric kit in the units the `set_*` calls take, the auto-NUC interval, and the camera-side and preview palettes with their choices. Each part needs its capability flag. The card lists the ranges by temperature, sends the chosen one's index to `set_temperature_range`, and fills every other field from the snapshot. |
 | `read_emissivity()` / `set_emissivity(value)` | 0..1. |
 | `read_distance_m()` / `set_distance_m(value)` | Object distance. |
 | `read_relative_humidity()` / `set_relative_humidity(fraction)` | 0..1. |
@@ -241,7 +242,10 @@ file. The sim's job is twofold:
    ships its own `extract_frame_index` for sim files; `capa-flir`
    ships the Atlas-backed extractor.
 
-The two never overlap (different magic). See [Simulators](simulators.md).
+The two never overlap (different magic). The sim reports the E85's
+three temperature ranges (-20 to 120, 0 to 650 and 300 to 1200 °C), so
+the manual card's range dropdown can be exercised without a camera.
+See [Simulators](simulators.md).
 
 ## See also
 

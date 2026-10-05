@@ -30,7 +30,7 @@ The full list of `destructive=True` dispatches in the Manual Control cards, as o
 | Alicat MFC | `totalizer_reset_peak` | Zero a totalizer's peak-flow watermark. [`alicat.py:294`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/alicat.py#L294) |
 | Fuji gas analyzer | `set_calibration_gas` | Changes the zero or span gas the analyzer calibrates a range against; the setting survives power-cycle and the next calibration is computed from it. [`fuji.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/fuji.py) |
 | Fuji gas analyzer | `calibration_begin` | Presses the analyzer's calibration keys up to its wait step. Nothing is calibrated yet, but the readings are marked calibrating until the operator calibrates or cancels. [`fuji.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/fuji.py) |
-| FLIR camera | `set_temperature_range` | Persistent camera-firmware config that survives power-cycle. [`camera.py:184`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/camera.py#L184) |
+| FLIR camera | `set_temperature_range` | Persistent camera-firmware config that survives power-cycle. [`camera.py:230`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/camera.py#L230) |
 
 The key that actually calibrates the gas analyzer (`calibration_commit`) is not a `destructive=True` dispatch: it sits behind a hold-to-confirm button that is enabled only while the reading is steady on the named gas, and the adapter refuses it without a person's confirmation even inside an authorized run. See [Fuji § Calibrating from capa](../devices/fuji.md#calibrating-from-capa).
 

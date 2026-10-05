@@ -94,7 +94,7 @@ The six card classes that ship today:
 | **BalanceCard** | Sartorius balances | Tare, zero, internal cal, filter / auto-zero / display unit / tare behavior, save settings; shows those settings and the last calibration |
 | **AlicatCard** | Alicat MFCs and pressure devices | Flow setpoint, gas select, valve hold, totalizer reset; shows the device's active gas and setpoint |
 | **FujiCard** | Fuji ZP-series gas analyzers | Response time, range and range method, output hold, calibration-gas setting, a guarded zero or span with a live steadiness readout |
-| **FlirCard** | FLIR IR cameras | Stream format, palette, NUC trigger |
+| **FlirCard** | FLIR IR cameras | Temperature range (picked from the ranges the camera reports, in °C), NUC trigger, auto-NUC interval, radiometric parameters, palettes (choices read from the camera); every field shows the camera's current setting |
 | **WebcamCard** | USB / built-in cameras | Resolution, framerate, codec |
 
 ---
@@ -164,10 +164,14 @@ A confirmation in flight:
 Each card shows the device's current state above its controls — a heater
 card shows `PV` and `SP`, a balance shows the temperature at its last
 calibration (`Last cal: 22.4 °C`, or `none since power-up`; the balance
-keeps no date), an MFC shows its active gas and setpoint. A setting the
-card can change — an MFC's gas, a balance's filter mode — is selected
-from what the device reports, and stays empty until the device has
-reported it. These refresh:
+keeps no date), an MFC shows its active gas and setpoint, an IR camera
+shows its active temperature range. A setting the card can change — an
+MFC's gas, a balance's filter mode — is selected from what the device
+reports, and stays empty until the device has reported it. Every field
+on an IR camera card — range, auto-NUC interval, radiometric values,
+both palettes — shows the camera's setting; one you have changed but
+not yet applied keeps your change through a refresh, and a command you
+cancel at its confirmation leaves it changed. These refresh:
 
 - **Once the pool reports ready**, asynchronously.
 - **After a command that changes them** — a setpoint, a gas, a balance

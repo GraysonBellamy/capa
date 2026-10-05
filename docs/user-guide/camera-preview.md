@@ -119,13 +119,13 @@ available from the manual-control card or via procedures.
 
 | Control | Capability | Notes |
 |---|---|---|
-| Palette (preview) | `PALETTE` | Iron / Rainbow / Grayscale etc. Preview-side only — does not affect the `.csq`. |
-| Span / range | `TEMPERATURE_RANGE_SELECT` | Forces a multi-second recalibration; refused mid-recording. |
+| Palette (preview) | `PALETTE` | Iron / Rainbow / White hot etc.; the manual card lists every preset the adapter can render. Preview-side only — does not affect the `.csq`. |
+| Span / range | `TEMPERATURE_RANGE_SELECT` | A dropdown of the ranges the camera reports, in °C (the E85 offers -20 to 120, 0 to 650 and 300 to 1200 °C), with the active one selected. Forces a multi-second recalibration; refused mid-recording. |
 | Radiometric vs visual toggle | `RADIOMETRIC` | What gets rendered in the tile; the radiometric data is always recorded regardless. |
 | Trigger NUC | `NUC_TRIGGER` | One-shot non-uniformity correction. Pauses imaging briefly. |
 | Auto-NUC interval | `AUTO_NUC_INTERVAL` | `0` disables. |
-| Remote palette (camera display) | `REMOTE_PALETTE` | The camera's on-device LCD palette. Distinct from `PALETTE` (preview-side). |
-| Emissivity / distance / atmospheric temp / atmospheric transmission / reflected temp / RH | `RADIOMETRIC_PARAMS` | The bundled radiometric kit. |
+| Remote palette (camera display) | `REMOTE_PALETTE` | The camera's on-device LCD palette, picked from the palettes the camera lists. Distinct from `PALETTE` (preview-side). |
+| Emissivity / distance / atmospheric temp / atmospheric transmission / reflected temp / RH | `RADIOMETRIC_PARAMS` | The bundled radiometric kit. The manual card shows the values the camera holds. |
 
 See [FLIR IR cameras](../devices/cameras-flir.md) for the full
 command list and the Atlas SDK requirements.
