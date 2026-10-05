@@ -30,6 +30,17 @@ domain_profile:
         purity: "UHP 5.0"
         target_flow_sccm: 100.0
 
+device_settings:                   # applied to the devices when the config loads
+  purge_mfc:
+    gas: N2
+  balance:
+    filter_mode: very stable
+    stability_range: accurate
+  ir_cam0:
+    temperature_range: {min_c: 0.0, max_c: 650.0}
+    emissivity: 0.95
+    distance_m: 0.5
+
 calibration_set:
   name: default
 

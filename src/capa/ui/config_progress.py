@@ -33,6 +33,9 @@ class ConfigLoadState(StrEnum):
     BUILDING_POOL = "building_pool"
     CLOSING_PREVIOUS = "closing_previous"
     OPENING_DEVICES = "opening_devices"
+    READING_SETTINGS = "reading_settings"
+    """Devices are open; reading the ones the experiment declares
+    ``device_settings`` for."""
     READY = "ready"
     FAILED = "failed"
 
@@ -66,6 +69,7 @@ _STATE_TEXT: Final[dict[ConfigLoadState, str]] = {
     ConfigLoadState.BUILDING_POOL: "Building worker pool",
     ConfigLoadState.CLOSING_PREVIOUS: "Closing previous config",
     ConfigLoadState.OPENING_DEVICES: "Opening devices",
+    ConfigLoadState.READING_SETTINGS: "Reading device settings",
     ConfigLoadState.READY: "Hardware ready",
     ConfigLoadState.FAILED: "Hardware failed",
 }
@@ -160,7 +164,7 @@ class HardwareInitDialog(QDialog):
             self._state_label.setStyleSheet(f"color: {COLOR_FAIL.name()}; font-weight: bold;")
         elif progress.state is ConfigLoadState.READY:
             self._state_label.setStyleSheet(f"color: {COLOR_OK.name()}; font-weight: bold;")
-        elif progress.state is ConfigLoadState.OPENING_DEVICES:
+        elif progress.state in (ConfigLoadState.OPENING_DEVICES, ConfigLoadState.READING_SETTINGS):
             self._state_label.setStyleSheet(f"color: {COLOR_RUNNING.name()};")
         else:
             self._state_label.setStyleSheet(f"color: {COLOR_IDLE.name()};")

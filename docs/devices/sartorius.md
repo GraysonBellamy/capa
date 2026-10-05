@@ -132,9 +132,22 @@ selector contract.
 | `set_auto_zero(...)` | `"set_auto_zero"` | Auto-zero on/off; saved with `save_menu`. |
 | `set_isocal_mode(...)` | `"set_isocal_mode"` | Isocal scheduling. |
 | `set_tare_behavior(...)` | `"set_tare_behavior"` | Whether a tare waits for a stable reading (p05): `"without stability"`, `"with stability"` or `"at stability"`. |
+| — | `"set_app_filter"` | Application filter (p02): `"final reading"`, `"filling"`, `"reduced"` or `"off"`. |
+| — | `"set_stability_range"` | How narrow a band the reading must stay in to count as stable (p03): `"max accuracy"`, `"very accurate"`, `"accurate"`, `"fast"`, `"very fast"` or `"max fast"`. |
+| — | `"set_stability_delay"` | How long the reading must stay in band before it's stable (p04): `"none"`, `"short"`, `"average"` or `"long"`. |
 | `save_menu()` / `reload_menu()` | matching kinds | Persist / discard parameter changes. |
 | `read_last_cal_record()` | n/a | Read-only — not gated. The temperature at the last calibration and whether one is on record since power-up; the balance keeps no date. |
-| `read_state_snapshot()` | n/a | Read-only — not gated. Filter mode, auto-zero, display unit, tare behavior and the last calibration, for the manual-control card. |
+| `read_state_snapshot()` | n/a | Read-only — not gated. Filter mode, application filter, stability range and delay, auto-zero, display unit, tare behavior and the last calibration, for the manual-control card. |
+
+sartoriuslib has no typed accessor for p02–p04, so the adapter reads and
+writes them through the raw parameter table. Each `set_*` payload is
+`{"mode": <label>}`; the label may also be the sartoriuslib enum name
+(`"VERY_ACCURATE"`) or the wire value. An unknown mode is refused
+before anything reaches the balance.
+
+An experiment can declare these menu settings (all but the display
+unit) under [`device_settings:`](../configuration/experiment-yaml.md)
+to have them applied when the config loads.
 
 All writes go through the [authorization
 gate](../safety/authorization-gates.md) — `issued_by` plus either

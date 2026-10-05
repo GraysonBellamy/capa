@@ -52,6 +52,7 @@ from capa.devices.camera.base import (
     CameraTemperatureRange,
     IrCameraStateSnapshot,
 )
+from capa.devices.camera.ir_settings import range_label
 from capa.ui.async_util import schedule_bg
 from capa.ui.manual.cards.base import CommandTarget, DeviceCard
 from capa.ui.state import RunController, RunUiState
@@ -516,7 +517,7 @@ class FlirCard(DeviceCard):
         self._fill_combo(
             "temperature_range_index",
             self._temp_range_combo,
-            [_range_label(r) for r in snapshot.temperature_ranges],
+            [range_label(r) for r in snapshot.temperature_ranges],
             snapshot.temperature_range_index,
         )
         self._fill_combo(
@@ -534,7 +535,7 @@ class FlirCard(DeviceCard):
         parts = [self._identity_line()]
         active_range = _active_range(snapshot)
         if active_range is not None:
-            parts.append(f"Range: {_range_label(active_range)}")
+            parts.append(f"Range: {range_label(active_range)}")
         self.set_subtitle("   ".join(parts))
 
     def _fill_combo(
@@ -590,18 +591,6 @@ def _active_range(snapshot: IrCameraStateSnapshot) -> CameraTemperatureRange | N
     if index is None or not 0 <= index < len(snapshot.temperature_ranges):
         return None
     return snapshot.temperature_ranges[index]
-
-
-def _range_label(temperature_range: CameraTemperatureRange) -> str:
-    """``"-20 to 120 °C"`` — the range as the operator picks it."""
-    return f"{_format_c(temperature_range.min_c)} to {_format_c(temperature_range.max_c)} °C"
-
-
-def _format_c(value: float) -> str:
-    # A Kelvin read-back converts to e.g. -19.999999999999972; round it
-    # back, and fold a rounded -0.0 into 0.
-    rounded = round(value, 1) + 0.0
-    return f"{rounded:g}"
 
 
 async def _safe_close_camera(camera: Camera) -> None:

@@ -85,6 +85,16 @@ For an emergency-but-clickable control (the Run tab's Emergency Stop), the [`Hol
 
 ---
 
+### Device settings applied on load
+
+An experiment's [`device_settings`](../configuration/device-settings.md)
+go out the same way: one `Authorization(run_id="manual")`, and each
+change issued with `issue_manual()`. In the GUI the operator who clicks
+Apply in the Device settings dialog is both `issued_by` and
+`confirmed_by` — the dialog, which lists every change, is the
+confirmation. A headless run has no dialog; launching it with the config
+is the confirmation, and the config's `operator.id` fills both fields.
+
 ## What denial looks like
 
 `AuthorizationError` is a subclass of `CapaError`, distinct from `AdapterError`, so audit failures are visible as security/policy issues rather than device faults.

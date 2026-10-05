@@ -22,6 +22,7 @@ Architecture:
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -46,6 +47,7 @@ from sartoriuslib import (
     sample_to_row,
     summarize_discovery,
 )
+from sartoriuslib.registry.parameters import PARAMETER_TABLE
 from sartoriuslib.streaming.recorder import record as sartorius_record
 from sartoriuslib.transport import SerialSettings
 
@@ -75,6 +77,7 @@ from capa.devices.records import (
     SourceRecord,
 )
 from capa.devices.runtime_state import AdapterRuntimeState
+from capa.devices.settings import DeviceSettingsSpec, SettingField
 
 if TYPE_CHECKING:
     from capa.devices.registry import AdapterDescriptor
@@ -168,6 +171,15 @@ class SartoriusStateSnapshot:
     filter_mode: str | None = None
     """``"very stable"`` / ``"stable"`` / ``"unstable"`` / ``"very unstable"``."""
 
+    app_filter: str | None = None
+    """``"final reading"`` / ``"filling"`` / ``"reduced"`` / ``"off"``."""
+
+    stability_range: str | None = None
+    """``"max accuracy"`` … ``"max fast"`` — how narrow a band counts as stable."""
+
+    stability_delay: str | None = None
+    """``"none"`` / ``"short"`` / ``"average"`` / ``"long"``."""
+
     auto_zero: str | None = None
     """``"on"`` / ``"off"``."""
 
@@ -183,6 +195,101 @@ class SartoriusStateSnapshot:
     cal_on_record: bool | None = None
     """Whether a calibration is on record. The record's metadata lives in
     RAM, so it is ``False`` after a cold boot until the next calibration."""
+
+
+# ---------------------------------------------------------------------------
+# Menu labels and declarative settings
+# ---------------------------------------------------------------------------
+#
+# Labels are sartoriuslib's mode names as lowercase words — what
+# :func:`_mode_label` reports and what the library's resolvers (and, for
+# p02–p04, :func:`_encode_mode`) accept.
+
+FilterModeLabel = Literal["very stable", "stable", "unstable", "very unstable"]
+AppFilterLabel = Literal["final reading", "filling", "reduced", "off"]
+StabilityRangeLabel = Literal[
+    "max accuracy", "very accurate", "accurate", "fast", "very fast", "max fast"
+]
+StabilityDelayLabel = Literal["none", "short", "average", "long"]
+AutoZeroLabel = Literal["on", "off"]
+TareBehaviorLabel = Literal["without stability", "with stability", "at stability"]
+
+_RAW_MODE_PARAMETERS: Final[dict[str, int]] = {
+    "app_filter": 2,
+    "stability_range": 3,
+    "stability_delay": 4,
+}
+"""Menu parameters sartoriuslib has no typed accessor for: name → p-index.
+Read and written through the raw parameter table."""
+
+_RAW_MODE_COMMANDS: Final[dict[str, int]] = {
+    f"set_{name}": index for name, index in _RAW_MODE_PARAMETERS.items()
+}
+
+
+class SartoriusSettings(BaseModel):
+    """What an experiment can declare for a balance under ``device_settings:``.
+
+    Written to the runtime menu only — never saved to EEPROM — so the
+    experiment re-applies them on every load.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    filter_mode: FilterModeLabel | None = Field(
+        default=None,
+        json_schema_extra={
+            "capa_help": "Ambient conditions (p01): settling time vs. vibration rejection."
+        },
+    )
+    app_filter: AppFilterLabel | None = Field(
+        default=None,
+        json_schema_extra={"capa_help": "Application filter (p02)."},
+    )
+    stability_range: StabilityRangeLabel | None = Field(
+        default=None,
+        json_schema_extra={
+            "capa_help": "How narrow a band the reading must stay in to count as stable (p03)."
+        },
+    )
+    stability_delay: StabilityDelayLabel | None = Field(
+        default=None,
+        json_schema_extra={
+            "capa_help": "How long the reading must stay in band before it's stable (p04)."
+        },
+    )
+    auto_zero: AutoZeroLabel | None = Field(
+        default=None,
+        json_schema_extra={"capa_help": "Automatic zero tracking (p06)."},
+    )
+    tare_behavior: TareBehaviorLabel | None = Field(
+        default=None,
+        json_schema_extra={"capa_help": "Whether a tare waits for a stable reading (p05)."},
+    )
+
+
+def _menu_field(name: str, label: str) -> SettingField:
+    return SettingField(
+        name=name,
+        label=label,
+        current=lambda snapshot: getattr(snapshot, name),
+        command=lambda mode, _snapshot: (f"set_{name}", {"mode": mode}),
+    )
+
+
+SARTORIUS_SETTINGS: Final = DeviceSettingsSpec(
+    model=SartoriusSettings,
+    fields=(
+        _menu_field("filter_mode", "Filter mode"),
+        _menu_field("app_filter", "Application filter"),
+        _menu_field("stability_range", "Stability range"),
+        _menu_field("stability_delay", "Stability delay"),
+        _menu_field("auto_zero", "Auto-zero"),
+        _menu_field("tare_behavior", "Tare behavior"),
+    ),
+    snapshot_type=SartoriusStateSnapshot,
+)
+"""Shared by :class:`SartoriusAdapter` and the balance simulator."""
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +584,9 @@ class SartoriusAdapter:
         * ``"set_auto_zero"`` — payload ``{"mode": str | int}``.
         * ``"set_isocal_mode"`` — payload ``{"mode": str | int}`` (Cubis only).
         * ``"set_tare_behavior"`` — payload ``{"mode": str | int}``.
+        * ``"set_app_filter"`` / ``"set_stability_range"`` /
+          ``"set_stability_delay"`` — payload ``{"mode": str | int}``; p02–p04
+          through the raw parameter table (see :func:`_encode_mode`).
         * ``"save_menu"`` — persist current menu to EEPROM.
         * ``"reload_menu"`` — reload saved menu from EEPROM.
         """
@@ -512,6 +622,17 @@ class SartoriusAdapter:
             mode = cmd.payload["mode"]
             await self._balance.set_tare_behavior(mode, confirm=True)
             return f"set_tare_behavior mode={mode!r}"
+        if kind in _RAW_MODE_COMMANDS:
+            index = _RAW_MODE_COMMANDS[kind]
+            mode = cmd.payload["mode"]
+            try:
+                wire = _encode_mode(index, mode)
+            except ValueError as exc:
+                raise AdapterError(
+                    f"sartorius {self.name!r} {kind}: {exc}", device=self.name
+                ) from exc
+            await self._balance.write_parameter(index, wire, confirm=True)
+            return f"{kind} mode={mode!r}"
         if kind == "save_menu":
             await self._balance.save_menu(confirm=True)
             return "save_menu"
@@ -734,12 +855,19 @@ class SartoriusAdapter:
         if balance is None:
             return None
         filter_mode = await self._read_or_none("filter_mode", balance.get_filter_mode)
+        raw_modes = {
+            name: await self._read_or_none(name, functools.partial(self._read_mode, index))
+            for name, index in _RAW_MODE_PARAMETERS.items()
+        }
         auto_zero = await self._read_or_none("auto_zero", balance.get_auto_zero)
         display_unit = await self._read_or_none("display_unit", balance.get_display_unit)
         tare_behavior = await self._read_or_none("tare_behavior", balance.get_tare_behavior)
         cal = await self._read_or_none("last_cal_record", balance.last_cal_record)
         return SartoriusStateSnapshot(
             filter_mode=_mode_label(filter_mode),
+            app_filter=_mode_label(raw_modes["app_filter"]),
+            stability_range=_mode_label(raw_modes["stability_range"]),
+            stability_delay=_mode_label(raw_modes["stability_delay"]),
             auto_zero=_mode_label(auto_zero),
             display_unit=_mode_label(display_unit),
             tare_behavior=_mode_label(tare_behavior),
@@ -753,6 +881,12 @@ class SartoriusAdapter:
         except SartoriusError as exc:
             _log.debug("sartorius %r read %s failed: %s", self.name, what, exc)
             return None
+
+    async def _read_mode(self, index: int) -> Enum:
+        """Decode a menu parameter sartoriuslib has no typed getter for."""
+        assert self._balance is not None
+        entry = await self._balance.read_parameter(index)
+        return PARAMETER_TABLE[index].decode(entry.current)
 
     # ------------------------------------------------------------------ helpers
 
@@ -927,6 +1061,30 @@ def _mode_label(value: Enum | None) -> str | None:
     return value.name.lower().replace("_", " ")
 
 
+def _encode_mode(index: int, mode: str | int) -> int:
+    """Wire byte for menu parameter ``index`` set to ``mode``.
+
+    ``mode`` is a label as :func:`_mode_label` reports it (``"very
+    accurate"``), the enum member's name, or the raw wire value. Raises
+    :class:`ValueError` for anything else, including ``UNKNOWN``.
+    """
+    spec = PARAMETER_TABLE[index]
+    enum_cls = spec.enum
+    assert enum_cls is not None
+    try:
+        member = (
+            enum_cls(mode)
+            if isinstance(mode, int)
+            else enum_cls[mode.strip().upper().replace(" ", "_")]
+        )
+    except (KeyError, ValueError):
+        member = None
+    if member is None or member.value == 0:
+        choices = ", ".join(repr(m.name.lower().replace("_", " ")) for m in enum_cls if m.value)
+        raise ValueError(f"unknown {spec.name} {mode!r}; expected one of {choices}")
+    return spec.encode(member)
+
+
 # ---------------------------------------------------------------------------
 # CLI handshake hook (``capa validate --strict``)
 # ---------------------------------------------------------------------------
@@ -1011,8 +1169,10 @@ async def discover(
 __all__ = [
     "ADAPTER_ID",
     "DESCRIPTOR",
+    "SARTORIUS_SETTINGS",
     "SartoriusAdapter",
     "SartoriusAdapterParams",
+    "SartoriusSettings",
     "SartoriusStateSnapshot",
     "discover",
     "handshake",
@@ -1044,6 +1204,7 @@ def _build_descriptor() -> AdapterDescriptor:
                 Capability.HAS_PARAMETER_CONFIG,
             }
         ),
+        settings=SARTORIUS_SETTINGS,
     )
 
 

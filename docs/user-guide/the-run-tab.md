@@ -110,7 +110,15 @@ the conductor's preparation with `PoolStateError`. Watch the
 flip CONNECTING → CONNECTED, then Start will light up.
 
 On click, Start does **not** open hardware — that happened at Apply &
-Connect. It rebuilds the channel ring buffers, swaps in a fresh plot
+Connect. If the experiment declares [device
+settings](../configuration/device-settings.md), Start first reads those
+devices again. If one has drifted since the config loaded — a manual-card
+change, a power-cycled MFC that reverted its gas — the Device settings
+dialog opens with **Apply selected**, **Start anyway** and **Cancel**;
+nothing starts until you choose. What the devices report at that moment
+goes into the bundle's `equipment.toml`.
+
+Start then rebuilds the channel ring buffers, swaps in a fresh plot
 pane, hands control to the conductor, and disables itself while the
 run is in flight.
 

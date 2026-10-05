@@ -823,6 +823,7 @@ class FlirIrSimParams(BaseModel):
 
 
 def _build_descriptor() -> AdapterDescriptor:
+    from capa.devices.camera.ir_settings import IR_CAMERA_SETTINGS  # noqa: PLC0415
     from capa.devices.registry import AdapterDescriptor  # noqa: PLC0415
 
     return AdapterDescriptor(
@@ -842,6 +843,7 @@ def _build_descriptor() -> AdapterDescriptor:
         channel_templates=(),
         discoverable=True,
         handshake_available=True,
+        settings=IR_CAMERA_SETTINGS,
     )
 
 

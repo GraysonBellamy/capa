@@ -4,6 +4,10 @@ Mirrors :class:`alicatlib.streaming.Sample` shape via
 :func:`alicatlib.sample_to_row`. One ``Reading`` per poll, with
 firmware-dependent measurement fields (``Mass_Flow``, ``Abs_Press``,
 ``Mass_Flow_Setpt``, ``Mix_Gas``, …).
+
+Keeps the active gas and the setpoint as state so the manual card and
+declarative ``device_settings`` can read back what they set; every other
+command is acknowledged without effect.
 """
 
 from __future__ import annotations
@@ -25,6 +29,8 @@ from alicatlib.devices.reading import (
     DataFrameFormat,
     DataFrameFormatFlavor,
 )
+from alicatlib.errors import UnknownGasError
+from alicatlib.registry import gas_registry
 
 from capa.channels.spec import AlicatFrameField, ChannelSpec
 from capa.core.clock import RunClock
@@ -36,6 +42,7 @@ from capa.devices.adapter import (
     CommandResult,
     DeviceCommand,
 )
+from capa.devices.alicat import ALICAT_SETTINGS, AlicatStateSnapshot
 from capa.devices.records import (
     DeviceEmission,
     DeviceSnapshot,
@@ -60,6 +67,9 @@ ADAPTER_ID: Final[str] = "alicat"
 
 _EMPTY_FORMAT = DataFrameFormat(fields=(), flavor=DataFrameFormatFlavor.DEFAULT)
 
+SIM_GASES: Final[tuple[str, ...]] = ("Air", "Ar", "CO2", "He", "N2", "O2")
+"""The gases the simulated device offers, in wire-code order."""
+
 
 @dataclass(slots=True)
 class AlicatSim:
@@ -78,10 +88,15 @@ class AlicatSim:
     static_fields: dict[str, float | str | None] = field(default_factory=dict)
     """Frame fields that are not generated per-tick (e.g. ``"Mix_Gas"``).
     Merged into the emitted DataFrame's ``values`` verbatim."""
+    gas: str = "Air"
+    """Active gas; changed by ``set_gas``."""
+    setpoint: float = 0.0
+    """Flow setpoint in SLPM; changed by ``set_setpoint`` / ``set_flow_setpoint``."""
     capabilities: frozenset[Capability] = frozenset(
         {
             Capability.HAS_SETPOINT,
             Capability.HAS_TARE,
+            Capability.HAS_GAS_SELECT,
         }
     )
     _lifecycle: AdapterLifecycle = field(default_factory=AdapterLifecycle)
@@ -98,6 +113,7 @@ class AlicatSim:
         tick_period_s: float = 0.5,
         signals: dict[str, dict[str, object]] | None = None,
         static_fields: dict[str, float | str | None] | None = None,
+        gas: str = "Air",
     ) -> AlicatSim:
         """TOML-friendly constructor.
 
@@ -110,6 +126,7 @@ class AlicatSim:
             tick_period_s=tick_period_s,
             signals=signals_from_mapping(signals or {}),
             static_fields=static_fields or {},
+            gas=gas,
         )
 
     def configure_channels(self, specs: list[ChannelSpec]) -> None:
@@ -245,7 +262,35 @@ class AlicatSim:
         )
         if rejection is not None:
             return rejection
+        if cmd.kind == "set_gas":
+            self.gas = self._offered_gas(cmd.payload["gas"])
+            return make_accepted_result(detail=f"set_gas gas={self.gas!r}", clock=clock)
+        if cmd.kind in ("set_setpoint", "set_flow_setpoint") and "value" in cmd.payload:
+            self.setpoint = float(cmd.payload["value"])
         return make_accepted_result(detail=f"sim ack {cmd.kind} target={cmd.target}", clock=clock)
+
+    def _offered_gas(self, gas: object) -> str:
+        """The :data:`SIM_GASES` label ``gas`` names; :class:`AdapterError`
+        for a gas the simulated device doesn't offer, as the real one refuses."""
+        try:
+            label = gas_registry.coerce(str(gas)).value
+        except UnknownGasError as exc:
+            raise AdapterError(f"alicat_sim {self.name!r} set_gas failed: {exc}") from exc
+        if label not in SIM_GASES:
+            raise AdapterError(f"alicat_sim {self.name!r} doesn't offer gas {label!r}")
+        return label
+
+    async def read_state_snapshot(self) -> AlicatStateSnapshot | None:
+        """Active gas, gas list and setpoint — the real adapter's read-back.
+        ``None`` before :meth:`open`, like the real adapter."""
+        if self._lifecycle.state == "closed":
+            return None
+        return AlicatStateSnapshot(
+            gas=self.gas,
+            gas_list=SIM_GASES,
+            setpoint=self.setpoint,
+            setpoint_unit="SLPM",
+        )
 
     async def set_flow_setpoint(
         self,
@@ -267,7 +312,7 @@ class AlicatSim:
         )
 
 
-__all__ = ["ADAPTER_ID", "DESCRIPTOR", "AlicatSim"]
+__all__ = ["ADAPTER_ID", "DESCRIPTOR", "SIM_GASES", "AlicatSim"]
 
 
 def _build_descriptor() -> AdapterDescriptor:
@@ -283,6 +328,7 @@ def _build_descriptor() -> AdapterDescriptor:
         supported_binding_sources=("alicat_frame_field",),
         default_params={},
         channel_templates=(ALICAT_PURGE_FLOW,),
+        settings=ALICAT_SETTINGS,
     )
 
 

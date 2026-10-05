@@ -75,8 +75,8 @@ _HARDWARE_PAYLOAD_KEYS: frozenset[str] = frozenset({"devices", "channels", "came
 # editing one) re-read the draft so their widgets never hold a stale
 # copy — a stale section would write its old copy back on its next edit.
 _SECTIONS_SHOWING_KEY: dict[str, tuple[str, ...]] = {
-    "devices": ("hardware",),
-    "cameras": ("hardware",),
+    "devices": ("hardware", "device_settings"),
+    "cameras": ("hardware", "device_settings"),
     "channels": ("channels", "calibration", "capa_profile", "hardware"),
     "sample": ("experiment",),
     "domain_profile": ("experiment", "capa_profile"),
@@ -1680,6 +1680,15 @@ class SetupTab(QWidget):
             from capa.ui.tabs.setup_sections.hardware import HardwareGlanceSection  # noqa: PLC0415
 
             return HardwareGlanceSection(self)
+        if section_id == "device_settings":
+            from capa.ui.tabs.setup_sections.device_settings import (  # noqa: PLC0415
+                DeviceSettingsSection,
+            )
+
+            device_settings = DeviceSettingsSection(self)
+            if self._controller is not None:
+                device_settings.set_run_controller(self._controller)
+            return device_settings
         if section_id == "capa_profile":
             from capa.ui.tabs.setup_sections.capa_profile import CapaProfileSection  # noqa: PLC0415
 

@@ -301,6 +301,79 @@ def test_layer2_nidaq_join_is_silent_for_sim_configs(configs_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Layer 2 — device_settings.
+# ---------------------------------------------------------------------------
+
+
+def _sim_capa(configs_dir: Path) -> ConfigDocument:
+    return ConfigDocument.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+
+
+def _settings_problems(doc: ConfigDocument) -> list[ConfigProblem]:
+    return [p for p in validate(doc) if p.section == "device_settings"]
+
+
+def test_device_settings_unknown_device(configs_dir: Path) -> None:
+    doc = _sim_capa(configs_dir)
+    doc.experiment_payload["device_settings"]["purge_mcf"] = {"gas": "N2"}
+    (problem,) = _settings_problems(doc)
+    assert problem.code == "device_settings.unknown_device"
+    assert problem.path == ("device_settings", "purge_mcf")
+    assert problem.source_file == doc.experiment_path
+
+
+def test_device_settings_on_adapter_without_settings(configs_dir: Path) -> None:
+    doc = _sim_capa(configs_dir)
+    doc.experiment_payload["device_settings"]["heater"] = {"setpoint": 600}
+    (problem,) = _settings_problems(doc)
+    assert problem.code == "device_settings.unsupported_adapter"
+
+
+def test_device_settings_validated_against_the_adapter_model(configs_dir: Path) -> None:
+    doc = _sim_capa(configs_dir)
+    settings = doc.experiment_payload["device_settings"]
+    settings["purge_mfc"] = {"gas": "N3"}
+    settings["balance"] = {"stability_range": "sloppy", "filter": "stable"}
+    settings["ir_cam0"] = {"relative_humidity": 45}
+    problems = _settings_problems(doc)
+    assert all(p.severity == "error" for p in problems)
+    by_path = {p.path: p for p in problems}
+    assert "did you mean" in by_path[("device_settings", "purge_mfc", "gas")].message
+    assert ("device_settings", "balance", "stability_range") in by_path
+    assert by_path[("device_settings", "balance", "filter")].code == (
+        "device_settings.extra_forbidden"
+    )
+    assert ("device_settings", "ir_cam0", "relative_humidity") in by_path
+
+
+def test_device_settings_entry_must_be_a_mapping(configs_dir: Path) -> None:
+    doc = _sim_capa(configs_dir)
+    doc.experiment_payload["device_settings"]["purge_mfc"] = "N2"
+    problems = validate(doc)
+    assert [(p.section, p.path) for p in problems] == [
+        ("device_settings", ("device_settings", "purge_mfc"))
+    ]
+
+
+def test_purge_gas_differing_from_profile_species_warns(configs_dir: Path) -> None:
+    doc = _sim_capa(configs_dir)
+    doc.experiment_payload["device_settings"]["purge_mfc"] = {"gas": "Ar"}
+    (problem,) = _settings_problems(doc)
+    assert problem.severity == "warning"
+    assert problem.code == "capa_profile.purge_gas_mismatch"
+    assert problem.path == ("device_settings", "purge_mfc", "gas")
+
+
+@pytest.mark.parametrize("species", ["nitrogen", "5% O2/N2"])
+def test_purge_gas_check_accepts_aliases_and_skips_mixtures(
+    configs_dir: Path, species: str
+) -> None:
+    doc = _sim_capa(configs_dir)
+    doc.experiment_payload["domain_profile"]["metadata"]["atmosphere"]["purge"]["species"] = species
+    assert _settings_problems(doc) == []
+
+
+# ---------------------------------------------------------------------------
 # Live checks gated.
 # ---------------------------------------------------------------------------
 
@@ -311,8 +384,10 @@ def test_layer5_live_checks_are_gated(configs_dir: Path) -> None:
     # Asking for live checks doesn't crash and doesn't produce live findings.
     problems_no_live = validate(doc, with_live_checks=False)
     problems_with_live = validate(doc, with_live_checks=True)
-    # No additional problems from the live stub.
-    assert len(problems_with_live) == len(problems_no_live)
+    # The only live finding is the IR camera simulator's handshake; the
+    # device sims declare none.
+    extra = [p for p in problems_with_live if p not in problems_no_live]
+    assert [(p.code, p.section) for p in extra] == [("live.handshake_ok", "cameras")]
 
 
 # ---------------------------------------------------------------------------

@@ -7,14 +7,23 @@ panes filling the body. Numerics live in a dock managed by
 Arm/Start is collapsed into a single Start button — preflight runs
 inside :meth:`Conductor.start` (PREPARING state) and any failure is
 surfaced as the run's :class:`RunUiResult`.
+
+Before that, Start reads the devices the experiment declares
+``device_settings`` for. If one has drifted, a
+:class:`~capa.ui.device_settings_dialog.DeviceSettingsDialog` offers to
+apply the declared values first; what the devices report is recorded in
+the bundle either way.
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
-from typing import Final
+from collections.abc import Mapping
+from typing import Any, Final
 
-from PySide6.QtCore import QSize, QTimer
+import structlog
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -25,10 +34,13 @@ from PySide6.QtWidgets import (
 
 from capa.core.ringbuffer import RingBufferRegistry
 from capa.experiment.config import ExperimentConfig
+from capa.runtime.device_settings import SettingsPlan
 from capa.runtime.lifecycle import PoolState
+from capa.ui.device_settings_dialog import DeviceSettingsDialog
 from capa.ui.hold_to_confirm import HoldToConfirmButton
 from capa.ui.plots.pane import PlotPane
 from capa.ui.state import RunController, RunUiResult, RunUiState
+from capa.ui.statusbar import OperatorIdProvider
 from capa.ui.theme import (
     COLOR_FAIL,
     COLOR_IDLE,
@@ -39,6 +51,8 @@ from capa.ui.theme import (
 )
 
 ELAPSED_REFRESH_MS: Final[int] = 1000
+
+_logger = structlog.get_logger("capa.ui.run_tab")
 
 _STATE_TEXT = {
     RunUiState.IDLE: "Idle",
@@ -73,11 +87,16 @@ class RunTab(QWidget):
         self,
         *,
         controller: RunController,
+        operator_provider: OperatorIdProvider,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._controller: RunController = controller
+        self._operator_provider = operator_provider
         self._config: ExperimentConfig | None = None
+        # True from a Start click until the run starts or the operator
+        # backs out of the device-settings dialog.
+        self._starting: bool = False
         self._run_started_mono: float | None = None
         self._plot_pane: PlotPane | None = None
 
@@ -197,7 +216,7 @@ class RunTab(QWidget):
 
     def can_start(self) -> bool:
         """``True`` if the Run tab's preconditions are satisfied."""
-        if self._config is None or self._controller.is_active:
+        if self._config is None or self._controller.is_active or self._starting:
             return False
         if not bool(getattr(self._controller, "hardware_ready", True)):
             return False
@@ -207,14 +226,63 @@ class RunTab(QWidget):
     # ------------------------------------------------------------------ control
 
     def _on_start_clicked(self) -> None:
+        if self._config is None or self._controller.is_active or self._starting:
+            return
+        check = self._controller.check_device_settings()
+        if check is None:
+            # Nothing declared to check.
+            self._start(None)
+            return
+        self._starting = True
+        self._start_btn.setEnabled(False)
+        check.add_done_callback(self._on_settings_checked)
+
+    def _on_settings_checked(self, task: asyncio.Task[SettingsPlan]) -> None:
+        if task.cancelled() or task.exception() is not None:
+            # The config was swapped or closed meanwhile.
+            self._abandon_start()
+            return
+        plan = task.result()
+        if not plan.needs_attention:
+            self._starting = False
+            self._start(plan.observed())
+            return
+        dialog = DeviceSettingsDialog(
+            plan=plan,
+            controller=self._controller,
+            operator_provider=self._operator_provider,
+            mode="start",
+            parent=self,
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.startRequested.connect(lambda: self._start_from_dialog(dialog))
+        dialog.rejected.connect(self._abandon_start)
+        dialog.open()
+
+    def _start_from_dialog(self, dialog: DeviceSettingsDialog) -> None:
+        self._starting = False
+        self._start(dialog.observed())
+
+    def _abandon_start(self) -> None:
+        self._starting = False
+        self._start_btn.setEnabled(self.can_start())
+
+    def _start(self, device_settings: Mapping[str, Mapping[str, Any]] | None) -> None:
         if self._config is None or self._controller.is_active:
+            self._start_btn.setEnabled(self.can_start())
             return
         # Hand the controller a fresh start; it will rebuild buffers and
         # signal state transitions. The plot pane is rebound to the new
         # registry on the EngineState.RUNNING transition (see _on_state),
         # which matches the numerics dock — by the time RUNNING fires,
         # the controller has finished rebuilding buffers.
-        self._controller.start(self._config)
+        try:
+            self._controller.start(self._config, device_settings_observed=device_settings)
+        except RuntimeError as exc:
+            # The hardware went away, or settings are mid-apply.
+            _logger.warning("ui.run_tab.start_refused", error=str(exc))
+            self._start_btn.setEnabled(self.can_start())
+            return
         self._run_started_mono = time.monotonic()
         self._elapsed_timer.start()
         self._start_btn.setEnabled(False)

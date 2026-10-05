@@ -4,7 +4,9 @@ Gated entirely on the adapter's :class:`Capability` flagset:
 
 * tare / zero            — ``HAS_TARE`` / ``HAS_ZERO``
 * internal cal           — ``HAS_INTERNAL_CAL`` (destructive)
-* filter / auto-zero /
+* filter / app filter /
+  stability range and
+  delay / auto-zero /
   display unit / tare    — ``HAS_PARAMETER_CONFIG``
 * save / reload menu     — ``HAS_PARAMETER_CONFIG`` (destructive — EEPROM)
 
@@ -16,7 +18,7 @@ that changes them.
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, get_args
 
 import structlog
 from PySide6.QtWidgets import (
@@ -29,7 +31,15 @@ from PySide6.QtWidgets import (
 )
 
 from capa.devices.adapter import Capability
-from capa.devices.sartorius import SartoriusStateSnapshot
+from capa.devices.sartorius import (
+    AppFilterLabel,
+    AutoZeroLabel,
+    FilterModeLabel,
+    SartoriusStateSnapshot,
+    StabilityDelayLabel,
+    StabilityRangeLabel,
+    TareBehaviorLabel,
+)
 from capa.experiment.config import DeviceConfig
 from capa.ui.manual.cards.base import DeviceCard, select_or_add
 from capa.ui.state import RunController
@@ -38,24 +48,15 @@ from capa.ui.statusbar import OperatorIdProvider
 _logger = structlog.get_logger("capa.ui.manual.balance")
 
 
-# Library-side fuzzy strings — sartoriuslib resolves these. Hardcoded here
-# rather than enumerated from the library because the library currently
-# exposes them through ``resolve_filter_mode`` (a free function), and the
-# values are stable across firmware versions. They match the labels
-# :class:`SartoriusStateSnapshot` reports, so a read-back selects its entry.
-FILTER_MODES: Final[tuple[str, ...]] = (
-    "very stable",
-    "stable",
-    "unstable",
-    "very unstable",
-)
-AUTO_ZERO_MODES: Final[tuple[str, ...]] = ("off", "on")
+# The adapter's menu labels: what :class:`SartoriusStateSnapshot` reports,
+# so a read-back selects its entry, and what the ``set_*`` commands accept.
+FILTER_MODES: Final[tuple[str, ...]] = get_args(FilterModeLabel)
+APP_FILTERS: Final[tuple[str, ...]] = get_args(AppFilterLabel)
+STABILITY_RANGES: Final[tuple[str, ...]] = get_args(StabilityRangeLabel)
+STABILITY_DELAYS: Final[tuple[str, ...]] = get_args(StabilityDelayLabel)
+AUTO_ZERO_MODES: Final[tuple[str, ...]] = get_args(AutoZeroLabel)
 DISPLAY_UNITS: Final[tuple[str, ...]] = ("g", "kg", "mg", "ct", "oz")
-TARE_BEHAVIORS: Final[tuple[str, ...]] = (
-    "without stability",
-    "with stability",
-    "at stability",
-)
+TARE_BEHAVIORS: Final[tuple[str, ...]] = get_args(TareBehaviorLabel)
 
 
 # Capability flags that justify rendering a BalanceCard at all. Below any
@@ -194,6 +195,36 @@ class BalanceCard(DeviceCard):
                 "Writes to xBPI p01 — runtime menu only until Save."
             ),
             apply_kind="set_filter_mode",
+            payload_key="mode",
+        )
+        self._param_combos["app_filter"] = self._add_combo_row(
+            body,
+            label="App filter:",
+            choices=APP_FILTERS,
+            tooltip="Application filter (xBPI p02) — runtime menu only until Save.",
+            apply_kind="set_app_filter",
+            payload_key="mode",
+        )
+        self._param_combos["stability_range"] = self._add_combo_row(
+            body,
+            label="Stability range:",
+            choices=STABILITY_RANGES,
+            tooltip=(
+                "How narrow a band the reading must stay in to count as stable "
+                "(xBPI p03) — runtime menu only until Save."
+            ),
+            apply_kind="set_stability_range",
+            payload_key="mode",
+        )
+        self._param_combos["stability_delay"] = self._add_combo_row(
+            body,
+            label="Stability delay:",
+            choices=STABILITY_DELAYS,
+            tooltip=(
+                "How long the reading must stay in band before it's stable "
+                "(xBPI p04) — runtime menu only until Save."
+            ),
+            apply_kind="set_stability_delay",
             payload_key="mode",
         )
         self._param_combos["auto_zero"] = self._add_combo_row(

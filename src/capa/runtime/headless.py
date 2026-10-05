@@ -4,7 +4,10 @@ The headless entry point for command-line runs. The function assembles
 the full conductor stack:
 
 1. Resolve the procedure plugin.
-2. Build a :class:`WorkerPool` from config and open it (adapters open here).
+2. Build a :class:`WorkerPool` from config and open it (adapters open here),
+   then apply the experiment's ``device_settings`` — no operator to ask:
+   launching the run with this config is the confirmation, and a setting
+   that can't be applied aborts the run before a bundle exists.
 3. Build a :class:`RealRunSession` (bundle writer, writer thread, clock).
 4. Build a :class:`Conductor` with a ``runner_factory`` that wires a
    :class:`ProcedureRunner` against the session's open resources.
@@ -51,6 +54,11 @@ from capa.runtime.conductor import (
     ConductorRunner,
     RunResult,
     RunSession,
+)
+from capa.runtime.device_settings import (
+    apply_device_settings,
+    plan_device_settings,
+    pool_readback,
 )
 from capa.runtime.dispatch import PoolDispatcher
 from capa.runtime.errors import ResourceConflict
@@ -206,6 +214,20 @@ async def run_headless(
         )
 
     try:
+        # 2b. Apply the experiment's device settings. Nothing is recording
+        #     yet, so a range switch on an IR camera is still allowed.
+        settings_failure, settings_observed = await _apply_device_settings(config, pool)
+        if settings_failure is not None:
+            _logger.error("headless.device_settings.failed", reason=settings_failure)
+            return HeadlessResult(
+                run_id=run_id or "preflight-refused",
+                bundle_path=None,
+                run_status="aborted",
+                bundle_status="open",
+                integrity_status="unknown",
+                exit_reason=f"device_settings: {settings_failure}",
+            )
+
         # 3. Collect adapter maps for the bundle's equipment + camera
         #    identity blocks at finalize. Cameras are wrapped in
         #    :class:`CameraDeviceAdapter`; the
@@ -233,6 +255,7 @@ async def run_headless(
             adapter_by_device=adapter_by_device,
             adapter_by_camera=adapter_by_camera,
             catalog=catalog,
+            device_settings=settings_observed,
         )
 
         # 5. Build the runner factory. The factory is invoked by the
@@ -359,6 +382,51 @@ async def run_headless(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _apply_device_settings(
+    config: ExperimentConfig, pool: WorkerPool
+) -> tuple[str | None, dict[str, dict[str, Any]]]:
+    """Apply ``config.device_settings`` to the open pool, unattended.
+
+    Returns ``(why the settings couldn't all be put in place, each
+    device's settings as read afterwards)``; the reason is ``None`` when
+    they are. A setting the device accepts but doesn't report back counts
+    as in place.
+    """
+    if not config.device_settings:
+        return None, {}
+    readback = pool_readback(pool)
+    plan = await plan_device_settings(config, readback)
+    blockers = [f"{d.name}: {d.error}" for d in plan.devices if d.error is not None]
+    blockers += [
+        f"{d.name} {issue.label.lower()}: {issue.message}"
+        for d in plan.devices
+        for issue in d.issues
+    ]
+    if blockers:
+        return "; ".join(blockers), plan.observed()
+    report = await apply_device_settings(
+        plan,
+        None,
+        dispatch=PoolDispatcher(pool).dispatch,
+        readback=readback,
+        operator_id=config.operator.id,
+    )
+    for result in report.results:
+        _logger.info(
+            "headless.device_settings.applied",
+            device=result.device,
+            setting=result.change.field,
+            outcome=result.outcome.value,
+            detail=result.detail,
+        )
+    failures = [
+        f"{r.device} {r.change.label.lower()}: {r.outcome.value.replace('_', ' ')} ({r.detail})"
+        for r in report.results
+        if not r.ok
+    ]
+    return ("; ".join(failures) if failures else None), report.plan_after.observed()
 
 
 def _build_method_executor_for_runner(

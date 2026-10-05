@@ -91,6 +91,7 @@ class ManualControlDock(QDockWidget):
         self._operator_provider: OperatorIdProvider = operator_provider
         self._cards_by_name: dict[str, DeviceCard] = {}
         self._controller.pool_changed.connect(self._on_pool_changed)
+        self._controller.device_settings_applied.connect(self.refresh_readbacks)
 
         # Outer scroll area so the dock stays usable when many cards stack.
         # The horizontal bar stays available: Qt lets a dock shrink below
@@ -220,7 +221,7 @@ class ManualControlDock(QDockWidget):
 
         # Schedule a best-effort readback refresh for cards that already
         # have an open adapter (registry-shared with a recent run).
-        self._schedule_initial_readback()
+        self.refresh_readbacks()
 
         # Deferred so the fit sees the settled layout: MainWindow adds
         # its other right-hand docks after this call returns.
@@ -256,7 +257,7 @@ class ManualControlDock(QDockWidget):
 
     def _on_pool_changed(self, pool: object) -> None:
         if pool is not None:
-            self._schedule_initial_readback()
+            self.refresh_readbacks()
 
     def card_for(self, name: str) -> DeviceCard | None:
         """Return the card for ``name`` if one was built, else ``None``.
@@ -289,7 +290,9 @@ class ManualControlDock(QDockWidget):
             card.deleteLater()
         self._cards_by_name.clear()
 
-    def _schedule_initial_readback(self) -> None:
+    def refresh_readbacks(self, *_args: object) -> None:
+        """Re-read every card's device in the background — on pool open,
+        and after device settings were applied."""
         if not self._cards_by_name:
             return
 

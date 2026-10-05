@@ -48,10 +48,11 @@ from alicatlib.devices.base import Device as AlicatDevice
 from alicatlib.devices.flow_controller import FlowController
 from alicatlib.devices.models import DeviceInfo, StpNtpMode, TimeUnit, TotalizerId
 from alicatlib.devices.pressure_controller import PressureController
-from alicatlib.registry import unit_registry
+from alicatlib.errors import UnknownGasError
+from alicatlib.registry import gas_registry, unit_registry
 from alicatlib.streaming.recorder import record as alicat_record
 from alicatlib.transport.base import SerialSettings
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from capa.channels.spec import AlicatFrameField, ChannelSpec
 from capa.core.clock import RunClock
@@ -79,6 +80,7 @@ from capa.devices.records import (
     SourceRecord,
 )
 from capa.devices.runtime_state import AdapterRuntimeState
+from capa.devices.settings import DeviceSettingsSpec, SettingField, SettingRefusedError
 
 if TYPE_CHECKING:
     from capa.devices.registry import AdapterDescriptor
@@ -162,6 +164,72 @@ class AlicatStateSnapshot:
 
     setpoint_unit: str | None = None
     """Unit label the device reports for :attr:`setpoint`, e.g. ``"SLPM"``."""
+
+
+# ---------------------------------------------------------------------------
+# Declarative settings — an experiment's ``device_settings:`` entry
+# ---------------------------------------------------------------------------
+
+
+class AlicatSettings(BaseModel):
+    """What an experiment can declare for an Alicat under ``device_settings:``.
+
+    Applied for the session only: nothing is saved to the device's EEPROM,
+    so the experiment re-applies them on every load instead.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    gas: str | None = Field(
+        default=None,
+        json_schema_extra={
+            "capa_help": (
+                "Gas the device reports flow against, e.g. N2, Air, Ar. "
+                "Leave unset to keep the device's current gas."
+            ),
+        },
+    )
+
+    @field_validator("gas")
+    @classmethod
+    def _known_gas(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return gas_registry.coerce(value).value
+        except UnknownGasError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+def _gas_key(label: str) -> str:
+    """Comparison key for a gas label: the registry's short name, or the
+    case-folded label for a gas the registry doesn't know (a custom mixture)."""
+    try:
+        return gas_registry.coerce(label).value
+    except UnknownGasError:
+        return label.casefold()
+
+
+def _set_gas(gas: str, snapshot: AlicatStateSnapshot) -> tuple[str, dict[str, Any]]:
+    if snapshot.gas_list and _gas_key(gas) not in {_gas_key(g) for g in snapshot.gas_list}:
+        raise SettingRefusedError(f"the device doesn't offer {gas}")
+    return "set_gas", {"gas": gas, "save": False}
+
+
+ALICAT_SETTINGS: Final = DeviceSettingsSpec(
+    model=AlicatSettings,
+    fields=(
+        SettingField(
+            name="gas",
+            label="Gas",
+            current=lambda snapshot: snapshot.gas,
+            command=_set_gas,
+            same=lambda have, want: _gas_key(have) == _gas_key(want),
+        ),
+    ),
+    snapshot_type=AlicatStateSnapshot,
+)
+"""Shared by :class:`AlicatAdapter` and the Alicat simulator."""
 
 
 # ---------------------------------------------------------------------------
@@ -1212,9 +1280,11 @@ async def discover(
 
 __all__ = [
     "ADAPTER_ID",
+    "ALICAT_SETTINGS",
     "DESCRIPTOR",
     "AlicatAdapter",
     "AlicatAdapterParams",
+    "AlicatSettings",
     "AlicatStateSnapshot",
     "discover",
     "handshake",
@@ -1249,6 +1319,7 @@ def _build_descriptor() -> AdapterDescriptor:
                 Capability.HAS_VALVE_HOLD,
             }
         ),
+        settings=ALICAT_SETTINGS,
     )
 
 

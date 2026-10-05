@@ -4,6 +4,10 @@ Mirrors :class:`sartoriuslib.streaming.Sample` shape via
 :func:`sartoriuslib.sinks.base.sample_to_row`. Carries stability / overload /
 underload flags so a procedure can verify "balance was stable for >= 5 s
 prior to ignition" using the preserved native row.
+
+Keeps the menu settings the real adapter exposes (filter mode, stability
+range, …) as state so the manual card and declarative ``device_settings``
+can read back what they set. Saving / reloading the menu is a no-op.
 """
 
 from __future__ import annotations
@@ -11,7 +15,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, get_args
 
 import anyio
 from sartoriuslib import (
@@ -40,6 +44,16 @@ from capa.devices.records import (
     DeviceSnapshot,
     SourceRecord,
 )
+from capa.devices.sartorius import (
+    SARTORIUS_SETTINGS,
+    AppFilterLabel,
+    AutoZeroLabel,
+    FilterModeLabel,
+    SartoriusStateSnapshot,
+    StabilityDelayLabel,
+    StabilityRangeLabel,
+    TareBehaviorLabel,
+)
 from capa.devices.sim._base import (
     build_channel_sample,
     channels_for_device,
@@ -55,6 +69,16 @@ if TYPE_CHECKING:
     from capa.devices.registry import AdapterDescriptor
 
 ADAPTER_ID: Final[str] = "sartorius"
+
+_MENU_CHOICES: Final[dict[str, tuple[str, ...]]] = {
+    "filter_mode": get_args(FilterModeLabel),
+    "app_filter": get_args(AppFilterLabel),
+    "stability_range": get_args(StabilityRangeLabel),
+    "stability_delay": get_args(StabilityDelayLabel),
+    "auto_zero": get_args(AutoZeroLabel),
+    "tare_behavior": get_args(TareBehaviorLabel),
+}
+"""Menu setting → the labels its ``set_<setting>`` command accepts."""
 
 
 @dataclass(slots=True)
@@ -75,7 +99,20 @@ class SartoriusSim:
     stable_after_s: float = 0.0
     """The balance reports ``stable=False`` until ``t_mono >= stable_after_s``,
     then ``stable=True``. Use to simulate a settling window."""
-    capabilities: frozenset[Capability] = frozenset({Capability.HAS_TARE, Capability.HAS_ZERO})
+    menu: dict[str, str] = field(
+        default_factory=lambda: {
+            "filter_mode": "stable",
+            "app_filter": "final reading",
+            "stability_range": "very accurate",
+            "stability_delay": "short",
+            "auto_zero": "on",
+            "tare_behavior": "with stability",
+        }
+    )
+    """Runtime menu, keyed like :data:`_MENU_CHOICES`."""
+    capabilities: frozenset[Capability] = frozenset(
+        {Capability.HAS_TARE, Capability.HAS_ZERO, Capability.HAS_PARAMETER_CONFIG}
+    )
     _lifecycle: AdapterLifecycle = field(default_factory=AdapterLifecycle)
     _channels: list[ChannelSpec] = field(default_factory=list)
     _clock: RunClock | None = None
@@ -257,7 +294,33 @@ class SartoriusSim:
         )
         if rejection is not None:
             return rejection
+        setting = cmd.kind.removeprefix("set_")
+        if cmd.kind.startswith("set_") and setting in _MENU_CHOICES:
+            mode = str(cmd.payload["mode"]).strip().lower().replace("_", " ")
+            if mode not in _MENU_CHOICES[setting]:
+                raise AdapterError(
+                    f"sartorius_sim {self.name!r} {cmd.kind}: unknown mode {mode!r}; "
+                    f"expected one of {', '.join(_MENU_CHOICES[setting])}"
+                )
+            self.menu[setting] = mode
+            return make_accepted_result(detail=f"{cmd.kind} mode={mode!r}", clock=clock)
         return make_accepted_result(detail=f"sim ack {cmd.kind}", clock=clock)
+
+    async def read_state_snapshot(self) -> SartoriusStateSnapshot | None:
+        """The menu settings — the real adapter's read-back, without a
+        calibration record. ``None`` before :meth:`open`, like the real adapter."""
+        if self._lifecycle.state == "closed":
+            return None
+        menu = self.menu
+        return SartoriusStateSnapshot(
+            filter_mode=menu["filter_mode"],
+            app_filter=menu["app_filter"],
+            stability_range=menu["stability_range"],
+            stability_delay=menu["stability_delay"],
+            auto_zero=menu["auto_zero"],
+            display_unit=self.unit.value,
+            tare_behavior=menu["tare_behavior"],
+        )
 
     async def tare(
         self,
@@ -293,6 +356,7 @@ def _build_descriptor() -> AdapterDescriptor:
         supported_binding_sources=("sartorius_reading",),
         default_params={},
         channel_templates=(SARTORIUS_MASS,),
+        settings=SARTORIUS_SETTINGS,
     )
 
 

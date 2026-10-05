@@ -32,6 +32,7 @@ EXPERIMENT_KEY_ORDER: tuple[str, ...] = (
     "storage",
     "safety",
     "runtime",
+    "device_settings",
     "tags",
     "custom",
 )

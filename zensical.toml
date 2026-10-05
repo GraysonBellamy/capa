@@ -93,6 +93,7 @@ nav = [
             { "Channel bindings" = "configuration/channel-bindings.md" },
             { "Calibrations on disk" = "configuration/calibrations.md" },
             { "CAPA profile fields" = "configuration/capa-profile.md" },
+            { "Device settings" = "configuration/device-settings.md" },
             { "Validation and problems" = "configuration/validation-and-problems.md" },
             { "Workspace layout" = "configuration/workspace-layout.md" },
         ] },
