@@ -28,7 +28,7 @@ domain_profile:
       purge:
         species: N2
         purity: "UHP 5.0"
-        target_flow_sccm: 100.0
+        target_flow_slpm: 100.0
 
 device_settings:                   # applied to the devices when the config loads
   purge_mfc:

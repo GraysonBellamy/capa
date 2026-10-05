@@ -159,14 +159,14 @@ def test_capa_profile_unset_required_number_is_omitted(qtbot: Any) -> None:
     validation reports it missing instead of accepting a placeholder."""
     section, draft = _make_section(qtbot)
     del draft.document.experiment_payload["domain_profile"]["metadata"]["atmosphere"]["purge"][
-        "target_flow_sccm"
+        "target_flow_slpm"
     ]
     section.refresh()
 
     payload = section.payload()
     assert payload is not None
     purge = _metadata(payload)["atmosphere"]["purge"]
-    assert "target_flow_sccm" not in purge
+    assert "target_flow_slpm" not in purge
 
 
 def test_capa_profile_refresh_replaces_previous_draft_values(qtbot: Any) -> None:

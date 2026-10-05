@@ -27,7 +27,7 @@ def _good_metadata() -> dict[str, Any]:
             "purge": {
                 "species": "N2",
                 "purity": "UHP 5.0",
-                "target_flow_sccm": 100.0,
+                "target_flow_slpm": 100.0,
             },
         },
     }
@@ -53,7 +53,7 @@ def test_validate_metadata_oxidative_with_reactive() -> None:
     raw["atmosphere"]["reactive"] = {  # secondary gas alongside the inert purge
         "species": "O2",
         "purity": "5.0",
-        "target_flow_sccm": 21.0,
+        "target_flow_slpm": 21.0,
         "target_mole_fraction": 0.21,
     }
     meta = cap.validate_metadata(raw)

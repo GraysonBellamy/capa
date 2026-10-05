@@ -230,7 +230,7 @@ def test_round_trip_capa_pyrolysis_metadata(qtbot: Any) -> None:
                 "purge": {
                     "species": "N2",
                     "purity": "UHP 5.0",
-                    "target_flow_sccm": 100.0,
+                    "target_flow_slpm": 100.0,
                 },
             },
         }
@@ -248,7 +248,7 @@ def test_round_trip_capa_pyrolysis_metadata(qtbot: Any) -> None:
     assert rebuilt.program.heater_setpoint_c == initial.program.heater_setpoint_c
     assert rebuilt.atmosphere.mode == initial.atmosphere.mode
     assert rebuilt.atmosphere.purge.species == initial.atmosphere.purge.species
-    assert rebuilt.atmosphere.purge.target_flow_sccm == initial.atmosphere.purge.target_flow_sccm
+    assert rebuilt.atmosphere.purge.target_flow_slpm == initial.atmosphere.purge.target_flow_slpm
 
 
 def test_values_changed_signal_fires_on_edit(qtbot: Any) -> None:

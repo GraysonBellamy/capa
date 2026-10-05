@@ -77,7 +77,7 @@ The procedure declares no required channels and no required capabilities. Whatev
 
 ## What gets recorded
 
-Free run does not drive the rig. **The heater holds whatever setpoint it had when the run began.** If the operator pre-positioned the rig from Manual Controls — heater at 600 °C, N₂ purge at 100 sccm — the free run captures the resulting steady-state with no further commands.
+Free run does not drive the rig. **The heater holds whatever setpoint it had when the run began.** If the operator pre-positioned the rig from Manual Controls — heater at 600 °C, N₂ purge at 100 slpm — the free run captures the resulting steady-state with no further commands.
 
 Two bundle audit events are written by the procedure itself:
 

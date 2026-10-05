@@ -124,7 +124,7 @@ Controls the gas atmosphere the specimen sees during the run.
 | `purity` | Grade / purity: `"UHP 5.0"`, `"99.999%"`, `"zero-grade air"`. |
 | `supplier` | Optional. |
 | `cylinder_lot` | Optional. |
-| `target_flow_sccm` | Operator's intended setpoint. **The MFC channel is the actual source of truth.** Setting this to 0 opts out of the `capa.purge_flow_established` preflight. |
+| `target_flow_slpm` | Operator's intended setpoint. **The MFC channel is the actual source of truth.** Setting this to 0 opts out of the `capa.purge_flow_established` preflight. |
 
 ### `ReactiveGas`
 
@@ -184,7 +184,7 @@ The profile contributes the following preflight checks, evaluated when the run i
 | `capa.required_channel_mappings` | yes | Every required channel group has at least `min_count` members. |
 | `capa.atmosphere_consistency` | yes | Declared atmosphere mode is consistent with declared channels: `oxidative` / `reactive_blend` modes must declare a `reactive_gas_flow`. |
 | `capa.heater_pv_in_safe_range` | yes | Heater PV reading is within the rig-survival ceiling (< 1000 °C by default). Catches sensor runaway / miswired channel; **not** a cold-start gate. |
-| `capa.purge_flow_established` | yes | Purge gas flow has been seen ≥ `target × 0.5` for ≥ 3 s. Skip by setting `purge.target_flow_sccm = 0`. |
+| `capa.purge_flow_established` | yes | Purge gas flow has been seen ≥ `target × 0.5` for ≥ 3 s. Skip by setting `purge.target_flow_slpm = 0`. |
 | `capa.flux_calibration_freshness` | no | When `target_heat_flux_kw_m2` is declared, `flux_calibration_ref` is set, and the on-disk tune artifact it points to is within the recency window (default 7 days). |
 | `capa.balance_stability` | no | When a mass channel is declared, it reports stable for ≥ 5 s prior to arming. |
 | `capa.disk_projection` | yes | Projected bundle size leaves ≥ 1.5× margin on the bundle volume. |

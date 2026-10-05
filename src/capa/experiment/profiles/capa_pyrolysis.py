@@ -213,10 +213,10 @@ class PurgeGas(BaseModel):
 
     supplier: str | None = None
     cylinder_lot: str | None = None
-    target_flow_sccm: float = Field(
+    target_flow_slpm: float = Field(
         ge=0,
         json_schema_extra={
-            "capa_unit": "sccm",
+            "capa_unit": "slpm",
             "capa_help": (
                 "Operator's intended purge-flow setpoint at standard "
                 "conditions. The MFC channel is the actual source of truth; "
@@ -236,10 +236,10 @@ class ReactiveGas(BaseModel):
     """e.g. ``"O2"``, ``"H2"``, ``"CO"``."""
 
     purity: str = Field(min_length=1)
-    target_flow_sccm: float = Field(
+    target_flow_slpm: float = Field(
         ge=0,
         json_schema_extra={
-            "capa_unit": "sccm",
+            "capa_unit": "slpm",
             "capa_help": "Operator's intended secondary-gas flow setpoint.",
         },
     )
