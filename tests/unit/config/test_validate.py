@@ -84,6 +84,7 @@ def test_layer3_skipped_when_profile_is_not_capa(configs_dir: Path) -> None:
     [
         "sim_capa_pyrolysis.yaml",
         "capa_real_full.yaml",
+        "capa_real_full_fuji.yaml",
         "capa_real_partial_a.yaml",
         "capa_real_partial_b.yaml",
     ],

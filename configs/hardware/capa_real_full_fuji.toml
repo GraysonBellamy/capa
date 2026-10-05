@@ -1,4 +1,4 @@
-name = "capa_real_full"
+name = "capa_real_full_fuji"
 
 [[devices]]
 name = "heater"
@@ -102,6 +102,22 @@ max_val = 0.02
 terminal_config = "DIFF"
 adc_timing_mode = "HIGH_RESOLUTION"
 auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices]]
+name = "analyzer"
+adapter = "capa.devices.fuji"
+
+[devices.params]
+port = "COM8"
+address = 1
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
+[devices.params.channel_map]
+CH1 = "co2"
+CH2 = "co"
+CH3 = "o2"
 
 [[cameras]]
 name = "visible_cam0"
@@ -315,3 +331,54 @@ output_unit = "g"
 
 [channels.metadata]
 capa_group = "mass"
+
+[[channels]]
+name = "gas.co2"
+kind = "gas_concentration"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "gases"
+
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH1"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[[channels]]
+name = "gas.co"
+kind = "gas_concentration"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "gases"
+
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH2"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[[channels]]
+name = "gas.o2"
+kind = "gas_concentration"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "gases"
+
+[channels.source]
+source = "fuji_channel"
+device = "analyzer"
+channel = "CH3"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
