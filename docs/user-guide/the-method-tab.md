@@ -32,7 +32,7 @@ For the on-disk schema and field reference, see
 ├──────────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────┬──────────────────────────────────────────┐  │
 │  │ # │ kind  │ summary │  Step detail (auto-form)                 │  │  ← step table
-│  │ 1 │ Hold  │ heater… │  target.name:  heater.setpoint           │  │     + detail
+│  │ 1 │ Hold  │ heater… │  target:       [heater.setpoint ▾]       │  │     + detail
 │  │ 2 │ Ramp  │ heater… │  value:        25.0  °C                  │  │
 │  │ 3 │ Safe… │ cool to │  duration_s:   60                        │  │
 │  │   │       │         │  end_condition: (none)                   │  │
@@ -114,6 +114,19 @@ Every field is unit-aware where applicable (the spinbox suffix is the
 expected unit; the form converts on edit). The form's `kind` field is
 hidden because the row's kind is fixed at insertion — change kind by
 deleting and re-adding.
+
+Fields that name a channel are dropdowns filled from the Setup tab's
+hardware channels:
+
+- A step's **target** and the keys of a Safe shutdown's `cool_target`
+  list the channels a step can drive: setpoint, MFC-flow, and
+  analog/digital-output channels.
+- An **end condition's** channel lists every channel.
+
+Hover an entry to see its kind and unit. You can still type a name:
+typing narrows the list, and a name outside the list (say, a channel
+you haven't added in Setup yet) is kept as typed. Channels added in
+Setup appear the next time you open the Method tab.
 
 Edits flow back into the step table immediately. If the edit makes the
 step invalid (e.g. a Hold with neither `duration_s` nor `end_condition`),

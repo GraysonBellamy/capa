@@ -20,7 +20,7 @@ class ChannelRef(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-    name: str
+    name: str = Field(title="Channel", json_schema_extra={"capa_widget": "command_channel"})
 
 
 class EndCondition(BaseModel):
@@ -30,7 +30,7 @@ class EndCondition(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-    channel: str
+    channel: str = Field(json_schema_extra={"capa_widget": "channel"})
     op: Literal[">", ">=", "<", "<=", "=="]
     value: float
 
@@ -201,7 +201,10 @@ class SafeShutdownStep(_StepBase):
     """
 
     kind: Literal["safe_shutdown"] = "safe_shutdown"
-    cool_target: dict[str, float] = Field(default_factory=dict)
+    cool_target: dict[str, float] = Field(
+        default_factory=dict,
+        json_schema_extra={"capa_widget": "command_channel"},
+    )
     """``{channel_name: setpoint}`` to drive to during shutdown."""
     duration_s: float | None = Field(
         default=None,

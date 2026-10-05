@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget
 
 from capa.ui.forms.widgets._helpers import _ERROR_STYLE
+
+if TYPE_CHECKING:
+    from capa.ui.forms.widgets._channels import ChannelOption
 
 
 class FieldWidget(QWidget):
@@ -35,5 +39,8 @@ class FieldWidget(QWidget):
         else:
             self.setStyleSheet("")
             self.setToolTip(self._description or "")
+
+    def set_channel_options(self, options: Sequence[ChannelOption]) -> None:
+        """Offer ``options`` to a field that names channels; no-op elsewhere."""
 
     _description: str = ""

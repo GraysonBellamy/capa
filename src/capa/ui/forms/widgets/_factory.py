@@ -20,6 +20,7 @@ from pydantic.fields import FieldInfo
 from PySide6.QtWidgets import QWidget
 
 from capa.ui.forms.widgets._base import FieldWidget
+from capa.ui.forms.widgets._channels import CHANNEL_WIDGET_ROLES, _ChannelField
 from capa.ui.forms.widgets._collection import (
     _DictStrFloatField,
     _FloatTupleField,
@@ -95,6 +96,10 @@ def _build_inner(
         from capa.ui.forms.widgets._nidaq_channels import NIDAQChannelsField  # noqa: PLC0415
 
         return NIDAQChannelsField(parent=parent)
+
+    channel_role = CHANNEL_WIDGET_ROLES.get(widget_id) if widget_id else None
+    if channel_role is not None and annotation is str:
+        return _ChannelField(role=channel_role, parent=parent)
 
     # Discriminated unions take priority over generic origin/args probes:
     # ``Annotated[A | B, Field(discriminator=...)]`` would otherwise fall
@@ -174,7 +179,7 @@ def _build_inner(
 
     if origin is dict:
         if args == (str, float):
-            return _DictStrFloatField(parent=parent)
+            return _DictStrFloatField(channel_role=channel_role, parent=parent)
         return _JsonFallbackField(parent=parent)
 
     # Unknown annotation — JSON fallback. Keeps the form usable for

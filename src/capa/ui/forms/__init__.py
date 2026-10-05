@@ -11,10 +11,14 @@ Public API:
 * :func:`build_form` — entry point; returns a :class:`ModelForm`.
 * :class:`ModelForm` — composed widget; exposes ``values()``,
   ``set_values()``, ``validate()``, and a ``valuesChanged`` Qt signal.
+* :class:`ChannelOption` / :func:`channel_options_from_hardware` — the
+  channel list a form's channel pickers offer, via
+  :meth:`ModelForm.set_channel_options`.
 """
 
 from __future__ import annotations
 
 from capa.ui.forms.from_model import ModelForm, build_form
+from capa.ui.forms.widgets._channels import ChannelOption, channel_options_from_hardware
 
-__all__ = ["ModelForm", "build_form"]
+__all__ = ["ChannelOption", "ModelForm", "build_form", "channel_options_from_hardware"]
