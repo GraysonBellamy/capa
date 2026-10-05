@@ -1,5 +1,5 @@
 ---
-description: Bringing up real CAPA pyrolysis hardware for the first time — pre-flight checklist, gas and exhaust, leak-check, free-run setup, sealing first real bundle.
+description: Bringing up real CAPA pyrolysis hardware for the first time — pre-flight checklist, gas and exhaust, free-run setup, sealing first real bundle.
 ---
 
 # Your first real run
@@ -32,11 +32,8 @@ Before launching capa:
 2. **Exhaust on.** Building exhaust and the rig's local extraction.
    You'll be flowing combustion products even on a simulator-equivalent
    profile.
-3. **Leak-check timestamp current.** If the last leak-check on the
-   reactor is older than your lab's policy window, redo it before
-   loading any sample.
-4. **Sample loaded** in the holder, holder in the reactor, lid sealed.
-5. **No one is leaning on the balance.** A casual elbow during tare
+3. **Sample loaded** in the holder, holder in the reactor.
+4. **No one is leaning on the balance.** A casual elbow during tare
    ruins the mass curve.
 
 Now launch:
@@ -127,8 +124,7 @@ Per [CAPA profile fields](../configuration/capa-profile.md):
   and the catalog) is filled from it.
 - **Heater program:** target heat flux and the heater setpoint that
   delivers it, plus the calibration source for it.
-- **Atmosphere:** purge gas + flow target, and the leak-check timestamp
-  from your pre-flight.
+- **Atmosphere:** purge gas + flow target.
 
 These don't change the run — they record *what was measured*. Five
 years from now this is what tells you whether two bundles are

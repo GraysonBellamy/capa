@@ -92,7 +92,6 @@ def test_filter_by_category_partitions_known_ids() -> None:
     # Pure config/filesystem checks must be classified static.
     assert "capa.required_channel_mappings" in static_ids
     assert "capa.atmosphere_consistency" in static_ids
-    assert "capa.leak_test_recency" in static_ids
     assert "capa.disk_projection" in static_ids
 
 

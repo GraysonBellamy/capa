@@ -32,7 +32,7 @@ This profile contributes:
   oxygen-depletion calorimetry by default, so the analyzer block is shaped
   for "qualitative product analysis" rather than "quantitative HRR".
 - **preflight checks** — heater PV in safe range, purge gas flow
-  established and stable, leak-test recency, balance stability when present,
+  established and stable, balance stability when present,
   required channel mappings.
 
 Cone-calorimeter mode (oxygen-depletion HRR) lives separately in
@@ -43,7 +43,6 @@ experiment YAML.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -266,22 +265,6 @@ class Atmosphere(BaseModel):
     mode: AtmosphereMode
     purge: PurgeGas
     reactive: ReactiveGas | None = None
-    purge_duration_s: float = Field(
-        default=0.0,
-        ge=0,
-        json_schema_extra={
-            "capa_unit": "s",
-            "capa_help": (
-                "How long the reactor is swept with purge gas before heating "
-                "begins. Captured so downstream analysis knows the pre-run "
-                "sweep duration."
-            ),
-        },
-    )
-
-    leak_check_at: datetime | None = None
-    """Most-recent leak / pressure-decay check timestamp. Preflight
-    ``capa.leak_test_recency`` reads this."""
 
 
 class DownstreamAnalyzer(BaseModel):
@@ -425,13 +408,6 @@ PREFLIGHT_CHECKS: tuple[PreflightCheck, ...] = (
         id="capa.purge_flow_established",
         description="Purge gas flow has been seen >= target * 0.5 for >=3 s.",
         blocking=True,
-    ),
-    PreflightCheck(
-        id="capa.leak_test_recency",
-        description=(
-            "Atmosphere.leak_check_at is within the lab-policy recency window (default 7 days)."
-        ),
-        blocking=False,
     ),
     PreflightCheck(
         id="capa.flux_calibration_freshness",

@@ -86,7 +86,7 @@ file rather than inlining the method into the experiment YAML.
 
 The CAPA-pyrolysis [domain profile](../glossary.md#profile-domain-profile)
 adds a scientific layer on top of the generic experiment recipe —
-specimen, atmosphere, target heat flux, leak-check provenance, and
+specimen, atmosphere, target heat flux, and
 required channel groups (heater_setpoint, heater_pv, sample_temperature,
 mass, purge_gas_flow). The fields are detailed on the [CAPA profile
 fields](capa-profile.md) page.

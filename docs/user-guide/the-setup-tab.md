@@ -214,7 +214,7 @@ section in the outline.
 The CAPA profile's scientific metadata, in four panes built directly from
 the profile's models: **Specimen**, **Heater program** (target heat flux,
 heater setpoint, tune-artifact lookup), **Atmosphere** (purge gas,
-optional reactive gas, leak-check timestamp) and **Analyzer & SOP**.
+optional reactive gas) and **Analyzer & SOP**.
 Below them, the required-channel mapping panel ties each CAPA channel
 group to a hardware channel. See
 [CAPA profile fields](../configuration/capa-profile.md) for the per-field

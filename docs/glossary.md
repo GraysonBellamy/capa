@@ -33,7 +33,7 @@ interpret the bundle.
 
 A *domain profile* layers scientific metadata and preflight checks on
 top of the generic experiment recipe — atmosphere composition, specimen
-holder geometry, heat-flux setpoint, leak-check provenance. Profile is
+holder geometry, heat-flux setpoint. Profile is
 **orthogonal to procedure**: the same `capa.builtin.recipe_runner`
 procedure can drive a CAPA-pyrolysis run or a cone-calorimeter run
 depending on which profile is attached. The CAPA-pyrolysis profile

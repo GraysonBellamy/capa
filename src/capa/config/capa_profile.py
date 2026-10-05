@@ -99,7 +99,7 @@ def current_capa_mappings(channels: Iterable[object]) -> dict[str, list[str]]:
 def profile_model_fields(metadata: Mapping[str, Any]) -> dict[str, Any]:
     """Return ``metadata`` without its underscore-prefixed preflight knobs.
 
-    Keys such as ``_safe_arm`` and ``_leak_window_days`` tune the
+    Keys such as ``_safe_arm`` and ``_flux_calibration_window_days`` tune the
     profile's preflight checks (:mod:`capa.experiment.profiles.runtime`).
     They share the ``domain_profile.metadata`` block but are not fields
     of the profile's metadata model, so model validation skips them.
