@@ -319,6 +319,21 @@ class TestFlirIrSimRadiometricVerbs:
         finally:
             await sim.close()
 
+    async def test_read_state_snapshot_reports_the_radiometric_writes(self) -> None:
+        sim = _make_sim()
+        await sim.open()
+        try:
+            await sim.command(_authorized("set_emissivity", emissivity=0.87))
+            await sim.command(_authorized("set_reflected_temp", temperature_c=650.0))
+            snapshot = await sim.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.radiometric is not None
+            assert snapshot.radiometric.emissivity == 0.87
+            assert snapshot.radiometric.reflected_temp_c == 650.0
+            assert snapshot.radiometric.distance_m == 1.0
+        finally:
+            await sim.close()
+
 
 class TestFlirIrSimNucVerbs:
     async def test_trigger_nuc_increments_counter(self) -> None:
@@ -409,6 +424,22 @@ class TestFlirIrSimTemperatureRange:
         finally:
             await sim.close()
 
+    async def test_read_state_snapshot_follows_the_range_switch(self) -> None:
+        sim = _make_sim()
+        assert await sim.read_state_snapshot() is None
+        await sim.open()
+        try:
+            snapshot = await sim.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.temperature_ranges == FlirIrSim.TEMPERATURE_RANGES
+            assert snapshot.temperature_range_index == 0
+            await sim.command(_authorized("set_temperature_range", index=2))
+            snapshot = await sim.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.temperature_range_index == 2
+        finally:
+            await sim.close()
+
 
 class TestFlirIrSimPaletteVerbs:
     async def test_set_remote_palette(self) -> None:
@@ -448,5 +479,22 @@ class TestFlirIrSimPaletteVerbs:
             result = await sim.command(_authorized("set_preview_palette", palette="puce"))
             assert result.accepted is False
             assert "unknown preview palette" in result.detail
+        finally:
+            await sim.close()
+
+    async def test_read_state_snapshot_reports_palettes_and_auto_nuc(self) -> None:
+        sim = _make_sim()
+        await sim.open()
+        try:
+            await sim.command(_authorized("set_remote_palette", palette="arctic"))
+            await sim.command(_authorized("set_preview_palette", palette="whitehot"))
+            await sim.command(_authorized("set_auto_nuc_interval", seconds=90))
+            snapshot = await sim.read_state_snapshot()
+            assert snapshot is not None
+            assert snapshot.remote_palettes == FlirIrSim.REMOTE_PALETTES
+            assert snapshot.remote_palette == "arctic"
+            assert snapshot.preview_palettes == tuple(sorted(FlirIrSim.PREVIEW_PALETTE_PRESETS))
+            assert snapshot.preview_palette == "whitehot"
+            assert snapshot.auto_nuc_interval_s == 90
         finally:
             await sim.close()

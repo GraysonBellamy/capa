@@ -28,7 +28,7 @@ Free run is the **simplest valid procedure** and the smoke-test path for the eng
 - **Just record sensors, no setpoint changes.** This is the default mental model for a CAPA single-setpoint hold: pre-position the heater + purge from the Manual Controls dock, then arm a free run for the data window.
 - **Headless smoke test.** `capa run --headless freerun.yaml` exercises the full engine pipeline without needing a method file.
 - **Simulator harness in tests.** Free run is what every unit/integration test arms when it only needs "the engine ran end-to-end."
-- **Operator ad-hoc capture.** The rig is doing something interesting (a leak check, a manual ramp via Manual Controls) and you want a bundle to look at later.
+- **Operator ad-hoc capture.** The rig is doing something interesting (a manual ramp via Manual Controls) and you want a bundle to look at later.
 
 Anything that needs scripted setpoint changes belongs in a [recipe runner](builtin-recipe-runner.md) with a method. The free-run preflight refuses a config with `method` set — see [Preflight](#preflight) below.
 

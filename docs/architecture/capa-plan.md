@@ -28,7 +28,7 @@ Sample rates are modest (3–60 Hz per device); the dominant I/O concern is vide
 
 - **Configurable rigs.** Channels, devices, calibrations, methods are all declarative (YAML / TOML / JSON) and version-controllable.
 - **Reproducible runs.** Every run produces a bundle that contains everything needed to interpret the data five years later — config, method, calibration snapshot, equipment, events, scalars, video.
-- **Domain-standard capture.** CAPA pyrolysis runs capture the metadata needed to interpret a controlled-atmosphere temperature program: temperature profile, atmosphere (carrier and optional reactive gas), specimen form/mass/holder, and leak-check timestamp.
+- **Domain-standard capture.** CAPA pyrolysis runs capture the metadata needed to interpret a controlled-atmosphere temperature program: temperature profile, atmosphere (carrier and optional reactive gas), and specimen form/mass/holder.
 - **Extensible procedures.** New routines (heat-flux gauge calibration, paint emissivity ramp, future profile variants) are plugin packages, not core changes.
 - **Operable.** A trained operator can launch a known recipe, monitor it, abort safely, and review the result without touching code.
 - **Headless-capable.** The engine runs without the GUI for testing, automation, and CI.
@@ -403,11 +403,11 @@ Domain profiles are optional schema/preflight bundles layered on top of the gene
 **`capa.profiles.capa_pyrolysis`.** Models the controlled-atmosphere pyrolysis apparatus the project is named after: a sample is heated under a controlled gas atmosphere (typically inert N2; sometimes a controlled O2 mix for partial-oxidation studies). Pyrolysis chemistry under controlled atmosphere — *not* oxygen-depletion calorimetry. Contributes:
 
 - specimen fields: id, material, initial mass, form (`disk` for ~99% of runs, `other` as the escape hatch), particle size when applicable, specimen-holder description, optional holder diameter and depth, conditioning notes
-- method fields: heater program summary (target heat flux at the specimen surface in kW/m², heater setpoint °C chosen to deliver that flux via the day-of calibration, optional `flux_calibration_ref`, optional ramp rate for the minority dynamic-program runs), atmosphere mode (inert / oxidative / reducing / reactive_blend), purge duration, leak-check timestamp
+- method fields: heater program summary (target heat flux at the specimen surface in kW/m², heater setpoint °C chosen to deliver that flux via the day-of calibration, optional `flux_calibration_ref`, optional ramp rate for the minority dynamic-program runs), atmosphere mode (inert / oxidative / reducing / reactive_blend)
 - atmosphere metadata: purge-gas spec (species, purity, supplier, cylinder lot, target purge flow), optional reactive-gas spec (species, purity, target flow, target mole fraction) for partial-oxidation runs
 - optional downstream-analyzer block (reserved for future setups; the current CAPA rig does not route gases to an analyzer): kind (FTIR / GC / MS / GC-MS / NDIR / other), serial, sampling-line delay, response time, external-file ref. If a future rig adds one, the analyzer is not capa-controlled — its data lives outside the bundle — but the pedigree fields are captured so the run record cross-references the right external dataset
 - required channel groups: `heater_setpoint`, `heater_pv`, `sample_temperature`, `purge_gas_flow`. Optional: `mass` (load-cell rigs), `reactive_gas_flow`, `reactor_pressure`
-- preflight checks: static — required channel mappings, atmosphere consistency (oxidative/blend mode requires a reactive-gas channel), leak-test recency, disk projection; dynamic (after adapters start, inside the task group) — heater PV in safe startup range, purge flow established, balance stability when mass is present. A silent live-data channel post-start is a blocking error, not a downgraded warning.
+- preflight checks: static — required channel mappings, atmosphere consistency (oxidative/blend mode requires a reactive-gas channel), disk projection; dynamic (after adapters start, inside the task group) — heater PV in safe startup range, purge flow established, balance stability when mass is present. A silent live-data channel post-start is a blocking error, not a downgraded warning.
 
 The profile snapshot lands in `profiles/capa_pyrolysis.toml` and is referenced from `manifest.json.domain_profile`. The profile does not make `capa` a standards-certification tool; it ensures the run bundle captures the metadata a researcher or later analyzer needs.
 
@@ -634,7 +634,7 @@ runs/2026-05-07_153000_S073-paint-A/
 - Visible video stays in MKV (no need to preserve radiometry); IR thermal stays in native FLIR `.csq` (raw radiometry preserved, vendor calibration intact, can be re-colorized at any time).
 - Frame-index parquets carry the canonical `(frame_idx, t_mono_ns, t_utc, capture_latency_s)` schema for every camera, so visible and IR analyses share the same join key against `scalars.parquet`.
 - `status.sqlite` keeps low-rate device-health rows (e.g., Watlow alarm bits, Alicat valve drive, balance stable flag) separate from the `scalars.parquet` engineering channels — different cadence, different consumer.
-- `profiles/` captures domain-standard context such as the temperature program summary, atmosphere metadata, specimen form/holder, leak-check recency, and (when present) downstream-analyzer pedigree fields.
+- `profiles/` captures domain-standard context such as the temperature program summary, atmosphere metadata, specimen form/holder, and (when present) downstream-analyzer pedigree fields.
 - `env/` and `manifest.sha256` make the bundle a closed scientific record. Re-deriving values five years later does not depend on what tooling happened to be installed today.
 
 **Live readback during a run is not needed** — the in-memory ConductorDataBus serves the UI. Files are written in flush-bounded chunks for crash safety, then **rewritten into well-sized row groups at finalize** (see §8.5). They are opened for analysis only after the bundle is readable (`finalized_unverified` or `sealed`).

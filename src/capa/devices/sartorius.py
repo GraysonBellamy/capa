@@ -25,7 +25,9 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import sartoriuslib
@@ -40,6 +42,7 @@ from sartoriuslib import (
     ProtocolKind,
     Reading,
     SartoriusError,
+    Unit,
     sample_to_row,
     summarize_discovery,
 )
@@ -150,6 +153,36 @@ class SartoriusAdapterParams(BaseModel):
     def overflow_policy(self) -> OverflowPolicy:
         """Translate the user-facing ``overflow`` string to a library :class:`OverflowPolicy`."""
         return OverflowPolicy.BLOCK if self.overflow == "block" else OverflowPolicy.DROP_NEWEST
+
+
+@dataclass(frozen=True, slots=True)
+class SartoriusStateSnapshot:
+    """One-shot readback of a balance's menu settings and last calibration.
+
+    Built by :meth:`SartoriusAdapter.read_state_snapshot` on the worker loop
+    and consumed by the manual-control card on the qasync loop. Mode values
+    are the lowercase spaced names the card offers and sartoriuslib's
+    resolvers accept. ``None`` means the balance did not report the value.
+    """
+
+    filter_mode: str | None = None
+    """``"very stable"`` / ``"stable"`` / ``"unstable"`` / ``"very unstable"``."""
+
+    auto_zero: str | None = None
+    """``"on"`` / ``"off"``."""
+
+    display_unit: str | None = None
+    """Display unit label, e.g. ``"g"``."""
+
+    tare_behavior: str | None = None
+    """``"without stability"`` / ``"with stability"`` / ``"at stability"``."""
+
+    cal_temperature_c: float | None = None
+    """Balance temperature at the last calibration."""
+
+    cal_on_record: bool | None = None
+    """Whether a calibration is on record. The record's metadata lives in
+    RAM, so it is ``False`` after a cold boot until the next calibration."""
 
 
 # ---------------------------------------------------------------------------
@@ -668,10 +701,10 @@ class SartoriusAdapter:
             ) from exc
 
     async def read_last_cal_record(self) -> CalRecord:
-        """Read the last-calibration snapshot (no authorization gate — read-only).
+        """Read the last-calibration record (no authorization gate — read-only).
 
-        Used by the manual-control panel to display when the balance was last
-        calibrated and what the result was.
+        The record carries the temperature at the last calibration and
+        whether one is on record since the last cold boot — no timestamp.
         """
         if self._balance is None:
             raise AdapterError(
@@ -685,6 +718,41 @@ class SartoriusAdapter:
                 f"sartorius {self.name!r} read_last_cal_record failed: {exc}",
                 device=self.name,
             ) from exc
+
+    async def read_state_snapshot(self) -> SartoriusStateSnapshot | None:
+        """One-shot read of the menu settings and last calibration for the
+        manual-control card.
+
+        Returns ``None`` when no balance is open. Individual reads that fail
+        (a parameter the balance family lacks, SBI framing) are captured as
+        ``None`` fields rather than raising.
+
+        No authorization gate (read-only). sartoriuslib serializes I/O on
+        the port, so this won't interleave with the streaming recorder.
+        """
+        balance = self._balance
+        if balance is None:
+            return None
+        filter_mode = await self._read_or_none("filter_mode", balance.get_filter_mode)
+        auto_zero = await self._read_or_none("auto_zero", balance.get_auto_zero)
+        display_unit = await self._read_or_none("display_unit", balance.get_display_unit)
+        tare_behavior = await self._read_or_none("tare_behavior", balance.get_tare_behavior)
+        cal = await self._read_or_none("last_cal_record", balance.last_cal_record)
+        return SartoriusStateSnapshot(
+            filter_mode=_mode_label(filter_mode),
+            auto_zero=_mode_label(auto_zero),
+            display_unit=_mode_label(display_unit),
+            tare_behavior=_mode_label(tare_behavior),
+            cal_temperature_c=cal.temperature_celsius if cal is not None else None,
+            cal_on_record=cal.has_metadata if cal is not None else None,
+        )
+
+    async def _read_or_none[T](self, what: str, read: Callable[[], Awaitable[T]]) -> T | None:
+        try:
+            return await read()
+        except SartoriusError as exc:
+            _log.debug("sartorius %r read %s failed: %s", self.name, what, exc)
+            return None
 
     # ------------------------------------------------------------------ helpers
 
@@ -849,6 +917,16 @@ class SartoriusAdapter:
         return out
 
 
+def _mode_label(value: Enum | None) -> str | None:
+    """Card-facing label for a decoded menu value: a unit's own label, a
+    mode's name as lowercase words. ``None`` for absent or ``UNKNOWN``."""
+    if value is None or value.name == "UNKNOWN":
+        return None
+    if isinstance(value, Unit):
+        return value.value
+    return value.name.lower().replace("_", " ")
+
+
 # ---------------------------------------------------------------------------
 # CLI handshake hook (``capa validate --strict``)
 # ---------------------------------------------------------------------------
@@ -935,6 +1013,7 @@ __all__ = [
     "DESCRIPTOR",
     "SartoriusAdapter",
     "SartoriusAdapterParams",
+    "SartoriusStateSnapshot",
     "discover",
     "handshake",
 ]

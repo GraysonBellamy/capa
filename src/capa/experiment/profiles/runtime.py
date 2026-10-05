@@ -403,44 +403,6 @@ async def _purge_flow_established(ctx: ProfilePreflightContext) -> Problem | Non
     return None
 
 
-@register("capa.leak_test_recency")
-async def _leak_test_recency(ctx: ProfilePreflightContext) -> Problem | None:
-
-    leak = ctx.profile_metadata.get("atmosphere", {}).get("leak_check_at")
-    if leak is None:
-        return Problem(
-            code="capa.leak_test_missing",
-            message="atmosphere.leak_check_at is not set; recency cannot be verified",
-            severity="warning",
-            blocking=False,
-        )
-    if isinstance(leak, str):
-        try:
-            leak_dt = datetime.fromisoformat(leak)
-        except ValueError:
-            return Problem(
-                code="capa.leak_test_unparseable",
-                message=f"atmosphere.leak_check_at is not ISO-8601: {leak!r}",
-                severity="warning",
-                blocking=False,
-            )
-    else:
-        leak_dt = leak
-    if leak_dt.tzinfo is None:
-        leak_dt = leak_dt.replace(tzinfo=UTC)
-    age = datetime.now(UTC) - leak_dt
-    window = timedelta(days=int(ctx.profile_metadata.get("_leak_window_days", 7)))
-    if age > window:
-        return Problem(
-            code="capa.leak_test_stale",
-            message=f"leak check is {age.days} days old (>{window.days} day window)",
-            severity="warning",
-            blocking=False,
-            metadata={"age_days": age.days, "window_days": window.days},
-        )
-    return None
-
-
 @register("capa.flux_calibration_freshness")
 async def _flux_calibration_freshness(ctx: ProfilePreflightContext) -> Problem | None:
     """Warn when a flux target is declared without a recent calibration.
@@ -453,7 +415,7 @@ async def _flux_calibration_freshness(ctx: ProfilePreflightContext) -> Problem |
     when the ref resolves to an on-disk tune artifact; free-form refs
     (lab notebook entries, etc.) pass without recency checks.
 
-    Overrides via ``profile_metadata`` mirror the leak-test recency knob:
+    Overrides via ``profile_metadata``:
 
     * ``_flux_calibration_window_days`` (default ``7``)
     * ``_flux_calibration_dir`` (default ``configs/calibrations/flux``)

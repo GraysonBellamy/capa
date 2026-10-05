@@ -23,7 +23,7 @@ per device that advertises any manual-relevant capability.
 ┌─ Manual Control ─────────────────────────────────────────────────┐
 │                                                                  │
 │  ┌─ Balance: balance_main ────────────────────────────────────┐  │
-│  │  Last cal: 2026-04-22 14:30 OK                             │  │
+│  │  Last cal: 22.4 °C                                         │  │
 │  │  [Tare]   [Zero]   [Internal cal…]   [Save settings…]      │  │
 │  │  Filter: [stable    ▾]   Auto-zero: [on ▾]                 │  │
 │  └────────────────────────────────────────────────────────────┘  │
@@ -34,10 +34,10 @@ per device that advertises any manual-relevant capability.
 │  │  [Heat-flux tune…]                                         │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  ┌─ MFC: mfc_n2 ──────────────────────────────────────────────┐  │
-│  │  Flow: 0.0 sccm   Setpoint: 0.0 sccm                       │  │
-│  │  Setpoint: [   0.0   ] sccm   [Apply]                      │  │
-│  │  Gas: [N2 ▾]   [Valve hold]   [Reset totalizer…]           │  │
+│  ┌─ Alicat: mfc_n2 ───────────────────────────────────────────┐  │
+│  │  Gas: N2   Setpoint: 0 SLPM                                │  │
+│  │  Value: [   0.000 ] SLPM   [Set]                           │  │
+│  │  Gas: [N2 ▾]   [Set (session)]   [Set + save (EEPROM)]     │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
@@ -70,18 +70,31 @@ entirely — no empty card.
 
 If the worker pool is still **opening** when the dock builds, the cards
 fall back to the adapter-import-string fingerprint (e.g. *sartorius* →
-balance, *alicat* → MFC) to pick the right card class. They'll repick
-the right capability set once the pool finishes opening.
+balance, *alicat* → MFC) to pick the right card class. Their controls
+stay disabled until the pool is open.
+
+An Alicat only reports whether it is a controller once it has been
+opened, so the Alicat card shows every section until then. Once the
+pool is open it rebuilds from the device's real flags: a meter loses
+its Setpoint and Valves sections. It then reads the active gas, the
+gas list and the setpoint from the device; the subtitle shows the
+active gas and setpoint, and the gas box stays empty until the device
+has reported one. The setpoint is always in the device's own
+engineering units, shown beside the value: the card has no unit to
+pick, because the device applies the number in its units whatever unit
+is named. Change units on the device itself. On firmware that reports
+its setpoint unit, a setpoint sent after the device's unit has changed
+is refused.
 
 The six card classes that ship today:
 
 | Card | Devices it matches | Common controls |
 |---|---|---|
 | **HeaterCard** | Watlow temperature controllers | Setpoint, Heat-flux tune launcher |
-| **BalanceCard** | Sartorius balances | Tare, zero, internal cal, filter / auto-zero / display unit, save settings |
-| **AlicatCard** | Alicat MFCs and pressure devices | Flow setpoint, gas select, valve hold, totalizer reset |
+| **BalanceCard** | Sartorius balances | Tare, zero, internal cal, filter / auto-zero / display unit / tare behavior, save settings; shows those settings and the last calibration |
+| **AlicatCard** | Alicat MFCs and pressure devices | Flow setpoint, gas select, valve hold, totalizer reset; shows the device's active gas and setpoint |
 | **FujiCard** | Fuji ZP-series gas analyzers | Response time, range and range method, output hold, calibration-gas setting, a guarded zero or span with a live steadiness readout |
-| **FlirCard** | FLIR IR cameras | Stream format, palette, NUC trigger |
+| **FlirCard** | FLIR IR cameras | Temperature range (picked from the ranges the camera reports, in °C), NUC trigger, auto-NUC interval, radiometric parameters, palettes (choices read from the camera); every field shows the camera's current setting |
 | **WebcamCard** | USB / built-in cameras | Resolution, framerate, codec |
 
 ---
@@ -149,13 +162,20 @@ A confirmation in flight:
 ## Read-back values
 
 Each card shows the device's current state above its controls — a heater
-card shows `PV` and `SP`, a balance shows `Last cal: …`, an MFC shows
-the live flow. These refresh:
+card shows `PV` and `SP`, a balance shows the temperature at its last
+calibration (`Last cal: 22.4 °C`, or `none since power-up`; the balance
+keeps no date), an MFC shows its active gas and setpoint, an IR camera
+shows its active temperature range. A setting the card can change — an
+MFC's gas, a balance's filter mode — is selected from what the device
+reports, and stays empty until the device has reported it. Every field
+on an IR camera card — range, auto-NUC interval, radiometric values,
+both palettes — shows the camera's setting; one you have changed but
+not yet applied keeps your change through a refresh, and a command you
+cancel at its confirmation leaves it changed. These refresh:
 
-- **Once on card open**, asynchronously (scheduled when the pool
-  reports ready).
-- **After each successful command**, so a Tare immediately repaints the
-  reading.
+- **Once the pool reports ready**, asynchronously.
+- **After a command that changes them** — a setpoint, a gas, a balance
+  setting or calibration — so the card shows what the device took.
 
 If the read-back fails (typically because the pool is mid-rebuild after
 a cold reload), the card logs at debug level and leaves the previous

@@ -276,7 +276,7 @@ class HeaterCard(DeviceCard):
         btn = QPushButton("Set", self)
 
         def _apply() -> None:
-            self.schedule_dispatch(
+            self.schedule_dispatch_and_read_back(
                 kind="set_setpoint",
                 payload={
                     "value": spin.value(),
@@ -346,7 +346,7 @@ class HeaterCard(DeviceCard):
         )
         if reply != QMessageBox.StandardButton.Ok:
             return
-        self.schedule_dispatch(
+        self.schedule_dispatch_and_read_back(
             kind="set_setpoint",
             payload={"value": float(safe_c), "instance": instance},
             destructive=True,

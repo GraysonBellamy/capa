@@ -131,8 +131,10 @@ selector contract.
 | `set_display_unit(...)` | `"set_display_unit"` | Display-only; does not change the wire scale. |
 | `set_auto_zero(...)` | `"set_auto_zero"` | Auto-zero on/off; saved with `save_menu`. |
 | `set_isocal_mode(...)` | `"set_isocal_mode"` | Isocal scheduling. |
-| `set_tare_behavior(...)` | `"set_tare_behavior"` | Manual vs auto tare on power-up. |
+| `set_tare_behavior(...)` | `"set_tare_behavior"` | Whether a tare waits for a stable reading (p05): `"without stability"`, `"with stability"` or `"at stability"`. |
 | `save_menu()` / `reload_menu()` | matching kinds | Persist / discard parameter changes. |
+| `read_last_cal_record()` | n/a | Read-only — not gated. The temperature at the last calibration and whether one is on record since power-up; the balance keeps no date. |
+| `read_state_snapshot()` | n/a | Read-only — not gated. Filter mode, auto-zero, display unit, tare behavior and the last calibration, for the manual-control card. |
 
 All writes go through the [authorization
 gate](../safety/authorization-gates.md) — `issued_by` plus either

@@ -85,14 +85,22 @@ class TestRealAlicat:
         try:
             if not isinstance(adapter._device, FlowController | PressureController):
                 pytest.skip("alicat device is a meter; no setpoint to echo")
-            frame = await adapter._device.poll()  # current setpoint snapshot
-            current_sp = float(getattr(frame, "Mass_Flow_Setpt", 0.0) or 0.0)
+            before = await adapter.read_state_snapshot()
+            assert before is not None
+            if before.setpoint is None:
+                # Without a read setpoint there is nothing safe to echo; a
+                # guessed value would move the flow.
+                pytest.skip("firmware can't report its setpoint (no LS)")
             result = await adapter.set_setpoint(
-                current_sp,
+                before.setpoint,
+                unit=before.setpoint_unit,
                 issued_by=_operator_id(),
                 confirmed_by=_operator_id(),
             )
             assert result.accepted is True
+            after = await adapter.read_state_snapshot()
+            assert after is not None
+            assert after.setpoint == pytest.approx(before.setpoint)
         finally:
             await adapter.close()
 

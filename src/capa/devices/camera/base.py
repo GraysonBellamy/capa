@@ -288,6 +288,66 @@ class CameraEvent(BaseModel):
     metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
+class CameraTemperatureRange(BaseModel):
+    """One camera-side temperature range, normalized to °C. Cameras report
+    their ranges in a native unit (the E85 reads back Kelvin); the adapter
+    converts so consumers never see the unit."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    min_c: float
+    max_c: float
+
+
+class IrRadiometricParams(BaseModel):
+    """The camera's radiometric parameters, in the units the ``set_*``
+    verbs take: °C, metres, and fractions for humidity and transmission.
+    Atlas exposes them as one kit (:attr:`CameraCapability.RADIOMETRIC_PARAMS`),
+    so a camera reports all of them or none."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    emissivity: float
+    atmospheric_temp_c: float
+    reflected_temp_c: float
+    distance_m: float
+    relative_humidity: float
+    """Fraction 0–1, not percent."""
+    atmospheric_transmission: float
+
+
+class IrCameraStateSnapshot(BaseModel):
+    """IR-camera read-back for the manual-control card.
+
+    Returned by an IR adapter's ``read_state_snapshot()`` and reached
+    through :meth:`~capa.runtime.dispatch.ManualClient.device_readback`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    temperature_ranges: tuple[CameraTemperatureRange, ...] = ()
+    """The ranges the camera offers, in the camera's order — position is
+    the index ``set_temperature_range`` takes. Empty for a camera without
+    :attr:`CameraCapability.TEMPERATURE_RANGE_SELECT`."""
+    temperature_range_index: int | None = None
+    """Index of the active range, or ``None`` when the camera has no ranges."""
+    radiometric: IrRadiometricParams | None = None
+    """``None`` for a camera without :attr:`CameraCapability.RADIOMETRIC_PARAMS`."""
+    auto_nuc_interval_s: int | None = None
+    """Seconds between automatic NUCs (``0`` = off), or ``None`` for a camera
+    without :attr:`CameraCapability.AUTO_NUC_INTERVAL`."""
+    remote_palettes: tuple[str, ...] = ()
+    """The palettes the camera's own display offers. Empty for a camera
+    without :attr:`CameraCapability.REMOTE_PALETTE`."""
+    remote_palette: str | None = None
+    """The camera display's active palette."""
+    preview_palettes: tuple[str, ...] = ()
+    """The palettes the live preview can render. Empty for a camera without
+    :attr:`CameraCapability.PALETTE`."""
+    preview_palette: str | None = None
+    """The live preview's active palette."""
+
+
 @runtime_checkable
 class Camera(Protocol):
     """Uniform camera surface.
@@ -420,7 +480,10 @@ __all__ = [
     "CameraInfo",
     "CameraOnFailure",
     "CameraSpec",
+    "CameraTemperatureRange",
     "CameraTransport",
     "FrameReceipt",
+    "IrCameraStateSnapshot",
+    "IrRadiometricParams",
     "make_stream_pair",
 ]

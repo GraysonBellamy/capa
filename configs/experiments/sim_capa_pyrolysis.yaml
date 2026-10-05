@@ -26,7 +26,6 @@ domain_profile:
       heater_setpoint_c: 600.0
     atmosphere:
       mode: inert
-      purge_duration_s: 30.0
       purge:
         species: N2
         purity: "UHP 5.0"

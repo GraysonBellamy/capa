@@ -60,7 +60,10 @@ from capa.devices.camera.base import (
     CameraHealth,
     CameraInfo,
     CameraSpec,
+    CameraTemperatureRange,
     FrameReceipt,
+    IrCameraStateSnapshot,
+    IrRadiometricParams,
     make_stream_pair,
 )
 
@@ -159,9 +162,13 @@ class FlirIrSim:
     )
     kind: Literal["ir"] = "ir"
 
-    TEMPERATURE_RANGES: tuple[str, ...] = ("low", "high")
-    """Sim camera reports two ranges. ``set_temperature_range`` validates
-    the index against this list."""
+    TEMPERATURE_RANGES: tuple[CameraTemperatureRange, ...] = (
+        CameraTemperatureRange(min_c=-20.0, max_c=120.0),
+        CameraTemperatureRange(min_c=0.0, max_c=650.0),
+        CameraTemperatureRange(min_c=300.0, max_c=1200.0),
+    )
+    """The FLIR E85's three ranges. ``set_temperature_range`` validates the
+    index against this list; :meth:`read_state_snapshot` reports it."""
 
     REMOTE_PALETTES: tuple[str, ...] = ("iron", "rainbow", "bw", "arctic", "lava")
     """Sim camera-side palette names. Distinct from the preview-side preset
@@ -386,6 +393,31 @@ class FlirIrSim:
             file_size_bytes=self._file_size,
             last_frame_t_mono_ns=self._last_frame_t_mono_ns,
             healthy=True,
+        )
+
+    async def read_state_snapshot(self) -> IrCameraStateSnapshot | None:
+        """The manual-control card's read-back: the temperature ranges and
+        the active one, the radiometric parameters, the auto-NUC interval,
+        and both palettes with their choices. ``None`` before :meth:`open`,
+        like the real adapter."""
+        if not self._open:
+            return None
+        return IrCameraStateSnapshot(
+            temperature_ranges=self.TEMPERATURE_RANGES,
+            temperature_range_index=self._temperature_range_index,
+            radiometric=IrRadiometricParams(
+                emissivity=self._emissivity,
+                atmospheric_temp_c=self._atmospheric_temp_c,
+                reflected_temp_c=self._reflected_temp_c,
+                distance_m=self._distance_m,
+                relative_humidity=self._relative_humidity,
+                atmospheric_transmission=self._atmospheric_transmission,
+            ),
+            auto_nuc_interval_s=self._auto_nuc_interval_s,
+            remote_palettes=self.REMOTE_PALETTES,
+            remote_palette=self._remote_palette,
+            preview_palettes=tuple(sorted(self.PREVIEW_PALETTE_PRESETS)),
+            preview_palette=self._preview_palette,
         )
 
     def frame_stream(self) -> AsyncIterator[FrameReceipt]:

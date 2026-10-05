@@ -141,7 +141,7 @@ widget at all.
 
 | Typed call | `DeviceCommand.kind` | Notes |
 |---|---|---|
-| `set_setpoint(value, units=None)` | `"set_setpoint"` | Controllers only. |
+| `set_setpoint(value, unit=None)` | `"set_setpoint"` | Controllers only. The value is in the device's engineering units — alicatlib does not convert. A `unit` is a check, not a conversion: the command is refused unless it matches the device's setpoint unit (from `LS`; refused on firmware without `LS`). |
 | `set_gas(gas)` | `"set_gas"` | **Safety-relevant — see Quirks.** |
 | `tare_flow()` | `"tare_flow"` | Meters and controllers. |
 | `tare_absolute_pressure()` | `"tare_absolute_pressure"` | Pressure surface only. |
@@ -151,11 +151,12 @@ widget at all.
 | `totalizer_reset()`, `totalizer_reset_peak()`, `totalizer_save()` | matching kinds | Totalizer-equipped devices. |
 | `lock_display()`, `unlock_display()`, `blink_display()` | matching kinds | Cosmetic; still gated. |
 | `read_gas_list()` | n/a | Read-only — not gated. |
+| `read_state_snapshot()` | n/a | Read-only — not gated. Active gas, gas list and setpoint for the manual-control card. The gas comes from `GS` (10v05+), else from a polled frame's gas column; the setpoint from `LS`, controllers only. |
 
 Every write goes through the [authorization
 gate](../safety/authorization-gates.md). The full command kind list is
 in [`_dispatch_command`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/alicat.py)
-(line 451+).
+(line 486+).
 
 ## Discovery and handshake
 

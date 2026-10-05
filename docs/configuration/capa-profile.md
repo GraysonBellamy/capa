@@ -12,7 +12,7 @@ A *domain profile* layers scientific metadata + preflight checks on top of the g
 - **specimen fields** — id, material, mass, form, holder geometry
 - **method fields** — heater program (target heat flux + heater setpoint), atmosphere composition, optional secondary gas
 - **required channel groups** — heater pair, sample TC, mass, purge MFC
-- **preflight checks** — heater PV safe range, purge flow established, leak-test recency, balance stability
+- **preflight checks** — heater PV safe range, purge flow established, balance stability
 
 The profile sits at `experiment.domain_profile.id = "capa.profiles.capa_pyrolysis"` in the experiment YAML. When set, the Setup tab's CAPA Profile section edits all the fields below; its forms are built from the profile's models, so the editor and this schema cannot disagree.
 
@@ -115,8 +115,6 @@ Controls the gas atmosphere the specimen sees during the run.
 | `mode` | `inert` \| `oxidative` \| `reducing` \| `reactive_blend` | Coarse classification. Drives the `capa.atmosphere_consistency` preflight for modes that need a reactive-gas flow channel. |
 | `purge` | `PurgeGas` | The inert/sweep gas spec. Always required. |
 | `reactive` | `ReactiveGas` \| `None` | Optional secondary gas for partial-oxidation or doped-purge experiments. `None` for pure-inert runs. |
-| `purge_duration_s` | s | How long the reactor is swept with purge gas before heating begins. Captured so downstream analysis knows the pre-run sweep duration. |
-| `leak_check_at` | datetime | Most-recent leak / pressure-decay check timestamp. Read by the `capa.leak_test_recency` preflight (default 7-day window, non-blocking warning). |
 
 ### `PurgeGas`
 
@@ -188,12 +186,11 @@ The profile contributes the following preflight checks, evaluated when the run i
 | `capa.atmosphere_consistency` | yes | Declared atmosphere mode is consistent with declared channels: `oxidative` / `reactive_blend` modes must declare a `reactive_gas_flow`. |
 | `capa.heater_pv_in_safe_range` | yes | Heater PV reading is within the rig-survival ceiling (< 1000 °C by default). Catches sensor runaway / miswired channel; **not** a cold-start gate. |
 | `capa.purge_flow_established` | yes | Purge gas flow has been seen ≥ `target × 0.5` for ≥ 3 s. Skip by setting `purge.target_flow_sccm = 0`. |
-| `capa.leak_test_recency` | no | `Atmosphere.leak_check_at` is within the lab-policy recency window (default 7 days). |
 | `capa.flux_calibration_freshness` | no | When `target_heat_flux_kw_m2` is declared, `flux_calibration_ref` is set, and the on-disk tune artifact it points to is within the recency window (default 7 days). |
 | `capa.balance_stability` | no | When a mass channel is declared, it reports stable for ≥ 5 s prior to arming. |
 | `capa.disk_projection` | yes | Projected bundle size leaves ≥ 1.5× margin on the bundle volume. |
 
-The blocking choices reflect a "fail loud at arm time" policy: anything that would silently produce a misleading bundle blocks; anything that's an operator-judgment call (stale leak check, stale calibration) warns.
+The blocking choices reflect a "fail loud at arm time" policy: anything that would silently produce a misleading bundle blocks; anything that's an operator-judgment call (stale calibration, unsettled balance) warns.
 
 ---
 

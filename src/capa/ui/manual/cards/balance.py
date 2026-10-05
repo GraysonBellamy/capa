@@ -8,8 +8,10 @@ Gated entirely on the adapter's :class:`Capability` flagset:
   display unit / tare    — ``HAS_PARAMETER_CONFIG``
 * save / reload menu     — ``HAS_PARAMETER_CONFIG`` (destructive — EEPROM)
 
-Live read-back ("Last cal: 2026-04-22 14:30 OK") is refreshed on card open
-and after each successful command via :meth:`refresh_readback`.
+The menu settings and the last calibration ("Last cal: 22.4 °C") are read
+from the balance via :meth:`ManualClient.device_readback` (the adapter's
+``read_state_snapshot``) once the pool is open, and again after each command
+that changes them.
 """
 
 from __future__ import annotations
@@ -27,8 +29,9 @@ from PySide6.QtWidgets import (
 )
 
 from capa.devices.adapter import Capability
+from capa.devices.sartorius import SartoriusStateSnapshot
 from capa.experiment.config import DeviceConfig
-from capa.ui.manual.cards.base import DeviceCard
+from capa.ui.manual.cards.base import DeviceCard, select_or_add
 from capa.ui.state import RunController
 from capa.ui.statusbar import OperatorIdProvider
 
@@ -38,7 +41,8 @@ _logger = structlog.get_logger("capa.ui.manual.balance")
 # Library-side fuzzy strings — sartoriuslib resolves these. Hardcoded here
 # rather than enumerated from the library because the library currently
 # exposes them through ``resolve_filter_mode`` (a free function), and the
-# values are stable across firmware versions.
+# values are stable across firmware versions. They match the labels
+# :class:`SartoriusStateSnapshot` reports, so a read-back selects its entry.
 FILTER_MODES: Final[tuple[str, ...]] = (
     "very stable",
     "stable",
@@ -47,7 +51,11 @@ FILTER_MODES: Final[tuple[str, ...]] = (
 )
 AUTO_ZERO_MODES: Final[tuple[str, ...]] = ("off", "on")
 DISPLAY_UNITS: Final[tuple[str, ...]] = ("g", "kg", "mg", "ct", "oz")
-TARE_BEHAVIORS: Final[tuple[str, ...]] = ("manual", "auto")
+TARE_BEHAVIORS: Final[tuple[str, ...]] = (
+    "without stability",
+    "with stability",
+    "at stability",
+)
 
 
 # Capability flags that justify rendering a BalanceCard at all. Below any
@@ -70,8 +78,8 @@ def is_balance_device(spec: DeviceConfig) -> bool:
 class BalanceCard(DeviceCard):
     """Per-balance manual-control card.
 
-    Capabilities are read once at construction. They never change for a
-    live adapter (the adapter set them at ``open()``), so we don't re-poll.
+    Capabilities are read once at construction. The Sartorius adapter sets
+    them in its constructor and never changes them, so we don't re-poll.
     """
 
     def __init__(
@@ -109,7 +117,9 @@ class BalanceCard(DeviceCard):
         if not caps:
             caps = _default_sartorius_capabilities()
         self._capabilities: frozenset[Capability] = caps
-        self.set_subtitle(f"Model: {spec.adapter.rsplit('.', 1)[-1]}   Use any control to connect")
+        self.set_subtitle(f"Device: {spec.name}   Adapter: {self._adapter_label()}")
+        # Parameter combos keyed by the SartoriusStateSnapshot field they show.
+        self._param_combos: dict[str, QComboBox] = {}
         self._build_capability_sections()
 
     # ------------------------------------------------------------------ build
@@ -158,7 +168,7 @@ class BalanceCard(DeviceCard):
             "Drops the pan briefly while the motorized weight cycles."
         )
         btn.clicked.connect(
-            lambda: self.schedule_dispatch(
+            lambda: self.schedule_dispatch_and_read_back(
                 kind="internal_adjust",
                 payload={"cal_type": None},
                 destructive=True,
@@ -175,7 +185,7 @@ class BalanceCard(DeviceCard):
 
     def _build_parameters_section(self) -> None:
         body = self.add_section("Parameters")
-        self._filter_combo = self._add_combo_row(
+        self._param_combos["filter_mode"] = self._add_combo_row(
             body,
             label="Filter mode:",
             choices=FILTER_MODES,
@@ -186,7 +196,7 @@ class BalanceCard(DeviceCard):
             apply_kind="set_filter_mode",
             payload_key="mode",
         )
-        self._auto_zero_combo = self._add_combo_row(
+        self._param_combos["auto_zero"] = self._add_combo_row(
             body,
             label="Auto-zero:",
             choices=AUTO_ZERO_MODES,
@@ -194,7 +204,7 @@ class BalanceCard(DeviceCard):
             apply_kind="set_auto_zero",
             payload_key="mode",
         )
-        self._unit_combo = self._add_combo_row(
+        self._param_combos["display_unit"] = self._add_combo_row(
             body,
             label="Display unit:",
             choices=DISPLAY_UNITS,
@@ -202,11 +212,11 @@ class BalanceCard(DeviceCard):
             apply_kind="set_display_unit",
             payload_key="unit",
         )
-        self._tare_combo = self._add_combo_row(
+        self._param_combos["tare_behavior"] = self._add_combo_row(
             body,
             label="Tare behavior:",
             choices=TARE_BEHAVIORS,
-            tooltip="Tare key behavior (xBPI parameter).",
+            tooltip="Whether a tare waits for a stable reading (xBPI p05).",
             apply_kind="set_tare_behavior",
             payload_key="mode",
         )
@@ -220,7 +230,7 @@ class BalanceCard(DeviceCard):
             "Write the current runtime menu to EEPROM (xBPI 0x47). Persistent across power-cycle."
         )
         btn_save.clicked.connect(
-            lambda: self.schedule_dispatch(
+            lambda: self.schedule_dispatch_and_read_back(
                 kind="save_menu",
                 destructive=True,
                 destructive_summary=(
@@ -236,7 +246,7 @@ class BalanceCard(DeviceCard):
             "Reload the saved menu from EEPROM (xBPI 0x46). Discards unsaved runtime changes."
         )
         btn_reload.clicked.connect(
-            lambda: self.schedule_dispatch(
+            lambda: self.schedule_dispatch_and_read_back(
                 kind="reload_menu",
                 destructive=True,
                 destructive_summary=(
@@ -269,14 +279,22 @@ class BalanceCard(DeviceCard):
         row.addWidget(lbl)
         combo = QComboBox(self)
         combo.addItems(list(choices))
+        # Nothing selected until the balance reports its setting: a preset
+        # first entry would read as the balance's current value.
+        combo.setCurrentIndex(-1)
+        combo.setPlaceholderText("not read yet")
         combo.setToolTip(tooltip)
         row.addWidget(combo)
         btn = QPushButton("Apply", self)
 
         def _apply() -> None:
-            self.schedule_dispatch(
+            value = combo.currentText()
+            if not value:
+                self._set_status(f"pick a {label.rstrip(':').lower()} first", level="warn")
+                return
+            self.schedule_dispatch_and_read_back(
                 kind=apply_kind,
-                payload={payload_key: combo.currentText()},
+                payload={payload_key: value},
             )
 
         btn.clicked.connect(_apply)
@@ -290,23 +308,21 @@ class BalanceCard(DeviceCard):
     # ------------------------------------------------------------------ live readback
 
     async def refresh_readback(self) -> None:
-        """Call ``read_last_cal_record`` and refresh the subtitle. Called
-        on card open and after successful destructive operations.
+        """Fetch the balance's menu settings and last calibration, then
+        show them. The dock calls this on card build and pool open; the
+        commands that change them call it after they land.
 
-        Best-effort: a failure here just clears the subtitle to a neutral
-        line — the operator can still use the card. Run-state-blocked
-        because the adapter is busy streaming during sampling.
+        Best-effort: a failure leaves the card as it is. Skipped while a
+        run is active (the adapter is busy streaming) and while the pool is
+        still opening — there is no client to ask yet.
         """
         if self._engine_blocks_writes():
             return
-        adapter = await self._ensure_adapter()
-        if adapter is None:
-            return
-        reader = getattr(adapter, "read_last_cal_record", None)
-        if not callable(reader):
+        client = self._controller.manual_client
+        if client is None:
             return
         try:
-            cal = await reader()
+            snapshot = await client.device_readback(self._spec.name)
         except Exception as exc:
             _logger.debug(
                 "manual.balance_readback_failed",
@@ -314,16 +330,32 @@ class BalanceCard(DeviceCard):
                 error=str(exc),
             )
             return
-        # CalRecord shape varies across firmware — render whatever fields
-        # it does expose without insisting on a specific layout.
-        when = getattr(cal, "timestamp", None) or getattr(cal, "started_at", None)
-        outcome = getattr(cal, "result", None) or getattr(cal, "status", None) or "—"
-        when_s = when.isoformat(sep=" ", timespec="seconds") if when else "—"
-        self.set_subtitle(
-            f"Device: {self._spec.name}   "
-            f"Adapter: {self._spec.adapter.rsplit('.', 1)[-1]}   "
-            f"Last cal: {when_s} ({outcome})"
-        )
+        if isinstance(snapshot, SartoriusStateSnapshot):
+            self.apply_snapshot(snapshot)
+
+    def apply_snapshot(self, snapshot: SartoriusStateSnapshot) -> None:
+        """Select each parameter combo's read-back value (none when the
+        balance didn't report it) and show the last calibration."""
+        for field, combo in self._param_combos.items():
+            value = getattr(snapshot, field)
+            if value is None:
+                combo.setCurrentIndex(-1)
+            else:
+                select_or_add(combo, value)
+        parts = [f"Device: {self._spec.name}", f"Adapter: {self._adapter_label()}"]
+        # The record has no timestamp; the temperature at the calibration is
+        # the one detail it carries.
+        if snapshot.cal_on_record is False:
+            parts.append("Last cal: none since power-up")
+        elif snapshot.cal_on_record:
+            temperature = snapshot.cal_temperature_c
+            parts.append(
+                "Last cal: on record" if temperature is None else f"Last cal: {temperature:.1f} °C"
+            )
+        self.set_subtitle("   ".join(parts))
+
+    def _adapter_label(self) -> str:
+        return self._spec.adapter.rsplit(".", 1)[-1]
 
 
 def _default_sartorius_capabilities() -> frozenset[Capability]:
