@@ -84,7 +84,7 @@ A widget that appears mid-run needs *current* state, not just future emissions. 
 - **`ManualClient.snapshot(device)`** — one-shot read against the device. Routes through the conductor (when armed) or the pool (otherwise); the worker runs `adapter.snapshot()` on its own loop and returns the result.
 - **`ManualClient.device_readback(device)`** — adapter-specific cached state (e.g. `WatlowStateSnapshot` carrying the last known PV / SP / output%). Pool-only — same call whether or not a run is armed.
 
-For camera handles, `ManualClient.camera_metadata(device)` returns the probe (UVC ranges, supported resolutions). The bare `camera(device)` accessor exists only for tests — UI code must not introduce new callers.
+For camera handles, `ManualClient.camera_metadata(device)` returns the probe (supported resolutions and fps caps); a webcam's UVC controls come through `device_readback(device)` like any device's read-back. The bare `camera(device)` accessor exists only for tests — UI code must not introduce new callers.
 
 ---
 

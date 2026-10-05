@@ -60,6 +60,7 @@ from capa.devices.camera._uvc import (
     AUTO_VERB_TO_PROPERTY,
     PROPERTY_BY_VERB,
     UvcController,
+    uvc_backend_available,
 )
 from capa.devices.camera.base import (
     CameraCapability,
@@ -68,9 +69,11 @@ from capa.devices.camera.base import (
     CameraInfo,
     CameraSpec,
     FrameReceipt,
+    WebcamControlState,
+    WebcamStateSnapshot,
     make_stream_pair,
 )
-from capa.devices.camera.metadata import UvcRangeMetadata, WebcamMetadata
+from capa.devices.camera.metadata import WebcamMetadata
 from capa.devices.camera.webcam.constants import (
     _BASE_CAPABILITIES,
     DEFAULT_CODEC,
@@ -137,6 +140,7 @@ class WebcamAdapter:
         "_started_t_mono_ns",
         "_supported_resolutions",
         "_uvc",
+        "_uvc_unavailable",
         "_width",
         "capabilities",
     )
@@ -182,6 +186,8 @@ class WebcamAdapter:
             capabilities=tuple(c.name for c in self.capabilities if c.name is not None),
         )
         self._uvc: UvcController | None = None
+        # Why ``_uvc`` is None after open(), for refusals and read-backs.
+        self._uvc_unavailable: str | None = None
         # Populated by :meth:`open` on Windows (dshow). Empty everywhere else;
         # the UI falls back to a static set when nothing was probed.
         self._supported_resolutions: list[tuple[int, int]] = []
@@ -315,30 +321,59 @@ class WebcamAdapter:
         — it forwards via a ``getattr(camera, "snapshot_metadata", None)``
         capability-style probe.
 
-        Safe to call before duvc-ctl has probed (``self._uvc is None``):
-        the ``uvc_ranges`` mapping is empty and the card keeps its wide
-        default bounds. The two resolution-related fields populate from
-        :attr:`_supported_resolutions` and :attr:`_resolution_fps_caps`,
-        which are themselves set at ``open()`` and never mutated.
+        Both fields populate from :attr:`_supported_resolutions` and
+        :attr:`_resolution_fps_caps`, which are set at ``open()`` and never
+        mutated. UVC control values change at runtime, so they come through
+        :meth:`read_state_snapshot` instead.
         """
-        ranges: dict[str, UvcRangeMetadata] = {}
-        if self._uvc is not None:
-            for verb, prop in PROPERTY_BY_VERB.items():
-                rng = self._uvc.get_cached_range(prop)
-                if rng is None:
-                    continue
-                ranges[verb] = UvcRangeMetadata(
-                    minimum=rng.minimum,
-                    maximum=rng.maximum,
-                    step=rng.step,
-                    default=rng.default,
-                    current=self._uvc.get_cached_current(prop),
-                )
         return WebcamMetadata(
             supported_resolutions=tuple(self._supported_resolutions),
             resolution_hint=(self._width, self._height),
             resolution_fps_caps=MappingProxyType(dict(self._resolution_fps_caps)),
-            uvc_ranges=MappingProxyType(ranges),
+        )
+
+    async def read_state_snapshot(self) -> WebcamStateSnapshot | None:
+        """Read every UVC control the camera supports, live.
+
+        Each control's value and auto mode come from the camera itself
+        (about 100 ms apiece through duvc-ctl); its range is the one the
+        camera declared at ``open()``. Feeds the manual card and an
+        experiment's ``device_settings``. ``None`` before :meth:`open`; a
+        snapshot whose ``unavailable`` says why when the camera's controls
+        can't be reached (not Windows, no duvc-ctl match).
+        """
+        if not self._open:
+            return None
+        uvc = self._uvc
+        if uvc is None:
+            return WebcamStateSnapshot(unavailable=self._unavailable_reason())
+        with_auto = set(AUTO_VERB_TO_PROPERTY.values())
+        controls: dict[str, WebcamControlState] = {}
+        for verb, prop in PROPERTY_BY_VERB.items():
+            if not uvc.supports(prop):
+                continue
+            state = await uvc.get(prop)
+            rng = uvc.get_cached_range(prop)
+            controls[verb.removeprefix("set_")] = WebcamControlState(
+                value=None if state is None else state.value,
+                auto=state.auto if state is not None and prop in with_auto else None,
+                minimum=None if rng is None else rng.minimum,
+                maximum=None if rng is None else rng.maximum,
+                step=None if rng is None else rng.step,
+            )
+        return WebcamStateSnapshot(controls=controls)
+
+    def _unavailable_reason(self) -> str:
+        return self._uvc_unavailable or "no duvc-ctl device match"
+
+    def _no_match_reason(self) -> str:
+        if self._spec.serial is not None:
+            return f"duvc-ctl found no camera with serial {self._spec.serial!r}"
+        if self._spec.model_hint is not None:
+            return f"duvc-ctl found no camera matching model_hint {self._spec.model_hint!r}"
+        return (
+            "duvc-ctl found no camera, or several and no model_hint or serial "
+            "in the hardware profile to pick one"
         )
 
     # ----------------------------------------------------------- protocol API
@@ -375,14 +410,21 @@ class WebcamAdapter:
         # holds a separate DirectShow handle that does NOT compete with PyAV
         # for the capture pin — IAMCameraControl / IAMVideoProcAmp can be
         # queried while another graph renders. Off Windows (or when duvc-ctl
-        # cannot match a device) the controller stays None and only the
-        # base capability flags survive.
-        if sys.platform == "win32":
+        # cannot match a device) the controller stays None, only the base
+        # capability flags survive, and ``_uvc_unavailable`` says why.
+        self._uvc_unavailable = None
+        if sys.platform != "win32":
+            self._uvc_unavailable = "camera controls are only available on Windows"
+        elif not uvc_backend_available():
+            self._uvc_unavailable = "duvc-ctl isn't installed, so camera controls are unavailable"
+        else:
             controller = await UvcController.find(
                 model_hint=self._spec.model_hint,
                 serial=self._spec.serial,
             )
-            if controller is not None:
+            if controller is None:
+                self._uvc_unavailable = self._no_match_reason()
+            else:
                 probed_caps = await controller.probe_capabilities()
                 if probed_caps:
                     self._uvc = controller
@@ -399,6 +441,9 @@ class WebcamAdapter:
                     )
                 else:
                     controller.close()
+                    self._uvc_unavailable = (
+                        f"{controller.device_name} reports no adjustable controls"
+                    )
         # Enumerate supported (width,height) pairs via PyAV's dshow
         # list_options output. duvc-ctl does not expose IAMStreamConfig,
         # so this is the only path on Windows. The probe opens + closes
@@ -605,7 +650,7 @@ class WebcamAdapter:
             if self._uvc is None:
                 raise AdapterError(
                     f"webcam {self._spec.name!r}: UVC controls unavailable "
-                    "(no duvc-ctl device match)"
+                    f"({self._unavailable_reason()})"
                 )
             prop = PROPERTY_BY_VERB[kind]
             if not self._uvc.supports(prop):
@@ -622,7 +667,7 @@ class WebcamAdapter:
             if self._uvc is None:
                 raise AdapterError(
                     f"webcam {self._spec.name!r}: UVC controls unavailable "
-                    "(no duvc-ctl device match)"
+                    f"({self._unavailable_reason()})"
                 )
             prop = AUTO_VERB_TO_PROPERTY[kind]
             if not self._uvc.supports(prop):

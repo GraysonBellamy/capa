@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, Signal
 
 from capa.config.problems import ConfigProblem
 from capa.devices.alicat import AlicatStateSnapshot
+from capa.devices.camera.base import WebcamStateSnapshot
 from capa.devices.sartorius import SartoriusStateSnapshot
 from capa.ui.tabs.setup import SetupTab
 from capa.ui.tabs.setup_sections.device_settings import DeviceSettingsSection
@@ -163,3 +164,47 @@ async def test_capture_fills_the_forms_from_the_devices(qtbot: Any) -> None:
     # The camera couldn't be read, so its declaration is untouched.
     assert settings["ir_cam0"] == DECLARED["ir_cam0"]
     assert "ir_cam0" in section._status.text()
+
+
+def _add_webcam(tab: SetupTab, section: DeviceSettingsSection, declared: dict[str, Any]) -> None:
+    tab.draft.document.hardware_payload["cameras"].append(
+        {"name": "visible_cam0", "adapter": "capa.devices.camera.webcam", "kind": "visible"}
+    )
+    tab.draft.document.experiment_payload["device_settings"]["visible_cam0"] = declared
+    section.refresh()
+
+
+def test_a_webcam_gets_a_form(qtbot: Any) -> None:
+    tab, section = _tab(qtbot)
+    _add_webcam(tab, section, {"zoom": 265, "tilt": 3600})
+    assert "visible_cam0" in section._forms
+    assert section.payload()["device_settings"]["visible_cam0"] == {  # type: ignore[index]
+        "zoom": 265,
+        "tilt": 3600,
+    }
+
+
+class _ClientWithoutWebcamControls(_Client):
+    async def device_readback(self, name: str) -> object:
+        if name == "visible_cam0":
+            return WebcamStateSnapshot(unavailable="camera controls are only available on Windows")
+        return await super().device_readback(name)
+
+
+@pytest.mark.anyio
+async def test_a_capture_that_reads_nothing_keeps_the_declaration(qtbot: Any) -> None:
+    controller = _Controller()
+    controller.manual_client = _ClientWithoutWebcamControls()
+    tab, section = _tab(qtbot, controller)
+    _add_webcam(tab, section, {"zoom": 265})
+    section._sync_capture_enabled()
+
+    section._capture_btn.click()
+    for _ in range(50):
+        await asyncio.sleep(0)
+        if section._capture_btn.isEnabled():
+            break
+
+    settings = tab.draft.document.experiment_payload["device_settings"]
+    assert settings["visible_cam0"] == {"zoom": 265}
+    assert "visible_cam0 (reported no settings)" in section._status.text()

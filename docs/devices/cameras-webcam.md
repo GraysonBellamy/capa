@@ -1,5 +1,5 @@
 ---
-description: USB visible-light webcams in capa — the PyAV-to-MKV pipeline, libx264 encoding, per-OS v4l2/avfoundation/dshow demuxers, UVC controls, and disconnect recovery.
+description: USB visible-light webcams in capa — the PyAV-to-MKV pipeline, libx264 encoding, per-OS v4l2/avfoundation/dshow demuxers, UVC controls and declaring them in an experiment, and disconnect recovery.
 ---
 
 # USB webcams
@@ -144,13 +144,61 @@ What this means in practice:
 
 ## UVC controls (Windows only)
 
-When the `duvc-ctl` wheel is installed, the adapter probes the camera
-for UVC properties (brightness, contrast, exposure, focus, zoom, pan,
-tilt) and adds the corresponding `CameraCapability` flags after
-`open()`. Operators can set these from the manual-control card.
+When the `duvc-ctl` wheel is installed, `open()` finds the camera by
+`serial` or `model_hint` (or takes the only one connected) and probes
+which UVC controls it has, adding the matching `CameraCapability`
+flags. The controls are:
 
-Off Windows, UVC controls are not exposed. The flags stay absent and
-the UI does not render the widgets.
+| Group | Controls | Commands |
+|---|---|---|
+| Framing | zoom, digital zoom, pan, tilt | `set_zoom`, `set_digital_zoom`, `set_pan`, `set_tilt` |
+| Focus | focus, auto focus | `set_focus`, `set_auto_focus` |
+| Exposure | exposure, auto exposure | `set_exposure`, `set_auto_exposure` |
+| White balance | white balance, auto white balance | `set_white_balance`, `set_auto_white_balance` |
+| Image | brightness, contrast, saturation, sharpness, gamma, hue, gain, backlight compensation | `set_<control>` |
+
+Values are in the camera's own units; the range and step come from the
+camera. Pan and tilt are arc-seconds (3600 = 1°) on most cameras, and
+exposure is UVC log2 seconds. Setting a value puts that control in
+manual mode, so setting exposure turns auto exposure off.
+
+`read_state_snapshot()` reads every control the camera has, live, as a
+`WebcamStateSnapshot`: each control's value, its auto mode (exposure,
+focus and white balance only) and its range and step. Each read takes
+about 100 ms, so a full read-back takes a second or two. The manual
+card shows it, and an experiment's `device_settings` are planned
+against it.
+
+Off Windows, or when duvc-ctl can't find the camera, the snapshot
+carries the reason instead (`unavailable`), the manual card greys the
+control rows out and shows it, and every UVC command is refused with
+it.
+
+### Declaring settings in the experiment
+
+An experiment can declare any of the controls above under
+`device_settings:` and have them applied when the config loads:
+
+```yaml
+device_settings:
+  visible_cam0:
+    zoom: 265
+    tilt: 3600
+    auto_exposure: false
+    exposure: -6
+    auto_focus: false
+    focus: 40
+```
+
+Each value is checked against the range and step the camera reports
+before anything is sent; one it can't take is listed with the nearest
+values it can. Zoom is applied before pan and tilt, which digital-PTZ
+cameras such as the C930e limit to the zoomed view, and each auto
+toggle before its value. A control the camera is driving itself shows
+as `auto` in the confirmation dialog. Declaring `auto_exposure: true`
+together with `exposure` is a validation error, since the value would
+turn auto off; the same goes for focus and white balance. See [Device
+settings](../configuration/device-settings.md).
 
 ## Capabilities
 
@@ -162,7 +210,7 @@ Always declared (`_BASE_CAPABILITIES`):
 | `SERIAL_SELECT` | Honors `CameraSpec.serial` for exact-match selection. |
 | `MODEL_HINT` | Honors `CameraSpec.model_hint` for friendly-name matching. |
 | `LIVE_PREVIEW` | Pumps frames onto `preview_stream`. |
-| `STREAM_FORMAT` | PyAV reopens the input with new resolution/framerate on the next `start_recording`. |
+| `STREAM_FORMAT` | `set_resolution` / `set_framerate` set the encoder's frame size and rate for the next `start_recording`. |
 
 Added after `open()` (Windows, depending on what `duvc-ctl` probes):
 the UVC-control flags listed in

@@ -31,7 +31,7 @@ keeps the change through a read-back.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Final
+from typing import Final
 
 import structlog
 from PySide6.QtWidgets import (
@@ -53,7 +53,6 @@ from capa.devices.camera.base import (
     IrCameraStateSnapshot,
 )
 from capa.devices.camera.ir_settings import range_label
-from capa.ui.async_util import schedule_bg
 from capa.ui.manual.cards.base import CommandTarget, DeviceCard
 from capa.ui.state import RunController, RunUiState
 from capa.ui.statusbar import OperatorIdProvider
@@ -119,12 +118,10 @@ class FlirCard(DeviceCard):
         self._auto_nuc_spin: QSpinBox | None = None
         self._remote_palette_combo: QComboBox | None = None
         self._preview_palette_combo: QComboBox | None = None
-        # Radiometric spinboxes by their IrRadiometricParams field.
+        # Radiometric spinboxes by their IrRadiometricParams field. Unapplied
+        # edits are named as in the snapshot (radiometric ones by their
+        # IrRadiometricParams field).
         self._radiometric_spins: dict[str, QDoubleSpinBox] = {}
-        # Fields changed since their last Apply, named as in the snapshot
-        # (radiometric ones by their IrRadiometricParams field): a
-        # read-back fills every other field.
-        self._unapplied_edits: set[str] = set()
         self._build_capability_sections()
 
     # ------------------------------------------------------------------ build
@@ -420,22 +417,6 @@ class FlirCard(DeviceCard):
         body.addLayout(row)
         self.register_action_widget(spin)
         self.register_action_widget(btn)
-
-    # ------------------------------------------------------------------ dispatch
-
-    def _apply_field(self, field: str, **dispatch: Any) -> None:
-        """Send the command for ``field``, then re-read the camera."""
-        if schedule_bg(self._apply_field_and_read_back(field, dispatch)) is None:
-            self._set_status("no event loop — UI not running?", level="error")
-
-    async def _apply_field_and_read_back(self, field: str, dispatch: dict[str, Any]) -> None:
-        """Once the command has reached the camera, accepted or not, the
-        field shows what the camera holds again. One that never went out —
-        a declined confirmation, no operator id — keeps the operator's
-        change."""
-        if await self.dispatch(**dispatch) is not None:
-            self._unapplied_edits.discard(field)
-        await self.refresh_readback()
 
     # ------------------------------------------------------------------ lifecycle
 

@@ -164,7 +164,7 @@ class DeviceSettingsSection(SectionWidget):
         if not devices and not orphans:
             empty = QLabel(
                 "No device in this hardware has settings an experiment can declare "
-                "(Alicat MFCs, Sartorius balances and IR cameras do).",
+                "(Alicat MFCs, Sartorius balances, IR cameras and USB webcams do).",
                 self._body,
             )
             empty.setWordWrap(True)
@@ -244,7 +244,13 @@ class DeviceSettingsSection(SectionWidget):
                 if not isinstance(snapshot, spec.snapshot_type):
                     failed.append(f"{name} (not connected)")
                     continue
-                form.set_values(capture_settings(spec, snapshot), replace=True)
+                values = capture_settings(spec, snapshot)
+                if not values:
+                    # A webcam whose controls are out of reach reads back
+                    # nothing; replacing would wipe what's declared.
+                    failed.append(f"{name} (reported no settings)")
+                    continue
+                form.set_values(values, replace=True)
                 captured.append(name)
         finally:
             self._suppress_signals = False

@@ -83,25 +83,28 @@ FLIR, IR sim) declares `LIVE_PREVIEW`.
 
 ## Per-camera controls
 
-The controls available on a tile depend on the camera's capability
-flags. The tile only renders widgets for flags the adapter actually
-declares after `open()` — a fixed-focus laptop webcam will not show a
-focus slider.
+The manual card renders every control section for its camera kind.
+Once the camera has been read, rows for controls it lacks are greyed
+out — a fixed-focus laptop webcam shows its focus row disabled.
 
 ### Webcam (visible)
 
 UVC controls are Windows-only and require the `duvc-ctl` wheel. On
-Linux/macOS, UVC controls are absent.
+Linux/macOS the rows are greyed out and the card's header says why.
+Each control's range, step, value and auto mode are read from the
+camera when the card is built, when the pool opens, after each Apply
+and after an experiment's [device
+settings](../configuration/device-settings.md) are applied.
 
 | Control | Capability | Notes |
 |---|---|---|
-| Resolution / framerate | `STREAM_FORMAT` | PyAV reopens the input on the next `start_recording`. Refused mid-recording. |
-| Exposure | `EXPOSURE_CONTROL` | UVC exposure is logged as `2^value` seconds; capa passes the raw int. |
+| Resolution / framerate | `STREAM_FORMAT` | Applies on the next `start_recording`. Refused mid-recording. |
+| Exposure | `EXPOSURE_CONTROL` | UVC exposure is `2^value` seconds; capa passes the raw int. Setting a value turns auto exposure off. |
 | Focus | `FOCUS_CONTROL` | Fixed-focus cameras don't advertise. |
-| Zoom | `ZOOM_CONTROL` | Distinguishes optical vs digital — silent fallback would mislead. |
+| Zoom | `ZOOM_CONTROL` | Separate rows for UVC zoom ("Optical zoom") and digital zoom. |
 | White balance | `WB_CONTROL` | Manual K + auto on/off. |
-| Pan / tilt | `PAN_TILT_CONTROL` | PTZ cameras only (Logitech BRIO, PTZ Pro 2). Fixed cameras reject. |
-| Brightness / contrast / saturation / sharpness / gamma / hue / gain / backlight | `IMAGE_ADJUST` | Grouped under one flag — most UVC cameras support at least brightness + contrast; finer gating is by probing each property's `PropRange` at `open()`. |
+| Pan / tilt | `PAN_TILT_CONTROL` | Arc-seconds on most cameras (3600 = 1°). PTZ and digital-PTZ cameras only (Logitech C930e, BRIO, PTZ Pro 2). |
+| Brightness / contrast / saturation / sharpness / gamma / hue / gain / backlight | `IMAGE_ADJUST` | Grouped under one flag — most UVC cameras support at least brightness + contrast; each row is greyed out if the camera lacks that property. |
 
 The dshow `list_options` probe (Windows) enumerates the device's
 supported `(width, height)` pairs and per-resolution max fps — those

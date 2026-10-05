@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from capa.devices.camera.webcam.adapter import WebcamAdapter
 from capa.devices.camera.webcam.constants import DEFAULT_CODEC, DEFAULT_FPS, DEFAULT_PIX_FMT
+from capa.devices.camera.webcam.settings import WEBCAM_SETTINGS
 from capa.devices.registry import AdapterDescriptor
 
 
@@ -51,6 +52,7 @@ def _build_descriptor() -> AdapterDescriptor:
         channel_templates=(),
         discoverable=True,
         handshake_available=True,
+        settings=WEBCAM_SETTINGS,
     )
 
 

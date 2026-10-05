@@ -11,6 +11,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from capa.devices.alicat import ALICAT_SETTINGS, AlicatSettings, AlicatStateSnapshot
+from capa.devices.camera.webcam.settings import WEBCAM_SETTINGS
 from capa.devices.registry import ensure_adapters_loaded, require_descriptor
 from capa.devices.sartorius import SARTORIUS_SETTINGS, SartoriusSettings, SartoriusStateSnapshot
 from capa.devices.settings import (
@@ -244,6 +245,7 @@ class TestSartoriusSettings:
         ("capa.devices.sim.alicat_sim", ALICAT_SETTINGS),
         ("capa.devices.sartorius", SARTORIUS_SETTINGS),
         ("capa.devices.sim.sartorius_sim", SARTORIUS_SETTINGS),
+        ("capa.devices.camera.webcam", WEBCAM_SETTINGS),
         ("capa.devices.watlow", None),
         ("capa.devices.sim.watlow_sim", None),
     ],

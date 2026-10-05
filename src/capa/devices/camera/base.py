@@ -348,6 +348,42 @@ class IrCameraStateSnapshot(BaseModel):
     """The live preview's active palette."""
 
 
+class WebcamControlState(BaseModel):
+    """One UVC control as a webcam reports it: the live value and mode,
+    plus the range the camera declared when it opened."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    value: int | None = None
+    """The camera's current value; ``None`` when the live read failed."""
+    auto: bool | None = None
+    """Whether the camera is driving the control itself. ``None`` for a
+    control without an auto mode (only exposure, focus and white balance
+    have one), or when the read failed."""
+    minimum: int | None = None
+    maximum: int | None = None
+    step: int | None = None
+    """The range the camera declared; ``None`` when it declared none."""
+
+
+class WebcamStateSnapshot(BaseModel):
+    """Webcam read-back for the manual-control card and ``device_settings``.
+
+    Returned by :meth:`WebcamAdapter.read_state_snapshot` and reached
+    through :meth:`~capa.runtime.dispatch.ManualClient.device_readback`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    controls: dict[str, WebcamControlState] = Field(default_factory=dict)
+    """The controls the camera supports, keyed by setting name (``"zoom"``,
+    ``"white_balance"`` — the ``set_*`` verb without its prefix). A
+    control the camera lacks is absent."""
+    unavailable: str | None = None
+    """Why the camera's controls can't be used (not Windows, duvc-ctl
+    missing, no matching camera); ``None`` when they can."""
+
+
 @runtime_checkable
 class Camera(Protocol):
     """Uniform camera surface.
@@ -485,5 +521,7 @@ __all__ = [
     "FrameReceipt",
     "IrCameraStateSnapshot",
     "IrRadiometricParams",
+    "WebcamControlState",
+    "WebcamStateSnapshot",
     "make_stream_pair",
 ]

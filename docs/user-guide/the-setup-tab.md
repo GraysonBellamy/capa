@@ -279,16 +279,17 @@ derived scalars (e.g. mean IR temperature).
 The settings this experiment applies to its devices when the config
 loads — see [Device settings](../configuration/device-settings.md). One
 collapsible form per device or camera that has declarable settings (an
-Alicat MFC, a Sartorius balance, an IR camera), listed from the
-hardware as you edit it. Tick **Set** on a field to declare it; an
+Alicat MFC, a Sartorius balance, an IR camera, a USB webcam), listed
+from the hardware as you edit it. Tick **Set** on a field to declare it; an
 unticked field is left as the device has it. The forms are saved in the
 experiment file, not the hardware file.
 
 **Capture from devices** fills every form from what the connected
 devices report — set the rig up once on the [manual
 cards](manual-controls.md), capture, and save. It needs the hardware
-connected (**Apply & Connect**); a device that can't be read is named
-and its form left as it was. Settings for a device that's no longer in
+connected (**Apply & Connect**); a device that can't be read, or
+reports nothing (a webcam off Windows), is named and its form left as
+it was. Settings for a device that's no longer in
 the hardware (or has none to declare) are listed with a **Remove**
 button instead of being dropped.
 

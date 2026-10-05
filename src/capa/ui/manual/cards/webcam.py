@@ -13,11 +13,12 @@ the duvc-ctl wrapper). Section gating is on the granular
 * ``PAN_TILT_CONTROL``    — pan / tilt sliders (PTZ cameras only)
 * ``IMAGE_ADJUST``        — brightness / contrast / saturation / sharpness / gamma / hue / gain / backlight
 
-UVC properties have device-specific value ranges; we fetch them on first
-open via :class:`UvcPropertyRange` and use them to bound the spinboxes.
-When the live range isn't available (UVC controls absent on this device,
-or the adapter isn't open yet) the spinbox falls back to a permissive
-default range and lets the adapter reject out-of-range at command-time.
+Each UVC control's range, value and auto mode come from the camera's
+read-back (:class:`WebcamStateSnapshot`): when the card is built, when the
+pool opens, after each Apply and after an experiment's device settings
+are applied. Rows for controls the camera lacks are greyed out. Until the
+first read-back the spinboxes take a permissive range and the adapter
+rejects what the camera can't take.
 
 Same lifecycle as FlirCard: open lazily on first action, auto-close on
 engine PREPARING so the engine can acquire the camera with its own
@@ -40,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from capa.devices.camera.base import CameraCapability, CameraSpec
+from capa.devices.camera.base import CameraCapability, CameraSpec, WebcamStateSnapshot
 from capa.devices.camera.metadata import WebcamMetadata
 from capa.runtime.dispatch import ManualClient
 from capa.ui.async_util import schedule_bg
@@ -91,13 +92,10 @@ def is_webcam_camera(spec: CameraSpec) -> bool:
 class WebcamCard(DeviceCard):
     """Per-webcam manual-control card.
 
-    Capabilities are populated optimistically from the static base set;
-    when the camera is opened, the live capability set narrows the
-    sections to those duvc-ctl confirmed against the device. Sections
-    that fall away after probing simply reject their dispatch with a
-    clear "device does not support …" message — preferred over silently
-    hiding the buttons because operators can then ask "wait, my C920 had
-    pan/tilt, why is it gone?" instead of being confused.
+    Every section renders from the static base set. Once the camera has
+    been read, rows for controls it lacks are greyed out rather than
+    hidden, so operators can still ask "wait, my C920 had pan/tilt, why
+    is it off?" instead of being confused.
     """
 
     def __init__(
@@ -117,16 +115,20 @@ class WebcamCard(DeviceCard):
         )
         self._spec: CameraSpec = spec
         self._capabilities: frozenset[CameraCapability] = _default_webcam_capabilities()
-        self.set_subtitle(
-            f"Camera: {spec.name}   Adapter: {spec.adapter.rsplit('.', 1)[-1]}   Kind: {spec.kind}"
-        )
-        # Live widget references and a latch so the probe-driven refresh
-        # only runs once per card lifetime. Populated by section builders
-        # and consumed by :meth:`_apply_metadata`.
+        self.set_subtitle(self._identity_line())
+        # Stream-format widgets and a latch so the metadata refresh only
+        # runs once per card lifetime; consumed by :meth:`_apply_metadata`.
         self._resolution_combo: QComboBox | None = None
         self._fps_spin: QDoubleSpinBox | None = None
-        self._spinboxes: dict[str, QSpinBox] = {}
         self._controls_initialized: bool = False
+        # UVC rows, filled by :meth:`apply_snapshot`. Value spinboxes are
+        # keyed by setting name ("zoom"), auto checkboxes by their auto
+        # field ("auto_exposure"), and every row widget by the control it
+        # sets, so a control the camera lacks can be greyed out as one.
+        self._value_spins: dict[str, QSpinBox] = {}
+        self._auto_checks: dict[str, QCheckBox] = {}
+        self._control_widgets: dict[str, list[QWidget]] = {}
+        self._unsupported: frozenset[str] = frozenset()
         # Kept in sync from :meth:`_apply_metadata` so the
         # resolution-combo change handler can recompute the fps cap without
         # holding a reference to the WebcamAdapter.
@@ -227,7 +229,7 @@ class WebcamCard(DeviceCard):
         body.addLayout(
             self._auto_toggle_row(
                 label="Auto exposure:",
-                kind="set_auto_exposure",
+                control="exposure",
                 tooltip=(
                     "Toggle camera-driven auto-exposure. When off, exposure "
                     "value below is used. UVC exposure is a log2(seconds) int."
@@ -238,7 +240,7 @@ class WebcamCard(DeviceCard):
         body.addLayout(
             self._int_value_row(
                 label="Exposure value:",
-                kind="set_exposure",
+                control="exposure",
                 tooltip=(
                     "Manual exposure value (UVC encoding: 2^value seconds). "
                     "Range varies per camera; device rejects out-of-range."
@@ -251,14 +253,14 @@ class WebcamCard(DeviceCard):
         body.addLayout(
             self._auto_toggle_row(
                 label="Auto focus:",
-                kind="set_auto_focus",
+                control="focus",
                 tooltip="Toggle continuous AF. When off, focus value below is used.",
             )
         )
         body.addLayout(
             self._int_value_row(
                 label="Focus value:",
-                kind="set_focus",
+                control="focus",
                 tooltip="Manual focus position. Units are device-specific.",
             )
         )
@@ -268,17 +270,14 @@ class WebcamCard(DeviceCard):
         body.addLayout(
             self._int_value_row(
                 label="Optical zoom:",
-                kind="set_zoom",
-                tooltip=(
-                    "Optical zoom level. Cameras without an optical zoom "
-                    "(C920 / C930e) reject — use Digital zoom instead."
-                ),
+                control="zoom",
+                tooltip="Zoom position (UVC Zoom). Units and range depend on the camera.",
             )
         )
         body.addLayout(
             self._int_value_row(
                 label="Digital zoom:",
-                kind="set_digital_zoom",
+                control="digital_zoom",
                 tooltip=(
                     "Digital zoom (crop + upscale). Software effect inside "
                     "the camera; quality degrades at high values."
@@ -291,14 +290,14 @@ class WebcamCard(DeviceCard):
         body.addLayout(
             self._auto_toggle_row(
                 label="Auto WB:",
-                kind="set_auto_white_balance",
+                control="white_balance",
                 tooltip="Toggle camera-driven auto white-balance.",
             )
         )
         body.addLayout(
             self._int_value_row(
                 label="WB temperature (K):",
-                kind="set_white_balance",
+                control="white_balance",
                 tooltip=(
                     "Color temperature in Kelvin (typical UVC range "
                     "2800 – 6500). Manual WB only takes effect after Auto "
@@ -312,38 +311,38 @@ class WebcamCard(DeviceCard):
         body.addLayout(
             self._int_value_row(
                 label="Pan:",
-                kind="set_pan",
-                tooltip="PTZ pan position. 0 is centered for most cameras.",
+                control="pan",
+                tooltip="PTZ pan position, in arc-seconds on most cameras. 0 is centered.",
             )
         )
         body.addLayout(
             self._int_value_row(
                 label="Tilt:",
-                kind="set_tilt",
-                tooltip="PTZ tilt position. 0 is centered for most cameras.",
+                control="tilt",
+                tooltip="PTZ tilt position, in arc-seconds on most cameras. 0 is centered.",
             )
         )
 
     def _build_image_adjust_section(self) -> None:
         body = self.add_section("Image adjust")
-        for label, kind, tooltip in (
-            ("Brightness:", "set_brightness", "Image brightness offset."),
-            ("Contrast:", "set_contrast", "Image contrast."),
-            ("Saturation:", "set_saturation", "Color saturation. 0 = grayscale."),
-            ("Sharpness:", "set_sharpness", "In-camera sharpening intensity."),
-            ("Gamma:", "set_gamma", "Gamma correction. 100 = linear."),
-            ("Hue:", "set_hue", "Color hue rotation. Rarely useful for lab imaging."),
-            ("Gain:", "set_gain", "Sensor gain. High gain raises noise."),
+        for label, control, tooltip in (
+            ("Brightness:", "brightness", "Image brightness offset."),
+            ("Contrast:", "contrast", "Image contrast."),
+            ("Saturation:", "saturation", "Color saturation. 0 = grayscale."),
+            ("Sharpness:", "sharpness", "In-camera sharpening intensity."),
+            ("Gamma:", "gamma", "Gamma correction. 100 = linear."),
+            ("Hue:", "hue", "Color hue rotation. Rarely useful for lab imaging."),
+            ("Gain:", "gain", "Sensor gain. High gain raises noise."),
             (
                 "Backlight comp:",
-                "set_backlight_compensation",
+                "backlight_compensation",
                 "Compensate for bright backlight. 0 = off.",
             ),
         ):
             body.addLayout(
                 self._int_value_row(
                     label=label,
-                    kind=kind,
+                    control=control,
                     tooltip=tooltip,
                 )
             )
@@ -354,18 +353,16 @@ class WebcamCard(DeviceCard):
         self,
         *,
         label: str,
-        kind: str,
+        control: str,
         tooltip: str,
-        minimum: int = -32768,
-        maximum: int = 32767,
     ) -> QHBoxLayout:
-        """One `label / QSpinBox / Apply` row for a `{"value": int}` verb.
+        """One `label / QSpinBox / Apply` row for the ``set_<control>``
+        verb's ``{"value": int}``.
 
-        Default bounds are intentionally wide (16-bit signed range); the
-        real per-property min/max land via
-        :meth:`_refresh_controls_from_probe` after the device is opened.
-        Pre-probe the spinbox accepts any plausible value rather than
-        clipping to a guessed range.
+        The bounds start wide (16-bit signed range); the camera's own range
+        lands with the first read-back (:meth:`apply_snapshot`). Until then
+        the spinbox accepts any plausible value rather than clipping to a
+        guessed range.
         """
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -373,28 +370,35 @@ class WebcamCard(DeviceCard):
         lbl.setMinimumWidth(120)
         row.addWidget(lbl)
         spin = QSpinBox(self)
-        spin.setRange(minimum, maximum)
+        spin.setRange(-32768, 32767)
         spin.setToolTip(tooltip)
-        self._spinboxes[kind] = spin
+        spin.valueChanged.connect(lambda _value: self._unapplied_edits.add(control))
+        self._value_spins[control] = spin
         row.addWidget(spin)
         btn = QPushButton("Apply", self)
+        btn.setObjectName(f"apply_{control}")
         btn.clicked.connect(
-            lambda: self.schedule_dispatch(kind=kind, payload={"value": int(spin.value())})
+            lambda: self._apply_field(
+                control, kind=f"set_{control}", payload={"value": int(spin.value())}
+            )
         )
         row.addWidget(btn)
         row.addStretch(1)
         for w in (spin, btn):
             self.register_action_widget(w)
+        self._control_widgets.setdefault(control, []).extend((spin, btn))
         return row
 
     def _auto_toggle_row(
         self,
         *,
         label: str,
-        kind: str,
+        control: str,
         tooltip: str,
     ) -> QHBoxLayout:
-        """One `label / QCheckBox / Apply` row for an auto-mode toggle verb."""
+        """One `label / QCheckBox / Apply` row for the ``set_auto_<control>``
+        verb. Checked until the first read-back says otherwise."""
+        field = f"auto_{control}"
         row = QHBoxLayout()
         row.setSpacing(6)
         lbl = QLabel(label, self)
@@ -403,15 +407,21 @@ class WebcamCard(DeviceCard):
         check = QCheckBox("enable", self)
         check.setToolTip(tooltip)
         check.setChecked(True)
+        check.toggled.connect(lambda _checked: self._unapplied_edits.add(field))
+        self._auto_checks[field] = check
         row.addWidget(check)
         btn = QPushButton("Apply", self)
+        btn.setObjectName(f"apply_{field}")
         btn.clicked.connect(
-            lambda: self.schedule_dispatch(kind=kind, payload={"enable": check.isChecked()})
+            lambda: self._apply_field(
+                field, kind=f"set_{field}", payload={"enable": check.isChecked()}
+            )
         )
         row.addWidget(btn)
         row.addStretch(1)
         for w in (check, btn):
             self.register_action_widget(w)
+        self._control_widgets.setdefault(control, []).extend((check, btn))
         return row
 
     # ------------------------------------------------------------------ lifecycle
@@ -494,15 +504,14 @@ class WebcamCard(DeviceCard):
         self._apply_metadata(metadata)
 
     def _apply_metadata(self, metadata: WebcamMetadata) -> None:
-        """Rewrite the resolution combo, fps cap, and spinbox ranges from
-        the metadata snapshot.
+        """Rewrite the resolution combo and fps cap from the metadata
+        snapshot.
 
         Called once after the adapter first opens. The resolution combo gets
         the dshow-enumerated list (or stays on the static fallback when the
-        probe came up empty); each UVC spinbox picks up its true device-
-        reported min/max/step and the value the camera currently has set;
-        the framerate spinbox is capped to the camera-advertised fps for
-        the currently-selected resolution.
+        probe came up empty); the framerate spinbox is capped to the
+        camera-advertised fps for the currently-selected resolution. UVC
+        controls come from :meth:`refresh_readback` instead.
 
         Signals are blocked across the rewrite so the dispatch handlers don't
         fire a flurry of stale set_* commands during widget rebuild.
@@ -528,20 +537,84 @@ class WebcamCard(DeviceCard):
         # Apply fps cap for whatever resolution the combo now shows. Done
         # after the combo refresh so the cap matches the displayed entry.
         self._apply_fps_cap_for_current_resolution()
+        self._controls_initialized = True
 
-        for verb, rng in metadata.uvc_ranges.items():
-            spin = self._spinboxes.get(verb)
-            if spin is None:
+    # ------------------------------------------------------------------ live readback
+
+    async def refresh_readback(self) -> None:
+        """Read the camera's UVC controls and show them.
+
+        The dock calls this when the card is built, once the pool has
+        opened, and after an experiment's device settings were applied;
+        every Apply calls it once the command lands. Best-effort: a failure
+        leaves the card as it is. Skipped during a run, like every
+        manual-card read.
+        """
+        if self._engine_blocks_writes():
+            return
+        client = self._controller.manual_client
+        if client is None:
+            return
+        try:
+            snapshot = await client.device_readback(self._spec.name)
+        except Exception as exc:
+            _logger.debug("manual.webcam_readback_failed", device=self.device_name, error=str(exc))
+            return
+        if isinstance(snapshot, WebcamStateSnapshot):
+            self.apply_snapshot(snapshot)
+
+    def apply_snapshot(self, snapshot: WebcamStateSnapshot) -> None:
+        """Show a read-back: each spinbox takes the camera's range, step and
+        value, each auto checkbox its mode, and rows for controls the camera
+        lacks are greyed out. A field the operator has changed and not yet
+        applied keeps the change."""
+        for control, spin in self._value_spins.items():
+            state = snapshot.controls.get(control)
+            if state is None:
                 continue
             spin.blockSignals(True)
             try:
-                spin.setRange(rng.minimum, rng.maximum)
-                spin.setSingleStep(max(1, rng.step))
-                spin.setValue(rng.current if rng.current is not None else rng.default)
+                if state.minimum is not None and state.maximum is not None:
+                    spin.setRange(state.minimum, state.maximum)
+                if state.step is not None:
+                    spin.setSingleStep(max(1, state.step))
+                if state.value is not None and control not in self._unapplied_edits:
+                    # Widen rather than clamp: show what the camera holds.
+                    spin.setRange(
+                        min(spin.minimum(), state.value), max(spin.maximum(), state.value)
+                    )
+                    spin.setValue(state.value)
             finally:
                 spin.blockSignals(False)
+        for field, check in self._auto_checks.items():
+            state = snapshot.controls.get(field.removeprefix("auto_"))
+            if state is None or state.auto is None or field in self._unapplied_edits:
+                continue
+            check.blockSignals(True)
+            try:
+                check.setChecked(state.auto)
+            finally:
+                check.blockSignals(False)
+        self._unsupported = frozenset(self._control_widgets) - snapshot.controls.keys()
+        line = self._identity_line()
+        if snapshot.unavailable is not None:
+            line += f"   Controls: {snapshot.unavailable}"
+        self.set_subtitle(line)
+        self._sync_action_widgets()
 
-        self._controls_initialized = True
+    def _sync_action_widgets(self, state: RunUiState | None = None) -> None:
+        """The base enables every row together; rows for controls the
+        camera lacks stay greyed out."""
+        super()._sync_action_widgets(state)
+        for control in self._unsupported:
+            for widget in self._control_widgets[control]:
+                widget.setEnabled(False)
+
+    def _identity_line(self) -> str:
+        spec = self._spec
+        return (
+            f"Camera: {spec.name}   Adapter: {spec.adapter.rsplit('.', 1)[-1]}   Kind: {spec.kind}"
+        )
 
     def _apply_fps_cap_for_current_resolution(self) -> None:
         """Cap the framerate spinbox to the dshow-reported max fps for the

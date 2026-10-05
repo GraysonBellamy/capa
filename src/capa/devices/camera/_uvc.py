@@ -54,6 +54,11 @@ else:  # pragma: no cover — non-Windows
     _duvc = None
 
 
+def uvc_backend_available() -> bool:
+    """``True`` when duvc-ctl imported, i.e. on Windows with the wheel installed."""
+    return _duvc is not None
+
+
 class UvcGroup(Enum):
     """duvc-ctl splits properties across two DirectShow interfaces.
 
@@ -196,23 +201,25 @@ class UvcController:
     Thread model: every blocking call into duvc-ctl is wrapped in
     :func:`anyio.to_thread.run_sync` so the asyncio loop is free. duvc-ctl
     holds the IDirectShow filter graph for ~100 ms during a get/set, which
-    is plenty to starve a 30 fps frame pump.
+    is plenty to starve a 30 fps frame pump. A lock serializes the calls:
+    a manual-card read-back, a Setup capture and a device-settings check
+    can all land at once, and each would otherwise take its own thread
+    into the one Camera handle.
     """
 
-    __slots__ = ("_camera", "_currents", "_device", "_device_name", "_ranges", "_supported")
+    __slots__ = ("_camera", "_device", "_device_name", "_lock", "_ranges", "_supported")
 
     def __init__(self, device: Any, device_name: str) -> None:
         self._device = device
         self._device_name = device_name
         self._camera: Any | None = None
+        self._lock = anyio.Lock()
         # Frozen at probe time so adapter dispatch can refuse unsupported
         # verbs without round-tripping into duvc-ctl every call.
         self._supported: frozenset[tuple[str, UvcGroup]] = frozenset()
-        # Populated by probe_capabilities() so the UI can build spinbox
-        # bounds + initial values from real device data without paying a
-        # per-property DirectShow round-trip on every refresh.
+        # Populated by probe_capabilities(); a property's range is fixed by
+        # the device, so read-backs reuse it rather than asking again.
         self._ranges: dict[tuple[str, UvcGroup], UvcPropertyRange] = {}
-        self._currents: dict[tuple[str, UvcGroup], int] = {}
 
     @property
     def device_name(self) -> str:
@@ -287,7 +294,6 @@ class UvcController:
         if caps is None:
             self._supported = frozenset()
             self._ranges = {}
-            self._currents = {}
             return frozenset()
         supported_pairs: set[tuple[str, UvcGroup]] = set()
         for prop in caps.supported_camera_properties():
@@ -296,14 +302,12 @@ class UvcController:
             supported_pairs.add((prop.name, UvcGroup.VIDEO))
         self._supported = frozenset(supported_pairs)
 
-        # Cache per-property range + current value off the same capabilities
-        # snapshot so the UI can populate spinbox bounds and initial values
-        # without paying a per-property DirectShow round-trip. PropertyCapability
-        # is returned by value from the duvc-ctl Python binding (the docs'
-        # Result-wrapped pattern is for free functions, not the
-        # DeviceCapabilities methods).
+        # Cache per-property ranges off the same capabilities snapshot so
+        # read-backs don't pay a per-property DirectShow round-trip for them.
+        # PropertyCapability is returned by value from the duvc-ctl Python
+        # binding (the docs' Result-wrapped pattern is for free functions,
+        # not the DeviceCapabilities methods).
         self._ranges = {}
-        self._currents = {}
         for cam_prop in caps.supported_camera_properties():
             cap = caps.get_camera_capability(cam_prop)
             self._record_capability(cap, cam_prop.name, UvcGroup.CAMERA)
@@ -318,8 +322,8 @@ class UvcController:
         return frozenset(flags)
 
     def _record_capability(self, cap: Any, name: str, group: UvcGroup) -> None:
-        """Extract range + current value from a ``PropertyCapability`` and
-        stash them in the per-controller caches. ``None`` (or a defensive
+        """Extract the range from a ``PropertyCapability`` and stash it in
+        the per-controller cache. ``None`` (or a defensive
         ``AttributeError`` from a binding that diverges) leaves the entry
         absent — callers fall back to safe widget defaults."""
         if cap is None:
@@ -335,27 +339,12 @@ class UvcController:
                 step=int(rng.step) if int(rng.step) > 0 else 1,
                 default=int(rng.default_val),
             )
-        try:
-            current = cap.current
-        except AttributeError:
-            current = None
-        if current is not None:
-            self._currents[(name, group)] = int(current.value)
 
     def get_cached_range(self, prop: UvcProperty) -> UvcPropertyRange | None:
         """Return the probed range for ``prop`` or ``None`` if the probe
         never recorded one (property unsupported, capabilities snapshot
         unavailable, …). Pure cache hit — never touches DirectShow."""
         return self._ranges.get((prop.name, prop.group))
-
-    def get_cached_current(self, prop: UvcProperty) -> int | None:
-        """Return the device's current value for ``prop`` as captured at
-        the last :meth:`probe_capabilities` call, or ``None`` if not
-        recorded. Used by the manual-control card to seed spinboxes with
-        the value the camera actually reports rather than the factory
-        default — keeps the UI honest after the operator's prior session
-        nudged settings."""
-        return self._currents.get((prop.name, prop.group))
 
     def supports(self, prop: UvcProperty) -> bool:
         """``True`` when this device declared ``prop`` in its capability
@@ -368,20 +357,22 @@ class UvcController:
         """Read current value + mode. ``None`` on read failure (device
         disconnected mid-session, etc.) — distinct from "unsupported",
         which :meth:`supports` answers."""
-        cam = await self._ensure_camera()
-        if cam is None:
-            return None
-        return await anyio.to_thread.run_sync(_get_property_state, cam, prop)
+        async with self._lock:
+            cam = await self._ensure_camera()
+            if cam is None:
+                return None
+            return await anyio.to_thread.run_sync(_get_property_state, cam, prop)
 
     async def get_range(self, prop: UvcProperty) -> UvcPropertyRange | None:
         """Read the property's allowed range. ``None`` if the property is
         unsupported or the device returned no range (rare; usually means
         the property is read-only or auto-only).
         """
-        cam = await self._ensure_camera()
-        if cam is None:
-            return None
-        return await anyio.to_thread.run_sync(_get_property_range, cam, prop)
+        async with self._lock:
+            cam = await self._ensure_camera()
+            if cam is None:
+                return None
+            return await anyio.to_thread.run_sync(_get_property_range, cam, prop)
 
     async def set_value(self, prop: UvcProperty, value: int) -> None:
         """Set ``prop`` to ``value`` in manual mode. Raises
@@ -389,26 +380,28 @@ class UvcController:
         device disconnected) — the adapter's command() catches and converts
         to a :class:`CommandResult` with ``accepted=False``.
         """
-        cam = await self._ensure_camera()
-        if cam is None:
-            raise AdapterError(
-                f"duvc-ctl: cannot open camera {self._device_name!r}",
-                device=self._device_name,
-            )
-        await anyio.to_thread.run_sync(_set_property_value, cam, prop, value)
+        async with self._lock:
+            cam = await self._ensure_camera()
+            if cam is None:
+                raise AdapterError(
+                    f"duvc-ctl: cannot open camera {self._device_name!r}",
+                    device=self._device_name,
+                )
+            await anyio.to_thread.run_sync(_set_property_value, cam, prop, value)
 
     async def set_auto(self, prop: UvcProperty, enable: bool) -> None:
         """Set ``prop`` to ``CamMode.Auto`` (``enable=True``) or
         ``CamMode.Manual`` (``enable=False``). When toggling back to manual
         without a new value, the device retains its last manual value —
         operators should follow up with :meth:`set_value` to pin one."""
-        cam = await self._ensure_camera()
-        if cam is None:
-            raise AdapterError(
-                f"duvc-ctl: cannot open camera {self._device_name!r}",
-                device=self._device_name,
-            )
-        await anyio.to_thread.run_sync(_set_property_auto, cam, prop, enable)
+        async with self._lock:
+            cam = await self._ensure_camera()
+            if cam is None:
+                raise AdapterError(
+                    f"duvc-ctl: cannot open camera {self._device_name!r}",
+                    device=self._device_name,
+                )
+            await anyio.to_thread.run_sync(_set_property_auto, cam, prop, enable)
 
     def close(self) -> None:
         """Drop the cached Camera handle. duvc-ctl uses RAII — the
@@ -419,6 +412,8 @@ class UvcController:
     # ------------------------------------------------------------------ internals
 
     async def _ensure_camera(self) -> Any | None:
+        """The Camera handle, opened on first use. Callers hold ``_lock``,
+        so two first calls can't both open it."""
         if self._camera is not None:
             return self._camera
         if _duvc is None:
@@ -474,16 +469,22 @@ def _get_property_state(cam: Any, prop: UvcProperty) -> UvcPropertyState | None:
     enum_val = _resolve_prop_enum(prop)
     if enum_val is None:
         return None
-    result = (
-        cam.get(enum_val) if prop.group is UvcGroup.CAMERA else cam.get_video_property(enum_val)
-    )
-    if not result.is_ok():
+    # duvc-ctl reports most failures through the Result, but a camera that
+    # drops off the bus mid-read raises (DeviceNotFoundError and friends).
+    # Either way the read failed, which ``get()`` reports as ``None``.
+    try:
+        result = (
+            cam.get(enum_val) if prop.group is UvcGroup.CAMERA else cam.get_video_property(enum_val)
+        )
+        if not result.is_ok():
+            return None
+        setting = result.value()
+        return UvcPropertyState(
+            value=int(setting.value),
+            auto=(setting.mode == _duvc.CamMode.Auto),
+        )
+    except Exception:
         return None
-    setting = result.value()
-    return UvcPropertyState(
-        value=int(setting.value),
-        auto=(setting.mode == _duvc.CamMode.Auto),
-    )
 
 
 def _get_property_range(cam: Any, prop: UvcProperty) -> UvcPropertyRange | None:
@@ -566,4 +567,5 @@ __all__ = [
     "UvcProperty",
     "UvcPropertyRange",
     "UvcPropertyState",
+    "uvc_backend_available",
 ]
