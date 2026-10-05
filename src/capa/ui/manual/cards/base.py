@@ -15,6 +15,7 @@ widget groups inside the card body.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any, Final
 
@@ -249,18 +250,10 @@ class DeviceCard(QGroupBox):
                 "This may persist to EEPROM or otherwise alter device "
                 "state in a way that survives power-cycle."
             )
-            answer = QMessageBox.question(
-                self,
-                "Confirm device write",
-                (
-                    f"Confirm destructive operation:\n\n  {summary}\n\n"
-                    f"Operator: {operator}\n\n"
-                    f"{note}"
-                ),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+            confirmed = await self._confirm(
+                f"Confirm destructive operation:\n\n  {summary}\n\nOperator: {operator}\n\n{note}"
             )
-            if answer != QMessageBox.StandardButton.Yes:
+            if not confirmed:
                 self._set_status("cancelled", level="idle")
                 return None
 
@@ -312,6 +305,39 @@ class DeviceCard(QGroupBox):
             self._set_status(f"✗ {kind} rejected: {result.detail}", level="warn")
             self._emit_manual_event(kind=kind, severity="warning", message=result.detail)
         return result
+
+    async def _confirm(self, text: str) -> bool:
+        """Ask ``text`` in a modal Yes/No box and wait for the answer.
+
+        The box is shown from a plain loop callback, not from inside the
+        calling task. A modal box spins a nested Qt event loop; under
+        qasync, a task that wakes meanwhile (a camera's preview drain, say)
+        cannot start while the calling task is mid-step — asyncio raises
+        "Cannot enter into task … while another task … is being executed"
+        and that task is never resumed. Outside a task, the nested loop
+        runs other tasks as it does for a modal opened from a Qt slot.
+        """
+        loop = asyncio.get_running_loop()
+        answer: asyncio.Future[bool] = loop.create_future()
+
+        def _ask() -> None:
+            try:
+                button = QMessageBox.question(
+                    self,
+                    "Confirm device write",
+                    text,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+            except Exception as exc:
+                if not answer.done():
+                    answer.set_exception(exc)
+                return
+            if not answer.done():
+                answer.set_result(button == QMessageBox.StandardButton.Yes)
+
+        loop.call_soon(_ask)
+        return await answer
 
     def schedule_dispatch(
         self,
