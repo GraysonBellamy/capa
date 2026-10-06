@@ -412,19 +412,25 @@ class SetupTab(QWidget):
         self._document_coordinator = coordinator
         self._refresh_apply_enabled()
 
-    def load_path(self, path: Path) -> None:
+    def load_path(self, path: Path, *, clear_per_run: bool = True) -> bool:
         """Open an experiment YAML/TOML and replace the current draft.
 
-        Errors surface as a modal. The previously-loaded draft is left
-        in place when the load fails so the operator doesn't lose mid-
-        edit state to a typo.
+        The operator and the specimen's per-run fields start empty
+        (``clear_per_run``), so each run gets its own measurements rather
+        than the ones last saved into the file. Pass
+        ``clear_per_run=False`` to show a config exactly as it is being
+        applied.
+
+        Errors surface as a modal and return ``False``. The previously-
+        loaded draft is left in place when the load fails so the operator
+        doesn't lose mid-edit state to a typo.
         """
         try:
-            draft = SetupDraft.from_path(path)
+            draft = SetupDraft.from_path(path, clear_per_run=clear_per_run)
         except CapaError as exc:
             QMessageBox.critical(self, "Open failed", f"{path}\n\n{exc}")
             _logger.warning("ui.setup.load_failed", path=str(path), error=str(exc))
-            return
+            return False
         self._draft = draft
         self._draft.unapplied = False
         self._apply_in_flight = False
@@ -438,6 +444,7 @@ class SetupTab(QWidget):
         self.draftLoaded.emit()
         self._maybe_emit_procedure_changed()
         _logger.info("ui.setup.loaded", path=str(path))
+        return True
 
     def load_config(self, config: ExperimentConfig, *, path: Path | None = None) -> None:
         """Seed the tab from an already-validated :class:`ExperimentConfig`.
@@ -445,12 +452,13 @@ class SetupTab(QWidget):
         Called by ``MainWindow._apply_loaded_config``. When a path is
         supplied, prefer :meth:`load_path` semantics (full
         :class:`ConfigDocument.load` round-trip) so the source-layout
-        info matches the on-disk shape. Otherwise build a synthetic
-        ``ConfigDocument`` from the model dump — used by tests that
-        construct configs programmatically.
+        info matches the on-disk shape; the per-run fields are kept,
+        since this is the config being applied. Otherwise build a
+        synthetic ``ConfigDocument`` from the model dump — used by tests
+        that construct configs programmatically.
         """
         if path is not None and path.is_file():
-            self.load_path(path)
+            self.load_path(path, clear_per_run=False)
             return
         # Synthetic path: model-dump the config and stuff it into a
         # ConfigDocument so the section widgets see consistent payloads.

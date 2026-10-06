@@ -1,11 +1,12 @@
 """:class:`SetupWizard` — from-scratch setup author.
 
-The wizard turns a few-click flow into a fully-validated draft so a
+The wizard turns a few-click flow into a ready-to-fill draft so a
 researcher who's never touched the underlying TOML can get to "press
 Start" in minutes. Four screens (starting point / source layout /
 method / save): every starting point we ship has a canonical device +
 channel seed, and operators can edit the result in the
-Devices/Channels sections after Finish.
+Devices/Channels sections after Finish. The operator and the specimen
+being tested start unset; the Problems panel lists what to fill in.
 
 The wizard never writes to disk or opens hardware until the operator
 explicitly chooses Save now → Finish.
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from capa.config import ConfigDocument, SourceLayout
+from capa.config.capa_profile import clear_per_run_fields
 
 StartingPoint = Literal["sim_capa", "real_capa", "free_sim", "free_real", "blank"]
 SourceLayoutKind = Literal["yaml_ext_toml", "toml_ext_toml", "single_yaml", "single_toml"]
@@ -346,9 +348,11 @@ def build_document(spec: _Spec) -> ConfigDocument:
 
     Strategy: load a canonical fixture from ``configs/`` for each
     starting point and reuse its payloads. This is *substantially*
-    simpler than maintaining a parallel inline seed and guarantees
-    that wizard output passes Layers 1-4 without the operator typing
-    anything.
+    simpler than maintaining a parallel inline seed. The fixture's
+    operator and per-run specimen values are cleared
+    (:func:`~capa.config.capa_profile.clear_per_run_fields`), so the only
+    Layers 1-4 errors in the result are the fields the operator has to
+    fill in.
     """
     if spec.starting_point == "blank":
         exp_payload, hw_payload = _blank_seed()
@@ -359,7 +363,7 @@ def build_document(spec: _Spec) -> ConfigDocument:
     else:
         template = _load_template(spec.starting_point)
         doc = ConfigDocument(
-            experiment_payload=dict(template.experiment_payload),
+            experiment_payload=clear_per_run_fields(template.experiment_payload),
             hardware_payload=dict(template.hardware_payload),
         )
 
@@ -394,8 +398,8 @@ def _blank_seed() -> tuple[dict[str, object], dict[str, object]]:
     ships invalid.
     """
     exp: dict[str, object] = {
-        "operator": {"id": "wizard"},
-        "sample": {"id": "wizard_sample"},
+        "operator": {},
+        "sample": {"id": ""},
     }
     hw: dict[str, object] = {
         "name": "blank_profile",

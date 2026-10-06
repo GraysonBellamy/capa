@@ -11,7 +11,7 @@ from capa.experiment.config import ExperimentConfig
 
 _FREE_RUN_TOML = """
 procedure = { id = "capa.builtin.free_run", config = { duration_s = 0.1 } }
-operator = { id = "abr" }
+operator = { id = "abr", display_name = "A. Researcher" }
 sample = { id = "S-1" }
 
 hardware = "hardware.toml"
@@ -56,7 +56,7 @@ def test_load_external_ref_resolves_relative(tmp_path: Path) -> None:
     sub.mkdir()
     (sub / "exp.toml").write_text(
         'procedure = { id = "capa.builtin.free_run" }\n'
-        'operator = { id = "abr" }\n'
+        'operator = { id = "abr", display_name = "A. Researcher" }\n'
         'sample = { id = "S-1" }\n'
         'hardware = "../hw.toml"\n',
         encoding="utf-8",
@@ -88,7 +88,7 @@ def test_method_source_path_none_for_freerun(configs_dir: Path) -> None:
 
 _INLINE_METHOD_TOML = """
 procedure = { id = "capa.builtin.recipe_runner" }
-operator = { id = "abr" }
+operator = { id = "abr", display_name = "A. Researcher" }
 sample = { id = "S-1" }
 hardware = "hardware.toml"
 

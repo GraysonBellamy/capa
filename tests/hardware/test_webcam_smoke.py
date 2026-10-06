@@ -146,7 +146,7 @@ class TestRealWebcamEngineRun:
                 version="0.1",
                 config={"duration_s": 5.0},
             ),
-            operator=OperatorRef(id=_operator_id()),
+            operator=OperatorRef(id=_operator_id(), display_name="Test Operator"),
             sample=SampleInfo(id="HW-SMOKE-WEBCAM-001"),
             tags=("hardware", "webcam", "smoke"),
         )

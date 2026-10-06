@@ -37,7 +37,7 @@ SIM_CAPA_EXP = REPO_ROOT / "configs" / "experiments" / "sim_capa_pyrolysis.yaml"
 def test_experiment_section_reads_operator_from_fixture(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     section = tab._sections["experiment"]
     assert isinstance(section, ExperimentSection)
     values = section._form.values()
@@ -49,7 +49,7 @@ def test_experiment_section_reads_operator_from_fixture(qtbot: Any) -> None:
 def test_storage_section_reads_storage_payload(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     section = tab._sections["storage"]
     assert isinstance(section, StorageSection)
     values = section._form.values()
@@ -60,7 +60,7 @@ def test_storage_section_reads_storage_payload(qtbot: Any) -> None:
 def test_safety_section_reads_rules(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     section = tab._sections["safety"]
     assert isinstance(section, SafetySection)
     # The fixture omits ``safety:`` — default empty rules tuple.
@@ -76,7 +76,7 @@ def test_safety_section_reads_rules(qtbot: Any) -> None:
 def test_storage_edit_propagates_to_document(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     section = tab._sections["storage"]
     assert isinstance(section, StorageSection)
 
@@ -96,7 +96,7 @@ def test_storage_edit_propagates_to_document(qtbot: Any) -> None:
 def test_safety_add_rule_flows_through(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     section = tab._sections["safety"]
     assert isinstance(section, SafetySection)
 
@@ -134,7 +134,7 @@ def test_experiment_edit_round_trips_through_save(qtbot: Any, tmp_path: Path) ->
 
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(work_exp)
+    tab.load_path(work_exp, clear_per_run=False)
     section = tab._sections["experiment"]
     assert isinstance(section, ExperimentSection)
 
@@ -163,7 +163,7 @@ def test_capa_profile_owns_sample(qtbot: Any) -> None:
     section leaves ``sample`` out of its payload."""
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     section = tab._sections["experiment"]
     assert isinstance(section, ExperimentSection)
     sample_widget = section._form.field_widget("sample")
@@ -183,7 +183,7 @@ def test_capa_profile_owns_sample(qtbot: Any) -> None:
 def test_experiment_section_edits_sample_without_profile(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     tab.draft.document.experiment_payload.pop("domain_profile")
     section = tab._sections["experiment"]
     assert isinstance(section, ExperimentSection)
@@ -201,7 +201,7 @@ def test_specimen_edit_updates_sample_everywhere(qtbot: Any) -> None:
     Operator & sample section re-reads it straight away."""
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     capa = tab._sections["capa_profile"]
     assert isinstance(capa, CapaProfileSection)
 
@@ -223,7 +223,7 @@ def test_capa_mapping_edit_refreshes_channels_section(qtbot: Any) -> None:
     a later Channels edit can't write its stale copy back."""
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     capa = tab._sections["capa_profile"]
     assert isinstance(capa, CapaProfileSection)
     row = next(r for r in capa._mapping_rows if r.group == "heater_pv")
@@ -245,7 +245,7 @@ def test_capa_mapping_edit_refreshes_channels_section(qtbot: Any) -> None:
 def test_validate_runs_after_debounce(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     # The fixture is valid out of the box. Corrupt the experiment
     # payload behind the form's back so the next debounce run surfaces
     # a problem we can observe. (The spinbox would otherwise clamp a
@@ -267,7 +267,7 @@ def test_validate_runs_after_debounce(qtbot: Any) -> None:
 def test_validate_button_runs_pipeline_synchronously(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     # Calling the slot directly bypasses the modal.
     tab.draft.validate()
     # The sim CAPA fixture is valid out of the box — zero errors.

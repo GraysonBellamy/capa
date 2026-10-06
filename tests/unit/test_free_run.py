@@ -46,7 +46,7 @@ def _ctx(stop: anyio.Event, *, with_method: bool = False) -> ProcedureContext:
         hardware=HardwareProfile(name="empty", devices=(), channels=()),
         method=method,
         procedure=ProcedureRef(id="capa.builtin.free_run"),
-        operator=OperatorRef(id="abr"),
+        operator=OperatorRef(id="abr", display_name="Test Operator"),
         sample=SampleInfo(id="S-1"),
     )
     instruments = ChannelRegistry.from_specs(list(config.hardware.channels))

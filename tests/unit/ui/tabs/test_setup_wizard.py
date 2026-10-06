@@ -170,10 +170,27 @@ def test_save_now_inline_layout_writes_one_file(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_sim_seed_passes_layer1_through_layer4(tmp_path: Path) -> None:
-    """A wizard-produced sim draft must be clean against Layers 1-4
-    (no method attached so we don't drag in method-target checks)."""
+def test_sim_seed_clears_operator_and_specimen() -> None:
+    """The template's operator and specimen describe someone else's run;
+    the new draft keeps only the rig-level specimen fields."""
+    spec = _Spec()
+    spec.starting_point = "sim_capa"
+    doc = build_document(spec)
+    exp = doc.experiment_payload
+    assert exp["operator"] == {}
+    metadata = exp["domain_profile"]["metadata"]
+    assert metadata["specimen"] == {"form": "disk", "specimen_holder": "stainless steel cup"}
+    assert metadata["program"]["target_heat_flux_kw_m2"] == 50.0
+    # sample mirrors the cleared specimen.
+    assert exp["sample"] == {"id": ""}
+
+
+def test_sim_seed_errors_are_the_fields_to_fill_in(tmp_path: Path) -> None:
+    """A wizard-produced sim draft fails Layers 1-4 only on the operator
+    and specimen fields left for the operator (no method attached so we
+    don't drag in method-target checks); filling them in clears it."""
     from capa.config import validate
+    from capa.config.capa_profile import sample_from_specimen
     from capa.ui.tabs.setup_wizard import _layout_for
 
     spec = _Spec()
@@ -188,7 +205,34 @@ def test_sim_seed_passes_layer1_through_layer4(tmp_path: Path) -> None:
 
     reloaded = ConfigDocument.load(spec.experiment_path)
     problems = validate(reloaded, with_live_checks=False)
-    errors = [p for p in problems if p.severity == "error"]
+    error_paths = {p.path for p in problems if p.severity == "error"}
+    specimen_path = ("domain_profile", "metadata", "specimen")
+    assert error_paths == {
+        ("operator", "id"),
+        ("operator", "display_name"),
+        (*specimen_path, "id"),
+        (*specimen_path, "material"),
+        (*specimen_path, "initial_mass_g"),
+        (*specimen_path, "thickness_mm"),
+        (*specimen_path, "diameter_mm"),
+    }
+
+    exp = reloaded.experiment_payload
+    exp["operator"] = {"id": "abr", "display_name": "A. Researcher"}
+    specimen = exp["domain_profile"]["metadata"]["specimen"]
+    specimen.update(
+        id="P-1", material="PMMA", initial_mass_g=5.0, thickness_mm=6.0, diameter_mm=70.0
+    )
+    exp["sample"] = sample_from_specimen(specimen, exp["sample"])
+    errors = [p for p in validate(reloaded, with_live_checks=False) if p.severity == "error"]
     if errors:
         msgs = [f"{p.code}: {p.message}" for p in errors]
-        pytest.fail("seed should be error-free:\n" + "\n".join(msgs))
+        pytest.fail("filled-in seed should be error-free:\n" + "\n".join(msgs))
+
+
+def test_blank_seed_leaves_operator_and_sample_id_empty() -> None:
+    spec = _Spec()
+    spec.starting_point = "blank"
+    doc = build_document(spec)
+    assert doc.experiment_payload["operator"] == {}
+    assert doc.experiment_payload["sample"] == {"id": ""}

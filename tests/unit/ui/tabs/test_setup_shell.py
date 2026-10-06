@@ -78,7 +78,7 @@ def test_setup_tab_outline_default_selects_overview(qtbot: Any) -> None:
 def test_load_path_seeds_draft_from_experiment_yaml(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     doc = tab.draft.document
     assert doc.experiment_path == SIM_CAPA_EXP.resolve()
     assert doc.experiment_format == "yaml"
@@ -92,13 +92,61 @@ def test_load_path_seeds_draft_from_experiment_yaml(qtbot: Any) -> None:
 def test_load_path_refreshes_overview(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     overview = tab._sections["overview"]
     assert isinstance(overview, OverviewSection)
     # The operator from the fixture should be reflected.
     assert "abr" in overview._operator.text()
     # Hardware-path label points at the external TOML.
     assert overview._hardware_path.text().endswith("sim_capa.toml")
+
+
+def test_load_path_clears_per_run_fields(qtbot: Any) -> None:
+    """Opening a config never carries over the last run's operator or
+    specimen measurements; the rig-level specimen fields stay."""
+    tab = SetupTab()
+    qtbot.addWidget(tab)
+    assert tab.load_path(SIM_CAPA_EXP)
+    exp = tab.draft.document.experiment_payload
+    assert exp["operator"] == {}
+    specimen = exp["domain_profile"]["metadata"]["specimen"]
+    assert specimen == {"form": "disk", "specimen_holder": "stainless steel cup"}
+    assert exp["sample"] == {"id": ""}
+    assert exp["domain_profile"]["metadata"]["program"]["heater_setpoint_c"] == 600.0
+    specimen_path = ("domain_profile", "metadata", "specimen")
+    assert {p.path for p in tab.draft.problems if p.severity == "error"} == {
+        ("operator", "id"),
+        ("operator", "display_name"),
+        (*specimen_path, "id"),
+        (*specimen_path, "material"),
+        (*specimen_path, "initial_mass_g"),
+        (*specimen_path, "thickness_mm"),
+        (*specimen_path, "diameter_mm"),
+    }
+    # Clearing isn't an edit: nothing to save until the operator types.
+    assert not tab.draft.is_dirty
+
+
+def test_load_config_with_path_keeps_per_run_fields(qtbot: Any) -> None:
+    """The config being applied shows in Setup exactly as applied."""
+    from capa.experiment.config import ExperimentConfig
+
+    tab = SetupTab()
+    qtbot.addWidget(tab)
+    tab.load_config(ExperimentConfig.load(SIM_CAPA_EXP), path=SIM_CAPA_EXP)
+    exp = tab.draft.document.experiment_payload
+    assert exp["operator"]["id"] == "abr"
+    assert exp["domain_profile"]["metadata"]["specimen"]["initial_mass_g"] == 5.0
+    assert not tab.draft.has_errors
+
+
+def test_load_path_reports_failure(qtbot: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "critical", lambda *_a, **_k: None)
+    tab = SetupTab()
+    qtbot.addWidget(tab)
+    assert not tab.load_path(tmp_path / "missing.yaml")
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +180,7 @@ def test_save_with_no_edits_is_byte_identical(qtbot: Any, tmp_path: Path) -> Non
 
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(work_exp)
+    tab.load_path(work_exp, clear_per_run=False)
     # Snapshot every file we expect to be touched.
     before_exp = work_exp.read_bytes()
     before_hw = work_hw.read_bytes()
@@ -162,7 +210,7 @@ def test_save_with_no_edits_is_byte_identical(qtbot: Any, tmp_path: Path) -> Non
 def test_save_as_writes_chosen_layout(qtbot: Any, tmp_path: Path) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     # Drive save_as directly with a chosen layout (bypass the modal).
     new_exp = tmp_path / "renamed.yaml"
     new_hw = tmp_path / "renamed_hardware.toml"
@@ -227,7 +275,7 @@ def test_strip_frozen_for_each_active_state(qtbot: Any, state: RunUiState) -> No
 def test_files_section_method_mode_changes_emit_signal(qtbot: Any) -> None:
     tab = SetupTab()
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     files = tab._sections["files"]
     assert isinstance(files, FilesSection)
     fired: list[object] = []

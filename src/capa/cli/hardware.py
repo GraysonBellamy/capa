@@ -25,7 +25,7 @@ hardware_app = typer.Typer(
 
 
 _HARDWARE_VALIDATE_STUB_EXPERIMENT: dict[str, Any] = {
-    "operator": {"id": "_hardware_validate_stub"},
+    "operator": {"id": "_hardware_validate_stub", "display_name": "_hardware_validate_stub"},
     "sample": {"id": "_hardware_validate_stub"},
     "procedure": {"id": "capa.builtin.recipe_runner", "version": "0.1"},
 }

@@ -52,10 +52,8 @@ import qasync
 import structlog
 from PySide6.QtWidgets import QApplication
 
-from capa.core.errors import CapaError
 from capa.core.logging import configure_pre_run_logging
 from capa.core.plugins_lock import PluginsLock
-from capa.experiment.config import ExperimentConfig
 from capa.runtime.recovery import recover_active_bundle_checkpoint
 from capa.storage.catalog import RunCatalog
 from capa.ui.main_window import MainWindow
@@ -105,29 +103,21 @@ def run_gui(
     """Run the GUI until the operator quits. Returns a process exit code.
 
     Args:
-        config_path: optional config to load on launch. ``None`` opens the
-            window with no active experiment; the operator can use
-            File→Open afterwards.
+        config_path: optional config to open in the Setup tab on launch,
+            as File→Open would: the operator fills in the per-run fields
+            and applies it. ``None`` opens the window with no config.
         runs_root: bundle parent directory.
         plugins_lock, repo_root, lockfile_source: forwarded to the engine
             on every run.
 
     Exit code: 0 on clean window close (regardless of what individual runs
     did inside; per-run results are visible in the bundle catalog and run
-    log). Non-zero only on hard startup failures (e.g. config refused).
+    log). A config that fails to open is reported in the window, not
+    through the exit code.
     """
     configure_pre_run_logging()
 
     runs_root.mkdir(parents=True, exist_ok=True)
-
-    initial_config: ExperimentConfig | None = None
-    if config_path is not None:
-        try:
-            initial_config = ExperimentConfig.load(config_path)
-        except CapaError as exc:
-            _logger.error("ui.initial_config_invalid", path=str(config_path), error=str(exc))
-            sys.stderr.write(f"capa: invalid config {config_path}: {exc}\n")
-            return 2
 
     app = QApplication.instance()
     if app is None:
@@ -168,8 +158,7 @@ def run_gui(
             lockfile_source=lockfile_source,
             plugins_lock=plugins_lock,
             configure_logging_for_bundle=True,
-            initial_config=initial_config,
-            initial_config_path=config_path,
+            open_path=config_path,
         )
         window.show()
         loop.run_forever()

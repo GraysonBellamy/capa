@@ -38,7 +38,7 @@ def test_check_button_disabled_when_draft_has_errors(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     assert tab._action_check.isEnabled()
     # Break the schema; Check button greys out.
     tab._draft.document.hardware_payload.pop("name", None)
@@ -51,7 +51,7 @@ def test_check_button_enabled_with_valid_draft(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     assert tab._action_check.isEnabled()
 
 
@@ -59,7 +59,7 @@ def test_check_button_disabled_during_active_run(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     controller.is_active = True
     controller.state_changed.emit(RunUiState.RUNNING)
     assert not tab._action_check.isEnabled()
@@ -73,7 +73,7 @@ def test_check_button_stays_enabled_after_live_handshake_error(qtbot: Any) -> No
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     assert tab._action_check.isEnabled()
     live_fail = [
         ConfigProblem(
@@ -100,7 +100,7 @@ def test_check_button_disabled_when_hardware_ready(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     assert tab._action_check.isEnabled()
 
     # Simulate "apply succeeded": pool is open.
@@ -119,7 +119,7 @@ def test_check_button_stays_disabled_after_draft_edit_post_apply(qtbot: Any) -> 
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     controller.hardware_ready = True
     controller.hardware_ready_changed.emit(True)
     assert not tab._action_check.isEnabled()
@@ -135,7 +135,7 @@ def test_check_button_disabled_while_check_in_flight(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     assert tab._action_check.isEnabled()
     tab._begin_check()
     assert not tab._action_check.isEnabled()
@@ -154,7 +154,7 @@ def test_check_connection_strip_state(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     # Loaded clean draft + no hardware ready stub → strip sits in UNAPPLIED
     # (the controller stub doesn't expose a live pool).
     assert tab._connection_strip.state in (ConnectionState.UNAPPLIED, ConnectionState.CONNECTED)
@@ -169,7 +169,7 @@ def test_check_finish_merges_live_problems(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     fake = [
         ConfigProblem(
             severity="info",
@@ -194,7 +194,7 @@ def test_check_refused_during_active_run(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     controller.is_active = True
     controller.state_changed.emit(RunUiState.RUNNING)
     with patch("capa.ui.tabs.setup.QMessageBox.information") as info:
@@ -207,7 +207,7 @@ def test_check_refused_with_errors_in_draft(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     # Inject an error: drop the required hardware ``name``.
     tab._draft.document.hardware_payload.pop("name", None)
     tab._draft.validate()
@@ -223,7 +223,7 @@ def test_check_without_running_loop_surfaces_info(qtbot: Any) -> None:
     controller = _ControllerStub()
     tab = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(tab)
-    tab.load_path(SIM_CAPA_EXP)
+    tab.load_path(SIM_CAPA_EXP, clear_per_run=False)
     with patch("capa.ui.tabs.setup.QMessageBox.information") as info:
         tab._on_check_hardware()
     assert info.call_count == 1

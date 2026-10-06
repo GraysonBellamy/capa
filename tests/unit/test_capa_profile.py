@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from capa.experiment.profiles import capa_pyrolysis as cap
 
@@ -15,6 +16,8 @@ def _good_metadata() -> dict[str, Any]:
             "id": "P-001",
             "material": "PMMA",
             "initial_mass_g": 5.0,
+            "thickness_mm": 6.0,
+            "diameter_mm": 70.0,
             "form": "disk",
             "specimen_holder": "stainless steel cup",
         },
@@ -44,6 +47,36 @@ def test_validate_metadata_rejects_negative_mass() -> None:
     raw = _good_metadata()
     raw["specimen"]["initial_mass_g"] = 0.0
     with pytest.raises(Exception):
+        cap.validate_metadata(raw)
+
+
+@pytest.mark.parametrize("field", ["thickness_mm", "diameter_mm"])
+def test_validate_metadata_requires_dimensions(field: str) -> None:
+    raw = _good_metadata()
+    del raw["specimen"][field]
+    with pytest.raises(ValidationError) as exc_info:
+        cap.validate_metadata(raw)
+    assert [err["loc"] for err in exc_info.value.errors()] == [("specimen", field)]
+
+
+def test_holder_and_insulation_masses_are_optional() -> None:
+    meta = cap.validate_metadata(_good_metadata())
+    assert meta.specimen.specimen_holder_mass_g is None
+    assert meta.specimen.insulation_mass_g is None
+
+    raw = _good_metadata()
+    raw["specimen"]["specimen_holder_mass_g"] = 42.5
+    raw["specimen"]["insulation_mass_g"] = 3.1
+    meta = cap.validate_metadata(raw)
+    assert meta.specimen.specimen_holder_mass_g == 42.5
+    assert meta.specimen.insulation_mass_g == 3.1
+
+
+@pytest.mark.parametrize("field", ["specimen_holder_mass_g", "insulation_mass_g"])
+def test_holder_and_insulation_masses_must_be_positive(field: str) -> None:
+    raw = _good_metadata()
+    raw["specimen"][field] = 0.0
+    with pytest.raises(ValidationError):
         cap.validate_metadata(raw)
 
 

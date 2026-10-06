@@ -268,7 +268,7 @@ class TestResolveDeviceAdapters:
                 ),
             ),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            operator=OperatorRef(id="op"),
+            operator=OperatorRef(id="op", display_name="Test Operator"),
             sample=SampleInfo(id="S1"),
         )
 
@@ -367,7 +367,7 @@ class TestBuildWorkersOnFailurePropagation:
                 ),
             ),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            operator=OperatorRef(id="op"),
+            operator=OperatorRef(id="op", display_name="Test Operator"),
             sample=SampleInfo(id="S1"),
         )
 
@@ -431,7 +431,7 @@ class TestBuildWorkersOnFailurePropagation:
                 ),
             ),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            operator=OperatorRef(id="op"),
+            operator=OperatorRef(id="op", display_name="Test Operator"),
             sample=SampleInfo(id="S1"),
         )
 

@@ -38,7 +38,7 @@ class _ExperimentMetadataView(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    operator: OperatorRef = Field(default_factory=lambda: OperatorRef(id=""))
+    operator: OperatorRef
     sample: SampleInfo = Field(default_factory=lambda: SampleInfo(id=""))
     tags: tuple[str, ...] = Field(
         default_factory=tuple,

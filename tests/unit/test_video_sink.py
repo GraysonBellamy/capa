@@ -64,7 +64,7 @@ def _config(*camera_specs: CameraSpec) -> ExperimentConfig:
         hardware=HardwareProfile(name="rig", cameras=camera_specs),
         method=None,
         procedure=ProcedureRef(id="capa.builtin.free_run", version="0.1"),
-        operator=OperatorRef(id="abr"),
+        operator=OperatorRef(id="abr", display_name="Test Operator"),
         sample=SampleInfo(id="S001"),
     )
 

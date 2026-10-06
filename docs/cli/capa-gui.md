@@ -27,7 +27,7 @@ Options:
 
 ## What it does
 
-Starts the qasync bootstrap (Qt event loop merged with asyncio), loads PySide6, and opens the main window. If `CONFIG` is provided, the Setup tab opens with that experiment already loaded; otherwise the welcome screen lets the operator pick one from **File → Open** or **Try a simulator**.
+Starts the qasync bootstrap (Qt event loop merged with asyncio), loads PySide6, and opens the main window. If `CONFIG` is provided, the Setup tab opens with that experiment already loaded, its operator and per-run specimen fields empty for you to fill in before **Apply & Connect** (see [Entered for every run](../configuration/capa-profile.md#entered-for-every-run)); otherwise the welcome screen lets the operator pick one from **File → Open** or **Try a simulator**.
 
 The conductor / worker-pool stack underneath is the same one [`capa run`](capa-run.md) uses. The GUI does not replace the runtime — it talks to the same conductor through the ManualClient surface described in the [runtime architecture](../architecture/runtime-architecture.md) doc.
 

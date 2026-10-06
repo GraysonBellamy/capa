@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from capa.config.capa_profile import (
     CAPA_PROFILE_ID,
+    clear_per_run_fields,
     profile_model_fields,
     sample_from_specimen,
     sample_specimen_mismatches,
@@ -76,3 +77,50 @@ def test_mismatches_report_each_field() -> None:
 def test_profile_model_fields_drops_preflight_knobs() -> None:
     metadata = {"specimen": {}, "_safe_arm": {"max_heater_pv_c": 400.0}}
     assert profile_model_fields(metadata) == {"specimen": {}}
+
+
+def test_clear_per_run_fields_keeps_rig_level_specimen_fields() -> None:
+    payload = {
+        "operator": {"id": "abr", "display_name": "A. Researcher"},
+        "sample": {"id": "P-1", "material": "PMMA", "mass_g": 5.0, "extra": {"lot": "B7"}},
+        "domain_profile": {
+            "id": CAPA_PROFILE_ID,
+            "metadata": {
+                "specimen": {
+                    "id": "P-1",
+                    "material": "PMMA",
+                    "initial_mass_g": 5.0,
+                    "thickness_mm": 6.0,
+                    "diameter_mm": 70.0,
+                    "form": "disk",
+                    "specimen_holder": "stainless steel cup",
+                    "specimen_holder_diameter_mm": 75.0,
+                    "specimen_holder_mass_g": 40.0,
+                    "insulation_mass_g": 3.0,
+                    "conditioning": "dried 24 h",
+                    "notes": "box B",
+                },
+                "program": {"target_heat_flux_kw_m2": 50.0},
+            },
+        },
+        "tags": ["capa"],
+    }
+    out = clear_per_run_fields(payload)
+    assert out["operator"] == {}
+    metadata = out["domain_profile"]["metadata"]
+    assert metadata["specimen"] == {
+        "form": "disk",
+        "specimen_holder": "stainless steel cup",
+        "specimen_holder_diameter_mm": 75.0,
+    }
+    assert metadata["program"] == {"target_heat_flux_kw_m2": 50.0}
+    assert out["sample"] == {"id": "", "extra": {"lot": "B7"}}
+    assert out["tags"] == ["capa"]
+    # The input is left as it was.
+    assert payload["operator"]["id"] == "abr"
+    assert payload["domain_profile"]["metadata"]["specimen"]["id"] == "P-1"
+
+
+def test_clear_per_run_fields_without_profile_clears_only_operator() -> None:
+    payload = {"operator": {"id": "abr", "display_name": "A. Researcher"}, "sample": {"id": "S-1"}}
+    assert clear_per_run_fields(payload) == {"operator": {}, "sample": {"id": "S-1"}}

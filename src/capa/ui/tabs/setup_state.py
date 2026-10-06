@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from capa.config.capa_profile import clear_per_run_fields
 from capa.config.document import ConfigDocument
 from capa.config.problems import ConfigProblem
 from capa.config.validate import validate
@@ -104,9 +105,16 @@ class SetupDraft:
     # -- factories ----------------------------------------------------------
 
     @classmethod
-    def from_path(cls, path: Path | str) -> SetupDraft:
-        """Load a draft from an experiment file."""
+    def from_path(cls, path: Path | str, *, clear_per_run: bool = False) -> SetupDraft:
+        """Load a draft from an experiment file.
+
+        ``clear_per_run`` empties the operator and the specimen's per-run
+        fields (:func:`~capa.config.capa_profile.clear_per_run_fields`) —
+        what the Setup tab does when the operator opens a config.
+        """
         document = ConfigDocument.load(path)
+        if clear_per_run:
+            document.experiment_payload = clear_per_run_fields(document.experiment_payload)
         draft = cls(document=document)
         draft.validate()
         return draft

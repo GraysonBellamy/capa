@@ -86,7 +86,7 @@ class MainWindow(QMainWindow):
         plugins_lock: object | None = None,  # capa.core.plugins_lock.PluginsLock
         configure_logging_for_bundle: bool = True,
         initial_config: ExperimentConfig | None = None,
-        initial_config_path: Path | None = None,
+        open_path: Path | None = None,
         shutdown_coordinator: ShutdownCoordinator | None = None,
     ) -> None:
         super().__init__()
@@ -292,12 +292,13 @@ class MainWindow(QMainWindow):
             self._manual_dock.hide()
         self._restore_window_state()
 
-        # Optional initial config (when launched with a positional path).
+        # Optional config at launch. ``open_path`` (``capa gui <config>``)
+        # opens in the Setup tab for the operator to complete, like
+        # File → Open; ``initial_config`` is applied as-is.
         if initial_config is not None:
-            QTimer.singleShot(
-                0,
-                lambda: self._apply_loaded_config(initial_config, initial_config_path),
-            )
+            QTimer.singleShot(0, lambda: self._apply_loaded_config(initial_config, None))
+        elif open_path is not None:
+            QTimer.singleShot(0, lambda: self._open_in_setup(open_path))
 
     # ------------------------------------------------------------------ build
 
@@ -404,14 +405,26 @@ class MainWindow(QMainWindow):
         )
         if not path_str:
             return
-        path = Path(path_str)
-        try:
-            cfg = ExperimentConfig.load(path)
-        except CapaError as exc:
-            QMessageBox.critical(self, "Config error", str(exc))
-            _logger.warning("ui.config_load_failed", path=str(path), error=str(exc))
+        self._open_in_setup(Path(path_str))
+
+    def _open_in_setup(self, path: Path) -> None:
+        """Open ``path`` in the Setup tab as a draft to complete and apply.
+
+        Opening never applies the config. The operator and the specimen's
+        per-run fields start empty, so the operator enters them for this
+        run and then presses Apply & Connect.
+        """
+        if self._controller.is_active:
+            self._status.showMessage(
+                "Cannot open a config while a run is active. Stop the run first.",
+                4000,
+            )
             return
-        self._apply_loaded_config(cfg, path)
+        if not self._setup_tab.load_path(path):
+            return
+        record_open(path)
+        self._central.setCurrentWidget(self._tabs)
+        self._tabs.setCurrentWidget(self._setup_tab)
 
     def _on_close_config(self) -> None:
         """Drop the active config and tear down the worker pool.
@@ -645,9 +658,14 @@ class MainWindow(QMainWindow):
 
     def _on_welcome_recent(self, path: object) -> None:
         if isinstance(path, Path):
-            self._load_config_path(path)
+            self._open_in_setup(path)
 
     def _load_config_path(self, path: Path) -> None:
+        """Load and apply ``path`` as it is on disk, per-run fields included.
+
+        Only the simulator shortcut uses this: its bundled config carries
+        sample values so a first-time user can press Start straight away.
+        """
         try:
             cfg = ExperimentConfig.load(path)
         except CapaError as exc:

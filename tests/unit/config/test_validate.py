@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from capa.config import ConfigDocument, ConfigProblem, validate
+from capa.config.capa_profile import clear_per_run_fields
 from capa.devices.registry import _import_builtins
 
 
@@ -79,21 +80,44 @@ def test_layer3_skipped_when_profile_is_not_capa(configs_dir: Path) -> None:
     assert capa_problems == []
 
 
+def test_layer3_sim_capa_config_is_clean(configs_dir: Path) -> None:
+    """The sim config carries sample values so headless runs and CI can use
+    it: valid metadata and a matching sample."""
+    doc = ConfigDocument.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+    problems = validate(doc)
+    assert [p for p in problems if p.code.startswith("capa_profile.")] == []
+
+
 @pytest.mark.parametrize(
     "name",
     [
-        "sim_capa_pyrolysis.yaml",
         "capa_real_full.yaml",
         "capa_real_full_fuji.yaml",
         "capa_real_partial_a.yaml",
         "capa_real_partial_b.yaml",
     ],
 )
-def test_layer3_shipped_capa_configs_are_clean(configs_dir: Path, name: str) -> None:
-    """Every shipped CAPA config has valid metadata and a matching sample."""
+def test_real_capa_configs_leave_per_run_fields_out(configs_dir: Path, name: str) -> None:
+    """The real-rig configs are complete apart from the fields entered for
+    every run, and opening one clears nothing else."""
     doc = ConfigDocument.load(configs_dir / "experiments" / name)
-    problems = validate(doc)
-    assert [p for p in problems if p.code.startswith("capa_profile.")] == []
+    specimen_path = ("domain_profile", "metadata", "specimen")
+    expected = {
+        ("operator",),
+        ("sample",),
+        (*specimen_path, "id"),
+        (*specimen_path, "material"),
+        (*specimen_path, "initial_mass_g"),
+        (*specimen_path, "thickness_mm"),
+        (*specimen_path, "diameter_mm"),
+    }
+    assert {p.path for p in validate(doc) if p.severity == "error"} == expected
+    doc.experiment_payload = clear_per_run_fields(doc.experiment_payload)
+    paths = {p.path for p in validate(doc) if p.severity == "error"}
+    assert paths == expected - {("operator",), ("sample",)} | {
+        ("operator", "id"),
+        ("operator", "display_name"),
+    }
 
 
 def test_layer3_capa_metadata_validated_against_model(configs_dir: Path) -> None:
@@ -115,6 +139,20 @@ def test_layer3_capa_metadata_validated_against_model(configs_dir: Path) -> None
     assert by_path[("domain_profile", "metadata", "specimen", "initial_mass_g")].code == (
         "capa_profile.metadata.missing"
     )
+
+
+def test_capa_metadata_checked_when_schema_fails(configs_dir: Path) -> None:
+    """A schema error elsewhere doesn't hide the CAPA metadata problems,
+    so a draft missing both operator and specimen fields lists them all."""
+    doc = ConfigDocument.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+    doc.experiment_payload["operator"] = {}
+    del doc.experiment_payload["domain_profile"]["metadata"]["specimen"]["thickness_mm"]
+    paths = {p.path for p in validate(doc) if p.severity == "error"}
+    assert paths == {
+        ("operator", "id"),
+        ("operator", "display_name"),
+        ("domain_profile", "metadata", "specimen", "thickness_mm"),
+    }
 
 
 def test_layer3_preflight_knobs_are_not_model_fields(configs_dir: Path) -> None:

@@ -65,7 +65,7 @@ def _config() -> ExperimentConfig:
         hardware=hardware,
         method=None,
         procedure=ProcedureRef(id="capa.builtin.free_run"),
-        operator=OperatorRef(id="abr"),
+        operator=OperatorRef(id="abr", display_name="Test Operator"),
         sample=SampleInfo(id="CRASH-001"),
     )
 

@@ -60,7 +60,7 @@ def _config_with_cameras(camera_blocks: list[dict[str, object]]) -> ExperimentCo
             cameras=camera_blocks,
         ),
         procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-        operator=OperatorRef(id="op_test"),
+        operator=OperatorRef(id="op_test", display_name="Test Operator"),
         sample=SampleInfo(id="sample_test"),
     )
 
@@ -213,7 +213,7 @@ class TestBuildWorkersWithCameras:
                 ],
             ),
             procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-            operator=OperatorRef(id="op_test"),
+            operator=OperatorRef(id="op_test", display_name="Test Operator"),
             sample=SampleInfo(id="sample_test"),
         )
         workers, device_to_resource = build_workers(

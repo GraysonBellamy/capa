@@ -27,6 +27,7 @@ from pydantic import ValidationError
 from capa.config.capa_profile import (
     CAPA_PROFILE_ID,
     CAPA_REQUIRED_GROUPS,
+    is_capa_profile,
     profile_model_fields,
     sample_specimen_mismatches,
 )
@@ -67,6 +68,11 @@ def validate(
         problems.extend(_layer4_resource(valid_config, document))
         if with_live_checks:
             problems.extend(_layer5_live(valid_config, document))
+    else:
+        # Layer 1 treats the CAPA profile metadata as a free-form dict, so
+        # its check needs no validated config. Running it here lists a new
+        # draft's missing operator and specimen fields together.
+        problems.extend(_capa_metadata_problems_unvalidated(document))
 
     return _sorted_problems(problems)
 
@@ -608,6 +614,18 @@ def _layer3_domain(config: Any, document: ConfigDocument) -> list[ConfigProblem]
     problems.extend(_capa_sample_problems(config, profile_ref.metadata, document))
     problems.extend(_capa_purge_gas_problems(config, profile_ref.metadata, document))
     return problems
+
+
+def _capa_metadata_problems_unvalidated(document: ConfigDocument) -> list[ConfigProblem]:
+    """:func:`_capa_metadata_problems` on the raw experiment payload, for a
+    document that failed Layer 1."""
+    payload = document.experiment_payload
+    if not is_capa_profile(payload):
+        return []
+    metadata = payload["domain_profile"].get("metadata") or {}
+    if not isinstance(metadata, Mapping):
+        return []
+    return _capa_metadata_problems(metadata, document)
 
 
 def _capa_metadata_problems(metadata: Any, document: ConfigDocument) -> list[ConfigProblem]:
