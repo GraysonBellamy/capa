@@ -17,6 +17,7 @@ domain_profile:
       id: SIM-CAPA-001
       material: PMMA
       initial_mass_g: 5.0
+      thickness_mm: 6.0
       form: disk
       specimen_holder: "stainless steel cup"
       conditioning: "23C / 50% RH for 48h"
@@ -49,6 +50,7 @@ sample:
   id: SIM-CAPA-001
   material: PMMA
   mass_g: 5.0
+  thickness_mm: 6.0
 
 tags: [sim, capa, pyrolysis]
 ```

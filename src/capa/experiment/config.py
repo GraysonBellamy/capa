@@ -280,11 +280,11 @@ class SampleInfo(BaseModel):
 
 
 class OperatorRef(BaseModel):
-    """Operator identity attached to an experiment — id plus optional display name."""
+    """Operator identity attached to an experiment — id plus display name."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-    id: str
-    display_name: str | None = None
+    id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
 
 
 # ---------------------------------------------------------------------------

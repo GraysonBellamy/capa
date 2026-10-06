@@ -399,11 +399,14 @@ is also offered when you Save As an external config to a new path.
 
 ### The Setup wizard
 
-**Open ▾ → New from template…** launches a one-screen wizard that asks
-the bare minimum for a runnable config: procedure, profile, primary
-heater, primary MFC, sample id. The wizard-produced draft is marked
-**unapplied** on completion so the **Apply & Connect** button lights up
-immediately — the wizard's whole point is "open this and start running."
+**Open ▾ → New from template…** launches a wizard that picks a starting
+template, file layout and method. The draft takes the template's devices,
+channels, procedure and rig-level profile fields (specimen form, holder,
+heater program, atmosphere), but not who is running what: the operator id
+and name, and the specimen's id, material, initial mass, thickness, holder
+and insulation masses, conditioning and notes all start empty. The
+Problems panel lists the required ones; fill them in, then
+**Apply & Connect**.
 
 ![Setup wizard "Starting point" step with five templates: CAPA pyrolysis (real / simulated), Free run (real / simulated), Blank.](../_snippets/images/setup-wizard.png)
 

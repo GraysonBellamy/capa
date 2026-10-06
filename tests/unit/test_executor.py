@@ -96,7 +96,7 @@ def _make_ctx(
         ),
         method=None,
         procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-        operator=OperatorRef(id="abr"),
+        operator=OperatorRef(id="abr", display_name="Test Operator"),
         sample=SampleInfo(id="S-EX"),
     )
     instruments = ChannelRegistry.from_specs(list(channels))

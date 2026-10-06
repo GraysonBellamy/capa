@@ -73,7 +73,7 @@ def _config() -> ExperimentConfig:
             ),
         ),
         procedure=ProcedureRef(id="capa.builtin.free_run", config={"duration_s": 0.1}),
-        operator=OperatorRef(id="op"),
+        operator=OperatorRef(id="op", display_name="Test Operator"),
         sample=SampleInfo(id="UI-RT"),
     )
 

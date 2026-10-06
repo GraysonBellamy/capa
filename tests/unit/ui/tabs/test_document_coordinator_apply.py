@@ -101,7 +101,7 @@ def test_method_tab_empty_with_method_mode_none_omits_method(qtbot: Any, tmp_pat
     yaml_path.write_text(
         f"hardware: {hw_path.name}\n"
         "procedure:\n  id: capa.builtin.recipe_runner\n  config: {}\n"
-        "operator:\n  id: tester\n"
+        "operator:\n  id: tester\n  display_name: Tester\n"
         "sample:\n  id: ZZ-1\n",
         encoding="utf-8",
         newline="\n",

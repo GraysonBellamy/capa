@@ -9,7 +9,7 @@ description: Field reference for `capa.profiles.capa_pyrolysis` domain profile �
 
 A *domain profile* layers scientific metadata + preflight checks on top of the generic experiment recipe. It does not drive the run — that's the [procedure](../procedures/what-is-a-procedure.md)'s job. The profile contributes:
 
-- **specimen fields** — id, material, mass, form, holder geometry
+- **specimen fields** — id, material, mass, thickness, form, holder geometry and mass
 - **method fields** — heater program (target heat flux + heater setpoint), atmosphere composition, optional secondary gas
 - **gas-sampling fields** — optional, for a rig with a gas analyzer: probe position, sample flow, sample line, transport delay
 - **required channel groups** — heater pair, mass, purge MFC
@@ -53,12 +53,14 @@ The physical sample under test.
 | `id` | — | yes | Operator-assigned specimen id. Mirrored into `sample.id`; Batch runs template it per child. |
 | `material` | — | yes | Free-text material name. The value an analyzer five years from now needs to know "what was this?" |
 | `initial_mass_g` | g | yes | Mass on the load cell before heating begins. Must be > 0. |
-| `thickness_mm` | mm | no | Specimen thickness. Leave unset when it isn't meaningful (powders). |
+| `thickness_mm` | mm | yes | Specimen thickness; for a powder or granulate, the bed depth. Must be > 0. |
 | `form` | `disk` \| `other` | yes | ~99% of CAPA runs use a disk. `other` is the escape hatch for irregular solids, liquids, etc.; describe in `notes`. |
 | `particle_size_um` | µm | no | Median particle size for powder/granulate runs. The Setup tab hides it while `form` is `disk` and drops any value it held. |
 | `specimen_holder` | — | yes | Holder description (e.g. `"stainless steel cup"`). Holder geometry varies by run; depth and diameter change the exposed surface area. |
 | `specimen_holder_diameter_mm` | mm | no | Outside / nominal diameter of the holder cup. |
 | `specimen_holder_depth_mm` | mm | no | Internal cup depth. Together with diameter, captures the cavity geometry that affects exposed surface area. |
+| `specimen_holder_mass_g` | g | no | Mass of the empty specimen holder, without insulation. |
+| `insulation_mass_g` | g | no | Mass of the insulation packed in the holder. Leave unset when the holder has none. |
 | `conditioning` | — | no | Pre-test conditioning (drying, desiccator, storage humidity). |
 | `notes` | — | no | Free text. |
 

@@ -11,11 +11,11 @@ single setpoint hold; dynamic programs (ramps) are the minority.
 
 This profile contributes:
 
-- **specimen fields** — id, material, mass, optional thickness, form (disk
-  for ~99% of runs; ``other`` for rare non-disk shapes), particle size for
-  non-disk runs, specimen-holder description and optional dimensions,
-  conditioning notes. The experiment's ``sample`` block mirrors the
-  identity fields from here.
+- **specimen fields** — id, material, mass, thickness, form (disk for
+  ~99% of runs; ``other`` for rare non-disk shapes), particle size for
+  non-disk runs, specimen-holder description with optional dimensions
+  and holder / insulation masses, conditioning notes. The experiment's
+  ``sample`` block mirrors the identity fields from here.
 - **method fields** — heater program (target heat flux + heater setpoint,
   optional flux-calibration reference, optional ramp rate), atmosphere
   composition + purge flow target, optional secondary-flow for
@@ -91,12 +91,11 @@ class CapaSpecimen(BaseModel):
             "capa_help": "Initial sample mass on the load cell, before heating begins.",
         },
     )
-    thickness_mm: float | None = Field(
-        default=None,
+    thickness_mm: float = Field(
         gt=0,
         json_schema_extra={
             "capa_unit": "mm",
-            "capa_help": "Specimen thickness. Leave unset when it isn't meaningful (powders).",
+            "capa_help": "Specimen thickness; for a powder or granulate, the bed depth.",
         },
     )
     form: SpecimenForm
@@ -131,6 +130,24 @@ class CapaSpecimen(BaseModel):
             "capa_help": (
                 "Internal cup depth. Together with diameter, captures the "
                 "cavity geometry that affects exposed surface area."
+            ),
+        },
+    )
+    specimen_holder_mass_g: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "g",
+            "capa_help": "Mass of the empty specimen holder, without insulation.",
+        },
+    )
+    insulation_mass_g: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "g",
+            "capa_help": (
+                "Mass of the insulation packed in the holder. Leave unset when the holder has none."
             ),
         },
     )

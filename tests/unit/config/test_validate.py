@@ -117,6 +117,20 @@ def test_layer3_capa_metadata_validated_against_model(configs_dir: Path) -> None
     )
 
 
+def test_capa_metadata_checked_when_schema_fails(configs_dir: Path) -> None:
+    """A schema error elsewhere doesn't hide the CAPA metadata problems,
+    so a draft missing both operator and specimen fields lists them all."""
+    doc = ConfigDocument.load(configs_dir / "experiments" / "sim_capa_pyrolysis.yaml")
+    doc.experiment_payload["operator"] = {}
+    del doc.experiment_payload["domain_profile"]["metadata"]["specimen"]["thickness_mm"]
+    paths = {p.path for p in validate(doc) if p.severity == "error"}
+    assert paths == {
+        ("operator", "id"),
+        ("operator", "display_name"),
+        ("domain_profile", "metadata", "specimen", "thickness_mm"),
+    }
+
+
 def test_layer3_preflight_knobs_are_not_model_fields(configs_dir: Path) -> None:
     """``_``-prefixed preflight knobs share the metadata block but are
     not validated against the model."""

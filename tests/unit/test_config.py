@@ -112,7 +112,7 @@ class TestExperimentConfig:
             hardware=_hp_min(),
             method=method,
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            operator=OperatorRef(id="abr"),
+            operator=OperatorRef(id="abr", display_name="Test Operator"),
             sample=SampleInfo(id="S001"),
         )
 
@@ -169,6 +169,18 @@ class TestExperimentConfig:
         assert ec.method is None
 
 
+class TestOperatorRef:
+    def test_requires_display_name(self) -> None:
+        with pytest.raises(ValueError, match="display_name"):
+            OperatorRef.model_validate({"id": "abr"})
+
+    @pytest.mark.parametrize("field", ["id", "display_name"])
+    def test_rejects_empty(self, field: str) -> None:
+        raw = {"id": "abr", "display_name": "A. Researcher", field: ""}
+        with pytest.raises(ValueError, match=field):
+            OperatorRef.model_validate(raw)
+
+
 class TestDeviceConfigRuntimeFields:
     """Device configs include ``resource_id`` and ``on_failure`` for
     :class:`DeviceConfig`. The defaults must keep existing configs
@@ -223,7 +235,7 @@ class TestRuntimeConfig:
         ec = ExperimentConfig(
             hardware=_hp_min(),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            operator=OperatorRef(id="abr"),
+            operator=OperatorRef(id="abr", display_name="Test Operator"),
             sample=SampleInfo(id="S001"),
         )
         assert ec.runtime == RuntimeConfig()
@@ -232,7 +244,7 @@ class TestRuntimeConfig:
         ec = ExperimentConfig(
             hardware=_hp_min(),
             procedure=ProcedureRef(id="capa.builtin.recipe_runner"),
-            operator=OperatorRef(id="abr"),
+            operator=OperatorRef(id="abr", display_name="Test Operator"),
             sample=SampleInfo(id="S001"),
             runtime=RuntimeConfig(shutdown_grace_s=8.0, ui_bridge_capacity=512),
         )

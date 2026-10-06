@@ -244,6 +244,7 @@ def test_round_trip_capa_pyrolysis_metadata(qtbot: Any) -> None:
                 "id": "P-1",
                 "material": "PMMA",
                 "initial_mass_g": 5.0,
+                "thickness_mm": 6.0,
                 "form": "disk",
                 "specimen_holder": "stainless steel cup",
             },

@@ -111,9 +111,11 @@ domain_profile:
       id: PMMA-2026-05-24-A
       material: PMMA
       initial_mass_g: 5.0
+      thickness_mm: 6.0
       form: disk
       specimen_holder: "stainless steel cup"
       conditioning: "23 C / 50% RH for 48h"
+      notes: "third disk from box B"
     program:
       target_heat_flux_kw_m2: 50.0
       heater_setpoint_c: 600.0
@@ -157,8 +159,8 @@ sample:
 
 | Field | Required | Notes |
 |---|:-:|---|
-| `id` | yes | Stable operator id. Carried into every device command's `issued_by`. |
-| `display_name` | no | Friendly name for the UI. |
+| `id` | yes | Stable operator id. Carried into every device command's `issued_by`. Must be non-empty. |
+| `display_name` | yes | The operator's name, as shown in the UI. Must be non-empty. |
 
 `SampleInfo`:
 
