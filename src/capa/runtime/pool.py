@@ -726,6 +726,13 @@ class WorkerPool:
         worker = self.worker_for(device)
         return worker.camera_metadata(device)
 
+    def set_preview_detail(self, device: str, enabled: bool) -> Future[bool]:
+        """Switch one camera's previews to full size or back to thumbnails
+        on the worker that owns it. Resolves to ``False`` when the camera
+        has no detail mode."""
+        worker = self.worker_for(device)
+        return worker.set_preview_detail(device, enabled)
+
     def device_readback(self, device: str) -> Future[Any]:
         """Probe one device's ``read_state_snapshot()`` on the owning worker.
 

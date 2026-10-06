@@ -123,6 +123,38 @@ class TestCameraMetadata:
         assert wrapper.camera_metadata() is None
 
 
+class _DetailWebcam:
+    """Stand-in that records ``set_preview_detail`` calls."""
+
+    spec = _vis_spec()
+    kind = "visible"
+    resource_id = "fake:detail"
+    capabilities: frozenset[CameraCapability] = frozenset()
+
+    def __init__(self) -> None:
+        self.calls: list[bool] = []
+
+    def set_preview_detail(self, enabled: bool) -> None:
+        self.calls.append(enabled)
+
+
+class TestSetPreviewDetail:
+    def test_forwards_to_a_camera_with_a_detail_mode(self) -> None:
+        camera = _DetailWebcam()
+        wrapper = CameraDeviceAdapter(
+            camera=camera,  # type: ignore[arg-type]
+            spec=_vis_spec(),
+            clock_proxy=_ClockProxy(),
+        )
+        assert wrapper.set_preview_detail(True) is True
+        assert wrapper.set_preview_detail(False) is True
+        assert camera.calls == [True, False]
+
+    def test_false_for_a_camera_without_one(self) -> None:
+        wrapper = make_camera_adapter(camera_cls=FlirIrSim, spec=_ir_spec())
+        assert wrapper.set_preview_detail(True) is False
+
+
 class _ReadingWebcam:
     """Stand-in whose ``read_state_snapshot`` returns whatever it's given."""
 

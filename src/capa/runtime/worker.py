@@ -267,6 +267,20 @@ class Worker:
             )
         return self._runner.submit(lambda: self._camera_metadata_impl(adapter_name))
 
+    def set_preview_detail(self, adapter_name: str, enabled: bool) -> Future[bool]:
+        """Switch one camera's previews to full size (pop-out window) or
+        back to thumbnails, on the worker loop.
+
+        Resolves to ``False`` for adapters whose camera has no detail
+        mode (IR cameras, non-camera adapters). No state-gate: previews
+        are UI-only and flow in every worker state.
+        """
+        if adapter_name not in self._adapters:
+            return _failed_future(
+                UnknownDeviceError(adapter_name, configured_names=tuple(self._adapters))
+            )
+        return self._runner.submit(lambda: self._set_preview_detail_impl(adapter_name, enabled))
+
     def device_readback(self, adapter_name: str) -> Future[Any]:
         """Probe an adapter's ``read_state_snapshot()`` on the worker loop.
 
@@ -1019,6 +1033,16 @@ class Worker:
         if not isinstance(result, WebcamMetadata):
             return None
         return result
+
+    async def _set_preview_detail_impl(self, adapter_name: str, enabled: bool) -> bool:
+        """Worker-side preview-detail switch. Adapters without the
+        ``set_preview_detail`` probe (non-camera adapters) return
+        ``False``, as does a camera without a detail mode."""
+        adapter = self._adapters[adapter_name]
+        setter = getattr(adapter, "set_preview_detail", None)
+        if not callable(setter):
+            return False
+        return bool(setter(enabled))
 
     async def _device_readback_impl(self, adapter_name: str) -> Any:
         """Worker-side ``adapter.read_state_snapshot()`` probe.

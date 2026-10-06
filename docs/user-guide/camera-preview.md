@@ -1,11 +1,11 @@
 ---
-description: The capa camera preview tile — live USB webcam and FLIR IR feed independent of recording, with cadence indicators, border-color health, and per-camera controls.
+description: The capa camera preview tile — live USB webcam and FLIR IR feed independent of recording, with cadence indicators, border-color health, a full-size pop-out window for setting focus, and per-camera controls.
 ---
 
 # Camera preview
 
 **Audience:** operators with one or more cameras on the rig (USB webcam, FLIR IR, or both).
-**Scope:** what the live preview tile shows, how it relates to recording, what the cadence indicator and border colors mean, and the per-camera controls.
+**Scope:** what the live preview tile shows, how it relates to recording, what the cadence indicator and border colors mean, the pop-out window, and the per-camera controls.
 
 ---
 
@@ -68,6 +68,43 @@ The visible-webcam path used to trip `pump_warning` at t ≈ 23 s into
 a recipe and silently lose the run; the adapter now drops the bad
 frame, logs the event, and keeps recording — the yellow border
 exists so the operator sees that something was lost.
+
+## Pop-out window
+
+The tile is a 320 px thumbnail, too small to judge focus. Click
+**Pop out** on a tile (or double-click the tile) to open that camera
+in its own window:
+
+- Drag the window to any size, or press **F11** or double-click the
+  image for full screen. **Esc** leaves full screen; pressed again it
+  closes the window.
+- While the window is open the webcam sends **full-size frames** — the
+  camera's own capture resolution, not an enlarged thumbnail — at
+  **10 Hz**, so you can watch focus settle after each Apply on the
+  manual card.
+- The window is for **between runs**. Starting a run closes it, and
+  **Pop out** stays disabled until the run ends. The webcam also
+  ignores the full-size request while recording, so a recording costs
+  exactly what it did before the pop-out existed.
+- The footer gives the frame size in pixels and says
+  `no new frames` if the feed stops, so a frozen image isn't mistaken
+  for a focus change that did nothing.
+- Closing the window puts the camera back on thumbnails.
+
+The window stays in front of the main window, so you can keep the
+webcam's manual card visible beside it: set **Auto focus** off, then
+step **Focus value** and Apply while you watch the window.
+
+FLIR and simulated IR cameras have no full-size mode; their window
+shows the usual preview, scaled up.
+
+!!! note "Check the capture size"
+    The footer shows what the camera actually captures. The webcam
+    adapter opens the camera at its default capture mode; the
+    `width` / `height` in the hardware profile set the size the
+    recording is *encoded* at. If the footer reads `640 × 480 px` on a
+    profile that records 1920 × 1080, the recording is an enlargement
+    of a 640 × 480 image.
 
 ## Cameras without `LIVE_PREVIEW`
 
@@ -138,6 +175,12 @@ command list and the Atlas SDK requirements.
 Preview is capped at 2 Hz (`PREVIEW_INTERVAL_NS = 500_000_000`).
 JPEG width is capped at 320 px (aspect preserved) at quality 70 —
 well under 30 kB even for high-detail frames.
+
+While a [pop-out window](#pop-out-window) is open between runs, the
+webcam sends full-size JPEGs at quality 85 instead, at 10 Hz
+(`PREVIEW_DETAIL_INTERVAL_NS`). Closing the window, or starting a
+run, drops it back to thumbnails; while recording, previews are always
+the 2 Hz thumbnails.
 
 For the webcam adapter, encoding the preview JPEG runs on the same
 worker thread as the H.264 encoder — the dominant cost is the
