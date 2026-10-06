@@ -22,11 +22,15 @@ from typing import Any
 
 import pytest
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QLineEdit
 
 from capa.config import ConfigDocument, SourceLayout
+from capa.ui.forms import ModelForm
 from capa.ui.state import RunUiState
 from capa.ui.tabs.setup import SetupTab
 from capa.ui.tabs.setup_outline import LEAF_SECTIONS
+from capa.ui.tabs.setup_sections.capa_profile import CapaProfileSection
+from capa.ui.tabs.setup_sections.experiment import ExperimentSection
 from capa.ui.tabs.setup_sections.files import FilesSection
 from capa.ui.tabs.setup_sections.overview import OverviewSection
 
@@ -125,6 +129,32 @@ def test_load_path_clears_per_run_fields(qtbot: Any) -> None:
     }
     # Clearing isn't an edit: nothing to save until the operator types.
     assert not tab.draft.is_dirty
+
+
+def test_load_path_marks_the_fields_left_to_fill(qtbot: Any) -> None:
+    """Each field an opened config is missing carries an inline error
+    mark, not just its section's outline glyph, and a mark clears once
+    the operator fills the field in."""
+    tab = SetupTab()
+    qtbot.addWidget(tab)
+    assert tab.load_path(SIM_CAPA_EXP)
+    experiment = tab._sections["experiment"]
+    capa_profile = tab._sections["capa_profile"]
+    assert isinstance(experiment, ExperimentSection)
+    assert isinstance(capa_profile, CapaProfileSection)
+    operator = experiment._form.field_widget("operator")._inner  # type: ignore[union-attr]
+    specimen = capa_profile._pane_forms["specimen"]
+
+    def marked(form: ModelForm) -> set[str]:
+        return {name for name, widget in form._fields.items() if widget.styleSheet()}
+
+    assert marked(operator) == {"id", "display_name"}
+    assert marked(specimen) == {"id", "material", "initial_mass_g", "thickness_mm", "diameter_mm"}
+
+    id_edit = operator._fields["id"].findChild(QLineEdit)
+    assert id_edit is not None
+    id_edit.setText("gb")
+    qtbot.waitUntil(lambda: marked(operator) == {"display_name"})
 
 
 def test_load_config_with_path_keeps_per_run_fields(qtbot: Any) -> None:

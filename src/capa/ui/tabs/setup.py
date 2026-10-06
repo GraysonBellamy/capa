@@ -437,7 +437,7 @@ class SetupTab(QWidget):
         self._clear_apply_outcome()
         self._refresh_all_sections()
         self._refresh_source_label()
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._problems.set_problems(self._draft.problems)
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
@@ -479,7 +479,7 @@ class SetupTab(QWidget):
         self._clear_apply_outcome()
         self._refresh_all_sections()
         self._refresh_source_label()
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._problems.set_problems(self._draft.problems)
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
@@ -493,7 +493,7 @@ class SetupTab(QWidget):
         self._clear_apply_outcome()
         self._refresh_all_sections()
         self._refresh_source_label()
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._problems.set_problems([])
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
@@ -533,7 +533,7 @@ class SetupTab(QWidget):
         self._clear_apply_outcome()
         self._refresh_all_sections()
         self._problems.set_problems(self._draft.problems)
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_source_label()
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
@@ -547,7 +547,7 @@ class SetupTab(QWidget):
         problems = self._draft.validate()
         if any(p.severity == "error" for p in problems):
             self._problems.set_problems(problems)
-            self._refresh_outline_markers()
+            self._refresh_problem_markers()
             QMessageBox.warning(
                 self,
                 "Save refused",
@@ -561,7 +561,7 @@ class SetupTab(QWidget):
             return
         self._draft.clear_dirty()
         self._refresh_source_label()
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self.saved.emit()
         _logger.info(
             "ui.setup.saved",
@@ -576,7 +576,7 @@ class SetupTab(QWidget):
         problems = self._draft.validate()
         if any(p.severity == "error" for p in problems):
             self._problems.set_problems(problems)
-            self._refresh_outline_markers()
+            self._refresh_problem_markers()
             QMessageBox.warning(
                 self,
                 "Save refused",
@@ -596,7 +596,7 @@ class SetupTab(QWidget):
             return
         self._draft.clear_dirty()
         self._refresh_source_label()
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         # Refresh sections — Save As may have flipped inline/external.
         self._refresh_all_sections()
         self.saved.emit()
@@ -608,7 +608,7 @@ class SetupTab(QWidget):
     def _on_validate(self) -> None:
         problems = self._draft.validate()
         self._problems.set_problems(problems)
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         # Pulse Overview if it's the visible section so the validation
         # snapshot updates immediately.
         self._refresh_section("overview")
@@ -700,7 +700,7 @@ class SetupTab(QWidget):
         # Overview reflects counts regardless.
         self._refresh_section(target_section)
         self._refresh_section("overview")
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_source_label()
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
@@ -939,7 +939,7 @@ class SetupTab(QWidget):
         self._draft.mark_dirty("channels")
         self._refresh_section("channels")
         self._refresh_section("overview")
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self._validate_timer.start()
@@ -1017,7 +1017,7 @@ class SetupTab(QWidget):
             self._refresh_section("channels")
         self._refresh_section("devices")
         self._refresh_section("overview")
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
         self._validate_timer.start()
@@ -1083,7 +1083,7 @@ class SetupTab(QWidget):
                 ch["calibration"] = dict(cal)
         self._draft.mark_dirty("channels")
         self._refresh_section("channels")
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_source_label()
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
@@ -1095,7 +1095,7 @@ class SetupTab(QWidget):
         self._draft.mark_dirty("channels")
         self._refresh_section("channels")
         self._refresh_section("calibration")
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_source_label()
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
@@ -1136,7 +1136,7 @@ class SetupTab(QWidget):
             return
         problems = self._draft.validate()
         self._problems.set_problems(problems)
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         if self._draft.has_errors:
             QMessageBox.warning(
                 self,
@@ -1199,7 +1199,7 @@ class SetupTab(QWidget):
         merged.extend(live_problems)
         self._draft.problems = merged
         self._problems.set_problems(merged)
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_apply_enabled()
         self._refresh_connection_strip()
 
@@ -1232,7 +1232,7 @@ class SetupTab(QWidget):
 
         problems = self._draft.validate()
         self._problems.set_problems(problems)
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         if self._draft.has_errors:
             QMessageBox.warning(
                 self,
@@ -1293,7 +1293,7 @@ class SetupTab(QWidget):
         # operator is moving on and the strip's red failure detail or
         # green connected detail becomes stale.
         self._clear_apply_outcome()
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_source_label()
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
@@ -1349,7 +1349,7 @@ class SetupTab(QWidget):
         """
         self._draft.validate()
         self._problems.set_problems(self._draft.problems)
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_section("overview")
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
@@ -1542,7 +1542,7 @@ class SetupTab(QWidget):
         self._clear_apply_outcome()
         self._refresh_all_sections()
         self._refresh_source_label()
-        self._refresh_outline_markers()
+        self._refresh_problem_markers()
         self._refresh_connection_strip()
         self._refresh_apply_enabled()
 
@@ -1756,11 +1756,14 @@ class SetupTab(QWidget):
         if widget is not None:
             widget.refresh()
 
-    def _refresh_outline_markers(self) -> None:
+    def _refresh_problem_markers(self) -> None:
+        """Repaint the outline glyphs and the sections' field marks."""
         self._outline.set_markers(
             dirty_sections=set(self._draft.dirty_sections),
             problems=self._draft.problems,
         )
+        for section in self._sections.values():
+            section.show_problems(self._draft.problems)
 
     def _refresh_source_label(self) -> None:
         doc = self._draft.document

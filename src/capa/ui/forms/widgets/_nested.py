@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import types
 import typing
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, get_args, get_origin
 
 from pydantic import BaseModel
@@ -69,6 +70,14 @@ class _NestedModelField(FieldWidget):
         name reset to their defaults rather than keeping whatever the
         previous value left behind."""
         self._inner.set_values(v if v is not None else {}, replace=True)
+
+    def show_errors(self, errors: Mapping[tuple[str | int, ...], str]) -> None:
+        """Mark the sub-fields the errors name, not the whole block.
+
+        An error on the block itself (``()``, e.g. the block is absent)
+        names no sub-field, so it has nothing to mark.
+        """
+        self._inner.show_errors({path: msg for path, msg in errors.items() if path})
 
 
 def _is_discriminated_union(annotation: Any, field: FieldInfo | None = None) -> bool:

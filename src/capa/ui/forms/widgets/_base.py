@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Signal
@@ -39,6 +39,16 @@ class FieldWidget(QWidget):
         else:
             self.setStyleSheet("")
             self.setToolTip(self._description or "")
+
+    def show_errors(self, errors: Mapping[tuple[str | int, ...], str]) -> None:
+        """Paint the errors addressed to this field, or clear them if none.
+
+        Paths are relative to this field: ``()`` is the field itself,
+        anything longer points inside it (a tuple row, a nested model's
+        sub-field). A widget without sub-fields of its own shows every
+        message on itself; :class:`_NestedModelField` routes them down.
+        """
+        self.set_error("\n".join(errors.values()) or None)
 
     def set_channel_options(self, options: Sequence[ChannelOption]) -> None:
         """Offer ``options`` to a field that names channels; no-op elsewhere."""

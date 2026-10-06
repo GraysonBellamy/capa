@@ -8,7 +8,9 @@ Storage, Safety) is a ``QWidget`` that:
 * exposes ``set_draft(draft)`` so the section reads the current payload
   off :class:`SetupDraft.document`;
 * exposes ``refresh()`` so the Setup tab can re-render after a save or
-  an external change.
+  an external change;
+* exposes ``show_problems(problems)`` so the Setup tab can mark the
+  fields the latest validation pass flagged.
 
 Sections that don't accept edits (Overview) wire ``valuesChanged`` but
 never emit it. Sections that do (Experiment, Files) emit on every form
@@ -18,12 +20,14 @@ change; the Setup tab applies the slice via
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget
 
 if TYPE_CHECKING:
+    from capa.config.problems import ConfigProblem
     from capa.ui.tabs.setup_state import SetupDraft
 
 
@@ -67,5 +71,36 @@ class SectionWidget(QWidget):
         """
         return None
 
+    def show_problems(self, problems: Sequence[ConfigProblem]) -> None:
+        """Mark the fields ``problems`` point at, clearing the rest.
 
-__all__ = ["SectionWidget"]
+        Called with the draft's full problem list after every
+        validation pass, so a field's mark clears as soon as its value
+        is fixed. The default is a no-op: only sections built on
+        :class:`~capa.ui.forms.ModelForm` mark individual fields; the
+        rest rely on the outline glyph and the Problems panel.
+        """
+
+
+def field_errors(
+    problems: Sequence[ConfigProblem],
+    section: str,
+    prefix: tuple[str | int, ...] = (),
+) -> dict[tuple[str | int, ...], str]:
+    """Error messages for ``section`` keyed by path, ``prefix`` removed.
+
+    Feeds :meth:`ModelForm.show_errors`: ``prefix`` is the address of
+    the form's model inside the section's problem paths, e.g.
+    ``("domain_profile", "metadata", "specimen")`` for the specimen
+    pane. Warnings are left out, and so are paths outside ``prefix``.
+    """
+    return {
+        problem.path[len(prefix) :]: problem.message
+        for problem in problems
+        if problem.severity == "error"
+        and problem.section == section
+        and problem.path[: len(prefix)] == prefix
+    }
+
+
+__all__ = ["SectionWidget", "field_errors"]

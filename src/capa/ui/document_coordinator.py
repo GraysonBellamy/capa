@@ -303,7 +303,7 @@ class DocumentCoordinator(QObject):
 
     def _mark_setup_dirty(self, section_id: str) -> None:
         self._setup_tab.draft.mark_dirty(section_id)
-        self._setup_tab._refresh_outline_markers()
+        self._setup_tab._refresh_problem_markers()
         self._setup_tab._refresh_source_label()
 
 

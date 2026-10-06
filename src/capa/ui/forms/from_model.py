@@ -10,7 +10,13 @@ resulting :class:`ModelForm` is a thin :class:`QWidget` that exposes:
 * :meth:`~ModelForm.set_values` — populate from a dict or a
   ``BaseModel`` instance;
 * :meth:`~ModelForm.validate` — run validation, paint inline errors,
-  return the list of :class:`pydantic.ValidationError.errors()` dicts.
+  return the list of :class:`pydantic.ValidationError.errors()` dicts;
+* :meth:`~ModelForm.show_errors` — paint errors found elsewhere (the
+  Setup tab's validation pipeline), addressed by field path.
+
+A required field (no default) gets a red ``*`` after its label, so the
+operator can tell which fields need a value before anything is
+validated.
 
 The form does *not* round-trip a fully-typed ``BaseModel`` instance via
 ``values()`` — it returns the dict shape, leaving validation /
@@ -31,8 +37,8 @@ into a named, collapsible group via ``Field(json_schema_extra={...})``:
 * ``"capa_group_subtitle": "..."`` — muted header hint rendered next to
   the group title. Like ``capa_group_open``, last declaration wins.
 
-Validation errors inside a collapsed group auto-open that group via
-:meth:`~ModelForm.set_error_on_field` so errors are never hidden.
+Validation errors inside a collapsed group auto-open that group so
+errors are never hidden.
 
 Conditional rows: ``"capa_hidden_when": {"<sibling field>": <value>}``
 hides the field's row while any listed sibling holds its value (e.g.
@@ -43,7 +49,7 @@ left out of :meth:`~ModelForm.values`, so it must have a default.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -105,18 +111,20 @@ def _build_field_label(
     """Compose the label cell for a form row.
 
     For plain fields, returns the same ``QLabel`` the form has always
-    used. For fields that declare ``capa_unit`` or ``capa_help``, wraps
-    the label in a small ``QWidget`` so the unit appears appended to the
-    text (``Heater setpoint [°C]``) and a ``(?)`` button sits next to
-    it. The ``capa_help`` text also lands in the label's tooltip so
-    hovering anywhere on the row shows it.
+    used. For fields that declare ``capa_unit`` or ``capa_help``, or are
+    required, wraps the label in a small ``QWidget`` so the unit appears
+    appended to the text (``Heater setpoint [°C]``), a red ``*`` marks a
+    required field, and a ``(?)`` button sits next to it. The
+    ``capa_help`` text also lands in the label's tooltip so hovering
+    anywhere on the row shows it.
     """
     base_text = _label_for(field_name, info)
     unit = _unit_from_field(info)
     help_text = _help_from_field(info) or info.description or ""
     annotated_text = f"{base_text} [{unit}]" if unit else base_text
+    required = info.is_required()
 
-    if not help_text and unit is None:
+    if not help_text and unit is None and not required:
         label = QLabel(annotated_text, parent)
         if info.description:
             label.setToolTip(info.description)
@@ -130,6 +138,13 @@ def _build_field_label(
     if help_text:
         label.setToolTip(help_text)
     layout.addWidget(label)
+    if required:
+        mark = QLabel("*", host)
+        mark.setObjectName("required_mark")
+        # Red only while enabled, so a read-only row greys out whole.
+        mark.setStyleSheet("QLabel { font-weight: 600; } QLabel:enabled { color: #d33; }")
+        mark.setToolTip("Required")
+        layout.addWidget(mark)
     if help_text:
         layout.addWidget(_HelpButton(help_text, host))
     layout.addStretch(1)
@@ -195,7 +210,7 @@ class ModelForm(QWidget):
         self._model_cls = model_cls
         self._fields: dict[str, FieldWidget] = {}
         # Map field-name → CollapsibleGroup hosting it. Ungrouped fields
-        # are absent. Used by :meth:`set_error_on_field` to auto-open
+        # are absent. Used by :meth:`show_errors` to auto-open
         # the right disclosure on validation failure so the operator
         # never has to hunt for a hidden error.
         self._field_group: dict[str, CollapsibleGroup] = {}
@@ -312,41 +327,35 @@ class ModelForm(QWidget):
         """Validate current state. Returns the Pydantic
         ``e.errors()`` list (empty if validation passed) and paints
         inline error indicators on the offending widgets."""
-        # Clear previous errors first so passing fields drop their style.
-        for name, widget in self._fields.items():
-            widget.set_error(None)
-            # Don't touch group open-state on the clear pass — collapsing
-            # a group the operator opened to fix an error would be
-            # disorienting. Open-state is sticky within a session and
-            # only the validation-failure path forces a transition.
-            _ = name
         try:
             self._model_cls.model_validate(self.values())
         except ValidationError as exc:
-            errors = exc.errors()
-            for err in errors:
-                loc = err.get("loc", ())
-                if loc and isinstance(loc[0], str):
-                    self.set_error_on_field(str(loc[0]), str(err.get("msg", "invalid")))
-            return [dict(err) for err in errors]
-        return []
+            details = exc.errors()
+        else:
+            details = []
+        self.show_errors({err["loc"]: err["msg"] for err in details})
+        return [dict(err) for err in details]
 
-    def set_error_on_field(self, field_name: str, message: str | None) -> None:
-        """Paint an error on one field and force-open any host group.
+    def show_errors(self, errors: Mapping[tuple[str | int, ...], str]) -> None:
+        """Paint ``errors`` inline and clear every field they don't name.
 
-        Used by :meth:`validate` and by the Setup tab's Problems panel
-        click-through — a problem whose ``ConfigProblem.path`` resolves
-        to a single field name lands here, and the disclosure opens
-        automatically. Passing ``None`` clears the error but does not
-        close the group.
+        Keys are field paths from this form's model, shaped like a
+        Pydantic error ``loc``: the first element names a field, the
+        rest points inside it, so ``("operator", "id")`` marks the
+        operator's id rather than the whole operator block. Paths that
+        name no field here are ignored. A collapsed group holding an
+        error opens; clearing never closes one, since collapsing a group
+        the operator opened to fix an error would be disorienting.
         """
-        target = self._fields.get(field_name)
-        if target is None:
-            return
-        target.set_error(message)
-        if message:
-            host = self._field_group.get(field_name)
-            if host is not None:
+        by_field: dict[str, dict[tuple[str | int, ...], str]] = {}
+        for path, message in errors.items():
+            if path and isinstance(path[0], str):
+                by_field.setdefault(path[0], {})[path[1:]] = message
+        for name, widget in self._fields.items():
+            field_errors = by_field.get(name, {})
+            widget.show_errors(field_errors)
+            host = self._field_group.get(name)
+            if field_errors and host is not None:
                 host.set_open(True)
 
     def group_for_field(self, field_name: str) -> CollapsibleGroup | None:
