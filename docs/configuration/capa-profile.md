@@ -55,7 +55,7 @@ The physical sample under test.
 | `initial_mass_g` | g | yes | Mass on the load cell before heating begins. Must be > 0. |
 | `thickness_mm` | mm | no | Specimen thickness. Leave unset when it isn't meaningful (powders). |
 | `form` | `disk` \| `other` | yes | ~99% of CAPA runs use a disk. `other` is the escape hatch for irregular solids, liquids, etc.; describe in `notes`. |
-| `particle_size_um` | µm | no | Median particle size for powder/granulate runs. Leave unset for the typical solid disk. |
+| `particle_size_um` | µm | no | Median particle size for powder/granulate runs. The Setup tab hides it while `form` is `disk` and drops any value it held. |
 | `specimen_holder` | — | yes | Holder description (e.g. `"stainless steel cup"`). Holder geometry varies by run; depth and diameter change the exposed surface area. |
 | `specimen_holder_diameter_mm` | mm | no | Outside / nominal diameter of the holder cup. |
 | `specimen_holder_depth_mm` | mm | no | Internal cup depth. Together with diameter, captures the cavity geometry that affects exposed surface area. |

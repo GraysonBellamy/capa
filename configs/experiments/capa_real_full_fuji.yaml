@@ -37,6 +37,10 @@ device_settings:
     gas: Air
   balance:
     filter_mode: very stable
+  analyzer:
+    co2_response_time_s: 0
+    co_response_time_s: 0
+    o2_response_time_s: 0
   ir_cam0:
     temperature_range:
       min_c: 0.0

@@ -457,6 +457,37 @@ def test_grouped_form_capa_group_open_respected(qtbot: Any) -> None:
     assert form.group_for_field("two") is rules
 
 
+class _HiddenWhenDemo(BaseModel):
+    shape: Literal["disk", "other"] = "disk"
+    grain_um: float | None = Field(
+        default=None, gt=0, json_schema_extra={"capa_hidden_when": {"shape": "disk"}}
+    )
+
+
+def test_hidden_when_row_follows_sibling_value(qtbot: Any) -> None:
+    """A ``capa_hidden_when`` row hides while the sibling holds the value,
+    reappears when it changes, and is left out of ``values()`` while hidden."""
+    form = build_form(_HiddenWhenDemo)
+    qtbot.addWidget(form)
+    grain = form._fields["grain_um"]
+    assert grain.isHidden()
+    assert form._labels["grain_um"].isHidden()
+    assert "grain_um" not in form.values()
+
+    combo = form._fields["shape"].findChild(QComboBox)
+    assert combo is not None
+    combo.setCurrentIndex(combo.findData("other"))
+    assert not grain.isHidden()
+    assert not form._labels["grain_um"].isHidden()
+    grain.set_value(150.0)
+    assert form.values()["grain_um"] == pytest.approx(150.0)
+
+    # set_values blocks widget signals; the row must still follow.
+    form.set_values({"shape": "disk"})
+    assert grain.isHidden()
+    assert "grain_um" not in form.values()
+
+
 def test_grouped_form_preserves_field_order_across_groups(qtbot: Any) -> None:
     """Primary fields render first regardless of where they appear in
     declaration order, then groups appear in first-mention order."""

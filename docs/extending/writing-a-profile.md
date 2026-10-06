@@ -81,6 +81,7 @@ A few conventions that pay off:
 - **Always freeze sub-models.** Metadata is captured at run-arm and snapshotted into the bundle. Mutation after that would invalidate the snapshot; freezing makes it a type error.
 - **Forbid extras at every level.** Operators mistype field names. `extra="forbid"` catches it at validation rather than at "I cannot find this field three months later."
 - **Use `json_schema_extra` for unit hints.** `Field(gt=0, json_schema_extra={"capa_unit": "kW/m²", "capa_help": "..."})` — the UI reads these.
+- **Use `capa_hidden_when` for fields that only apply to some choices.** `json_schema_extra={"capa_hidden_when": {"form": "disk"}}` hides the row while the sibling `form` field is `"disk"`, and the form leaves the field out of what it saves, so give it a default.
 - **Use `Literal[...]` for closed sets.** "atmosphere.mode" should be `Literal["inert", "oxidative", "reducing", "reactive_blend"]`, not `str`. The UI then renders a dropdown.
 
 The shipped CAPA profile's [specimen / method / atmosphere sub-models](https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/profiles/capa_pyrolysis.py) are the clearest reference for unit hints and dropdown patterns.
