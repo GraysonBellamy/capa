@@ -12,8 +12,8 @@ single setpoint hold; dynamic programs (ramps) are the minority.
 This profile contributes:
 
 - **specimen fields** — id, material, mass, optional thickness, form (disk
-  for ~99% of runs; ``other`` for rare non-disk shapes), particle size when
-  relevant, specimen-holder description and optional dimensions,
+  for ~99% of runs; ``other`` for rare non-disk shapes), particle size for
+  non-disk runs, specimen-holder description and optional dimensions,
   conditioning notes. The experiment's ``sample`` block mirrors the
   identity fields from here.
 - **method fields** — heater program (target heat flux + heater setpoint,
@@ -105,10 +105,8 @@ class CapaSpecimen(BaseModel):
         gt=0,
         json_schema_extra={
             "capa_unit": "µm",
-            "capa_help": (
-                "Median particle size for powder / granulate runs. Leave unset "
-                "for the typical solid disk."
-            ),
+            "capa_help": "Median particle size for powder / granulate runs.",
+            "capa_hidden_when": {"form": "disk"},
         },
     )
 

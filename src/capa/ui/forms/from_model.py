@@ -33,6 +33,11 @@ into a named, collapsible group via ``Field(json_schema_extra={...})``:
 
 Validation errors inside a collapsed group auto-open that group via
 :meth:`~ModelForm.set_error_on_field` so errors are never hidden.
+
+Conditional rows: ``"capa_hidden_when": {"<sibling field>": <value>}``
+hides the field's row while any listed sibling holds its value (e.g.
+particle size while the specimen form is ``"disk"``). A hidden field is
+left out of :meth:`~ModelForm.values`, so it must have a default.
 """
 
 from __future__ import annotations
@@ -150,6 +155,15 @@ def _group_metadata(info: FieldInfo) -> tuple[str, bool | None, str | None]:
     return group, default_open, subtitle
 
 
+def _hidden_when(info: FieldInfo) -> dict[str, Any]:
+    """Read the ``capa_hidden_when`` ``{sibling: value}`` map off one field."""
+    extra = getattr(info, "json_schema_extra", None)
+    if not isinstance(extra, dict):
+        return {}
+    raw = extra.get("capa_hidden_when")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
 def _group_title(group_name: str) -> str:
     """Render an internal group key as the on-screen header title.
 
@@ -185,6 +199,11 @@ class ModelForm(QWidget):
         # the right disclosure on validation failure so the operator
         # never has to hunt for a hidden error.
         self._field_group: dict[str, CollapsibleGroup] = {}
+        # Label cell per field, and the ``capa_hidden_when`` conditions
+        # of the fields that declare one — together they let
+        # :meth:`_refresh_conditional_rows` hide a whole row.
+        self._labels: dict[str, QWidget] = {}
+        self._hidden_when: dict[str, dict[str, Any]] = {}
         # Per-form hidden field set, ORed with the global defaults.
         # The discriminated-union widget uses this to hide its
         # discriminator field (``"source"`` for SourceBinding, ``"kind"``
@@ -239,6 +258,7 @@ class ModelForm(QWidget):
             for name, info in members:
                 self._add_field(None, group_widget, name, info)
 
+        self.valuesChanged.connect(self._refresh_conditional_rows)
         self.set_values(self._defaults_dict())
 
     # ------------------------------------------------------------------ API
@@ -251,9 +271,12 @@ class ModelForm(QWidget):
         ``model_cls.model_validate(...)`` cleanly. A required field whose
         widget is still unset (a numeric field with no value yet) is
         left out, so validation reports it as missing rather than
-        accepting a placeholder."""
+        accepting a placeholder. So is a row ``capa_hidden_when`` has
+        hidden, so a value it no longer applies to isn't saved."""
         out: dict[str, Any] = {}
         for name, widget in self._fields.items():
+            if self._is_conditionally_hidden(name):
+                continue
             value = widget.value()
             if value is None and self._model_cls.model_fields[name].is_required():
                 continue
@@ -281,6 +304,9 @@ class ModelForm(QWidget):
                 widget.set_value(data[name])
             elif replace:
                 widget.set_value(defaults.get(name))
+        # ``set_value`` blocks the widgets' signals, so re-evaluate the
+        # conditional rows by hand.
+        self._refresh_conditional_rows()
 
     def validate(self) -> list[dict[str, Any]]:
         """Validate current state. Returns the Pydantic
@@ -368,6 +394,24 @@ class ModelForm(QWidget):
             self._field_group[name] = group_widget
         widget.valueChanged.connect(self.valuesChanged)
         self._fields[name] = widget
+        self._labels[name] = label_widget
+        if hidden_when := _hidden_when(info):
+            self._hidden_when[name] = hidden_when
+
+    def _is_conditionally_hidden(self, name: str) -> bool:
+        """``True`` while a ``capa_hidden_when`` condition on ``name`` holds."""
+        for sibling, value in self._hidden_when.get(name, {}).items():
+            widget = self._fields.get(sibling)
+            if widget is not None and widget.value() == value:
+                return True
+        return False
+
+    def _refresh_conditional_rows(self) -> None:
+        """Show or hide each ``capa_hidden_when`` row from its siblings."""
+        for name in self._hidden_when:
+            visible = not self._is_conditionally_hidden(name)
+            self._labels[name].setVisible(visible)
+            self._fields[name].setVisible(visible)
 
     def _defaults_dict(self) -> dict[str, Any]:
         """Pydantic ``Field(default=...)`` values, expanded into a dict

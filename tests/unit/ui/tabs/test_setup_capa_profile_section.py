@@ -154,6 +154,24 @@ def test_capa_profile_specimen_edit_rewrites_sample(qtbot: Any) -> None:
     }
 
 
+def test_capa_profile_particle_size_only_for_non_disk(qtbot: Any) -> None:
+    """Particle size is hidden for a disk specimen and not saved."""
+    section, _ = _make_section(qtbot)
+    form = section._pane_forms["specimen"]
+    particle = form.field_widget("particle_size_um")
+    assert particle is not None
+    assert particle.isHidden()
+
+    form.set_values({"form": "other", "particle_size_um": 200.0})
+    assert not particle.isHidden()
+    payload = section.payload()
+    assert _metadata(payload)["specimen"]["particle_size_um"] == pytest.approx(200.0)
+
+    form.set_values({"form": "disk"})
+    assert particle.isHidden()
+    assert "particle_size_um" not in _metadata(section.payload())["specimen"]
+
+
 def test_capa_profile_unset_required_number_is_omitted(qtbot: Any) -> None:
     """A required number with no value stays out of the payload, so
     validation reports it missing instead of accepting a placeholder."""
