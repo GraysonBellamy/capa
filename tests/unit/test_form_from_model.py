@@ -11,12 +11,12 @@ from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QLineEdit, QSpinBox
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QLabel, QLineEdit, QSpinBox
 
 from capa.experiment.profiles.capa_pyrolysis import CapaPyrolysisMetadata
 from capa.ui.forms import build_form
 from capa.ui.forms.widgets import CollapsibleGroup
-from capa.ui.forms.widgets._helpers import _decimals_for_field, _label_for
+from capa.ui.forms.widgets._helpers import _ERROR_STYLE, _decimals_for_field, _label_for
 
 
 class _Demo(BaseModel):
@@ -227,6 +227,54 @@ def test_validate_surfaces_error_on_offending_widget(qtbot: Any) -> None:
     assert errors, "expected at least one validation error"
     # The offending widget got its error styled.
     assert "Less than" in (cap_widget.toolTip() or "") or cap_widget.toolTip()
+
+
+class _Operator(BaseModel):
+    id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+
+
+class _Run(BaseModel):
+    operator: _Operator
+    notes: str = ""
+
+
+def test_required_fields_carry_a_marker(qtbot: Any) -> None:
+    """A field with no default gets a ``*`` after its label; one with a
+    default doesn't."""
+    form = build_form(_Run)
+    qtbot.addWidget(form)
+    assert form._labels["operator"].findChild(QLabel, "required_mark") is not None
+    assert form._labels["notes"].findChild(QLabel, "required_mark") is None
+    inner = form._fields["operator"]._inner  # type: ignore[attr-defined]
+    assert inner._labels["id"].findChild(QLabel, "required_mark") is not None
+
+
+def test_show_errors_marks_the_nested_sub_field(qtbot: Any) -> None:
+    """A path into a nested model marks the sub-field it names, not the
+    whole block, and an empty map clears the mark."""
+    form = build_form(_Run)
+    qtbot.addWidget(form)
+    operator = form._fields["operator"]
+    inner = operator._inner  # type: ignore[attr-defined]
+    form.show_errors({("operator", "id"): "Field required"})
+    assert inner._fields["id"].styleSheet() == _ERROR_STYLE
+    assert inner._fields["id"].toolTip() == "Field required"
+    assert inner._fields["display_name"].styleSheet() == ""
+    assert operator.styleSheet() == ""
+    form.show_errors({})
+    assert inner._fields["id"].styleSheet() == ""
+
+
+def test_validate_marks_nested_sub_fields(qtbot: Any) -> None:
+    form = build_form(_Run)
+    qtbot.addWidget(form)
+    inner = form._fields["operator"]._inner  # type: ignore[attr-defined]
+    form.set_values({"operator": {"id": "gb", "display_name": ""}})
+    errors = form.validate()
+    assert [err["loc"] for err in errors] == [("operator", "display_name")]
+    assert inner._fields["display_name"].styleSheet() == _ERROR_STYLE
+    assert inner._fields["id"].styleSheet() == ""
 
 
 def test_round_trip_capa_pyrolysis_metadata(qtbot: Any) -> None:

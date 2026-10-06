@@ -12,6 +12,7 @@ sample fields here are read-only and left out of the payload.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,9 +22,10 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 from capa.config.capa_profile import is_capa_profile
 from capa.experiment.config import OperatorRef, SampleInfo
 from capa.ui.forms import build_form
-from capa.ui.tabs.setup_sections._base import SectionWidget
+from capa.ui.tabs.setup_sections._base import SectionWidget, field_errors
 
 if TYPE_CHECKING:
+    from capa.config.problems import ConfigProblem
     from capa.ui.tabs.setup_state import SetupDraft
 
 
@@ -137,6 +139,10 @@ class ExperimentSection(SectionWidget):
         if self._sample_from_profile:
             owned = tuple(key for key in owned if key != "sample")
         return {key: value for key, value in self._form.values().items() if key in owned}
+
+    def show_problems(self, problems: Sequence[ConfigProblem]) -> None:
+        """Mark the operator / sample / tag fields with errors."""
+        self._form.show_errors(field_errors(problems, "experiment"))
 
     # -- slots --------------------------------------------------------------
 

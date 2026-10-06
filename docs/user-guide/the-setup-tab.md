@@ -204,6 +204,12 @@ The centre pane shows the form for whichever outline row is selected.
 Every section is scroll-wrapped so tall panes (CAPA Profile, Channels)
 never spill off-screen on a 1080p display.
 
+In the CAPA Profile and Operator & sample forms, a red `*` after a label
+marks a required field. A field with an error has a red border, and its
+tooltip gives the problem. The border clears as soon as the value is
+valid, so the red fields are the ones still left to enter. The other
+sections show errors through the outline marker and the Problems panel.
+
 ### Overview
 
 Read-only glance — what's loaded, what's dirty, what to do next. The
@@ -228,7 +234,8 @@ also rewrites the experiment's `sample` block (id, material, mass,
 thickness, notes), which names the run id and the catalog entry.
 
 Required numbers with no value yet show `—`; they and any other
-missing or invalid field appear in the Problems panel. For an experiment
+missing or invalid field get a red border and appear in the Problems
+panel. For an experiment
 without a domain profile the section offers **Add CAPA profile**, which
 starts the specimen from the current sample.
 
@@ -411,8 +418,8 @@ is also offered when you Save As an external config to a new path.
 template, file layout and method. The draft takes the template's devices,
 channels, procedure and rig-level profile fields (specimen form, holder,
 heater program, atmosphere). As with any opened config, the operator and
-the specimen's per-run fields start empty; the Problems panel lists the
-required ones. Fill them in, then **Apply & Connect**.
+the specimen's per-run fields start empty; they have red borders, and the
+Problems panel lists them. Fill them in, then **Apply & Connect**.
 
 ![Setup wizard "Starting point" step with five templates: CAPA pyrolysis (real / simulated), Free run (real / simulated), Blank.](../_snippets/images/setup-wizard.png)
 

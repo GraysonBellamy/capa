@@ -26,7 +26,7 @@ on a different profile are left alone.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -74,9 +74,10 @@ from capa.experiment.profiles.capa_pyrolysis import (
 )
 from capa.runtime.emissions import ProcedureTick
 from capa.ui.forms import build_form
-from capa.ui.tabs.setup_sections._base import SectionWidget
+from capa.ui.tabs.setup_sections._base import SectionWidget, field_errors
 
 if TYPE_CHECKING:
+    from capa.config.problems import ConfigProblem
     from capa.ui.forms.from_model import ModelForm
     from capa.ui.state import RunController
     from capa.ui.tabs.setup_state import SetupDraft
@@ -365,6 +366,17 @@ class CapaProfileSection(SectionWidget):
             ),
             "channels": self._compose_channels_with_mappings(),
         }
+
+    def show_problems(self, problems: Sequence[ConfigProblem]) -> None:
+        """Mark the metadata fields with errors, pane by pane.
+
+        A missing channel mapping has no field to mark; its row's ✗
+        chip shows it.
+        """
+        metadata = ("domain_profile", "metadata")
+        for key, form in self._pane_forms.items():
+            form.show_errors(field_errors(problems, "capa_profile", (*metadata, key)))
+        self._record_form.show_errors(field_errors(problems, "capa_profile", metadata))
 
     # -- slots: profile on/off ----------------------------------------------
 
