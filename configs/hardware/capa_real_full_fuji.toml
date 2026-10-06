@@ -110,7 +110,7 @@ adapter = "capa.devices.fuji"
 [devices.params]
 port = "COM8"
 address = 1
-rate_hz = 1.0
+rate_hz = 5.0
 auto_reconnect = true
 snapshot_period_s = 30.0
 
