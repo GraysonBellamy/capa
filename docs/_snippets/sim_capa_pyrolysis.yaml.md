@@ -18,6 +18,7 @@ domain_profile:
       material: PMMA
       initial_mass_g: 5.0
       thickness_mm: 6.0
+      diameter_mm: 70.0
       form: disk
       specimen_holder: "stainless steel cup"
       conditioning: "23C / 50% RH for 48h"

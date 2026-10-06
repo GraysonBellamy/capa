@@ -15,13 +15,10 @@ domain_profile:
   id: capa.profiles.capa_pyrolysis
   metadata:
     specimen:
-      id: REAL-B-001
-      material: PMMA
-      initial_mass_g: 5.0
-      thickness_mm: 6.0
+      # id, material, masses, dimensions and conditioning are entered for
+      # each run in the Setup tab, along with the operator.
       form: disk
       specimen_holder: "stainless steel cup"
-      conditioning: "23C / 50% RH for 48h"
     program:
       target_heat_flux_kw_m2: 50.0
       heater_setpoint_c: 600.0
@@ -31,16 +28,6 @@ domain_profile:
         species: N2
         purity: "UHP 5.0"
         target_flow_slpm: 100.0
-
-operator:
-  id: abr
-  display_name: A. Researcher
-
-sample:
-  id: REAL-B-001
-  material: PMMA
-  mass_g: 5.0
-  thickness_mm: 6.0
 
 tags:
   - real

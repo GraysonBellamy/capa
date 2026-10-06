@@ -89,7 +89,7 @@ def _make_progress(
 
 def test_apply_emits_request_and_shows_applying_banner(qtbot: Any) -> None:
     setup, _method, _coord, _controller = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     # The fixture loads with unapplied=False — mark it unapplied so
     # the Apply gate is satisfied (operator just edited something).
     setup._draft.unapplied = True
@@ -112,7 +112,7 @@ def test_apply_emits_request_and_shows_applying_banner(qtbot: Any) -> None:
 
 def test_apply_succeeded_flips_banner_and_clears_unapplied(qtbot: Any) -> None:
     setup, _method, _coord, controller = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     setup._draft.unapplied = True
     setup._refresh_apply_enabled()
     setup._on_apply_to_rig()
@@ -128,7 +128,7 @@ def test_apply_succeeded_flips_banner_and_clears_unapplied(qtbot: Any) -> None:
 
 def test_apply_failed_flips_banner_and_preserves_unapplied(qtbot: Any) -> None:
     setup, _method, _coord, controller = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     setup._draft.unapplied = True
     setup._refresh_apply_enabled()
     setup._on_apply_to_rig()
@@ -154,7 +154,7 @@ def test_apply_failed_flips_banner_and_preserves_unapplied(qtbot: Any) -> None:
 
 def test_apply_refused_during_active_run(qtbot: Any) -> None:
     setup, _method, _coord, controller = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     setup._draft.unapplied = True
     setup._refresh_apply_enabled()
 
@@ -174,7 +174,7 @@ def test_apply_refused_during_active_run(qtbot: Any) -> None:
 
 def test_apply_refused_when_draft_has_errors(qtbot: Any) -> None:
     setup, _method, _coord, _controller = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     # Break the schema — drop the required hardware ``name``.
     setup._draft.document.hardware_payload.pop("name", None)
     setup._draft.validate()
@@ -197,7 +197,7 @@ def test_apply_refused_when_draft_has_errors(qtbot: Any) -> None:
 
 def test_apply_ok_banner_clears_on_next_edit(qtbot: Any) -> None:
     setup, _method, _coord, controller = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     setup._draft.unapplied = True
     setup._on_apply_to_rig()
     controller.config_load_finished.emit(_make_progress(ConfigLoadState.READY))
@@ -220,7 +220,7 @@ def test_apply_ok_banner_clears_on_next_edit(qtbot: Any) -> None:
 def test_frozen_banner_trumps_applying(qtbot: Any) -> None:
     """If a run starts during an apply, the frozen banner wins."""
     setup, _method, _coord, controller = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     setup._draft.unapplied = True
     setup._on_apply_to_rig()
     assert setup._connection_strip.state is ConnectionState.CONNECTING
@@ -230,7 +230,7 @@ def test_frozen_banner_trumps_applying(qtbot: Any) -> None:
 
 def test_apply_enabled_only_when_unapplied_and_no_errors(qtbot: Any) -> None:
     setup, _method, _coord, _controller = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     # Loaded but not edited: unapplied is False (load resets it).
     assert not setup._draft.unapplied
     assert not setup._action_apply.isEnabled()
@@ -281,7 +281,7 @@ def test_new_action_disabled_during_active_run(qtbot: Any) -> None:
     toolbar action greys out.
     """
     setup, _method, _coord, controller = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     controller.is_active = True
     controller.state = RunUiState.RUNNING
     controller.state_changed.emit(RunUiState.RUNNING)
@@ -306,7 +306,7 @@ def test_apply_falls_back_when_coordinator_not_set(qtbot: Any) -> None:
     controller = _ControllerStub()
     setup = SetupTab(controller=controller)  # type: ignore[arg-type]
     qtbot.addWidget(setup)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
     setup._draft.unapplied = True
     setup._refresh_apply_enabled()
 

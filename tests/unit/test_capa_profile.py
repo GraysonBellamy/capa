@@ -17,6 +17,7 @@ def _good_metadata() -> dict[str, Any]:
             "material": "PMMA",
             "initial_mass_g": 5.0,
             "thickness_mm": 6.0,
+            "diameter_mm": 70.0,
             "form": "disk",
             "specimen_holder": "stainless steel cup",
         },
@@ -49,12 +50,13 @@ def test_validate_metadata_rejects_negative_mass() -> None:
         cap.validate_metadata(raw)
 
 
-def test_validate_metadata_requires_thickness() -> None:
+@pytest.mark.parametrize("field", ["thickness_mm", "diameter_mm"])
+def test_validate_metadata_requires_dimensions(field: str) -> None:
     raw = _good_metadata()
-    del raw["specimen"]["thickness_mm"]
+    del raw["specimen"][field]
     with pytest.raises(ValidationError) as exc_info:
         cap.validate_metadata(raw)
-    assert [err["loc"] for err in exc_info.value.errors()] == [("specimen", "thickness_mm")]
+    assert [err["loc"] for err in exc_info.value.errors()] == [("specimen", field)]
 
 
 def test_holder_and_insulation_masses_are_optional() -> None:

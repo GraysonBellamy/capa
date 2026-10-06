@@ -14,9 +14,8 @@ explicitly chooses Save now → Finish.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -30,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from capa.config import ConfigDocument, SourceLayout
-from capa.config.capa_profile import profile_specimen, sample_from_specimen
+from capa.config.capa_profile import clear_per_run_fields
 
 StartingPoint = Literal["sim_capa", "real_capa", "free_sim", "free_real", "blank"]
 SourceLayoutKind = Literal["yaml_ext_toml", "toml_ext_toml", "single_yaml", "single_toml"]
@@ -350,9 +349,10 @@ def build_document(spec: _Spec) -> ConfigDocument:
     Strategy: load a canonical fixture from ``configs/`` for each
     starting point and reuse its payloads. This is *substantially*
     simpler than maintaining a parallel inline seed. The fixture's
-    operator and per-specimen values are cleared
-    (:func:`_clear_per_run_fields`), so the only Layers 1-4 errors in
-    the result are the fields the operator has to fill in.
+    operator and per-run specimen values are cleared
+    (:func:`~capa.config.capa_profile.clear_per_run_fields`), so the only
+    Layers 1-4 errors in the result are the fields the operator has to
+    fill in.
     """
     if spec.starting_point == "blank":
         exp_payload, hw_payload = _blank_seed()
@@ -363,7 +363,7 @@ def build_document(spec: _Spec) -> ConfigDocument:
     else:
         template = _load_template(spec.starting_point)
         doc = ConfigDocument(
-            experiment_payload=_clear_per_run_fields(template.experiment_payload),
+            experiment_payload=clear_per_run_fields(template.experiment_payload),
             hardware_payload=dict(template.hardware_payload),
         )
 
@@ -408,46 +408,6 @@ def _blank_seed() -> tuple[dict[str, object], dict[str, object]]:
         "cameras": [],
     }
     return exp, hw
-
-
-_PER_RUN_SPECIMEN_KEYS: frozenset[str] = frozenset(
-    {
-        "id",
-        "material",
-        "initial_mass_g",
-        "thickness_mm",
-        "specimen_holder_mass_g",
-        "insulation_mass_g",
-        "conditioning",
-        "notes",
-    }
-)
-"""CAPA specimen fields recorded fresh for each run: the specimen under
-test, plus the holder and insulation masses weighed with it. A cloned
-template's values for these are dropped; the rig-level fields (``form``,
-``specimen_holder`` and its dimensions) keep theirs."""
-
-
-def _clear_per_run_fields(experiment_payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a copy of a template's experiment payload without the operator
-    or the template's per-run specimen values.
-
-    The operator starts empty and the CAPA specimen loses
-    :data:`_PER_RUN_SPECIMEN_KEYS`; ``sample`` is re-mirrored from the
-    cleared specimen so the two stay in step.
-    """
-    exp = dict(experiment_payload)
-    exp["operator"] = {}
-    specimen = profile_specimen(exp)
-    if specimen is None:
-        return exp
-    cleared = {k: v for k, v in specimen.items() if k not in _PER_RUN_SPECIMEN_KEYS}
-    profile = dict(exp["domain_profile"])
-    profile["metadata"] = {**profile["metadata"], "specimen": cleared}
-    exp["domain_profile"] = profile
-    sample = exp.get("sample")
-    exp["sample"] = sample_from_specimen(cleared, sample if isinstance(sample, Mapping) else None)
-    return exp
 
 
 # Map a starting-point id to the canonical fixture file it clones.

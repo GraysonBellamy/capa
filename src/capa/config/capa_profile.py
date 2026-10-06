@@ -12,6 +12,8 @@ Single source of truth for:
   where the operator describes the specimen; the experiment's top-level
   ``sample`` block (which names the run id and the catalog row) is
   derived from it. Layer 3 flags any drift between the two.
+* the per-run fields (operator, specimen measurements) that every opened
+  config starts without.
 
 Pure data + pure functions — no Qt, no I/O.
 """
@@ -51,6 +53,24 @@ SPECIMEN_SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
 """``(specimen_key, sample_key)`` pairs mirrored from
 ``domain_profile.metadata.specimen`` into the experiment's ``sample``
 block. ``sample.extra`` is not mirrored; it stays as authored."""
+
+PER_RUN_SPECIMEN_KEYS: frozenset[str] = frozenset(
+    {
+        "id",
+        "material",
+        "initial_mass_g",
+        "thickness_mm",
+        "diameter_mm",
+        "specimen_holder_mass_g",
+        "insulation_mass_g",
+        "conditioning",
+        "notes",
+    }
+)
+"""Specimen fields entered fresh for every run: the specimen under test,
+plus the holder and insulation masses weighed with it. The rest of the
+specimen block (``form``, ``specimen_holder`` and its dimensions)
+describes the rig and carries over. See :func:`clear_per_run_fields`."""
 
 _POSITIVE_SAMPLE_KEYS: frozenset[str] = frozenset({"mass_g", "thickness_mm"})
 """``sample`` keys that :class:`~capa.experiment.config.SampleInfo`
@@ -159,6 +179,29 @@ def sample_from_specimen(
     return out
 
 
+def clear_per_run_fields(experiment_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy of ``experiment_payload`` with its per-run values removed.
+
+    The operator is emptied and, under the CAPA profile, the specimen
+    loses :data:`PER_RUN_SPECIMEN_KEYS`; ``sample`` is re-mirrored from
+    the cleared specimen. Opening a config or starting from a template
+    goes through here, so a run never inherits the last run's operator
+    or measurements.
+    """
+    exp = dict(experiment_payload)
+    exp["operator"] = {}
+    specimen = profile_specimen(exp)
+    if specimen is None:
+        return exp
+    cleared = {k: v for k, v in specimen.items() if k not in PER_RUN_SPECIMEN_KEYS}
+    profile = dict(exp["domain_profile"])
+    profile["metadata"] = {**profile["metadata"], "specimen": cleared}
+    exp["domain_profile"] = profile
+    sample = exp.get("sample")
+    exp["sample"] = sample_from_specimen(cleared, sample if isinstance(sample, Mapping) else None)
+    return exp
+
+
 def sample_specimen_mismatches(
     sample: Mapping[str, Any],
     specimen: Mapping[str, Any],
@@ -183,7 +226,9 @@ __all__ = [
     "CAPA_OPTIONAL_GROUPS",
     "CAPA_PROFILE_ID",
     "CAPA_REQUIRED_GROUPS",
+    "PER_RUN_SPECIMEN_KEYS",
     "SPECIMEN_SAMPLE_FIELDS",
+    "clear_per_run_fields",
     "current_capa_mappings",
     "is_capa_profile",
     "profile_model_fields",

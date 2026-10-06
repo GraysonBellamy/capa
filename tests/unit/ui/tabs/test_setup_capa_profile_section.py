@@ -112,17 +112,23 @@ def test_capa_profile_payload_includes_channels_profile_and_sample(qtbot: Any) -
 @pytest.mark.parametrize("path", CAPA_EXPERIMENTS, ids=lambda p: p.name)
 def test_capa_profile_round_trips_shipped_configs(qtbot: Any, path: Path) -> None:
     """Loading a shipped CAPA config and composing the payload without
-    edits reproduces its profile and sample blocks unchanged."""
+    edits reproduces its profile and sample blocks unchanged. The real-rig
+    configs leave the sample out; it mirrors their empty specimen id."""
     document = ConfigDocument.load(path)
     original_profile = copy.deepcopy(document.experiment_payload["domain_profile"])
-    original_sample = copy.deepcopy(document.experiment_payload["sample"])
+    original_sample = copy.deepcopy(document.experiment_payload.get("sample", {"id": ""}))
     section = CapaProfileSection()
     qtbot.addWidget(section)
     section.set_draft(SetupDraft(document=document))
 
     payload = section.payload()
     assert payload is not None
-    assert payload["domain_profile"] == original_profile
+    composed = copy.deepcopy(payload["domain_profile"])
+    # A text field the file leaves out composes as "" (the real-rig configs
+    # leave the specimen id and material to be entered for each run).
+    specimen = composed["metadata"]["specimen"]
+    composed["metadata"]["specimen"] = {k: v for k, v in specimen.items() if v != ""}
+    assert composed == original_profile
     assert payload["sample"] == original_sample
 
 

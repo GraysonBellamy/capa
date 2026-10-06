@@ -9,7 +9,7 @@ description: Field reference for `capa.profiles.capa_pyrolysis` domain profile �
 
 A *domain profile* layers scientific metadata + preflight checks on top of the generic experiment recipe. It does not drive the run — that's the [procedure](../procedures/what-is-a-procedure.md)'s job. The profile contributes:
 
-- **specimen fields** — id, material, mass, thickness, form, holder geometry and mass
+- **specimen fields** — id, material, mass, thickness, diameter, form, holder geometry and mass
 - **method fields** — heater program (target heat flux + heater setpoint), atmosphere composition, optional secondary gas
 - **gas-sampling fields** — optional, for a rig with a gas analyzer: probe position, sample flow, sample line, transport delay
 - **required channel groups** — heater pair, mass, purge MFC
@@ -54,6 +54,7 @@ The physical sample under test.
 | `material` | — | yes | Free-text material name. The value an analyzer five years from now needs to know "what was this?" |
 | `initial_mass_g` | g | yes | Mass on the load cell before heating begins. Must be > 0. |
 | `thickness_mm` | mm | yes | Specimen thickness; for a powder or granulate, the bed depth. Must be > 0. |
+| `diameter_mm` | mm | yes | Specimen diameter. For a non-disk specimen, the diameter of its exposed surface. Must be > 0. |
 | `form` | `disk` \| `other` | yes | ~99% of CAPA runs use a disk. `other` is the escape hatch for irregular solids, liquids, etc.; describe in `notes`. |
 | `particle_size_um` | µm | no | Median particle size for powder/granulate runs. The Setup tab hides it while `form` is `disk` and drops any value it held. |
 | `specimen_holder` | — | yes | Holder description (e.g. `"stainless steel cup"`). Holder geometry varies by run; depth and diameter change the exposed surface area. |
@@ -69,10 +70,18 @@ The physical sample under test.
 The specimen fields are not optional record-keeping. Five years later, an analyst reopening the bundle reconstructs the run from these values:
 
 - **Mass** sets the integration baseline for the load cell's mass-loss trace.
-- **Form + holder geometry** sets the exposed surface area, which is needed to convert mass-loss rate into a mass-loss flux.
+- **Diameter, form and holder geometry** set the exposed surface area, which is needed to convert mass-loss rate into a mass-loss flux.
 - **Particle size + conditioning** explain transport-limited effects that the rate trace alone cannot account for.
 
 Missing fields are a Layer-3 validation error, so the Setup tab refuses to save or Apply & Connect.
+
+### Entered for every run
+
+Mass and dimensions change from one specimen to the next, so the GUI never carries them over. Whenever a config opens (File → Open, the Setup tab's Open, Recents, `capa gui <config>`, or New from template) these fields start empty, along with the operator id and name:
+
+`id`, `material`, `initial_mass_g`, `thickness_mm`, `diameter_mm`, `specimen_holder_mass_g`, `insulation_mass_g`, `conditioning`, `notes`
+
+The rest of the specimen block (`form`, `specimen_holder` and its dimensions) describes the rig and keeps its saved values. Saving a config still writes what you entered; it is cleared again the next time the config opens. A headless `capa run` uses the file as written, so fill these in before running one.
 
 ### The `sample` block mirrors the specimen
 

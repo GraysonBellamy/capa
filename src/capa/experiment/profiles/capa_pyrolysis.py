@@ -11,8 +11,8 @@ single setpoint hold; dynamic programs (ramps) are the minority.
 
 This profile contributes:
 
-- **specimen fields** — id, material, mass, thickness, form (disk for
-  ~99% of runs; ``other`` for rare non-disk shapes), particle size for
+- **specimen fields** — id, material, mass, thickness, diameter, form
+  (disk for ~99% of runs; ``other`` for rare non-disk shapes), particle size for
   non-disk runs, specimen-holder description with optional dimensions
   and holder / insulation masses, conditioning notes. The experiment's
   ``sample`` block mirrors the identity fields from here.
@@ -96,6 +96,15 @@ class CapaSpecimen(BaseModel):
         json_schema_extra={
             "capa_unit": "mm",
             "capa_help": "Specimen thickness; for a powder or granulate, the bed depth.",
+        },
+    )
+    diameter_mm: float = Field(
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "mm",
+            "capa_help": (
+                "Specimen diameter. For a non-disk specimen, the diameter of its exposed surface."
+            ),
         },
     )
     form: SpecimenForm

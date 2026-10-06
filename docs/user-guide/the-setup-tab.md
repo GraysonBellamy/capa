@@ -232,10 +232,18 @@ missing or invalid field appear in the Problems panel. For an experiment
 without a domain profile the section offers **Add CAPA profile**, which
 starts the specimen from the current sample.
 
+Opening a config never fills in the specimen's per-run fields: id,
+material, initial mass, thickness, diameter, holder and insulation
+masses, conditioning and notes start empty every time, as do the
+operator id and name. Weigh and measure the specimen, fill them in, then
+**Apply & Connect**. Form, holder and the rest of the profile keep their
+saved values. See
+[Entered for every run](../configuration/capa-profile.md#entered-for-every-run).
+
 ### Experiment → Operator & sample
 
-Operator id (goes to the status bar's `op` pill), calibration set, tags
-and custom fields. The operator id is stamped into every event the run
+Operator id and name (the id goes to the status bar's `op` pill), tags
+and custom fields. Both start empty whenever a config opens. The operator id is stamped into every event the run
 records, so changing it mid-day matters for the audit trail.
 
 While the CAPA profile is on, the sample fields here are read-only — they
@@ -402,11 +410,9 @@ is also offered when you Save As an external config to a new path.
 **Open ▾ → New from template…** launches a wizard that picks a starting
 template, file layout and method. The draft takes the template's devices,
 channels, procedure and rig-level profile fields (specimen form, holder,
-heater program, atmosphere), but not who is running what: the operator id
-and name, and the specimen's id, material, initial mass, thickness, holder
-and insulation masses, conditioning and notes all start empty. The
-Problems panel lists the required ones; fill them in, then
-**Apply & Connect**.
+heater program, atmosphere). As with any opened config, the operator and
+the specimen's per-run fields start empty; the Problems panel lists the
+required ones. Fill them in, then **Apply & Connect**.
 
 ![Setup wizard "Starting point" step with five templates: CAPA pyrolysis (real / simulated), Free run (real / simulated), Blank.](../_snippets/images/setup-wizard.png)
 

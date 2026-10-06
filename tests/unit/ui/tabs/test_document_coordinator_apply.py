@@ -36,7 +36,7 @@ def _make_triple(
 
 def test_build_applied_config_round_trips_loaded_fixture(qtbot: Any) -> None:
     setup, _method, coord = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
 
     cfg = coord.build_applied_config()
     assert isinstance(cfg, ExperimentConfig)
@@ -62,7 +62,7 @@ def test_method_tab_buffer_overrides_document_payload(qtbot: Any) -> None:
     ``build_applied_config`` — Apply-to-Rig honours the operator's most
     recent intent."""
     setup, method_tab, coord = _make_triple(qtbot)
-    setup.load_path(SIM_CAPA_EXP)
+    setup.load_path(SIM_CAPA_EXP, clear_per_run=False)
 
     # Replace the loaded method with a single-step buffer in the Method tab.
     new_method = Method(
@@ -106,6 +106,6 @@ def test_method_tab_empty_with_method_mode_none_omits_method(qtbot: Any, tmp_pat
         encoding="utf-8",
         newline="\n",
     )
-    setup.load_path(yaml_path)
+    setup.load_path(yaml_path, clear_per_run=False)
     cfg = coord.build_applied_config()
     assert cfg.method is None

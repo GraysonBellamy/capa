@@ -324,6 +324,33 @@ def test_main_window_open_dialog_path_handling(qtbot: Any, tmp_path: Path) -> No
     window.close()
 
 
+def test_main_window_open_loads_setup_without_applying(
+    qtbot: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """File → Open (and Recents, and ``capa gui <config>``) puts the config
+    in the Setup tab with its per-run fields empty; nothing is applied
+    until the operator fills them in and presses Apply & Connect."""
+    from capa.ui import main_window as main_window_module
+    from capa.ui.main_window import MainWindow
+
+    recorded: list[Path] = []
+    monkeypatch.setattr(main_window_module, "record_open", recorded.append)
+    sim_capa = Path(__file__).resolve().parents[2] / "configs/experiments/sim_capa_pyrolysis.yaml"
+
+    window = MainWindow(runs_root=tmp_path, configure_logging_for_bundle=False)
+    qtbot.addWidget(window)
+    window._open_in_setup(sim_capa)
+
+    assert window._controller.active_config is None
+    assert window.run_tab.can_start() is False
+    assert window._tabs.currentWidget() is window.setup_tab
+    draft = window.setup_tab.draft
+    assert draft.document.experiment_payload["operator"] == {}
+    assert draft.has_errors
+    assert recorded == [sim_capa]
+    window.close()
+
+
 def test_main_window_offers_device_settings_only_when_they_differ(
     qtbot: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

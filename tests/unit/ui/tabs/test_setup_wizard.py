@@ -214,12 +214,15 @@ def test_sim_seed_errors_are_the_fields_to_fill_in(tmp_path: Path) -> None:
         (*specimen_path, "material"),
         (*specimen_path, "initial_mass_g"),
         (*specimen_path, "thickness_mm"),
+        (*specimen_path, "diameter_mm"),
     }
 
     exp = reloaded.experiment_payload
     exp["operator"] = {"id": "abr", "display_name": "A. Researcher"}
     specimen = exp["domain_profile"]["metadata"]["specimen"]
-    specimen.update(id="P-1", material="PMMA", initial_mass_g=5.0, thickness_mm=6.0)
+    specimen.update(
+        id="P-1", material="PMMA", initial_mass_g=5.0, thickness_mm=6.0, diameter_mm=70.0
+    )
     exp["sample"] = sample_from_specimen(specimen, exp["sample"])
     errors = [p for p in validate(reloaded, with_live_checks=False) if p.severity == "error"]
     if errors:
