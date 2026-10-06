@@ -52,6 +52,17 @@ JPEG payload well under 30 kB at quality=70 even for high-detail frames."""
 PREVIEW_JPEG_QUALITY = 70
 """Visually lossless enough for a thumbnail; cheap to encode at 2 Hz."""
 
+PREVIEW_DETAIL_INTERVAL_NS = 100_000_000
+"""10 Hz preview cadence while a pop-out window shows the camera (see
+:meth:`WebcamAdapter.set_preview_detail`), so focus visibly settles after
+an Apply. Between runs only: while recording, previews are 2 Hz
+thumbnails whatever was asked, so they never compete with the encoder
+for the pump's frame budget."""
+
+PREVIEW_DETAIL_JPEG_QUALITY = 85
+"""Full-size pop-out previews keep fine edges intact for judging focus;
+quality 70 smears them."""
+
 _PLATFORM_DEFAULTS: dict[str, tuple[str, str]] = {
     "linux": ("v4l2", "/dev/video0"),
     "darwin": ("avfoundation", "default"),

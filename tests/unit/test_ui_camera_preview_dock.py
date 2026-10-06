@@ -14,6 +14,8 @@ from io import BytesIO
 from typing import Any, Literal
 
 from PIL import Image
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QToolButton
 
 from capa.devices.camera.base import CameraEvent, CameraSpec
 from capa.ui.docks.camera_preview import (
@@ -21,6 +23,7 @@ from capa.ui.docks.camera_preview import (
     STALE_THRESHOLD_MS,
     CameraPreviewDock,
 )
+from capa.ui.state import RunUiState
 
 
 def _event(
@@ -280,3 +283,123 @@ class TestEventDrivenSurfaces:
         dock.note_event("not-an-event")
         dock.note_event(None)
         dock.note_event(42)
+
+
+class TestPopout:
+    """The pop-out window: opened from a tile, fed full-size frames, and
+    the camera asked for those frames only while it is open."""
+
+    @staticmethod
+    def _dock(qtbot: Any, *names: str) -> tuple[CameraPreviewDock, list[tuple[str, bool]]]:
+        dock = CameraPreviewDock(cameras=[_spec(n) for n in names])
+        qtbot.addWidget(dock)
+        detail: list[tuple[str, bool]] = []
+        dock.preview_detail_changed.connect(lambda name, on: detail.append((name, on)))
+        return dock, detail
+
+    def test_pop_out_button_opens_window_and_asks_for_detail(self, qtbot: Any) -> None:
+        dock, detail = self._dock(qtbot, "visible_cam0")
+
+        button = dock.findChild(QToolButton, "popout_visible_cam0")
+        assert button is not None
+        qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+        window = dock._popouts["visible_cam0"]
+        assert window.isVisible()
+        assert detail == [("visible_cam0", True)]
+
+    def test_double_click_on_tile_opens_window(self, qtbot: Any) -> None:
+        dock, detail = self._dock(qtbot, "visible_cam0")
+
+        qtbot.mouseDClick(dock._tiles["visible_cam0"], Qt.MouseButton.LeftButton)
+
+        assert dock._popouts["visible_cam0"].isVisible()
+        assert detail == [("visible_cam0", True)]
+
+    def test_window_shows_full_size_frame_and_tile_keeps_thumbnail(self, qtbot: Any) -> None:
+        dock, _ = self._dock(qtbot, "visible_cam0")
+        dock.open_popout("visible_cam0")
+
+        dock.update_preview("visible_cam0", _jpeg(size=(1280, 720)))
+
+        window = dock._popouts["visible_cam0"]
+        assert window._view._image is not None
+        assert window._view._image.width() == 1280
+        assert "1280 × 720 px" in window._footer.text()
+        assert dock._tiles["visible_cam0"]._image_label.pixmap().width() == PREVIEW_TILE_WIDTH
+
+    def test_window_starts_from_last_thumbnail(self, qtbot: Any) -> None:
+        dock, _ = self._dock(qtbot, "visible_cam0")
+        dock.update_preview("visible_cam0", _jpeg())
+
+        dock.open_popout("visible_cam0")
+
+        image = dock._popouts["visible_cam0"]._view._image
+        assert image is not None
+        assert image.width() == 320
+
+    def test_closing_window_drops_detail(self, qtbot: Any) -> None:
+        dock, detail = self._dock(qtbot, "visible_cam0")
+        dock.open_popout("visible_cam0")
+
+        dock._popouts["visible_cam0"].close()
+
+        assert detail == [("visible_cam0", True), ("visible_cam0", False)]
+
+    def test_reopening_an_open_window_asks_once(self, qtbot: Any) -> None:
+        dock, detail = self._dock(qtbot, "visible_cam0")
+        dock.open_popout("visible_cam0")
+        dock.open_popout("visible_cam0")
+
+        assert detail == [("visible_cam0", True)]
+
+    def test_reassert_on_pool_open_covers_open_windows_only(self, qtbot: Any) -> None:
+        dock, detail = self._dock(qtbot, "visible_cam0", "visible_cam1")
+        dock.open_popout("visible_cam0")
+        dock.open_popout("visible_cam1")
+        dock._popouts["visible_cam1"].close()
+        detail.clear()
+
+        dock.reassert_preview_detail(None)  # pool closed: nothing to ask
+        dock.reassert_preview_detail(object())
+
+        assert detail == [("visible_cam0", True)]
+
+    def test_full_screen_toggle(self, qtbot: Any) -> None:
+        dock, _ = self._dock(qtbot, "visible_cam0")
+        dock.open_popout("visible_cam0")
+        window = dock._popouts["visible_cam0"]
+
+        qtbot.keyClick(window, Qt.Key.Key_F11)
+        assert window.isFullScreen()
+        qtbot.keyClick(window, Qt.Key.Key_Escape)
+        assert not window.isFullScreen()
+        assert window.isVisible()
+        qtbot.keyClick(window, Qt.Key.Key_Escape)
+        assert not window.isVisible()
+
+    def test_starting_a_run_closes_windows_and_drops_detail(self, qtbot: Any) -> None:
+        dock, detail = self._dock(qtbot, "visible_cam0")
+        dock.open_popout("visible_cam0")
+
+        dock.set_run_state(RunUiState.PREPARING)
+
+        assert not dock._popouts["visible_cam0"].isVisible()
+        assert detail == [("visible_cam0", True), ("visible_cam0", False)]
+
+    def test_no_pop_out_during_a_run(self, qtbot: Any) -> None:
+        dock, detail = self._dock(qtbot, "visible_cam0")
+        button = dock.findChild(QToolButton, "popout_visible_cam0")
+        assert button is not None
+
+        dock.set_run_state(RunUiState.RUNNING)
+        assert not button.isEnabled()
+        dock.open_popout("visible_cam0")
+        qtbot.mouseDClick(dock._tiles["visible_cam0"], Qt.MouseButton.LeftButton)
+        assert "visible_cam0" not in dock._popouts
+        assert detail == []
+
+        dock.set_run_state(RunUiState.SEALED)
+        assert button.isEnabled()
+        dock.open_popout("visible_cam0")
+        assert dock._popouts["visible_cam0"].isVisible()

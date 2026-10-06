@@ -546,6 +546,12 @@ class MainWindow(QMainWindow):
                 self._controller.camera_event_received.disconnect(
                     self._camera_preview_dock.note_event
                 )
+            with contextlib.suppress(TypeError):
+                self._controller.pool_changed.disconnect(
+                    self._camera_preview_dock.reassert_preview_detail
+                )
+            with contextlib.suppress(TypeError):
+                self._controller.state_changed.disconnect(self._camera_preview_dock.set_run_state)
             if self._camera_toggle is not None:
                 self._view_menu.removeAction(self._camera_toggle)
                 self._camera_toggle = None
@@ -558,6 +564,16 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._camera_preview_dock)
         self._controller.preview_received.connect(self._camera_preview_dock.update_preview)
         self._controller.camera_event_received.connect(self._camera_preview_dock.note_event)
+        # Pop-out windows ask their camera for full-size frames while open,
+        # and close when a run starts. The old dock's open windows close
+        # with it, and its pool is being replaced, so nothing needs
+        # switching back on teardown.
+        self._camera_preview_dock.preview_detail_changed.connect(
+            self._controller.set_preview_detail
+        )
+        self._controller.pool_changed.connect(self._camera_preview_dock.reassert_preview_detail)
+        self._controller.state_changed.connect(self._camera_preview_dock.set_run_state)
+        self._camera_preview_dock.set_run_state(self._controller.state)
         self._camera_toggle = self._register_dock_view_action(
             self._camera_preview_dock, "Camera &Preview", "Ctrl+2"
         )

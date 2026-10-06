@@ -639,6 +639,21 @@ class CameraDeviceAdapter:
             return None
         return result
 
+    def set_preview_detail(self, enabled: bool) -> bool:
+        """Ask the camera for full-size, faster previews while a pop-out
+        window shows them, or go back to thumbnails.
+
+        Same capability-style probe as :meth:`camera_metadata`: a camera
+        exposing ``set_preview_detail`` (:class:`WebcamAdapter` today)
+        switches and this returns ``True``; others (FLIR Atlas, IR sim)
+        keep their usual previews and this returns ``False``.
+        """
+        setter = getattr(self._camera, "set_preview_detail", None)
+        if not callable(setter):
+            return False
+        setter(enabled)
+        return True
+
     async def read_state_snapshot(self) -> IrCameraStateSnapshot | WebcamStateSnapshot | None:
         """Forward the camera's ``read_state_snapshot()`` for manual cards
         and ``device_settings``.

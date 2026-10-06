@@ -328,6 +328,21 @@ class ManualClient:
             raise UnknownDeviceError(device_name) from exc
         return await asyncio.wrap_future(fut)
 
+    async def set_preview_detail(self, device_name: str, enabled: bool) -> bool:
+        """Switch a camera's previews to full size (for a pop-out preview
+        window) or back to thumbnails.
+
+        Returns ``False`` when the camera has no detail mode; its previews
+        stay as they are. Like :meth:`camera_metadata`, does not route
+        through the conductor: previews are UI-only, so the same call
+        applies whether or not a run is armed.
+        """
+        try:
+            fut = self._pool.set_preview_detail(device_name, enabled)
+        except KeyError as exc:
+            raise UnknownDeviceError(device_name) from exc
+        return await asyncio.wrap_future(fut)
+
     async def device_readback(self, device_name: str) -> object:
         """Probe a device's ``read_state_snapshot()`` across loops.
 

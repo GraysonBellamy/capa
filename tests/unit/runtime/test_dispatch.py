@@ -399,3 +399,28 @@ class TestManualClient:
         client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
         with pytest.raises(UnknownDeviceError):
             await client.camera_metadata("missing")
+
+    async def test_set_preview_detail_routes_through_pool(self) -> None:
+        class _PoolWithDetail(_FakePool):
+            def __init__(self) -> None:
+                super().__init__()
+                self.detail_calls: list[tuple[str, bool]] = []
+
+            def set_preview_detail(self, device: str, enabled: bool) -> cf.Future[bool]:
+                self.detail_calls.append((device, enabled))
+                return _FakePoolFuture(True).future()
+
+        pool = _PoolWithDetail()
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
+        assert await client.set_preview_detail("visible_cam0", True) is True
+        assert pool.detail_calls == [("visible_cam0", True)]
+
+    async def test_set_preview_detail_unknown_device_raises(self) -> None:
+        class _PoolRaising(_FakePool):
+            def set_preview_detail(self, device: str, enabled: bool) -> cf.Future[bool]:
+                raise KeyError(device)
+
+        pool = _PoolRaising()
+        client = ManualClient(pool=cast("WorkerPool", pool), conductor_provider=lambda: None)
+        with pytest.raises(UnknownDeviceError):
+            await client.set_preview_detail("missing", True)

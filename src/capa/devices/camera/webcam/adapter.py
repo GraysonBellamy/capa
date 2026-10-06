@@ -81,6 +81,7 @@ from capa.devices.camera.webcam.constants import (
     DEFAULT_PIX_FMT,
     OPEN_RETRY_DEADLINE_S,
     OPEN_RETRY_DELAYS_S,
+    PREVIEW_DETAIL_INTERVAL_NS,
     PREVIEW_INTERVAL_NS,
     _platform_default_format,
 )
@@ -130,6 +131,7 @@ class WebcamAdapter:
         "_output_path",
         "_output_stream",
         "_pix_fmt",
+        "_preview_detail",
         "_preview_recv",
         "_preview_send",
         "_pump_stop",
@@ -201,6 +203,9 @@ class WebcamAdapter:
         self._file_size = 0
         self._last_frame_t_mono_ns: int | None = None
         self._last_preview_t_mono_ns: int | None = None
+        # Full-size, faster previews for a pop-out window; see
+        # :meth:`set_preview_detail`.
+        self._preview_detail: bool = False
         self._started_t_mono_ns: int | None = None
         self._output_path: Path | None = None
         self._output_container: Any = None
@@ -548,6 +553,18 @@ class WebcamAdapter:
         """Yield structured camera events (open / start / stop / error)."""
         return _drain_stream(self._event_recv)
 
+    def set_preview_detail(self, enabled: bool) -> None:
+        """Switch previews between thumbnails and full-size frames.
+
+        A pop-out preview window turns this on so the operator can judge
+        focus: previews keep the camera's full frame size and arrive at
+        :data:`PREVIEW_DETAIL_INTERVAL_NS`. Ignored while recording —
+        previews stay 2 Hz thumbnails, so a recording costs exactly what
+        it did without the pop-out. UI-only, so this is not a command and
+        is never logged.
+        """
+        self._preview_detail = enabled
+
     async def command(self, cmd: DeviceCommand) -> CommandResult:
         """Dispatch a :class:`DeviceCommand` to the right typed verb.
 
@@ -695,7 +712,8 @@ class WebcamAdapter:
         * ``receipt`` is ``None`` when the adapter is not actively
           recording (preview-only mode) or when the encoder rejected the
           frame.
-        * ``preview_bytes`` is ``None`` on throttled ticks (2 Hz cap).
+        * ``preview_bytes`` is ``None`` on throttled ticks (2 Hz cap, or
+          10 Hz between runs while :meth:`set_preview_detail` is on).
         * ``drop_reason`` is non-``None`` only when the encoder rejected
           the frame mid-recording (libx264 EINVAL, format renegotiation,
           …). Dropping rather than raising keeps the pump alive across
@@ -755,12 +773,17 @@ class WebcamAdapter:
         # on every frame the consumer cannot use (28 of 30 at webcam rate).
         # DROP_OLDEST is enforced by ``_preview_send`` having capacity 2;
         # ``send_nowait`` from the wrapper silently drops on backpressure.
+        # A pop-out window asks for full-size, faster frames. Honoured only
+        # between runs: while recording, previews stay 2 Hz thumbnails
+        # whatever was asked, so the recording never pays for them.
+        detail = self._preview_detail and not recording
+        interval = PREVIEW_DETAIL_INTERVAL_NS if detail else PREVIEW_INTERVAL_NS
         preview_bytes: bytes | None = None
         if (
             self._last_preview_t_mono_ns is None
-            or t_mono_ns - self._last_preview_t_mono_ns >= PREVIEW_INTERVAL_NS
+            or t_mono_ns - self._last_preview_t_mono_ns >= interval
         ):
-            preview_bytes = _encode_preview_jpeg(frame)
+            preview_bytes = _encode_preview_jpeg(frame, full_size=detail)
             self._last_preview_t_mono_ns = t_mono_ns
         return receipt, preview_bytes, drop_reason
 

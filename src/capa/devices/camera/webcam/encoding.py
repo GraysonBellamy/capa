@@ -16,7 +16,11 @@ import numpy as np
 from anyio.streams.memory import MemoryObjectReceiveStream
 from PIL import Image
 
-from capa.devices.camera.webcam.constants import PREVIEW_JPEG_QUALITY, PREVIEW_MAX_WIDTH
+from capa.devices.camera.webcam.constants import (
+    PREVIEW_DETAIL_JPEG_QUALITY,
+    PREVIEW_JPEG_QUALITY,
+    PREVIEW_MAX_WIDTH,
+)
 
 
 def _is_transient_open_error(exc: BaseException) -> bool:
@@ -57,19 +61,26 @@ def _reformat_to_rgb24(frame: av.VideoFrame) -> np.ndarray:
     return frame.reformat(format="rgb24").to_ndarray()
 
 
-def _encode_preview_jpeg(frame: np.ndarray) -> bytes:
+def _encode_preview_jpeg(frame: np.ndarray, *, full_size: bool = False) -> bytes:
     """Width-cap to :data:`PREVIEW_MAX_WIDTH` (aspect preserved) and JPEG-encode.
+
+    ``full_size`` keeps the whole frame at :data:`PREVIEW_DETAIL_JPEG_QUALITY`
+    for a pop-out preview window instead of a thumbnail.
 
     Runs inside ``_push_frame_sync``, which the async wrapper already executes
     via :func:`anyio.to_thread.run_sync`, so the libjpeg work stays off the
     asyncio loop.
     """
     img = Image.fromarray(frame)
-    if img.width > PREVIEW_MAX_WIDTH:
-        new_h = max(1, round(img.height * (PREVIEW_MAX_WIDTH / img.width)))
-        img = img.resize((PREVIEW_MAX_WIDTH, new_h), Image.Resampling.BILINEAR)
+    if full_size:
+        quality = PREVIEW_DETAIL_JPEG_QUALITY
+    else:
+        quality = PREVIEW_JPEG_QUALITY
+        if img.width > PREVIEW_MAX_WIDTH:
+            new_h = max(1, round(img.height * (PREVIEW_MAX_WIDTH / img.width)))
+            img = img.resize((PREVIEW_MAX_WIDTH, new_h), Image.Resampling.BILINEAR)
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=PREVIEW_JPEG_QUALITY)
+    img.save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
 
 

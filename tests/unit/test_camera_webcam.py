@@ -790,6 +790,83 @@ class TestPreviewEncoding:
         assert len(previews) == 1, len(previews)
 
 
+class TestPreviewDetail:
+    """``set_preview_detail`` — full-size, faster previews for a pop-out
+    window, without touching the recording's cadence."""
+
+    @staticmethod
+    async def _next_preview(cam: WebcamAdapter) -> bytes | None:
+        import anyio
+
+        with anyio.move_on_after(0.2):
+            return await cam.preview_stream().__anext__()
+        return None
+
+    async def test_detail_previews_are_full_size(self) -> None:
+        from io import BytesIO
+
+        from PIL import Image
+
+        cam = _make(width=640, height=480)
+        await cam.open()
+        try:
+            cam.set_preview_detail(True)
+            await cam.push_frame(_solid_frame(640, 480, (10, 200, 30)))
+            jpeg = await self._next_preview(cam)
+            assert jpeg is not None
+            assert Image.open(BytesIO(jpeg)).size == (640, 480)
+
+            cam.set_preview_detail(False)
+            cam._last_preview_t_mono_ns = None
+            await cam.push_frame(_solid_frame(640, 480, (10, 200, 30)))
+            jpeg = await self._next_preview(cam)
+            assert jpeg is not None
+            assert Image.open(BytesIO(jpeg)).size == (320, 240)
+        finally:
+            await cam.close()
+
+    async def test_detail_previews_are_faster_between_runs(self) -> None:
+        from capa.devices.camera.webcam import PREVIEW_DETAIL_INTERVAL_NS
+
+        cam = _make()
+        await cam.open()
+        try:
+            cam.set_preview_detail(True)
+            # One detail interval since the last preview: past the 10 Hz
+            # cadence but well inside the 2 Hz one.
+            cam._last_preview_t_mono_ns = cam._clock.t_mono_ns() - PREVIEW_DETAIL_INTERVAL_NS
+            await cam.push_frame(_solid_frame(64, 48, (255, 0, 0)))
+            assert await self._next_preview(cam) is not None
+        finally:
+            await cam.close()
+
+    async def test_recording_ignores_detail(self, tmp_path: Path) -> None:
+        """While recording, previews stay 2 Hz thumbnails whatever a pop-out
+        asked for, so the recording costs what it did without one."""
+        from io import BytesIO
+
+        from PIL import Image
+
+        from capa.devices.camera.webcam import PREVIEW_DETAIL_INTERVAL_NS
+
+        cam = _make(width=640, height=480)
+        await cam.open()
+        try:
+            cam.set_preview_detail(True)
+            await cam.start_recording(tmp_path / "v.mkv")
+            assert await cam.push_frame(_solid_frame(640, 480, (255, 0, 0))) is not None
+            jpeg = await self._next_preview(cam)
+            assert jpeg is not None
+            assert Image.open(BytesIO(jpeg)).size == (320, 240)
+
+            cam._last_preview_t_mono_ns = cam._clock.t_mono_ns() - PREVIEW_DETAIL_INTERVAL_NS
+            assert await cam.push_frame(_solid_frame(640, 480, (255, 0, 0))) is not None
+            assert await self._next_preview(cam) is None
+            await cam.stop_recording()
+        finally:
+            await cam.close()
+
+
 class TestOpenInputRetry:
     """``_open_input_with_retry`` recovers from transient ``[Errno 5]``."""
 

@@ -66,6 +66,7 @@ from capa.runtime.session import RealRunSession
 from capa.runtime.shutdown import PoolCloseResult
 from capa.runtime.state import ConductorState
 from capa.storage.catalog import RunCatalog
+from capa.ui.async_util import schedule_bg
 from capa.ui.config_progress import ConfigLoadProgress, ConfigLoadState
 from capa.ui.lifecycle import LifecycleKind, LifecycleRegistry
 
@@ -806,6 +807,29 @@ class RunController(QObject):
     def emit_manual_event(self, event: DeviceEvent) -> None:
         """Surface a manual-command :class:`DeviceEvent` to the events dock."""
         self.manual_event.emit(event)
+
+    def set_preview_detail(self, camera_name: str, enabled: bool) -> None:
+        """Ask ``camera_name`` for full-size previews while its pop-out
+        window is open, or for thumbnails again once it closes.
+
+        Fire-and-forget; a no-op while no pool is open. Cameras without a
+        detail mode keep sending thumbnails, which the window scales up.
+        """
+        client = self._manual_client
+        if client is not None:
+            schedule_bg(self._send_preview_detail(client, camera_name, enabled))
+
+    async def _send_preview_detail(
+        self, client: ManualClient, camera_name: str, enabled: bool
+    ) -> None:
+        try:
+            await client.set_preview_detail(camera_name, enabled)
+        except Exception as exc:
+            _logger.debug(
+                "ui.controller.preview_detail_failed",
+                camera=camera_name,
+                error=str(exc),
+            )
 
     # ------------------------------------------------------------------ device settings
 
