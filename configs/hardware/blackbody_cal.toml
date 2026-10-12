@@ -1,0 +1,254 @@
+name = "blackbody_cal"
+
+# FLIR E40 radiometric calibration against the IR-564 cavity blackbody.
+# The NI 9214 (cDAQ1Mod1) logs the blackbody's Type-S reference
+# thermocouple on ai15 and the inner/outer wall K-type thermocouples on
+# ai2/ai3 as the ambient temperature, and a loose K-type probe on ai1
+# (ice-point check, then lab air). The blackbody's own controller is
+# logged over RS-485 (see below); lab air temperature and RH are still
+# entered by hand in the run's sample extras.
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.nidaq"
+
+[devices.params]
+task_name = "default_task"
+rate_hz = 3.0
+snapshot_period_s = 30.0
+auto_reconnect = false
+overflow = "block"
+
+# Type S produces only ~6-10 uV/degC, so offset drift over a long session
+# matters: autozero every sample.
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai15"
+name = "TC_blackbody"
+thermocouple_type = "S"
+min_val = 0.0
+max_val = 1200.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai3"
+name = "TC_outer_wall"
+thermocouple_type = "K"
+min_val = 0.0
+max_val = 400.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai2"
+name = "TC_inner_wall"
+thermocouple_type = "K"
+min_val = 0.0
+max_val = 400.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+# Loose K-type probe beside the wall channels: ice-point check of the
+# 9214 cold-junction compensation, then lab air for the rest of the
+# session. min_val is below 0 so the ice point stays in range.
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai1"
+name = "TC_spare"
+thermocouple_type = "K"
+min_val = -20.0
+max_val = 100.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+# The IR-301's controller is a Watlow Series F4P: Modbus RTU at 19200
+# 8-N-1, address 10. COM8 is the USB–RS-485 adapter the Fuji gas analyzer
+# normally uses; move its cable to the IR-301 before a blackbody session. watlowlib (>= 0.8) supports it read-only, so capa
+# only logs it. Identify reads the decimal places (606) and the system
+# temperature unit (901) from the controller, so the scale and unit come
+# from the device; wire_temperature_unit asserts the expected °C and the
+# channels below declare degC, so a controller switched to °F shows up
+# as a unit-mismatch event instead of wrong numbers. cold_junction_value
+# (104) is the controller's cold-junction temperature in the system unit.
+[[devices]]
+name = "blackbody_ctrl"
+adapter = "capa.devices.watlow"
+
+[devices.params]
+port = "COM8"
+address = 10
+profile = "f4p"
+protocol = "modbus_rtu"
+baudrate = 19200
+parameters = ["process_value", "setpoint", "output_power", "cold_junction_value"]
+instances = [1]
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+wire_temperature_unit = "C"
+
+[[cameras]]
+name = "ir_cam0"
+adapter = "capa_flir.flir_ir"
+kind = "ir"
+estimated_bps = 4_500_000   # 30 Hz uncompressed .csq, conservative
+on_failure = "warn"
+
+[cameras.params]
+circular_buffer_frames = 60
+compression = false
+discovery_timeout_s = 5.0
+
+[[channels]]
+name = "blackbody_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_blackbody"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "outer_wall_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_outer_wall"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "inner_wall_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_inner_wall"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "spare_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_spare"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "controller_pv"
+kind = "process_var"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "watlow_parameter"
+device = "blackbody_ctrl"
+parameter = "process_value"
+instance = 1
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "controller_setpoint"
+kind = "setpoint"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "watlow_parameter"
+device = "blackbody_ctrl"
+parameter = "setpoint"
+instance = 1
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "controller_cold_junction"
+kind = "process_var"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "watlow_parameter"
+device = "blackbody_ctrl"
+parameter = "cold_junction_value"
+instance = 1
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "controller_output_power"
+kind = "process_var"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "controller_output"
+
+[channels.source]
+source = "watlow_parameter"
+device = "blackbody_ctrl"
+parameter = "output_power"
+instance = 1
+
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
