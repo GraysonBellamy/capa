@@ -1,0 +1,67 @@
+# One recording of the FLIR E40 calibration against the IR-564 blackbody.
+# Run once per view per setpoint (mirror session 2026-10-08, then the
+# direct session).
+#
+# Before each run, in the Setup tab:
+#   - sample id: <view>_<setpoint>C, D = direct, M = through the mirror,
+#     e.g. D_300C, M_300C; direct runs at the 51 deg mirror set's path
+#     (aperture ~34 px across), with a _22in suffix for the 34 deg set's
+#     path (~32.5 px). Image size, not the tape, is the geometry record.
+#   - sample extras: lab air temperature and RH, the path length, and the
+#     mirror geometry in the mirror session. The controller's PV, set
+#     point, output and cold junction are logged from the controller.
+#   - trigger a NUC from the IR camera card just before Start
+#
+# Run with:
+#
+#   uv run capa validate --strict configs/experiments/blackbody_cal.yaml
+#   uv run capa gui configs/experiments/blackbody_cal.yaml --runs-root runs/blackbody_cal
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    # 2 min spans several cycles of the blackbody's ~±0.1 °C control
+    # wander; ~3600 frames at 30 Hz, ~0.5 GB of .csq per recording.
+    duration_s: 120.0
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+sample:
+  id: SET_ME   # e.g. M_75C; set per run (a real-looking default slips through)
+  material: IR-564 cavity blackbody
+  notes: "FLIR E40 blackbody calibration, 1.00 in aperture"
+  extra:
+    view: direct              # direct | mirror
+    setpoint_c: null
+    lab_air_temp_c: null
+    lab_rh_percent: null
+    path_length_m: null       # camera -> aperture plane (total, via mirror)
+    aperture_in: 1.0
+    # Mirror session only
+    mirror_temp_c: null
+    camera_to_mirror_m: null
+    mirror_to_aperture_m: null
+    aoi_deg: null             # angle of incidence; arms are 2x this apart
+
+device_settings:
+  ir_cam0:
+    temperature_range:
+      min_c: 0.0
+      max_c: 650.0
+    # Raw counts are reprocessed later; emissivity 1 keeps the live
+    # readout near the setpoint in the direct view as a sanity check.
+    emissivity: 1.0
+    # No auto_nuc_interval_s: the E40 doesn't accept the change, so
+    # automatic NUCs stay on. NUC by hand before each run and drop any
+    # mid-recording NUC frames in the analysis.
+
+tags:
+  - real
+  - calibration
+  - blackbody
+  - flir-e40
+
+hardware: ../hardware/blackbody_cal.toml

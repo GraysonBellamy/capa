@@ -1,0 +1,139 @@
+name = "typeS_check"
+
+# Room-temperature check of the IR-564 Type-S offset. The blackbody is cold
+# and unpowered, so its CAL thermocouple (ai15, via the green extension)
+# and the controller's own thermocouple both sit at room temperature. The
+# spare K-type probe on ai1 (ice-point checked) hangs beside the source
+# head, and the wall K-type thermocouples on ai2/ai3 log alongside. Same
+# channel settings as blackbody_cal.toml, without the camera.
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.nidaq"
+
+[devices.params]
+task_name = "default_task"
+rate_hz = 3.0
+snapshot_period_s = 30.0
+auto_reconnect = false
+overflow = "block"
+
+# Type S produces only ~6 uV/degC at room temperature: autozero every sample.
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai15"
+name = "TC_blackbody"
+thermocouple_type = "S"
+min_val = 0.0
+max_val = 1200.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai1"
+name = "TC_spare"
+thermocouple_type = "K"
+min_val = -20.0
+max_val = 100.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai3"
+name = "TC_outer_wall"
+thermocouple_type = "K"
+min_val = 0.0
+max_val = 400.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai2"
+name = "TC_inner_wall"
+thermocouple_type = "K"
+min_val = 0.0
+max_val = 400.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[channels]]
+name = "blackbody_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_blackbody"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "spare_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_spare"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "outer_wall_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_outer_wall"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "inner_wall_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_inner_wall"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"

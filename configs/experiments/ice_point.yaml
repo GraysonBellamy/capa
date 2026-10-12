@@ -1,0 +1,51 @@
+# Ice-point check of the NI 9214 cold-junction compensation: a spare
+# K-type probe on ai1 in an ice bath, with the wall thermocouples logging
+# alongside. A reading near -1.5 degC on the probe means the CJC reads the
+# terminal block ~1.5 degC low; near 0 means the CJC is fine.
+#
+# Before Start:
+#   - insulated vessel (thermos/Dewar) packed to the top with finely
+#     crushed ice; water only to fill the gaps, never above the ice
+#     surface (drain and repack as it melts), settled 20-30 min
+#   - probe bead ~10 cm deep in the middle among the ice, not touching
+#     the wall or bottom; an independent thermometer in the same bath
+#     if one is available
+#   - same probe on ai1 as the 2026-10-09 run (+0.43 degC), terminal
+#     block untouched for ~15 min after wiring it
+#   - live reading flat (drift < 0.05 degC/min)
+#   - sample id ICE2_packed (ICE_spare is the 2026-10-09 run)
+#   - sample extras: lab air temperature and RH, bath settle time and
+#     probe depth
+#
+# Run with:
+#
+#   uv run capa validate --strict configs/experiments/ice_point.yaml
+#   uv run capa gui configs/experiments/ice_point.yaml --runs-root runs/blackbody_cal
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    # 5 min at 3 Hz: enough samples to see drift as well as the mean.
+    duration_s: 300.0
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+sample:
+  id: ICE2_packed
+  material: Spare K-type thermocouple in an ice bath
+  notes: "Ice-point check of the NI 9214 CJC; probe on ai1"
+  extra:
+    lab_air_temp_c: null
+    lab_rh_percent: null
+    bath_settle_min: null
+    probe_depth_cm: null
+
+tags:
+  - real
+  - calibration
+  - ice-point
+
+hardware: ../hardware/ice_point.toml

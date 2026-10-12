@@ -1,0 +1,52 @@
+# Check of the IR-564 Type-S offset: ai15 (CAL T/C) reads a constant
+# ~1.26 degC below the controller from 45 to 640 degC. The controller
+# can't be powered without heating (lowest setpoint it holds is 45 degC;
+# the mirror runs at 45 degC are the powered comparison), so this run is
+# with the controller off and the blackbody cold:
+#
+#   ROOM_typeS_off: blackbody in this room >= 3-4 h (overnight) first.
+#   0-2 min untouched: ai15 vs the spare K probe (ai1, taped to the
+#   source housing) and the walls. ~1.4 low -> fault in
+#   the ai15 path, controller right; reads room -> the controller side.
+#   2-3 min hold the CAL T/C connector in a hand, 3-5 min released: ai15
+#   moves -> stray junction at the connector.
+#   Afterwards: controller menu for a PV offset / input shift.
+#
+#   CAVITY_typeS (no waiting): the clean spare bead pushed deep into the
+#   cavity near the apex, not touching the cone. The cavity is an
+#   isothermal enclosure, so the bead and the CAL T/C see the same
+#   temperature even while the source is still settling after a move.
+#   ai15 = spare - (0..0.4) -> ai15 right; ~1.4 lower -> ai15 path.
+#
+# CAL T/C output -> green extension -> ai15, as in the mirror session.
+# Hand-on/hand-off times in the notes.
+#
+# Run with:
+#
+#   uv run capa validate --strict configs/experiments/typeS_check.yaml
+#   uv run capa gui configs/experiments/typeS_check.yaml --runs-root runs/blackbody_cal
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 300.0
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+sample:
+  id: ROOM_typeS_off
+  material: IR-564 cavity blackbody, cold, controller off
+  notes: "Room-temperature check of the Type-S offset (ai15 vs room)"
+  extra:
+    hand_on_s: null    # time into the run the connector was gripped
+    hand_off_s: null
+
+tags:
+  - real
+  - calibration
+  - blackbody
+
+hardware: ../hardware/typeS_check.toml
