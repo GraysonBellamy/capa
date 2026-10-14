@@ -133,7 +133,7 @@ Hit **Abort** if any of the following fire:
 
 The procedure's own safety nets (gauge silence, gauge sanity, runaway detector, wall-clock budget) catch most of these eventually. Hitting Abort is the operator-friendly path when you see it sooner than the procedure does.
 
-After an Abort, the procedure's `finally` block drives the heater to `t_safe_c` (default 25 °C). Any accepted targets up to the abort point are preserved in the on-disk artifact.
+After an Abort, the procedure's `finally` block drives the heater to `t_safe_c` (default 0 °C). Any accepted targets up to the abort point are preserved in the on-disk artifact.
 
 ---
 

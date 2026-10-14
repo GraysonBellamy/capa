@@ -874,7 +874,7 @@ class TestHeaterCardSafeCool:
 
     Ships standalone of hold mode — the affordance is generally useful.
     Reads the safe temperature from the active method's Heat-Flux Tune
-    config when present, otherwise falls back to 25 °C.
+    config when present, otherwise falls back to 0 °C.
     """
 
     def test_button_renders_with_fallback_temp_when_no_tune_config(
@@ -896,11 +896,11 @@ class TestHeaterCardSafeCool:
 
         button_texts = [b.text() for b in card.findChildren(QPushButton)]
         assert "Cool to safe" in button_texts
-        # The fallback constant is 25 °C — surfaced in the info label.
+        # The fallback constant is 0 °C — surfaced in the info label.
         from PySide6.QtWidgets import QLabel
 
         info_texts = [lbl.text() for lbl in card.findChildren(QLabel)]
-        assert any("25" in t and "°C" in t for t in info_texts), info_texts
+        assert any("to 0 °C" in t for t in info_texts), info_texts
         _close_pool_sync(controller)
 
     def test_resolve_safe_temp_reads_heat_flux_tune_config(
@@ -910,7 +910,7 @@ class TestHeaterCardSafeCool:
         op_provider: OperatorIdProvider,
     ) -> None:
         """When the active procedure is heat_flux_tune, ``t_safe_c`` from
-        the procedure config wins over the 25 °C fallback."""
+        the procedure config wins over the 0 °C fallback."""
         from capa.ui.manual.cards.watlow import HeaterCard
 
         cfg = _heater_cfg(
@@ -937,7 +937,7 @@ class TestHeaterCardSafeCool:
     ) -> None:
         """A heat_flux_tune procedure config that omits ``t_safe_c``
         (defaulted at validation time, absent from a partial dict) still
-        resolves to the 25 °C fallback rather than raising."""
+        resolves to the 0 °C fallback rather than raising."""
         from capa.ui.manual.cards.watlow import HeaterCard
 
         cfg = _heater_cfg(
@@ -953,7 +953,7 @@ class TestHeaterCardSafeCool:
             operator_provider=op_provider,
         )
         qtbot.addWidget(card)
-        assert card._resolve_safe_temp_c() == 25.0
+        assert card._resolve_safe_temp_c() == 0.0
         _close_pool_sync(controller)
 
     def test_confirmation_rejection_suppresses_dispatch(

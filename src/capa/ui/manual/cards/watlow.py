@@ -83,11 +83,11 @@ channel of this name exists in the active hardware profile — defensive
 UX so the launcher isn't visible on a rig that can't measure flux."""
 
 
-_FALLBACK_SAFE_C: Final[float] = 25.0
+_FALLBACK_SAFE_C: Final[float] = 0.0
 """Safe-cool fallback when the active method has no Heat-Flux Tune config
 to read ``t_safe_c`` from. Matches :attr:`HeatFluxTuneConfig.t_safe_c`'s
 own default — picking a different value would surprise an operator who
-has been seeing 25 °C in the procedure dialogs."""
+has been seeing 0 °C in the procedure dialogs."""
 
 
 class HeaterCard(DeviceCard):
@@ -302,7 +302,7 @@ class HeaterCard(DeviceCard):
 
         Ships independent of hold mode: even without the
         ``hold_at_completion`` flag, this affordance is a generally
-        useful safety control — a faster path than typing 25 into the
+        useful safety control — a faster path than typing 0 into the
         setpoint spinbox.
         """
         body = self.add_section("Safe cool")

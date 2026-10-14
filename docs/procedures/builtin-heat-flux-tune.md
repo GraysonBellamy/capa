@@ -108,7 +108,7 @@ Defaults to a damped secant with a ±25 °C clamp. The `n_iter_max` default of 1
 
 | Field | Unit | Default | Notes |
 |---|---|---|---|
-| `t_safe_c` | °C | 25 | Cooldown setpoint on abort or completion. Must be below `t_set_max_c`; config validation enforces this. |
+| `t_safe_c` | °C | 0 | Cooldown setpoint on abort or completion. Must be below `t_set_max_c`; config validation enforces this. |
 | `hold_at_completion` | bool | `False` | Leave heater at the converged setpoint after a successful single-target tune. Four gates must all pass — see [hold-at-completion](../calibration/heat-flux-tune-procedure.md#hold-at-completion). Refused at config validation for multi-target sessions. |
 | `f_gauge_sanity_max_kw_m2` | kW/m² | 150 | Pre-loop gauge sanity ceiling. Catches calibration-off-by-10× or runaway gauge. **Not** a "must be cold" check — starting with the heater at an intermediate setpoint is supported. |
 
