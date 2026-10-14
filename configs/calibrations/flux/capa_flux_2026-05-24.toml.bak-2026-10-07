@@ -1,0 +1,21 @@
+id = "capa_flux_2026-05-24"
+rig = "capa_real_full"
+heater_device = "heater"
+heater_setpoint_channel = "heater.setpoint"
+heater_pv_channel = "heater.pv"
+flux_channel = "heat_flux_gauge"
+geometry = "40 mm below heater, centerline"
+accepted_at = 2026-05-24 18:14:50.867469+00:00
+procedure_id = "capa.builtin.heat_flux_tune"
+procedure_version = "0.1.0"
+
+[[points]]
+target_flux_kw_m2 = 50.0
+heater_setpoint_c = 726.970337753898
+measured_flux_mean_kw_m2 = 49.904800492603634
+measured_flux_std_kw_m2 = 0.17718712722569072
+measured_flux_slope_kw_m2_per_min = 0.09137477944618944
+heater_pv_mean_c = 726.9612397907554
+soak_s = 1754.5979678
+accepted = true
+accept_reason = "algorithm_converged"

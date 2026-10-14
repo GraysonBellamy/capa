@@ -34,8 +34,8 @@ device_settings:
       max_c: 650.0
     emissivity: 0.95
   visible_cam0:
-    zoom: 265
-    tilt: 5
+    zoom: 270
+    tilt: 7
 tags:
   - real
   - full
