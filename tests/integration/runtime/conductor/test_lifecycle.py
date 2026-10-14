@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from capa.core.databus import DataBus
+from capa.runtime.bridge import BridgePolicy, ThreadBridge
 from capa.runtime.conductor import (
     Conductor,
     NoOpRunner,
@@ -266,6 +267,62 @@ class TestFailures:
             cond.join(timeout=2.0)
             assert result.outcome is RunOutcome.CRASHED
             assert result.final_state is ConductorState.FAILED
+        finally:
+            await pool.close()
+
+    @pytest.mark.parametrize("failure", ["runner_factory", "preflight", "none"])
+    async def test_ui_bridge_closes_on_every_exit_path(self, failure: str) -> None:
+        """The UI drains the UI bridge until end-of-stream, so the
+        conductor must close it however the run ends — including the
+        preparation / preflight failures that never reach SEALED.
+        Otherwise the UI's run task never finishes and the app is stuck
+        "run is active" with Stop/Abort disabled."""
+        adapter = make_fake_adapter("d0", resource_id="sim:d0", tick_period_s=0.005)
+        pool = _build_pool([adapter])
+        await pool.open()
+        try:
+
+            class BadPreflight:
+                async def preflight(self, ctx: RunContext, bus: DataBus) -> None:
+                    raise ValueError("preflight nope")
+
+                async def run(self, ctx: RunContext, bus: DataBus) -> None:
+                    raise AssertionError("never reached")
+
+            def _bad_factory(session: Any, ctx: RunContext) -> Any:
+                # Mirrors a procedure whose config fails validation when
+                # the runner factory instantiates it.
+                raise ValueError("procedure config invalid")
+
+            kwargs: dict[str, Any]
+            if failure == "runner_factory":
+                kwargs = {"runner_factory": _bad_factory}
+            elif failure == "preflight":
+                kwargs = {"runner": BadPreflight()}
+            else:
+                kwargs = {"runner": NoOpRunner(run_for_s=0.05)}
+            cond = Conductor(pool=pool, session=make_fake_session(), **kwargs)
+            bridge: ThreadBridge[Any] = ThreadBridge(
+                name="ui",
+                capacity=64,
+                consumer_loop=asyncio.get_running_loop(),
+                policy=BridgePolicy.DROP_OLDEST,
+            )
+            bridge.attach_consumer()
+            cond.attach_ui_bridge(bridge)
+            cond.start()
+
+            async def _drain() -> None:
+                async for _ in bridge:
+                    pass
+
+            await asyncio.wait_for(_drain(), timeout=5.0)
+            result = await asyncio.wrap_future(cond.result_future)
+            cond.join(timeout=2.0)
+
+            assert bridge.closed
+            expected = ConductorState.SEALED if failure == "none" else ConductorState.FAILED
+            assert result.final_state is expected
         finally:
             await pool.close()
 
