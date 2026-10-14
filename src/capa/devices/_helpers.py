@@ -277,6 +277,18 @@ def serial_resource_id(port: str) -> str:
     return f"serial:{port.strip().upper()}"
 
 
+def hid_resource_id(serial: str | None) -> str:
+    """Return the ``resource_id`` for an adapter on an MCP2221 USB-I2C bridge.
+
+    One bridge is one I2C bus, so every adapter on it shares a worker.
+    ``serial`` is the bridge's USB serial string; ``None`` (the chip's
+    default, serial enumeration disabled) means "the first bridge found"
+    and collapses to ``hid:mcp2221:any`` so two such adapters still share.
+    """
+    body = (serial or "").strip() or "any"
+    return f"hid:mcp2221:{body}"
+
+
 def daqmx_resource_id_from_channels(physical_channels: Iterable[str]) -> str:
     """Return the ``resource_id`` for a DAQmx adapter, derived from its
     physical-channel strings (e.g. ``"cDAQ1Mod1/ai0"``).
@@ -303,6 +315,7 @@ __all__ = [
     "build_channel_sample",
     "channels_for_device",
     "daqmx_resource_id_from_channels",
+    "hid_resource_id",
     "make_accepted_result",
     "make_not_open_result",
     "make_record_id",

@@ -74,6 +74,12 @@ exception: it keeps every setting it takes, through a power cycle.
 
 Written to the balance's runtime menu; never saved with `save_menu`.
 
+### SHT4x ambient sensor (`capa.devices.sht4x`, `capa.devices.sim.sht4x_sim`)
+
+| Field | Values | Notes |
+|---|---|---|
+| `precision` | `high`, `medium`, `low` | Measurement repeatability; changes which measure command the stream sends. The heater is never declarative. |
+
 ### Fuji gas analyzer (`capa.devices.fuji`, `capa.devices.sim.fuji_sim`)
 
 Settings are declared per gas, by the gas the device's `channel_map`

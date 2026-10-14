@@ -139,6 +139,8 @@ binding-kind combobox by likely match.
 | `mass` | Balance reading |
 | `mfc_flow` | Mass flow controller flow value |
 | `gas_concentration` | Concentration of one gas from a gas analyzer (O2, CO2, CO) |
+| `temperature` | Temperature from a sensor that is not a thermocouple or a controller (an SHT4x, an RTD) |
+| `humidity` | Relative humidity from an ambient sensor |
 | `video_visible` | Visible-camera frame stream (no scalar value column) |
 | `video_ir` | IR-camera frame stream |
 | `derived` | Computed from other channels (future derivation registry) |

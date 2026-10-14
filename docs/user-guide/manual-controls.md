@@ -65,8 +65,8 @@ on each adapter's `Capability` flagset. If a device advertises **none**
 of the manual-relevant capabilities (`HAS_TARE`, `HAS_ZERO`,
 `HAS_INTERNAL_CAL`, `HAS_PARAMETER_CONFIG`, `HAS_SETPOINT`,
 `HAS_GAS_SELECT`, `HAS_VALVE_HOLD`, `HAS_TOTALIZER`,
-`HAS_DISPLAY_CONTROL`, `HAS_GAS_CALIBRATION`), the device is skipped
-entirely — no empty card.
+`HAS_DISPLAY_CONTROL`, `HAS_GAS_CALIBRATION`, `HAS_SENSOR_HEATER`), the
+device is skipped entirely — no empty card.
 
 If the worker pool is still **opening** when the dock builds, the cards
 fall back to the adapter-import-string fingerprint (e.g. *sartorius* →
@@ -86,11 +86,12 @@ is named. Change units on the device itself. On firmware that reports
 its setpoint unit, a setpoint sent after the device's unit has changed
 is refused.
 
-The six card classes that ship today:
+The seven card classes that ship today:
 
 | Card | Devices it matches | Common controls |
 |---|---|---|
 | **HeaterCard** | Watlow temperature controllers | Setpoint, Heat-flux tune launcher |
+| **Sht4xCard** | SHT4x ambient sensors | Measurement precision; a confirmed heater pulse (power and duration); soft reset. The subtitle shows the sensor's serial, the bridge revision, the last reading and the heater history |
 | **BalanceCard** | Sartorius balances | Tare, zero, internal cal, filter / auto-zero / display unit / tare behavior, save settings; shows those settings and the last calibration |
 | **AlicatCard** | Alicat MFCs and pressure devices | Flow setpoint, gas select, valve hold, totalizer reset; shows the device's active gas and setpoint |
 | **FujiCard** | Fuji ZP-series gas analyzers | Per gas: response time, range (picked by its span, e.g. `0–25 vol%`) and range method; output hold and hold mode; calibration-gas setting; a guarded zero or span with a live steadiness readout. Everything is named by gas, not channel number, and every field shows the analyzer's current setting |

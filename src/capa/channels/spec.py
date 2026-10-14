@@ -49,6 +49,11 @@ class ChannelKind(StrEnum):
     """Mass flow controller flow value."""
     GAS_CONCENTRATION = "gas_concentration"
     """Concentration of one gas from a gas analyzer (O2, CO2, CO)."""
+    TEMPERATURE = "temperature"
+    """Temperature from a sensor that is not a thermocouple or a controller
+    (a digital ambient sensor, an RTD)."""
+    HUMIDITY = "humidity"
+    """Relative humidity from an ambient sensor."""
     VIDEO_VISIBLE = "video_visible"
     """Visible-camera frame stream (no scalar value column)."""
     VIDEO_IR = "video_ir"
@@ -143,6 +148,19 @@ class FujiChannel(_BindingBase):
     field: Literal["value", "valid"] = "value"
 
 
+class Sht4xReading(_BindingBase):
+    """Selector into one SHT4x ambient-sensor poll (:mod:`capa.devices.sht4x`).
+
+    Every poll measures temperature and relative humidity together; the
+    row carries both plus the raw 16-bit words. ``field`` picks which
+    value the channel carries: ``"temperature"`` in °C or ``"humidity"``
+    in %RH.
+    """
+
+    source: Literal["sht4x_reading"] = "sht4x_reading"
+    field: Literal["temperature", "humidity"]
+
+
 class NIDAQReadingField(_BindingBase):
     """Selector into a polled :class:`nidaqlib.tasks.models.DaqReading`.
 
@@ -190,6 +208,7 @@ SourceBinding = Annotated[
     | WatlowParameter
     | SartoriusReading
     | FujiChannel
+    | Sht4xReading
     | NIDAQReadingField
     | NIDAQBlockChannel
     | DerivedBinding,
@@ -383,6 +402,7 @@ __all__ = [
     "NIDAQBlockChannel",
     "NIDAQReadingField",
     "SartoriusReading",
+    "Sht4xReading",
     "SourceBinding",
     "WatlowParameter",
     "make_identity",

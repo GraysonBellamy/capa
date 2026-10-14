@@ -33,11 +33,13 @@ from capa.devices.camera.base import CameraSpec
 from capa.devices.camera.webcam import WebcamAdapter
 from capa.devices.nidaq import NIDAQAdapter
 from capa.devices.sartorius import SartoriusAdapter
+from capa.devices.sht4x import Sht4xAdapter
 from capa.devices.sim.alicat_sim import AlicatSim
 from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.devices.sim.nidaq_block_sim import NIDAQBlockSim
 from capa.devices.sim.nidaq_polled_sim import NIDAQPolledSim
 from capa.devices.sim.sartorius_sim import SartoriusSim
+from capa.devices.sim.sht4x_sim import Sht4xSim
 from capa.devices.sim.watlow_sim import WatlowSim
 from capa.devices.watlow import WatlowAdapter
 
@@ -56,6 +58,10 @@ def _make_alicat(port: str = "COM7") -> AlicatAdapter:
 
 def _make_sartorius(port: str = "COM4") -> SartoriusAdapter:
     return SartoriusAdapter(name="balance", port=port)
+
+
+def _make_sht4x(serial: str | None = None, name: str = "ambient") -> Sht4xAdapter:
+    return Sht4xAdapter(name=name, serial=serial)
 
 
 def _nidaq_channel(physical_channel: str) -> dict[str, Any]:
@@ -111,6 +117,10 @@ def _make_sartorius_sim(name: str = "balance") -> SartoriusSim:
     return SartoriusSim(name=name)
 
 
+def _make_sht4x_sim(name: str = "ambient") -> Sht4xSim:
+    return Sht4xSim(name=name)
+
+
 def _make_nidaq_polled_sim(name: str = "cdaq1") -> NIDAQPolledSim:
     return NIDAQPolledSim(name=name, task="tc_task")
 
@@ -138,11 +148,13 @@ ALL_FACTORIES: list[tuple[str, Callable[[], object]]] = [
     ("watlow", _make_watlow),
     ("alicat", _make_alicat),
     ("sartorius", _make_sartorius),
+    ("sht4x", _make_sht4x),
     ("nidaq", _make_nidaq),
     ("webcam", _make_webcam),
     ("watlow_sim", _make_watlow_sim),
     ("alicat_sim", _make_alicat_sim),
     ("sartorius_sim", _make_sartorius_sim),
+    ("sht4x_sim", _make_sht4x_sim),
     ("nidaq_polled_sim", _make_nidaq_polled_sim),
     ("nidaq_block_sim", _make_nidaq_block_sim),
     ("flir_ir_sim", _make_flir_ir_sim),
@@ -159,7 +171,7 @@ def test_adapter_exposes_nonempty_stable_resource_id(factory: Callable[[], objec
     assert rid1 == rid2, "resource_id must be stable across calls"
     assert ":" in rid1, f"resource_id {rid1!r} must follow '<scheme>:<body>' convention"
     scheme = rid1.split(":", 1)[0]
-    assert scheme in {"serial", "daqmx", "webcam", "sim"}, (
+    assert scheme in {"serial", "daqmx", "hid", "webcam", "sim"}, (
         f"unexpected resource_id scheme {scheme!r} in {rid1!r}"
     )
 
@@ -217,6 +229,31 @@ def test_watlow_resource_id_strips_whitespace() -> None:
     a = _make_watlow(port="COM6")
     b = _make_watlow(port=" COM6 ")
     assert a.resource_id == b.resource_id
+
+
+# ---------------------------------------------------------------------------
+# MCP2221 bridge sharing
+# ---------------------------------------------------------------------------
+
+
+def test_two_sht4x_adapters_without_a_bridge_serial_share_a_worker() -> None:
+    """With serial enumeration off (the chip's default) every adapter opens
+    "the first bridge", which is one bus: they must share a worker."""
+    a = _make_sht4x(name="ambient")
+    b = _make_sht4x(name="enclosure")
+    assert a.resource_id == b.resource_id == "hid:mcp2221:any"
+
+
+def test_sht4x_adapters_on_different_bridges_have_distinct_resource_ids() -> None:
+    a = _make_sht4x(serial="0006774894")
+    b = _make_sht4x(serial="0006774895")
+    assert a.resource_id == "hid:mcp2221:0006774894"
+    assert a.resource_id != b.resource_id
+
+
+def test_sht4x_resource_id_strips_whitespace_and_treats_blank_as_any() -> None:
+    assert _make_sht4x(serial=" 0006774894 ").resource_id == "hid:mcp2221:0006774894"
+    assert _make_sht4x(serial="   ").resource_id == "hid:mcp2221:any"
 
 
 # ---------------------------------------------------------------------------

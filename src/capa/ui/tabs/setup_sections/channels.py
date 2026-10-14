@@ -84,7 +84,7 @@ def _compose_reads_from(source: object) -> str:
         if device:
             return f"{device}.{param} (loop {instance})"
         return f"({variant})"
-    if variant in ("alicat_frame_field", "sartorius_reading"):
+    if variant in ("alicat_frame_field", "sartorius_reading", "sht4x_reading"):
         field = source.get("field") or "?"
         if device:
             return f"{device}.{field}"
@@ -126,6 +126,7 @@ _VARIANT_LABELS: dict[str, str] = {
     "alicat_frame_field": "Alicat frame field",
     "sartorius_reading": "Sartorius reading",
     "fuji_channel": "Fuji analyzer channel",
+    "sht4x_reading": "SHT4x reading",
     "nidaq_reading_field": "NI-DAQ reading field",
     "nidaq_block_channel": "NI-DAQ block channel",
     "derived": "Derived expression",
@@ -156,6 +157,7 @@ _VARIANT_FIELDS: dict[str, tuple[tuple[str, str, type, str | None], ...]] = {
         ("channel", "Channel", str, "fuji_channels"),
         ("field", "Field", str, "fuji_fields"),
     ),
+    "sht4x_reading": (("field", "Field", str, "sht4x_fields"),),
     "nidaq_reading_field": (
         ("task", "Task", str, "nidaq_tasks"),
         ("field", "Field", str, "nidaq_fields"),
@@ -610,6 +612,8 @@ class _SourceBindingEditor(QWidget):
         if key == "fuji_fields":
             # The concentration, or 1/0 for whether the reading is live.
             return ["value", "valid"]
+        if key == "sht4x_fields":
+            return ["temperature", "humidity"]
         if key is None or not self._nidaq_declared:
             return None
         device_name = self._device_combo.currentData()

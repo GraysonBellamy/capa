@@ -49,6 +49,10 @@ from capa.ui.manual.cards.fuji import (
     FujiCard,
     is_fuji_device,
 )
+from capa.ui.manual.cards.sht4x import (
+    Sht4xCard,
+    is_sht4x_device,
+)
 from capa.ui.manual.cards.watlow import (
     HeaterCard,
     is_heater_device,
@@ -138,6 +142,7 @@ class ManualControlDock(QDockWidget):
             Capability.HAS_TOTALIZER,
             Capability.HAS_DISPLAY_CONTROL,
             Capability.HAS_GAS_CALIBRATION,
+            Capability.HAS_SENSOR_HEATER,
         ]
 
         any_added = False
@@ -182,6 +187,12 @@ class ManualControlDock(QDockWidget):
                 )
             elif is_fuji_device(dev):
                 card = FujiCard(
+                    spec=dev,
+                    controller=self._controller,
+                    operator_provider=self._operator_provider,
+                )
+            elif is_sht4x_device(dev):
+                card = Sht4xCard(
                     spec=dev,
                     controller=self._controller,
                     operator_provider=self._operator_provider,

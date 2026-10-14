@@ -30,6 +30,7 @@ The shipped adapters are also the best learning resource:
 | Sartorius | [`src/capa/devices/sartorius.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sartorius.py) | Stability flag and the cold-open race. |
 | Fuji | [`src/capa/devices/fuji.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/fuji.py) | Error rows that keep their columns, a validity state per reading, a unit check that quarantines, tiered writes, and a long-running operation owned by one task across several commands. |
 | NI-DAQ | [`src/capa/devices/nidaq.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/nidaq.py) | Hardware-clocked task, polled vs block mode, `HARDWARE_CLOCKED`/`EMITS_BLOCKS`. |
+| SHT4x | [`src/capa/devices/sht4x.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sht4x.py) | The smallest real adapter: a protocol owned in-tree, blocking I/O off-loaded with `anyio.to_thread.run_sync`, a poll loop paced by the run clock, error rows that keep their columns. |
 
 Read the family closest to yours before opening this page's contract section.
 
@@ -146,6 +147,7 @@ The format is `<scheme>:<body>` where `scheme` is one of:
 | Scheme | Body | Used by |
 |---|---|---|
 | `serial` | port name | watlow, alicat, sartorius, fuji |
+| `hid` | `mcp2221:<bridge serial or any>` | sht4x |
 | `daqmx` | chassis/device name | nidaq |
 | `webcam` | serial number | webcam |
 | `sim` | adapter-chosen name | simulators |

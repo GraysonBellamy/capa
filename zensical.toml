@@ -104,6 +104,7 @@ nav = [
             { "Sartorius balance" = "devices/sartorius.md" },
             { "Fuji gas analyzer" = "devices/fuji.md" },
             { "NI-DAQ" = "devices/nidaq.md" },
+            { "SHT4x ambient sensor" = "devices/sht4x.md" },
             { "USB webcams" = "devices/cameras-webcam.md" },
             { "FLIR IR cameras" = "devices/cameras-flir.md" },
             { Simulators = "devices/simulators.md" },

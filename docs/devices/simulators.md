@@ -118,6 +118,7 @@ them apart by feature surface.
 | [`capa.devices.sim.alicat_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/alicat_sim.py) | [Alicat](alicat.md) | `wide_row` | `{"<Frame_Field>": spec}` | Flow plots, gas-select UI, totalizer surfaces, applying a declared gas. |
 | [`capa.devices.sim.sartorius_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/sartorius_sim.py) | [Sartorius](sartorius.md) | `single_value_row` | single `mass_signal` spec | Mass loss curves, tare/zero plumbing, stability flag propagation, the menu settings. |
 | [`capa.devices.sim.fuji_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/fuji_sim.py) | [Fuji](fuji.md) | `wide_row` | `{"<CHn>": spec}`, in vol% | Gas plots, validity states, the settings verbs, a zero or span from the manual card. |
+| [`capa.devices.sim.sht4x_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/sht4x_sim.py) | [SHT4x](sht4x.md) | `wide_row` | `temperature_signal` and `humidity_signal` specs, both optional | Ambient plots, the precision setting, a heater pulse's perturbation. |
 | [`capa.devices.sim.nidaq_polled_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/nidaq_polled_sim.py) | [NI-DAQ polled](nidaq.md#polled-mode) | `wide_row` | `{"<channel>": spec}` | TC channels, polled binding kind. |
 | [`capa.devices.sim.nidaq_block_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/nidaq_block_sim.py) | [NI-DAQ block](nidaq.md#hardware-clocked-block-mode) | `block` | `{"<channel>": spec}` | Block sidecar, kHz path, downsampled channels. |
 | [`capa.devices.sim.flir_ir_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/flir_ir_sim.py) | [FLIR IR](cameras-flir.md) | `FrameReceipt` (camera path) | n/a — synthetic gradient frames | Camera-task wiring, manifest `cameras` block, frame-index parquet round-trip without an Atlas install. |
@@ -148,8 +149,11 @@ applying them and reading them back works the same as on hardware:
   ranges are in vol%: one per gas, two for O2 (0–25 and 0–10 vol%). As
   on the analyzer, `set_range` is refused unless the range method is
   manual.
+- **`sht4x_sim`** keeps the measurement precision and its heater
+  history. A `heater_pulse` adds a warm offset that decays over ten
+  seconds and is held to the same duty cycle as the real sensor.
 
-All four answer `read_state_snapshot()` like their real adapters, so
+All five answer `read_state_snapshot()` like their real adapters, so
 the manual cards show the simulated state.
 
 ## Sim-only environment flags

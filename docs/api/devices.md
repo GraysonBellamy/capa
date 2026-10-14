@@ -18,7 +18,8 @@ and cameras through the same lifecycle.
 - Per-family pages: [Watlow](../devices/watlow.md),
   [Alicat](../devices/alicat.md), [Sartorius](../devices/sartorius.md),
   [Fuji](../devices/fuji.md),
-  [NI-DAQ](../devices/nidaq.md), [Webcams](../devices/cameras-webcam.md),
+  [NI-DAQ](../devices/nidaq.md), [SHT4x](../devices/sht4x.md),
+  [Webcams](../devices/cameras-webcam.md),
   [FLIR](../devices/cameras-flir.md),
   [Simulators](../devices/simulators.md).
 - [Writing a device adapter](../extending/writing-a-device-adapter.md) —

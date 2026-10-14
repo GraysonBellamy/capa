@@ -60,6 +60,17 @@ def _fuji_channel_binding(channel: str, field: str = "value") -> Callable[[str],
     return _factory
 
 
+def _sht4x_reading_binding(field: str) -> Callable[[str], dict[str, object]]:
+    def _factory(device_name: str) -> dict[str, object]:
+        return {
+            "source": "sht4x_reading",
+            "device": device_name,
+            "field": field,
+        }
+
+    return _factory
+
+
 def _nidaq_reading_binding(task: str, field: str) -> Callable[[str], dict[str, object]]:
     def _factory(device_name: str) -> dict[str, object]:
         return {
@@ -163,6 +174,30 @@ FUJI_O2 = ChannelTemplate(
     plot_group="gases",
 )
 
+SHT4X_AMBIENT_TEMPERATURE = ChannelTemplate(
+    id="sht4x.ambient_temperature",
+    label="Ambient temperature from SHT4x",
+    kind="temperature",
+    source_factory=_sht4x_reading_binding("temperature"),
+    default_unit="degC",
+    default_derived_unit="degC",
+    default_calibration={"kind": "identity", "input_unit": "degC", "output_unit": "degC"},
+    capa_group="ambient_temperature",
+    plot_group="ambient",
+)
+
+SHT4X_AMBIENT_HUMIDITY = ChannelTemplate(
+    id="sht4x.ambient_humidity",
+    label="Ambient relative humidity from SHT4x",
+    kind="humidity",
+    source_factory=_sht4x_reading_binding("humidity"),
+    default_unit="percent",
+    default_derived_unit="percent",
+    default_calibration={"kind": "identity", "input_unit": "percent", "output_unit": "percent"},
+    capa_group="ambient_humidity",
+    plot_group="ambient",
+)
+
 NIDAQ_THERMOCOUPLE = ChannelTemplate(
     id="nidaq.thermocouple",
     label="Thermocouple from NI-DAQ task",
@@ -183,6 +218,8 @@ __all__ = [
     "FUJI_O2",
     "NIDAQ_THERMOCOUPLE",
     "SARTORIUS_MASS",
+    "SHT4X_AMBIENT_HUMIDITY",
+    "SHT4X_AMBIENT_TEMPERATURE",
     "WATLOW_HEATER_PV",
     "WATLOW_HEATER_SETPOINT",
 ]

@@ -136,7 +136,7 @@ def test_save_now_writes_external_layout(tmp_path: Path) -> None:
     # Reload and confirm the clone carries devices + channels.
     reloaded = ConfigDocument.load(spec.experiment_path)
     devices = reloaded.hardware_payload["devices"]
-    assert {d["name"] for d in devices} == {"heater", "purge_mfc", "balance", "cdaq1"}
+    assert {d["name"] for d in devices} == {"heater", "purge_mfc", "balance", "cdaq1", "ambient"}
     channels = reloaded.hardware_payload["channels"]
     names = {ch["name"] for ch in channels}
     assert "heater.pv" in names

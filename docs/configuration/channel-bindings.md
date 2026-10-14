@@ -25,6 +25,7 @@ The shape of that row depends on the library:
 | `alicatlib` | one wide row per poll (many fields) | field name |
 | `sartoriuslib` | one single-value row per balance reading | field name (defaults to `value`) |
 | `fujilib` | one wide row per poll (every analyzer channel) | analyzer channel + field (defaults to `value`) |
+| SHT4x (in-tree) | one wide row per poll (temperature and humidity) | field: `temperature` or `humidity` |
 | `nidaqlib` (polled) | one wide row per read (channel ↦ value) | task name + field name |
 | `nidaqlib` (hardware-clocked) | rectangular `(channels, samples)` block | task name + channel name |
 | n/a (derived) | computed from other channels | dependency list + expression id |
@@ -33,9 +34,9 @@ See [Devices overview — emission
 shapes](../devices/overview.md#emission-shapes) for the picture of how
 each library lays out its rows.
 
-## The seven binding kinds
+## The eight binding kinds
 
-Every binding is one of seven discriminated variants. The `source` field
+Every binding is one of eight discriminated variants. The `source` field
 picks which model applies; Pydantic refuses any other value at load
 time.
 
@@ -129,6 +130,25 @@ A sample's `status` carries the reading's validity state, but nothing
 in capa acts on `status`. Bind a second channel with `field = "valid"`
 when an alarm or a procedure has to watch validity. See [Fuji § The
 validity state](../devices/fuji.md#the-validity-state).
+
+### `sht4x_reading`
+
+Selects one of the two values an [SHT4x ambient
+sensor](../devices/sht4x.md) measures per poll. The row carries
+`temperature_c`, `humidity_pct`, both raw words, the precision and error
+fields; there is no default field, since neither value is the obvious one.
+
+| Field | Type | Required | Notes |
+|---|---|:-:|---|
+| `device` | str | yes | The SHT4x device name. |
+| `field` | str | yes | `"temperature"` (°C) or `"humidity"` (%RH). |
+
+```toml
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "humidity"
+```
 
 ### `nidaq_reading_field`
 
@@ -312,6 +332,8 @@ lives in
 | `mass` | `sartorius_reading` |
 | `mfc_flow` | `alicat_frame_field` |
 | `gas_concentration` | `fuji_channel`, `nidaq_reading_field` |
+| `temperature` | `sht4x_reading`, `nidaq_reading_field`, `watlow_parameter` |
+| `humidity` | `sht4x_reading` |
 | `analog_in` | `nidaq_reading_field`, `nidaq_block_channel` |
 | `derived` | `derived` |
 
