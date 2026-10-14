@@ -9,6 +9,7 @@ integration test (separate module).
 from __future__ import annotations
 
 import math
+import random
 from datetime import UTC, datetime
 
 import pytest
@@ -327,7 +328,7 @@ def test_rolling_window_is_warm_handles_sample_period_boundary() -> None:
     # span peaks at window_s - period (eviction removes the sample at
     # the cutoff so the oldest retained sample sits one period inside).
     # A naive ``span >= window_s`` check therefore never fires; is_warm
-    # uses the in-window average period as the slop.
+    # measures elapsed time since the first push instead.
     w = RollingWindow(window_s=60.0)
     t = 0.0
     while t <= 120.0:
@@ -335,6 +336,26 @@ def test_rolling_window_is_warm_handles_sample_period_boundary() -> None:
         t += 0.2
     assert w.span_s() < 60.0  # span tops out at 59.8 s
     assert w.is_warm(60.0) is True
+
+
+def test_rolling_window_is_warm_stays_warm_under_timestamp_jitter() -> None:
+    # Rig case: 3 Hz software-timed DAQ, 180 s window -> exactly 540
+    # periods, so the oldest sample straddles the eviction cutoff and
+    # the window flips between 540 and 541 samples on jitter alone.
+    # Once warm, the window must stay warm until cleared — a single
+    # not-warm poll resets the predicate's dwell timer.
+    rng = random.Random(0)
+    w = RollingWindow(window_s=180.0)
+    first_warm: int | None = None
+    for k in range(3 * 400):
+        w.push(k / 3.0 + rng.uniform(-0.005, 0.005), 50.0)
+        if first_warm is None:
+            if w.is_warm(180.0):
+                first_warm = k
+        else:
+            assert w.is_warm(180.0) is True, f"window went cold at sample {k}"
+    assert first_warm is not None
+    assert first_warm == pytest.approx(540, abs=2)
 
 
 def test_rolling_window_is_warm_false_during_warmup() -> None:

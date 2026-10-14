@@ -388,7 +388,7 @@ class HeatFluxTuneConfig(BaseModel):
     )
 
     t_safe_c: float = Field(
-        default=25.0,
+        default=0.0,
         ge=0,
         json_schema_extra={
             "capa_unit": "°C",

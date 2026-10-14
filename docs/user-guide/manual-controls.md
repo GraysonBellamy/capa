@@ -155,7 +155,7 @@ dispatch immediately on click.
 
 A confirmation in flight:
 
-![Confirmation dialog: "Drive heater to 25 °C? The current setpoint will be overwritten." with OK / Cancel buttons.](../_snippets/images/manual-confirm-dialog.png)
+![Confirmation dialog: "Drive heater to 0 °C? The current setpoint will be overwritten." with OK / Cancel buttons.](../_snippets/images/manual-confirm-dialog.png)
 
 ---
 

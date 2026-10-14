@@ -92,11 +92,14 @@ class RollingWindow:
     window_s: float
     hampel_k: float = 3.0
     _samples: deque[tuple[float, float]] = field(default_factory=deque)
+    _first_t_s: float | None = None
 
     def push(self, t_s: float, value: float) -> None:
         """Append a new sample to the ring (overwrites oldest slot when full)."""
         if not math.isfinite(value):
             return
+        if self._first_t_s is None:
+            self._first_t_s = t_s
         self._samples.append((t_s, value))
         cutoff = t_s - self.window_s
         while self._samples and self._samples[0][0] < cutoff:
@@ -113,6 +116,7 @@ class RollingWindow:
         last secant step for up to ``window_s`` seconds.
         """
         self._samples.clear()
+        self._first_t_s = None
 
     def span_s(self) -> float:
         """Time span (s) covered by the oldest and newest samples in the ring."""
@@ -123,19 +127,18 @@ class RollingWindow:
     def is_warm(self, target_window_s: float) -> bool:
         """Return True once enough wall time has elapsed since the first push.
 
-        ``span_s()`` is bounded above by ``window_s`` minus one sample
-        period — the oldest retained sample sits one period *inside*
-        the eviction cutoff — so a naive ``span >= window_s`` check can
-        never fire at non-trivial sample rates. Use the in-window
-        average period as the slop term: at steady state
-        ``span + period`` straddles ``window_s`` from below.
+        Measured from the first sample pushed since construction or the
+        last :meth:`clear`, not from the current ``span_s()``. After
+        eviction the span hovers within one sample period of
+        ``window_s`` — when ``window_s`` is a whole number of periods
+        (180 s at 3 Hz) the oldest sample straddles the cutoff and
+        timestamp jitter alone flips a span-based check on and off,
+        resetting the predicate's dwell timer. Elapsed-since-first-push
+        is monotonic, so once warm the window stays warm until cleared.
         """
-        n = len(self._samples)
-        if n < 2:
+        if self._first_t_s is None or not self._samples:
             return False
-        span = self._samples[-1][0] - self._samples[0][0]
-        avg_period = span / (n - 1) if n > 1 else 0.0
-        return span + avg_period >= target_window_s
+        return self._samples[-1][0] - self._first_t_s >= target_window_s
 
     def _keep_pairs(self) -> list[tuple[float, float]]:
         pairs = list(self._samples)

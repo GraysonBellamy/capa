@@ -43,7 +43,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
@@ -690,6 +690,15 @@ class Conductor:
         finally:
             self._ended_mono_ns = time.monotonic_ns()
             self._publish_result()
+            # Close the UIBridge last, on every exit path — including the
+            # preparation / preflight failures that return before SEALED —
+            # so the UI drain task sees end-of-stream (sentinel) and the
+            # UI's run task ends. Missing this left the UI stuck "active"
+            # after a failed run. `close()` is idempotent; RuntimeError
+            # means the UI loop is already gone and nobody is listening.
+            if self._ui_bridge is not None:
+                with suppress(RuntimeError):
+                    self._ui_bridge.close()
             try:
                 loop.close()
             finally:
@@ -896,12 +905,6 @@ class Conductor:
             self._session_closed = True
 
             self._transition(ConductorState.SEALED)
-
-            # Close the UIBridge last so the UI drain task sees end-of-stream
-            # (sentinel) and exits cleanly. The UI may have already torn down
-            # its drain on window close — `close()` is idempotent.
-            if self._ui_bridge is not None and not self._ui_bridge.closed:
-                self._ui_bridge.close()
 
     async def _drain_worker(self, resource_id: str, bridge: ThreadBridge[WorkerEmission]) -> None:
         """One drain coroutine per worker bridge.

@@ -105,7 +105,7 @@ def _default_acquire() -> AcquireStep:
 
 
 def _default_safe_shutdown() -> SafeShutdownStep:
-    return SafeShutdownStep(cool_target={"heater.setpoint": 25.0})
+    return SafeShutdownStep(cool_target={"heater.setpoint": 0.0})
 
 
 def _default_custom() -> CustomStep:

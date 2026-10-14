@@ -361,6 +361,18 @@ class TestParams:
         assert p.parameters == ("process_value", "setpoint")
         assert p.instances == (1,)
         assert p.identify_on_open is True
+        assert p.profile == "ezzone"
+        assert p.device_profile().name == "ezzone"
+
+    def test_f4p_profile(self) -> None:
+        p = WatlowAdapterParams(
+            port="COM8", address=10, protocol="modbus_rtu", baudrate=19200, profile="f4p"
+        )
+        assert p.device_profile().name == "f4p"
+
+    def test_unknown_profile_rejected(self) -> None:
+        with pytest.raises(Exception):
+            WatlowAdapterParams(port="COM8", profile="f4")  # type: ignore[arg-type]
 
     def test_to_serial_settings(self) -> None:
         p = WatlowAdapterParams(

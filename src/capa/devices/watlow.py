@@ -35,6 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from watlowlib import (
     Controller,
     DeviceInfo,
+    DeviceProfile,
     OverflowPolicy,
     ProtocolKind,
     Reading,
@@ -119,6 +120,14 @@ class WatlowAdapterParams(BaseModel):
     """Wire protocol. ``auto`` runs the conservative detector
     from watlowlib; pin one in production."""
 
+    profile: Literal["ezzone", "series_sd", "f4p"] = "ezzone"
+    """watlowlib device profile: ``ezzone`` (EZ-ZONE PM, the rig heater),
+    ``series_sd`` (Series SD) or ``f4p`` (Series F4P, the controller in the
+    IR-564 blackbody's IR-301; read-only in watlowlib). It picks the
+    parameter registry and identity sequence. ``protocol`` and the serial
+    framing are still taken from this config, so set them to match the
+    family (F4P: ``modbus_rtu`` at 19200)."""
+
     baudrate: int = 38400
     parity: Literal["none", "even", "odd"] = "none"
     stopbits: Literal[1, 2] = 1
@@ -200,6 +209,10 @@ class WatlowAdapterParams(BaseModel):
     def protocol_kind(self) -> ProtocolKind:
         """Wire protocol family (e.g. ``"sbi"``, ``"sbi-pid"``) for this controller."""
         return _PROTOCOL_BY_NAME[self.protocol]
+
+    def device_profile(self) -> DeviceProfile:
+        """The :class:`watlowlib.DeviceProfile` named by :attr:`profile`."""
+        return watlowlib.profile_named(self.profile)
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +402,8 @@ class WatlowAdapter:
                 # itself useful state (it tells the snapshot we tried). Note
                 # this is diagnostic only — the wire-side tag on Sample.unit
                 # comes from ``wire_temperature_unit``, not this label.
+                # On a non-PM profile (no 17050 row) this returns ``None``
+                # without touching the wire.
                 self._display_unit = await self._controller.read_comms_unit_label()
         except WatlowError as exc:
             await self._safe_close_controller()
@@ -840,6 +855,7 @@ class WatlowAdapter:
             return await self._controller_factory()
         return await watlowlib.open_device(
             self.params.port,
+            profile=self.params.device_profile(),
             protocol=self.params.protocol_kind(),
             address=self.params.address,
             serial_settings=self.params.to_serial_settings(),
@@ -1029,6 +1045,7 @@ async def handshake(params: dict[str, Any]) -> str:
     try:
         controller = await watlowlib.open_device(
             parsed.port,
+            profile=parsed.device_profile(),
             protocol=parsed.protocol_kind(),
             address=parsed.address,
             serial_settings=parsed.to_serial_settings(),
