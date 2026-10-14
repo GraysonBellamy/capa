@@ -131,6 +131,10 @@ class Capability(Flag):
     """Adapter drives a zero or span calibration against a gas the operator
     supplies and names (Fuji gas analyzer). Manual-override territory: it
     overwrites the calibration, and is right only if that gas is flowing."""
+    HAS_SENSOR_HEATER = auto()
+    """Adapter exposes a sensor's built-in conditioning heater (SHT4x). A
+    pulse warms the element for up to a second and skews its reading for
+    a while after; manual-override territory, never mid-measurement."""
 
 
 class DeviceCommand(BaseModel):
@@ -207,9 +211,10 @@ class DeviceAdapter(Protocol):
         that do not share a resource MUST expose different ``resource_id``\\ s.
 
         Format is ``<scheme>:<body>`` where ``scheme`` is one of:
-        ``serial``, ``daqmx``, ``webcam``, ``sim``. The body is whatever
-        identifies the resource within that scheme (port name, device/chassis
-        name, serial number). The string is stable across calls and computed
+        ``serial``, ``daqmx``, ``hid``, ``webcam``, ``sim``. The body is
+        whatever identifies the resource within that scheme (port name,
+        device/chassis name, USB bridge, serial number). The string is
+        stable across calls and computed
         from constructor inputs without I/O — it must be safe to read before
         :meth:`open` has been called."""
         ...

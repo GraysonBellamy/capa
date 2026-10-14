@@ -47,6 +47,9 @@ dependencies = [
     "sartoriuslib>=0.4.3,<0.5",
     "nidaqlib>=0.3.0,<0.4",
     "fujilib>=0.2.0,<0.3",
+    # HID transport for the MCP2221 USB-I2C bridge behind the SHT4x
+    # ambient sensor (capa.devices.sht4x). Wheels bundle libhidapi.
+    "hidapi>=0.14",
     "pyside6>=6.7",
     "qasync>=0.27",
     "pyqtgraph>=0.13",
@@ -217,6 +220,12 @@ ignore_missing_imports = true
 # validation; silencing the missing-import warning lets the wrapper stay typed.
 [[tool.mypy.overrides]]
 module = ["nidaqmx", "nidaqmx.*"]
+ignore_missing_imports = true
+
+# hidapi (import name ``hid``) is a Cython extension without stubs; the
+# MCP2221 transport types its own handle Protocol around it.
+[[tool.mypy.overrides]]
+module = ["hid"]
 ignore_missing_imports = true
 
 # duvc-ctl ships py.typed but only as a Windows-only wheel. On Linux/macOS

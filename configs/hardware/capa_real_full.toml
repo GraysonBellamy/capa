@@ -103,6 +103,18 @@ terminal_config = "DIFF"
 adc_timing_mode = "HIGH_RESOLUTION"
 auto_zero_mode = "EVERY_SAMPLE"
 
+[[devices]]
+name = "ambient"
+adapter = "capa.devices.sht4x"
+on_failure = "warn"
+
+[devices.params]
+i2c_address = 0x44
+precision = "high"
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
 [[cameras]]
 name = "visible_cam0"
 adapter = "capa.devices.camera.webcam"
@@ -315,3 +327,45 @@ output_unit = "g"
 
 [channels.metadata]
 capa_group = "mass"
+
+# --- Ambient air (SHT4x on the MCP2221 bridge; optional) ---
+
+[[channels]]
+name = "ambient.temperature"
+kind = "temperature"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "temperature"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[channels.metadata]
+capa_group = "ambient_temperature"
+
+[[channels]]
+name = "ambient.humidity"
+kind = "humidity"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "humidity"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[channels.metadata]
+capa_group = "ambient_humidity"

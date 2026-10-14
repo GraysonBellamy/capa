@@ -117,6 +117,13 @@ def build_device_payload_from_row(
         # confirms or corrects it in the device detail pane.
         if isinstance(row.get("channel_map"), dict):
             params["channel_map"] = dict(row["channel_map"])
+    elif family == "sht4x":
+        # The bridge's USB serial is only known when the chip exposes one;
+        # without it the adapter opens the first bridge found.
+        if row.get("serial"):
+            params["serial"] = row["serial"]
+        if "i2c_address" in row:
+            params["i2c_address"] = row["i2c_address"]
     elif family == "nidaq" and row.get("device"):
         # NI-DAQ discover returns devices, not channels — operator
         # fills the channel list separately in the device detail pane.
@@ -218,6 +225,15 @@ def _summarise_row(family: str, row: dict[str, Any]) -> str:
             bits.append(str(row["model"]))
         if row.get("serial"):
             bits.append(f"sn={row['serial']}")
+        return "  ".join(bits) or "(no identity)"
+    if family == "sht4x":
+        bits = []
+        if row.get("serial"):
+            bits.append(f"bridge sn={row['serial']}")
+        if row.get("i2c_address") is not None:
+            bits.append(f"addr=0x{int(row['i2c_address']):02x}")
+        if row.get("sensor_serial"):
+            bits.append(f"sensor sn={row['sensor_serial']}")
         return "  ".join(bits) or "(no identity)"
     if family == "nidaq":
         bits = []

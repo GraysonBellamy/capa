@@ -41,6 +41,8 @@ CAPA_REQUIRED_GROUPS: dict[str, tuple[str, ...]] = {
 # Optional groups — surfaced for completeness but never block Apply.
 CAPA_OPTIONAL_GROUPS: dict[str, tuple[str, ...]] = {
     "reactive_gas_flow": ("mfc_flow",),
+    "ambient_temperature": ("temperature", "tc", "analog_in"),
+    "ambient_humidity": ("humidity", "analog_in"),
 }
 
 SPECIMEN_SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (

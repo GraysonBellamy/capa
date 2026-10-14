@@ -26,15 +26,15 @@ def _make_section(qtbot: Any) -> tuple[HardwareGlanceSection, SetupDraft]:
 def test_glance_summarises_counts(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
     text = section._summary.text()
-    assert "4 device(s)" in text
-    assert "6 channel(s)" in text
+    assert "5 device(s)" in text
+    assert "8 channel(s)" in text
     assert "1 camera(s)" in text
 
 
 def test_glance_populates_tables(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
-    assert section._devices_model.rowCount() == 4
-    assert section._channels_model.rowCount() == 6
+    assert section._devices_model.rowCount() == 5
+    assert section._channels_model.rowCount() == 8
     assert section._cameras_model.rowCount() == 1
 
 

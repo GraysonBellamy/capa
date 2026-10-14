@@ -43,7 +43,7 @@ def _tab(qtbot: Any, controller: Any = None) -> tuple[SetupTab, DeviceSettingsSe
 def test_one_form_per_device_that_declares_settings(qtbot: Any) -> None:
     _, section = _tab(qtbot)
     # The heater (Watlow) and the NI-DAQ have no declarable settings.
-    assert list(section._forms) == ["purge_mfc", "balance", "ir_cam0"]
+    assert list(section._forms) == ["purge_mfc", "balance", "ambient", "ir_cam0"]
 
 
 def test_payload_round_trips_the_declared_settings(qtbot: Any) -> None:

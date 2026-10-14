@@ -1,0 +1,37 @@
+# Free-run experiment against a real SHT4x ambient sensor on an MCP2221.
+#
+# Records lab air temperature and relative humidity at 1 Hz into both
+# ``device_records/sht4x.parquet`` (one wide row per poll: both values,
+# both raw words, latency) and ``scalars.parquet`` (calibrated
+# ChannelSamples). The bundle's manifest captures the sensor serial and
+# the bridge revision at run-start.
+#
+# Run with:
+#
+#   capa validate --strict configs/experiments/sht4x_real_freerun.yaml
+#   capa run --headless     configs/experiments/sht4x_real_freerun.yaml
+#
+# With one MCP2221 on the PC nothing in ``configs/hardware/sht4x_real.toml``
+# needs adjusting; set ``serial`` there once a second bridge appears.
+
+procedure:
+  id: capa.builtin.free_run
+  version: "0.1"
+  config:
+    duration_s: 30.0
+
+operator:
+  id: abr
+  display_name: A. Researcher
+
+sample:
+  id: SHT4X-REAL-001
+  material: none
+  notes: "Real-hardware ambient sensor free run"
+
+tags:
+  - real
+  - sht4x
+  - freerun
+
+hardware: ../hardware/sht4x_real.toml

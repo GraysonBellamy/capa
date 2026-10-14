@@ -28,12 +28,18 @@ emissions onto capa's universal `DeviceAdapter` contract.
 | Sartorius lab balances | [`sartoriuslib`](https://github.com/GraysonBellamy/sartoriuslib) | [`capa.devices.sartorius`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sartorius.py) | `capa.devices.sim.sartorius_sim` |
 | Fuji ZP-series gas analyzers | [`fujilib`](https://github.com/GraysonBellamy/fujilib) | [`capa.devices.fuji`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/fuji.py) | `capa.devices.sim.fuji_sim` |
 | NI cDAQ / DAQmx | [`nidaqlib`](https://github.com/GraysonBellamy/nidaqlib) | [`capa.devices.nidaq`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/nidaq.py) | `capa.devices.sim.nidaq_polled_sim`, `nidaq_block_sim` |
+| Sensirion SHT4x ambient sensor | in-tree ([`hidapi`](https://pypi.org/project/hidapi/) + [`capa.devices._mcp2221`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/_mcp2221.py)) | [`capa.devices.sht4x`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sht4x.py) | `capa.devices.sim.sht4x_sim` |
+
+The SHT4x is the one exception to the sibling-library rule: a two-value
+read-only sensor whose whole protocol is six commands, so the driver
+lives in capa and would be promoted to a library only if a second I2C
+device or a second consumer appeared.
 
 Cameras are peers of devices but not subtypes — they live under
 [`capa.devices.camera`](https://github.com/GraysonBellamy/capa/tree/main/src/capa/devices/camera).
 The per-family pages ([Watlow](watlow.md), [Alicat](alicat.md),
 [Sartorius](sartorius.md), [Fuji](fuji.md), [NI-DAQ](nidaq.md),
-[Webcam](cameras-webcam.md),
+[SHT4x](sht4x.md), [Webcam](cameras-webcam.md),
 [FLIR](cameras-flir.md), [Simulators](simulators.md)) document the
 adapter-specific `params` schema and operational quirks.
 
@@ -105,6 +111,7 @@ The format is `<scheme>:<body>`:
 | Scheme | Body | Example |
 |---|---|---|
 | `serial` | port name | `serial:COM4` |
+| `hid` | USB bridge | `hid:mcp2221:any` |
 | `daqmx` | chassis/device | `daqmx:cDAQ1` |
 | `webcam` | OS index | `webcam:0` |
 | `sim` | per-adapter-instance | `sim:watlow_sim-heater` |
@@ -152,7 +159,7 @@ shapes match the libraries' row layouts:
 
 | Shape | One row is… | Used by |
 |---|---|---|
-| `wide_row` | one poll, many fields | `alicatlib` `Sample`, `fujilib` `Sample`, `nidaqlib` polled `DaqReading` |
+| `wide_row` | one poll, many fields | `alicatlib` `Sample`, `fujilib` `Sample`, `nidaqlib` polled `DaqReading`, the SHT4x poll |
 | `long_row` | one `(device, parameter, instance)` | `watlowlib` `Sample` |
 | `single_value_row` | one balance reading | `sartoriuslib` `Sample` |
 | `block` | a rectangular `(channels, samples_per_channel)` chunk | `nidaqlib` hardware-clocked `DaqBlock` |
@@ -170,6 +177,7 @@ kinds](../configuration/channel-bindings.md):
 | `wide_row` (Alicat) | `alicat_frame_field` |
 | `wide_row` (Fuji) | `fuji_channel` |
 | `wide_row` (NI polled) | `nidaq_reading_field` |
+| `wide_row` (SHT4x) | `sht4x_reading` |
 | `long_row` (Watlow) | `watlow_parameter` |
 | `single_value_row` (Sartorius) | `sartorius_reading` |
 | `block` (NI hardware-clocked) | `nidaq_block_channel` |

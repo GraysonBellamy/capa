@@ -48,6 +48,7 @@ The opt-in env var alone is not enough — each smoke module also reads a small 
 | Sartorius | `CAPA_TEST_SARTORIUS_PORT` | `CAPA_TEST_SARTORIUS_PROTOCOL` (`"xbpi"`), `CAPA_TEST_SARTORIUS_BAUD` (`9600`), `CAPA_TEST_SARTORIUS_OPERATOR` (`"hw-test"`) |
 | Fuji | `CAPA_TEST_FUJI_PORT` | `CAPA_TEST_FUJI_ADDRESS` (`1`), `CAPA_TEST_FUJI_CHANNEL_MAP` (`"CH1=co2,CH2=co,CH3=o2"`), `CAPA_TEST_FUJI_OPERATOR` (`"hw-test"`) |
 | NI-DAQ | none if your rig uses `cDAQ1Mod1` | `CAPA_TEST_NIDAQ_DEVICE` (`"cDAQ1Mod1"`), `CAPA_TEST_NIDAQ_OPERATOR` (`"hw-test"`) |
+| SHT4x | none (the first MCP2221 found) | `CAPA_TEST_SHT4X_ADDRESS` (`0x44`), `CAPA_TEST_SHT4X_SERIAL` (unset; the bridge's USB serial), `CAPA_TEST_SHT4X_OPERATOR` (`"hw-test"`) |
 | Webcam | `CAPA_TEST_WEBCAM_DEVICE` | `CAPA_TEST_WEBCAM_INPUT_FORMAT` (platform default), `CAPA_TEST_WEBCAM_OPERATOR` (`"hw-test"`) |
 
 Operator IDs default to `"hw-test"` and exist so the [authorization gate](../safety/authorization-gates.md) has a real attributable identity in the bundle's event log — they have no rig-side meaning.

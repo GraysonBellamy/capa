@@ -60,6 +60,18 @@ end = 873.0
 duration_s = 0.2
 
 # --- Simulated IR camera (stands in for the FLIR E85) ---
+[[devices]]
+name = "ambient"
+adapter = "capa.devices.sim.sht4x_sim"
+[devices.params.temperature_signal]
+kind = "sine"
+offset = 22.0
+amplitude = 0.3
+frequency_hz = 0.0167
+[devices.params.humidity_signal]
+kind = "constant"
+value = 45.0
+
 [[cameras]]
 name = "ir_cam0"
 adapter = "capa.devices.sim.flir_ir_sim"
@@ -175,3 +187,45 @@ field = "value"
 kind = "identity"
 input_unit = "g"
 output_unit = "g"
+
+# --- Ambient air (sim SHT4x; optional capa groups) ---
+
+[[channels]]
+name = "ambient.temperature"
+kind = "temperature"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "temperature"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[channels.metadata]
+capa_group = "ambient_temperature"
+
+[[channels]]
+name = "ambient.humidity"
+kind = "humidity"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "humidity"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[channels.metadata]
+capa_group = "ambient_humidity"
