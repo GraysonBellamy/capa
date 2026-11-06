@@ -16,6 +16,7 @@ from capa.core.clock import RunClock
 from capa.core.databus import DataBus
 from capa.devices.adapter import CommandResult, DeviceCommand
 from capa.devices.records import ChannelSample
+from capa.experiment import executor as executor_module
 from capa.experiment.authorization import Authorization
 from capa.experiment.config import (
     DeviceConfig,
@@ -27,6 +28,7 @@ from capa.experiment.config import (
 )
 from capa.experiment.executor import (
     DEFAULT_RAMP_TICK_HZ,
+    PROMPT_TICK_KIND,
     MethodExecutor,
     MethodExecutorError,
 )
@@ -41,8 +43,9 @@ from capa.experiment.method import (
     SetpointStep,
     WaitStep,
 )
-from capa.experiment.procedures.base import ProcedureContext
+from capa.experiment.procedures.base import OperatorCommand, ProcedureContext
 from capa.runtime.dispatch import AdapterDispatcher
+from capa.runtime.emissions import ProcedureTick
 
 
 class _FakeWriter:
@@ -288,28 +291,167 @@ async def test_prompt_step_auto_acknowledge_completes() -> None:
     assert "method.prompt.acknowledged" in kinds
 
 
-@pytest.mark.anyio
-async def test_prompt_step_confirmed_via_metadata_flag() -> None:
-    ctx, writer, _, _ = _make_ctx()
-    method = Method(
-        name="m",
-        steps=(PromptStep(message="ignite", timeout_s=2.0),),
-    )
+class _FakeSink:
+    """Collects the ticks a prompt publishes for the UI."""
 
-    async def confirm_after_delay() -> None:
-        await anyio.sleep(0.05)
-        ctx.metadata["_prompt_confirmed"] = True  # type: ignore[index]
+    def __init__(self) -> None:
+        self.ticks: list[ProcedureTick] = []
+
+    def publish(self, tick: ProcedureTick) -> None:
+        self.ticks.append(tick)
+
+    def states(self) -> list[tuple[object, object]]:
+        return [(t.payload["state"], t.payload["prompt_id"]) for t in self.ticks]
+
+
+def _attach_ui(ctx: ProcedureContext) -> tuple[_FakeSink, Any]:
+    """Wire a UI sink and an operator-command stream into ``ctx``."""
+    sink = _FakeSink()
+    send, recv = anyio.create_memory_object_stream[OperatorCommand](max_buffer_size=8)
+    ctx.ui_sink = sink
+    ctx.operator_commands = recv
+    return sink, send
+
+
+async def _open_prompt_id(sink: _FakeSink) -> str:
+    """Wait for the first ``open`` tick and return its prompt id."""
+    with anyio.fail_after(2.0):
+        while not sink.ticks:
+            await anyio.sleep(0.005)
+    prompt_id = sink.ticks[0].payload["prompt_id"]
+    assert isinstance(prompt_id, str)
+    return prompt_id
+
+
+@pytest.mark.anyio
+async def test_prompt_step_confirmed_by_operator_command() -> None:
+    ctx, writer, _, _ = _make_ctx()
+    sink, send = _attach_ui(ctx)
+    method = Method(name="m", steps=(PromptStep(title="Ignite", message="ignite"),))
+
+    async def confirm() -> None:
+        prompt_id = await _open_prompt_id(sink)
+        await send.send(OperatorCommand(kind="confirm_prompt", metadata={"prompt_id": prompt_id}))
 
     async with anyio.create_task_group() as tg:
-        tg.start_soon(confirm_after_delay)
+        tg.start_soon(confirm)
         await MethodExecutor(ctx=ctx).run_to_completion(method)
+
     kinds = [e["kind"] for e in writer.events]
-    assert "method.prompt.shown" in kinds
-    assert "method.prompt.acknowledged" in kinds
-    ack = next(e for e in writer.events if e["kind"] == "method.prompt.acknowledged")
-    assert ack["metadata"] == {"by": "operator"}
-    # No timeout / unanswered event
     assert "method.prompt.unanswered" not in kinds
+    ack = next(e for e in writer.events if e["kind"] == "method.prompt.acknowledged")
+    prompt_id = sink.ticks[0].payload["prompt_id"]
+    assert ack["metadata"] == {"by": "operator", "prompt_id": prompt_id}
+    first = sink.ticks[0].payload
+    assert first["kind"] == PROMPT_TICK_KIND
+    assert (first["title"], first["message"]) == ("Ignite", "ignite")
+    assert (first["step_index"], first["step_count"]) == (0, 1)
+    assert sink.ticks[0].procedure_id == "capa.builtin.recipe_runner"
+    assert sink.states()[-1] == ("closed", prompt_id)
+
+
+@pytest.mark.anyio
+async def test_prompt_step_drops_confirm_for_another_prompt() -> None:
+    """A stale confirm (e.g. a double-click on the previous prompt) must
+    not release the prompt that is waiting now."""
+    ctx, writer, _, _ = _make_ctx()
+    sink, send = _attach_ui(ctx)
+    method = Method(name="m", steps=(PromptStep(message="slide to B"),))
+    finished = anyio.Event()
+
+    async def confirm() -> None:
+        prompt_id = await _open_prompt_id(sink)
+        await send.send(OperatorCommand(kind="confirm_prompt", metadata={"prompt_id": "stale"}))
+        await send.send(OperatorCommand(kind="pause"))
+        await anyio.sleep(0.1)
+        assert not finished.is_set()
+        await send.send(OperatorCommand(kind="confirm_prompt", metadata={"prompt_id": prompt_id}))
+
+    async def run() -> None:
+        await MethodExecutor(ctx=ctx).run_to_completion(method)
+        finished.set()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(confirm)
+        tg.start_soon(run)
+    assert "method.prompt.acknowledged" in [e["kind"] for e in writer.events]
+
+
+@pytest.mark.anyio
+async def test_prompt_step_republishes_open_tick_while_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(executor_module, "PROMPT_REPUBLISH_S", 0.02)
+    ctx, _writer, _, _ = _make_ctx()
+    sink, send = _attach_ui(ctx)
+    method = Method(name="m", steps=(PromptStep(message="wait"),))
+
+    async def confirm_later() -> None:
+        prompt_id = await _open_prompt_id(sink)
+        await anyio.sleep(0.15)
+        await send.send(OperatorCommand(kind="confirm_prompt", metadata={"prompt_id": prompt_id}))
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(confirm_later)
+        await MethodExecutor(ctx=ctx).run_to_completion(method)
+    states = sink.states()
+    assert len({prompt_id for _, prompt_id in states}) == 1
+    assert [s for s, _ in states].count("open") >= 3
+    assert states[-1][0] == "closed"
+
+
+@pytest.mark.anyio
+async def test_prompt_step_without_timeout_waits_when_ui_attached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With a UI attached an unset timeout_s means no deadline: the
+    headless default must not apply."""
+    monkeypatch.setattr(executor_module, "PROMPT_HEADLESS_DEFAULT_TIMEOUT_S", 0.05)
+    ctx, writer, _, _ = _make_ctx()
+    sink, send = _attach_ui(ctx)
+    method = Method(name="m", steps=(PromptStep(message="slow operator"),))
+
+    async def confirm_late() -> None:
+        prompt_id = await _open_prompt_id(sink)
+        await anyio.sleep(0.2)
+        await send.send(OperatorCommand(kind="confirm_prompt", metadata={"prompt_id": prompt_id}))
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(confirm_late)
+        await MethodExecutor(ctx=ctx).run_to_completion(method)
+    assert "method.prompt.acknowledged" in [e["kind"] for e in writer.events]
+
+
+@pytest.mark.anyio
+async def test_prompt_step_headless_default_timeout_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(executor_module, "PROMPT_HEADLESS_DEFAULT_TIMEOUT_S", 0.05)
+    ctx, writer, _, _ = _make_ctx()
+    method = Method(name="m", steps=(PromptStep(message="nobody here"),))
+    with pytest.raises(MethodExecutorError, match="timed out"):
+        await MethodExecutor(ctx=ctx).run_to_completion(method)
+    unanswered = next(e for e in writer.events if e["kind"] == "method.prompt.unanswered")
+    assert unanswered["metadata"]["reason"] == "timeout"
+    assert unanswered["severity"] == "warning"
+
+
+@pytest.mark.anyio
+async def test_prompt_step_external_stop_returns_and_closes_dialog() -> None:
+    ctx, writer, _, stop = _make_ctx()
+    sink, _send = _attach_ui(ctx)
+    method = Method(name="m", steps=(PromptStep(message="stop me"),))
+
+    async def stop_later() -> None:
+        await _open_prompt_id(sink)
+        stop.set()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(stop_later)
+        await MethodExecutor(ctx=ctx).run_to_completion(method)
+    unanswered = next(e for e in writer.events if e["kind"] == "method.prompt.unanswered")
+    assert unanswered["metadata"]["reason"] == "external_stop"
+    assert sink.states()[-1][0] == "closed"
 
 
 @pytest.mark.anyio

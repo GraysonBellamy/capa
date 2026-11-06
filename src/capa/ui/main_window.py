@@ -47,6 +47,7 @@ from capa.ui.docks.log import LogDock
 from capa.ui.docks.manual_control import ManualControlDock
 from capa.ui.docks.numerics import NumericsDock
 from capa.ui.document_coordinator import DocumentCoordinator
+from capa.ui.method_prompt import MethodPromptDialog
 from capa.ui.recents import record_open
 from capa.ui.shutdown import (
     ShutdownCoordinator,
@@ -229,6 +230,10 @@ class MainWindow(QMainWindow):
         self._heat_flux_tune_dock = HeatFluxTuneDock(self._controller, self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._heat_flux_tune_dock)
         self._heat_flux_tune_dock.setVisible(False)
+
+        # Method prompt dialog — appears while a method's prompt step
+        # waits for the operator and sends the confirm on Continue.
+        self._method_prompt_dialog = MethodPromptDialog(self._controller, self)
 
         # Log dock — mirrors structlog stdout into the GUI so the
         # operator can diagnose pool/conductor/run-lifecycle activity

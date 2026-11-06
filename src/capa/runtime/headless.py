@@ -454,6 +454,9 @@ def _build_method_executor_for_runner(
 
     The databus must be the conductor's authoritative bus so executor
     ``_wait_for`` subscriptions actually receive emissions.
+    :meth:`ProcedureRunner._build_proc_ctx` later rebinds the executor to
+    the procedure's own context, which adds the linked stop event, the
+    operator-command stream and the UI sink.
     """
     exec_ctx = ProcedureContext(
         clock=clock,

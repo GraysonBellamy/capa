@@ -174,7 +174,7 @@ Two channels are available for live communication with the Run tab:
 - **`ctx.bundle_writer.write_event(...)`** — anything that should be in the bundle for posterity. Events also surface in the diagnostics dock and the event log. Use for: state transitions, command issuance, anomalies.
 - **`ctx.ui_sink.publish(tick)`** — pure operator-facing telemetry that should *not* land in the bundle. Used by self-driving procedures (heat-flux tune emits a `ProcedureTick` after each iteration with live numerics for the dock). The sink is `None` when no UI is attached (CLI headless, tests); null-check before publishing.
 
-If you need bidirectional control — pause, resume, "accept the current measurement" — wire `ctx.operator_commands` (an `ObjectReceiveStream` of `OperatorCommand`) into a background task that owns the procedure's "what to do next" flag. Heat-flux tune does this; FreeRun and RecipeRunner do not.
+If you need bidirectional control — pause, resume, "accept the current measurement" — wire `ctx.operator_commands` (an `ObjectReceiveStream` of `OperatorCommand`) into a background task that owns the procedure's "what to do next" flag. Heat-flux tune does this; FreeRun and RecipeRunner do not. The method executor reads the same stream while a `prompt` step waits for its `confirm_prompt`, so a procedure that runs prompt steps and also keeps its own consumer splits the commands between the two; don't do both.
 
 ---
 
