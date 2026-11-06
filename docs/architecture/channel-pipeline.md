@@ -134,7 +134,7 @@ def build_channel_sample(*, spec, raw_value, t_mono_ns,
 Two consequences worth knowing:
 
 1. **`scalars.parquet`'s `value` column is calibrated.** The `raw_value` column is populated only when `keep_raw=True`. Analysts asking "are these counts or engineering values?" should default to "engineering" for the `value` column.
-2. **Uncertainty is propagated per-sample.** The `UncertaintySpec` carried on the calibration variant produces a per-sample absolute uncertainty in output units, written into `scalars.parquet`'s `uncertainty` column. The `coverage_factor` (k=1 vs k=2) is recorded in the calibration's metadata, separately, so an analyzer five years later quotes the right interval without guessing.
+2. **Uncertainty is propagated per-sample.** The `UncertaintySpec` carried on the calibration variant produces a per-sample absolute uncertainty in output units, already multiplied by `coverage_factor`, written into `scalars.parquet`'s `uncertainty` column. The `coverage_factor` (k=1 vs k=2) is recorded in the calibration's metadata, separately, so an analyzer five years later quotes the right interval without guessing.
 
 `CustomCallable` calibrations are not evaluated inside `build_channel_sample` — they require the plugin runtime and are rejected with an `AdapterError`. The supported flow for plugin-driven calibrations runs through the calibration-fitting procedure, not the live sample path.
 
