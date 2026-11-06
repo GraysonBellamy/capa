@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from capa.channels.spec import ChannelSpec
 from capa.core.ringbuffer import RingBufferRegistry
+from capa.ui.display_units import display_unit
 from capa.ui.theme import COLOR_IDLE, monospace_font, numeric_display_font
 
 REFRESH_INTERVAL_MS: Final[int] = 1000
@@ -32,7 +33,7 @@ class _NumericTile(QWidget):
     def __init__(self, channel: ChannelSpec, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._channel: ChannelSpec = channel
-        self._unit: str = channel.derived_unit or channel.unit
+        self._unit, self._scale = display_unit(channel.output_unit())
 
         layout = QGridLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -60,7 +61,7 @@ class _NumericTile(QWidget):
         if value is None:
             self._value_label.setText("—")
         else:
-            self._value_label.setText(_format(value))
+            self._value_label.setText(_format(value * self._scale))
 
 
 def _format(value: float) -> str:

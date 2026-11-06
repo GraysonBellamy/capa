@@ -65,6 +65,7 @@ from PySide6.QtWidgets import (
 
 from capa.channels.spec import ChannelSpec
 from capa.core.ringbuffer import RingBufferRegistry
+from capa.ui.display_units import display_unit
 
 REPAINT_INTERVAL_MS: Final[int] = 200
 """5 Hz plot repaint cadence. Ring buffers still accept samples at their
@@ -157,6 +158,9 @@ class PlotPane(QWidget):
 
         self._curves: dict[str, pg.PlotDataItem] = {}
         self._unit_per_group: dict[str, str] = {}
+        # Per-channel factor into the unit the axis shows
+        # (:func:`~capa.ui.display_units.display_unit`): Pa plots as kPa.
+        self._scales: dict[str, float] = {}
         # Last-seen ``total_kept`` per channel — used in ``_refresh`` to
         # skip ``setData`` for curves whose ring buffer has not advanced
         # since the previous repaint tick. ``-1`` forces a first paint.
@@ -188,7 +192,7 @@ class PlotPane(QWidget):
             plot.setBackground("w")
             plot.showGrid(x=True, y=True, alpha=0.3)
             plot.setLabel("bottom", "t (s)", **label_style)
-            unit = group_channels[0].derived_unit or group_channels[0].unit
+            unit, _ = display_unit(group_channels[0].output_unit())
             self._unit_per_group[group_name] = unit
             plot.setLabel("left", f"{group_name} [{unit}]", **label_style)
             # Reserve fixed axis-area sizes so long tick labels (large
@@ -208,8 +212,8 @@ class PlotPane(QWidget):
             # ``labelUnits`` as empty and, once the data range triggers
             # a non-unity scale, appends ``(x0.001)`` to the label —
             # which overflows the fixed axis reservations the moment a
-            # run starts. Tick values stay in the channel's declared
-            # unit instead of being silently rescaled.
+            # run starts. Tick values stay in the unit the label names
+            # instead of being silently rescaled.
             left_axis.enableAutoSIPrefix(False)
             bottom_axis.enableAutoSIPrefix(False)
             plot.addLegend(offset=(8, 8))
@@ -255,6 +259,7 @@ class PlotPane(QWidget):
                     connect="all",
                 )
                 self._curves[ch.name] = curve
+                self._scales[ch.name] = display_unit(ch.output_unit())[1]
                 self._last_kept[ch.name] = -1
             self._splitter.addWidget(plot)
 
@@ -310,6 +315,9 @@ class PlotPane(QWidget):
             t_ns, v = buf.snapshot()
             if t_ns.size == 0:
                 continue
+            scale = self._scales[channel]
+            if scale != 1.0:
+                v = v * scale
             # Convert t_mono_ns → seconds-since-run-start for display.
             curve.setData(*peak_decimate(t_ns.astype("float64") / 1e9, v))
             self._last_kept[channel] = kept
