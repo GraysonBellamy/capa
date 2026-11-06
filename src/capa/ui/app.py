@@ -57,6 +57,8 @@ from capa.core.plugins_lock import PluginsLock
 from capa.runtime.recovery import recover_active_bundle_checkpoint
 from capa.storage.catalog import RunCatalog
 from capa.ui.main_window import MainWindow
+from capa.ui.watchdog import LOG_NAME as STALL_LOG_NAME
+from capa.ui.watchdog import GuiStallWatchdog
 
 _logger = structlog.get_logger("capa.ui.app")
 
@@ -124,6 +126,8 @@ def run_gui(
         app = QApplication(sys.argv)
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
+    # A frozen window leaves the stacks of every thread here; see watchdog.py.
+    watchdog = GuiStallWatchdog(runs_root / STALL_LOG_NAME)
 
     if os.environ.get("CAPA_SCREENSHOT_PROBE"):
         # Dev-only, gated import — keep lazy so the probe module isn't
@@ -165,6 +169,7 @@ def run_gui(
         # NOTE: loop.close() is intentionally omitted. See module docstring.
     finally:
         catalog.__exit__(None, None, None)
+        watchdog.stop()
     # Hard-exit so the process actually terminates even if a C-extension
     # background thread (NI-DAQmx, duvc_ctl, libav) would otherwise hold
     # Python's interpreter shutdown open. See :func:`_hard_exit_after_gui`.
