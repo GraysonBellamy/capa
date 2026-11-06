@@ -178,7 +178,7 @@ The policy is *time-window decimation*: a sample is dropped if its `t_mono_ns` i
 
 Sizing rules:
 
-- Default `decimate_to_hz` is 60 Hz, intentionally above the fastest configured producer (a 50 Hz Sartorius balance), so the buffer keeps every sample. The plot pane's peak-mode downsampler then preserves transients regardless of the actual repaint cadence (~10 Hz).
+- Default `decimate_to_hz` is 60 Hz, intentionally above the fastest configured producer (a 50 Hz Sartorius balance), so the buffer keeps every sample. Above 8000 samples the plot pane draws each curve as per-bucket minima and maxima ([`peak_decimate`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/plots/pane.py)), which preserves transients regardless of the repaint cadence (5 Hz). The pane does not use pyqtgraph's own auto-downsampler: it loops with x-autorange and froze the window during long runs (issue #26).
 - Per-buffer capacity is sized for "many seconds of samples at `decimate_to_hz`" — see [`ringbuffer.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/core/ringbuffer.py). Set lower in config only if a channel produces faster than the buffer can usefully store.
 - Drop counters are exposed for the status bar's "Dropped UI samples (rolling 10 s)" pill.
 

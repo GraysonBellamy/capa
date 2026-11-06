@@ -10,10 +10,11 @@ downsampler preserves transient spikes between repaints.
 
 Performance optimizations that remain in place regardless of repaint rate:
 
-* ``setDownsampling(auto=True, mode="peak")`` — pyqtgraph collapses N
-  points to ~pixel-width using min/max per bucket, so paint cost scales
-  with plot width, not buffer depth.
-* ``setClipToView(True)`` — skip rendering off-screen segments.
+* :func:`peak_decimate` caps every curve at :data:`MAX_CURVE_POINTS`
+  using min/max per bucket, so drawing cost stops growing with ring depth.
+  Below the cap, curves get the raw buffer.
+* ``setClipToView(True)`` — skip rendering off-screen segments once the
+  operator zooms in (pyqtgraph skips clipping while x autoranges).
 * ``skipFiniteCheck=True`` + ``connect="all"`` on curves — values are
   already finite floats from the ring buffer, so we both skip the
   pre-paint finite sweep and use the fastest ``arrayToQPath`` path.
@@ -26,6 +27,18 @@ Performance optimizations that remain in place regardless of repaint rate:
   curves whose buffer has not received new samples since the last tick
   skip ``setData`` entirely. Low-rate channels (Watlow, Sartorius at
   1 Hz) cost nothing on most repaints.
+* A hidden pane (another tab in front) skips the refresh; the dirty
+  check catches every curve up on the first tick it is visible again.
+
+Note on pyqtgraph's own downsampler (``setDownsampling(auto=True)``): it
+must stay off. It picks its factor from the current x range, while
+x-autorange picks the range from the downsampled data, whose extent shrinks
+by a sample or two each time the factor steps up. At the sample count where
+the factor steps from k to k+1 the two feed each other indefinitely, the
+plot repaints back to back with no new data, and the window goes "Not
+Responding" (issue #26). :func:`peak_decimate` depends on the data alone and
+always keeps the first and last sample, so the autorange it feeds settles
+after one pass.
 
 Note on OpenGL: pyqtgraph's ``useOpenGL=True`` is the *old* GraphicsView-
 on-QOpenGLWidget path, not a shader pipeline. On Windows specifically,
@@ -39,6 +52,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Final
 
+import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QFontDatabase, QResizeEvent, QShowEvent
@@ -61,6 +75,12 @@ producer rate by design — the operator does not need 10 Hz visual refresh
 for a 1 Hz temperature trace, and halving the repaint rate doubles the UI
 thread's headroom for free."""
 
+MAX_CURVE_POINTS: Final[int] = 8000
+"""Most points :func:`peak_decimate` hands to one curve: several per pixel
+at any plot width. A deeper ring (a 3 Hz channel is past it after 45 min in
+the default 36 000-sample ring) is drawn as its per-bucket minima and
+maxima."""
+
 # A small palette cycled across lines within a single pane. Distinct enough
 # to be readable on a high-density panel; not so saturated that the eye
 # tires over a long run.
@@ -74,6 +94,39 @@ _LINE_COLORS = (
     "#d85f9c",
     "#9bd85f",
 )
+
+
+def peak_decimate(
+    x: np.ndarray, y: np.ndarray, max_points: int = MAX_CURVE_POINTS
+) -> tuple[np.ndarray, np.ndarray]:
+    """Reduce ``(x, y)`` to about ``max_points`` while keeping its extremes.
+
+    Splits the samples into equal buckets and keeps each bucket's minimum
+    and maximum, in time order, at their own timestamps. The first and last
+    samples are always kept, so the x extent of the result is the x extent
+    of the input: the plot's autorange never depends on the decimation.
+    Arrays at or under ``max_points`` are returned as they are.
+    """
+    n = x.size
+    if n <= max_points:
+        return x, y
+    per_bucket = -(-n // (max_points // 2))
+    whole = (n // per_bucket) * per_bucket
+    buckets = y[:whole].reshape(-1, per_bucket)
+    lo = buckets.argmin(axis=1)
+    hi = buckets.argmax(axis=1)
+    starts = np.arange(0, whole, per_bucket)
+    idx = np.unique(
+        np.concatenate(
+            (
+                [0, n - 1],
+                starts + np.minimum(lo, hi),
+                starts + np.maximum(lo, hi),
+                np.arange(whole, n),
+            )
+        )
+    )
+    return x[idx], y[idx]
 
 
 class PlotPane(QWidget):
@@ -178,12 +231,8 @@ class PlotPane(QWidget):
             overlay.adjustSize()
             self._overlays.append(overlay)
             self._plots.append(plot)
-            # autoDownsample + peak method: pyqtgraph picks the downsample
-            # factor from the curve's pixel width vs point count, then
-            # plots min/max per bucket so transient peaks survive. Lets
-            # the ring buffer carry full-rate (un-decimated) data without
-            # forcing the GPU to draw N points into N/k pixels.
-            plot.setDownsampling(auto=True, mode="peak")
+            # No setDownsampling(auto=True): it loops with x-autorange and
+            # freezes the window (module docstring). _refresh decimates.
             plot.setClipToView(True)
             for idx, ch in enumerate(group_channels):
                 color = _LINE_COLORS[idx % len(_LINE_COLORS)]
@@ -245,6 +294,8 @@ class PlotPane(QWidget):
     # ------------------------------------------------------------------ internal
 
     def _refresh(self) -> None:
+        if not self.isVisible():
+            return
         new_data = False
         for channel, curve in self._curves.items():
             buf = self._registry.get(channel)
@@ -260,7 +311,7 @@ class PlotPane(QWidget):
             if t_ns.size == 0:
                 continue
             # Convert t_mono_ns → seconds-since-run-start for display.
-            curve.setData(t_ns.astype("float64") / 1e9, v)
+            curve.setData(*peak_decimate(t_ns.astype("float64") / 1e9, v))
             self._last_kept[channel] = kept
             new_data = True
         if new_data and not self._has_data:
@@ -286,4 +337,4 @@ class PlotPane(QWidget):
         self._reposition_overlays()
 
 
-__all__ = ["REPAINT_INTERVAL_MS", "PlotPane"]
+__all__ = ["MAX_CURVE_POINTS", "REPAINT_INTERVAL_MS", "PlotPane", "peak_decimate"]
