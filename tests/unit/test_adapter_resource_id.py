@@ -29,12 +29,14 @@ import pytest
 from capa.core.clock import RunClock
 from capa.devices.adapter import DeviceAdapter
 from capa.devices.alicat import AlicatAdapter
+from capa.devices.bmp58x import Bmp58xAdapter
 from capa.devices.camera.base import CameraSpec
 from capa.devices.camera.webcam import WebcamAdapter
 from capa.devices.nidaq import NIDAQAdapter
 from capa.devices.sartorius import SartoriusAdapter
 from capa.devices.sht4x import Sht4xAdapter
 from capa.devices.sim.alicat_sim import AlicatSim
+from capa.devices.sim.bmp58x_sim import Bmp58xSim
 from capa.devices.sim.flir_ir_sim import FlirIrSim
 from capa.devices.sim.nidaq_block_sim import NIDAQBlockSim
 from capa.devices.sim.nidaq_polled_sim import NIDAQPolledSim
@@ -62,6 +64,10 @@ def _make_sartorius(port: str = "COM4") -> SartoriusAdapter:
 
 def _make_sht4x(serial: str | None = None, name: str = "ambient") -> Sht4xAdapter:
     return Sht4xAdapter(name=name, serial=serial)
+
+
+def _make_bmp58x(serial: str | None = None, name: str = "baro") -> Bmp58xAdapter:
+    return Bmp58xAdapter(name=name, serial=serial)
 
 
 def _nidaq_channel(physical_channel: str) -> dict[str, Any]:
@@ -121,6 +127,10 @@ def _make_sht4x_sim(name: str = "ambient") -> Sht4xSim:
     return Sht4xSim(name=name)
 
 
+def _make_bmp58x_sim(name: str = "baro") -> Bmp58xSim:
+    return Bmp58xSim(name=name)
+
+
 def _make_nidaq_polled_sim(name: str = "cdaq1") -> NIDAQPolledSim:
     return NIDAQPolledSim(name=name, task="tc_task")
 
@@ -149,12 +159,14 @@ ALL_FACTORIES: list[tuple[str, Callable[[], object]]] = [
     ("alicat", _make_alicat),
     ("sartorius", _make_sartorius),
     ("sht4x", _make_sht4x),
+    ("bmp58x", _make_bmp58x),
     ("nidaq", _make_nidaq),
     ("webcam", _make_webcam),
     ("watlow_sim", _make_watlow_sim),
     ("alicat_sim", _make_alicat_sim),
     ("sartorius_sim", _make_sartorius_sim),
     ("sht4x_sim", _make_sht4x_sim),
+    ("bmp58x_sim", _make_bmp58x_sim),
     ("nidaq_polled_sim", _make_nidaq_polled_sim),
     ("nidaq_block_sim", _make_nidaq_block_sim),
     ("flir_ir_sim", _make_flir_ir_sim),
@@ -249,6 +261,15 @@ def test_sht4x_adapters_on_different_bridges_have_distinct_resource_ids() -> Non
     b = _make_sht4x(serial="0006774895")
     assert a.resource_id == "hid:mcp2221:0006774894"
     assert a.resource_id != b.resource_id
+
+
+def test_sensors_on_one_bridge_share_a_worker() -> None:
+    """An SHT4x and a BMP58x on one MCP2221 are one I2C bus: one worker."""
+    assert _make_sht4x().resource_id == _make_bmp58x().resource_id == "hid:mcp2221:any"
+    assert (
+        _make_sht4x(serial="0006774894").resource_id
+        == _make_bmp58x(serial="0006774894").resource_id
+    )
 
 
 def test_sht4x_resource_id_strips_whitespace_and_treats_blank_as_any() -> None:

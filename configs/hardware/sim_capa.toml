@@ -72,6 +72,15 @@ frequency_hz = 0.0167
 kind = "constant"
 value = 45.0
 
+[[devices]]
+name = "baro"
+adapter = "capa.devices.sim.bmp58x_sim"
+[devices.params.pressure_signal]
+kind = "sine"
+offset = 100800.0
+amplitude = 15.0
+frequency_hz = 0.005
+
 [[cameras]]
 name = "ir_cam0"
 adapter = "capa.devices.sim.flir_ir_sim"
@@ -229,3 +238,23 @@ output_unit = "percent"
 
 [channels.metadata]
 capa_group = "ambient_humidity"
+
+[[channels]]
+name = "ambient.pressure"
+kind = "pressure"
+unit = "Pa"
+derived_unit = "Pa"
+plot_group = "ambient_pressure"
+
+[channels.source]
+source = "bmp58x_reading"
+device = "baro"
+field = "pressure"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "Pa"
+output_unit = "Pa"
+
+[channels.metadata]
+capa_group = "ambient_pressure"

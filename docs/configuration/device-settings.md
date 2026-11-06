@@ -80,6 +80,13 @@ Written to the balance's runtime menu; never saved with `save_menu`.
 |---|---|---|
 | `precision` | `high`, `medium`, `low` | Measurement repeatability; changes which measure command the stream sends. The heater is never declarative. |
 
+### BMP58x barometer (`capa.devices.bmp58x`, `capa.devices.sim.bmp58x_sim`)
+
+| Field | Values | Notes |
+|---|---|---|
+| `pressure_oversampling` | `1`, `2`, `4`, `8`, `16`, `32`, `64`, `128` | Pressure samples per conversion; more is less noise and a longer conversion. |
+| `temperature_oversampling` | `1`, `2`, `4`, `8`, `16`, `32`, `64`, `128` | Temperature samples per conversion. |
+
 ### Fuji gas analyzer (`capa.devices.fuji`, `capa.devices.sim.fuji_sim`)
 
 Settings are declared per gas, by the gas the device's `channel_map`

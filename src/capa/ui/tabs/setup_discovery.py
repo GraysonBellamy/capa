@@ -117,7 +117,7 @@ def build_device_payload_from_row(
         # confirms or corrects it in the device detail pane.
         if isinstance(row.get("channel_map"), dict):
             params["channel_map"] = dict(row["channel_map"])
-    elif family == "sht4x":
+    elif family in ("sht4x", "bmp58x"):
         # The bridge's USB serial is only known when the chip exposes one;
         # without it the adapter opens the first bridge found.
         if row.get("serial"):
@@ -234,6 +234,15 @@ def _summarise_row(family: str, row: dict[str, Any]) -> str:
             bits.append(f"addr=0x{int(row['i2c_address']):02x}")
         if row.get("sensor_serial"):
             bits.append(f"sensor sn={row['sensor_serial']}")
+        return "  ".join(bits) or "(no identity)"
+    if family == "bmp58x":
+        bits = []
+        if row.get("chip"):
+            bits.append(str(row["chip"]))
+        if row.get("serial"):
+            bits.append(f"bridge sn={row['serial']}")
+        if row.get("i2c_address") is not None:
+            bits.append(f"addr=0x{int(row['i2c_address']):02x}")
         return "  ".join(bits) or "(no identity)"
     if family == "nidaq":
         bits = []

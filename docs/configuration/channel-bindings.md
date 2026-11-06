@@ -1,5 +1,5 @@
 ---
-description: capa channel binding reference — seven `SourceBinding` variants pulling from Watlow, Alicat, Sartorius, Fuji, NI-DAQ (polled and hardware-clocked), derived channels.
+description: capa channel binding reference — nine `SourceBinding` variants pulling from Watlow, Alicat, Sartorius, Fuji, the SHT4x and BMP58x ambient sensors, NI-DAQ (polled and hardware-clocked), derived channels.
 ---
 
 # Channel bindings
@@ -26,6 +26,7 @@ The shape of that row depends on the library:
 | `sartoriuslib` | one single-value row per balance reading | field name (defaults to `value`) |
 | `fujilib` | one wide row per poll (every analyzer channel) | analyzer channel + field (defaults to `value`) |
 | SHT4x (in-tree) | one wide row per poll (temperature and humidity) | field: `temperature` or `humidity` |
+| BMP58x (in-tree) | one wide row per poll (pressure and temperature) | field: `pressure` or `temperature` |
 | `nidaqlib` (polled) | one wide row per read (channel ↦ value) | task name + field name |
 | `nidaqlib` (hardware-clocked) | rectangular `(channels, samples)` block | task name + channel name |
 | n/a (derived) | computed from other channels | dependency list + expression id |
@@ -34,9 +35,9 @@ See [Devices overview — emission
 shapes](../devices/overview.md#emission-shapes) for the picture of how
 each library lays out its rows.
 
-## The eight binding kinds
+## The nine binding kinds
 
-Every binding is one of eight discriminated variants. The `source` field
+Every binding is one of nine discriminated variants. The `source` field
 picks which model applies; Pydantic refuses any other value at load
 time.
 
@@ -148,6 +149,25 @@ fields; there is no default field, since neither value is the obvious one.
 source = "sht4x_reading"
 device = "ambient"
 field = "humidity"
+```
+
+### `bmp58x_reading`
+
+Selects one of the two values a [BMP58x barometer](../devices/bmp58x.md)
+measures per conversion. The row carries `pressure_pa`, `temperature_c`,
+both raw words, both oversampling ratios and the error fields; there is
+no default field.
+
+| Field | Type | Required | Notes |
+|---|---|:-:|---|
+| `device` | str | yes | The BMP58x device name. |
+| `field` | str | yes | `"pressure"` (Pa) or `"temperature"` (°C, the chip's own). |
+
+```toml
+[channels.source]
+source = "bmp58x_reading"
+device = "baro"
+field = "pressure"
 ```
 
 ### `nidaq_reading_field`
@@ -332,8 +352,9 @@ lives in
 | `mass` | `sartorius_reading` |
 | `mfc_flow` | `alicat_frame_field` |
 | `gas_concentration` | `fuji_channel`, `nidaq_reading_field` |
-| `temperature` | `sht4x_reading`, `nidaq_reading_field`, `watlow_parameter` |
+| `temperature` | `sht4x_reading`, `bmp58x_reading`, `nidaq_reading_field`, `watlow_parameter` |
 | `humidity` | `sht4x_reading` |
+| `pressure` | `bmp58x_reading`, `alicat_frame_field`, `nidaq_reading_field` |
 | `analog_in` | `nidaq_reading_field`, `nidaq_block_channel` |
 | `derived` | `derived` |
 

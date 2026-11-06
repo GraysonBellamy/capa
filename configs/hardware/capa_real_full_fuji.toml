@@ -131,6 +131,21 @@ rate_hz = 1.0
 auto_reconnect = true
 snapshot_period_s = 30.0
 
+# BMP58x barometer on the same MCP2221 bridge as the SHT4x: both adapters
+# share one worker and one HID handle, so i2c_speed_hz (when set) must match.
+[[devices]]
+name = "baro"
+adapter = "capa.devices.bmp58x"
+on_failure = "warn"
+
+[devices.params]
+i2c_address = 0x47
+pressure_oversampling = 64
+temperature_oversampling = 4
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
 [[cameras]]
 name = "visible_cam0"
 adapter = "capa.devices.camera.webcam"
@@ -436,3 +451,23 @@ output_unit = "percent"
 
 [channels.metadata]
 capa_group = "ambient_humidity"
+
+[[channels]]
+name = "ambient.pressure"
+kind = "pressure"
+unit = "Pa"
+derived_unit = "Pa"
+plot_group = "ambient_pressure"
+
+[channels.source]
+source = "bmp58x_reading"
+device = "baro"
+field = "pressure"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "Pa"
+output_unit = "Pa"
+
+[channels.metadata]
+capa_group = "ambient_pressure"

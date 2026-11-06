@@ -7,15 +7,17 @@ including the real chip's trap: a cancel sent to an idle engine wedges
 it in state ``0x62`` until a chip reset. :class:`FakeSht4xHid` adds an
 SHT4x: measure commands queue a CRC-protected response, the serial
 command answers a fixed serial, and knobs corrupt a response, make the
-sensor NACK, or fail the HID link. :meth:`FakeMcp2221Hid.attach` puts
-further targets on the same bus.
+sensor NACK, or fail the HID link. :class:`FakeBmp58x` is a register-map
+BMP58x barometer that :meth:`FakeMcp2221Hid.attach` puts on any bridge,
+so one fake bridge can carry both sensors.
 """
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from capa.devices._mcp2221 import BridgeSelector, HidHandle
+from capa.devices.bmp58x import encode_data
 from capa.devices.sht4x import crc8, raw_from_humidity, raw_from_temperature
 
 _CMD_STATUS = 0x10
@@ -258,6 +260,114 @@ class FakeSht4xHid(FakeMcp2221Hid):
             self.read_data = bytes(corrupted)
 
 
+class FakeBmp58x:
+    """A BMP58x barometer as a register map, for :meth:`FakeMcp2221Hid.attach`.
+
+    Writes set the register pointer and, with data, write registers from
+    it (auto-incrementing); reads return registers from the pointer.
+    Writing forced mode to ``ODR_CONFIG`` runs a conversion of
+    :attr:`pressure_pa` / :attr:`temperature_c` (pressure only when
+    enabled in ``OSR_CONFIG``), raises data-ready if the source is
+    enabled, and drops back to standby. ``INT_STATUS`` clears on read.
+    """
+
+    RESET_REGISTERS: ClassVar[dict[int, int]] = {
+        0x01: 0x50,  # CHIP_ID
+        0x02: 0x32,  # REV_ID
+        0x14: 0x35,  # INT_CONFIG
+        0x27: 0x10,  # INT_STATUS: power-on reset complete
+        0x28: 0x02,  # STATUS: NVM ready
+        0x30: 0x03,  # DSP_CONFIG
+        0x37: 0x70,  # ODR_CONFIG: 1 Hz, standby, deep standby allowed
+    }
+
+    def __init__(
+        self,
+        *,
+        pressure_pa: float = 100_825.0,
+        temperature_c: float = 21.5,
+        chip_id: int = 0x50,
+    ) -> None:
+        self.pressure_pa = pressure_pa
+        self.temperature_c = temperature_c
+        self.chip_id = chip_id
+        self.registers = bytearray(0x80)
+        self.pointer = 0
+        self.resets = 0
+        self.conversions = 0
+        self.writes: list[bytes] = []
+        self.nack_reads = 0
+        """How many upcoming reads NACK."""
+        self.never_ready = False
+        """Conversions never raise data-ready (a sensor that stopped)."""
+        self.power_on_reset_next = False
+        """The next conversion finds the sensor freshly power-cycled."""
+        self.reject_config = False
+        """Configuration writes are ignored (a sensor that will not configure)."""
+        self.ready_after_polls = 0
+        """How many ``INT_STATUS`` reads after a trigger before data-ready shows."""
+        self._polls_left = 0
+        self._soft_reset()
+
+    def _soft_reset(self) -> None:
+        self.registers[:] = bytes(0x80)
+        for register, value in self.RESET_REGISTERS.items():
+            self.registers[register] = value
+        self.registers[0x01] = self.chip_id
+        self.registers[0x1D:0x23] = bytes([0x7F] * 6)
+
+    def on_write(self, data: bytes) -> None:
+        self.writes.append(bytes(data))
+        if not data:
+            return
+        self.pointer = data[0]
+        for offset, value in enumerate(data[1:]):
+            self._write_register(self.pointer + offset, value)
+
+    def _write_register(self, register: int, value: int) -> None:
+        if register == 0x7E:
+            if value == 0xB6:
+                self.resets += 1
+                self._soft_reset()
+            return
+        forced = register == 0x37 and value & 0x03 == 0x02
+        if self.reject_config and register in (0x15, 0x36, 0x37) and not forced:
+            return
+        self.registers[register] = value
+        if forced:
+            self._convert()
+
+    def _convert(self) -> None:
+        self.conversions += 1
+        if self.power_on_reset_next:
+            self.power_on_reset_next = False
+            self._soft_reset()
+            return
+        pressure_enabled = bool(self.registers[0x36] & 0x40)
+        data = encode_data(self.temperature_c, self.pressure_pa if pressure_enabled else 0.0)
+        self.registers[0x1D:0x23] = data
+        self.registers[0x37] &= 0xFC  # back to standby
+        if self.registers[0x15] & 0x01 and not self.never_ready:
+            self._polls_left = self.ready_after_polls
+            if self._polls_left == 0:
+                self.registers[0x27] |= 0x01
+
+    def on_read(self, length: int) -> bytes | None:
+        if self.nack_reads > 0:
+            self.nack_reads -= 1
+            return None
+        start = self.pointer
+        if start == 0x27 and self._polls_left > 0:
+            self._polls_left -= 1
+            if self._polls_left == 0:
+                self.registers[0x27] |= 0x01
+            return bytes([0x00])
+        data = bytes(self.registers[start : start + length])
+        if start <= 0x27 < start + length:
+            self.registers[0x27] = 0x00
+        return data
+
+
 def opener_for(handle: HidHandle) -> OpenerFor:
     """An opener that hands out ``handle`` and records each selector."""
     return OpenerFor(handle)
@@ -280,6 +390,7 @@ class OpenerFor:
 
 
 __all__ = [
+    "FakeBmp58x",
     "FakeI2cTarget",
     "FakeMcp2221Hid",
     "FakeSht4xHid",

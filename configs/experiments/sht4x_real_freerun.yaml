@@ -1,10 +1,11 @@
-# Free-run experiment against a real SHT4x ambient sensor on an MCP2221.
+# Free-run experiment against the real ambient sensors on an MCP2221: an
+# SHT4x (temperature, humidity) and a BMP58x barometer on the same bridge.
 #
-# Records lab air temperature and relative humidity at 1 Hz into both
-# ``device_records/sht4x.parquet`` (one wide row per poll: both values,
-# both raw words, latency) and ``scalars.parquet`` (calibrated
-# ChannelSamples). The bundle's manifest captures the sensor serial and
-# the bridge revision at run-start.
+# Records lab air temperature, relative humidity and pressure at 1 Hz into
+# ``device_records/sht4x.parquet`` and ``device_records/bmp58x.parquet``
+# (one wide row per poll: the values, the raw words, latency) and
+# ``scalars.parquet`` (calibrated ChannelSamples). The bundle's manifest
+# captures the sensor identities and the bridge revision at run-start.
 #
 # Run with:
 #

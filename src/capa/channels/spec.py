@@ -54,6 +54,8 @@ class ChannelKind(StrEnum):
     (a digital ambient sensor, an RTD)."""
     HUMIDITY = "humidity"
     """Relative humidity from an ambient sensor."""
+    PRESSURE = "pressure"
+    """Absolute pressure from a barometric or process pressure sensor."""
     VIDEO_VISIBLE = "video_visible"
     """Visible-camera frame stream (no scalar value column)."""
     VIDEO_IR = "video_ir"
@@ -161,6 +163,19 @@ class Sht4xReading(_BindingBase):
     field: Literal["temperature", "humidity"]
 
 
+class Bmp58xReading(_BindingBase):
+    """Selector into one BMP58x barometer poll (:mod:`capa.devices.bmp58x`).
+
+    Every poll is one forced conversion of pressure and temperature; the
+    row carries both plus the raw 24-bit words. ``field`` picks which
+    value the channel carries: ``"pressure"`` in Pa or ``"temperature"``
+    in °C (the sensor's own, used for its compensation).
+    """
+
+    source: Literal["bmp58x_reading"] = "bmp58x_reading"
+    field: Literal["pressure", "temperature"]
+
+
 class NIDAQReadingField(_BindingBase):
     """Selector into a polled :class:`nidaqlib.tasks.models.DaqReading`.
 
@@ -209,6 +224,7 @@ SourceBinding = Annotated[
     | SartoriusReading
     | FujiChannel
     | Sht4xReading
+    | Bmp58xReading
     | NIDAQReadingField
     | NIDAQBlockChannel
     | DerivedBinding,
@@ -395,6 +411,7 @@ __all__ = [
     "AlarmAction",
     "AlarmBand",
     "AlicatFrameField",
+    "Bmp58xReading",
     "ChannelKind",
     "ChannelSpec",
     "DerivedBinding",
