@@ -33,6 +33,11 @@ def _build_registry() -> pint.UnitRegistry:  # type: ignore[type-arg]
     reg.define("@alias degF = deg_F = fahrenheit")
     reg.define("@alias degK = deg_K = kelvin")
     reg.define("@alias percent = pct = %")
+    # pint ships slpm (atmosphere * liter / minute) but not its small sibling,
+    # which low-range Alicat MFCs report in.
+    reg.define(
+        "standard_cubic_centimeter_per_minute = atmosphere * cubic_centimeter / minute = sccm"
+    )
     return reg
 
 

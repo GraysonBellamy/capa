@@ -22,6 +22,12 @@ class TestUnits:
         assert not units_compatible("V", "kg")
         assert not units_compatible("kPa", "slpm")
 
+    def test_sccm(self) -> None:
+        from capa.core.units import UNIT_REGISTRY
+
+        assert units_compatible("sccm", "slpm")
+        assert UNIT_REGISTRY.Quantity(500, "sccm").to("slpm").magnitude == pytest.approx(0.5)
+
     def test_unknown_rejected(self) -> None:
         with pytest.raises(ConfigError):
             parse_unit("not_a_unit_xyz")
