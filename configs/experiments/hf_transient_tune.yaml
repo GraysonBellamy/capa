@@ -1,0 +1,46 @@
+# Per-flux tune for the transient heat-flux test (hf_transient.yaml):
+# open air, heater off the chamber, reference 232041 at 40 mm, one target
+# per run. hold_at_completion leaves the heater HOLDING at the converged
+# setpoint; the heat_flux_tune.holding event gives the value for the
+# test's sample extras. A non-converged (warn_proceeded) tune cools instead
+# of holding: rerun it.
+#
+# Before each run set targets_kw_m2 and operator_initial_setpoint_c from
+# the open-air estimates (2026-10-17 transfer cal, 40 mm):
+#   20 kW/m2 -> 512 C,  30 -> 602,  50 -> 728,  70 -> 819
+#
+# Uses the transfer-cal hardware (heater, reference on ai14, 175681 volts
+# on ai8 as hfg2.voltage, its body TC on ai4, ambient sensor): no cameras,
+# so a long tune doesn't fill the disk with video.
+#
+#   uv run capa validate --strict configs/experiments/hf_transient_tune.yaml
+#   uv run capa gui configs/experiments/hf_transient_tune.yaml --runs-root runs/hf_transient_tune
+
+hardware: ../hardware/hfg_transfer_cal.toml
+
+procedure:
+  id: capa.builtin.heat_flux_tune
+  version: "0.1.0"
+  config:
+    targets_kw_m2: [20.0]
+    initial_guess: operator
+    operator_initial_setpoint_c: 512.0
+    hold_at_completion: true
+    operator_id: gbellamy
+    geometry: "open air, 40 mm below heater, centerline (heater off the chamber)"
+    gauge_calibration_ref: "Medtherm 32-10SB-18-20608 SN 232041, 12867.29134 kW/m2/V"
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+sample:
+  id: TUNE_20kW   # TUNE_<flux>kW
+  material: none (reference gauge, open air)
+  notes: "Single-target tune ahead of hf_transient"
+
+tags:
+  - real
+  - heat-flux
+  - tune
+  - hf-transient

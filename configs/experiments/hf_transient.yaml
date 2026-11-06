@@ -1,0 +1,84 @@
+# Transient heat flux inside the CAPA chamber, one flux per run (20, 30,
+# 50, maybe 70 kW/m2). Gauge 175681 sits at the specimen position, centred,
+# face level with the sample surface, on a black-painted copper plate that
+# the IR camera (via the mirror) and the webcam view.
+#
+# Per flux:
+#   1. Tune open air over the reference at 40 mm with
+#      configs/experiments/hf_transient_tune.yaml (edit its target first).
+#      It ends with the heater HOLDING at the setpoint it found.
+#   2. Remove the reference, switch the cooling water to the chamber loop,
+#      fill in the sample extras below (flux and the tuned setpoint from the
+#      tune's "holding" event), then run this config.
+#
+# The method (configs/methods/hf_transient.method.toml) never touches the
+# heater. It turns the air purge on at 185 SLPM (aborting if purge.flow
+# hasn't reached 180 within 30 s: air supply shut), records 30 s of flush and a
+# 2 min baseline, prompts for the heater to go on, leaves the heater-on
+# period open until you click Continue just after sliding the heater off,
+# records 2 min more, then turns the purge off. The heater keeps holding.
+# The step.entered/exited events tagged "hftrans win=..." mark the windows;
+# contact_switch may give a sharper heater-on/off time than the prompt
+# clicks.
+#
+# During the run: watch hfg_175681.body_temperature. If it climbs more than
+# ~5 degC above the cooling water, stop the run (cooling problem). CAPA's
+# safety rules are not enforced yet. Stop leaves the heater and the purge at
+# their last setpoints: set the Alicat to 0 by hand after a Stop.
+#
+# Run with:
+#
+#   uv run capa validate --strict configs/experiments/hf_transient.yaml
+#   uv run capa gui configs/experiments/hf_transient.yaml --runs-root runs/hf_transient
+
+hardware: ../hardware/hf_transient.toml
+method: ../methods/hf_transient.method.toml
+
+procedure:
+  id: capa.builtin.recipe_runner
+  version: "0.1"
+  config:
+    auto_acknowledge_prompts: false
+    notes: "Transient heat flux at the specimen position, gauge 175681"
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+device_settings:
+  purge_mfc:
+    gas: Air
+  ir_cam0:
+    temperature_range:
+      min_c: 0.0
+      max_c: 650.0
+    emissivity: 0.95
+  visible_cam0:
+    zoom: 270
+    tilt: 7
+
+sample:
+  id: SET_ME   # HFT_175681_<flux>kW_r<n>, e.g. HFT_175681_20kW_r1
+  material: Heat-flux gauge 175681 on black-painted copper plate
+  notes: "Transient heat flux at the specimen position under air purge"
+  extra:
+    gauge_model: "Medtherm 8-2-10-4-0-36-20680K"
+    gauge_serial: "175681"
+    gauge_calibration: hfg_175681_2026-10-17
+    target_flux_kw_m2: null          # 20, 30, 50, 70
+    tuned_setpoint_c: null           # from the tune's heat_flux_tune.holding event
+    tuned_flux_kw_m2: null           # reference reading the tune accepted
+    heater_to_face_mm: 40.0
+    face_vs_sample_surface_mm: 0.0   # + = gauge face above the sample surface plane
+    purge_gas: Air
+    purge_flow_slpm: 185.0
+    purge_mfc: "Alicat MCR-200SLPM-D SN 225873"
+    cooling: "separate loop + building supply"
+    cooling_water_temp_c: null
+    plate_coating: "black paint"
+    ir_view: "via gold mirror (rho = 0.9783, 2026-10-12 refit)"
+
+tags:
+  - real
+  - heat-flux
+  - hf-transient

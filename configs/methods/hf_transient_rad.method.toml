@@ -1,0 +1,74 @@
+name = "hf_transient_rad"
+description = "Transient heat flux at the specimen position with radiometer 222091: window purge set by hand, air purge on, 2 min baseline, heater on the chamber for a fixed 30 min, 2 min after, purge off. The heater is never commanded: it keeps the setpoint the tune left it holding."
+
+[[steps]]
+kind = "prompt"
+title = "Before the test"
+message = "Heater tuned and HOLDING at this flux, off the chamber; reference gauge removed. Radiometer 222091 CENTRED at the specimen position, top face level with the sample surface; window clean; cooling water flowing (no body TC: check the flow by eye); its signal flat on the plot. Start the radiometer window purge BY HAND now: N2, 0.2 L/min (200 sccm) on the MC-500 front panel, and confirm it reads 200. Chamber closed; air supply open; MCR-200 setpoint source on serial. Continue turns the air purge on (185 SLPM), then records 30 s of flush and the 2 min baseline."
+notes = "hftrans win=checklist"
+
+[[steps]]
+kind = "setpoint"
+value = 185.0
+notes = "hftrans win=purge_on"
+
+[steps.target]
+name = "purge.setpoint"
+
+# No flow (air supply shut) ends the run here, before the baseline.
+[[steps]]
+kind = "wait"
+timeout_s = 30.0
+on_timeout = "abort"
+notes = "hftrans win=purge_reach"
+
+[steps.end_condition]
+channel = "purge.flow"
+op = ">="
+value = 180.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 30.0
+notes = "hftrans win=flush"
+
+[[steps]]
+kind = "acquire"
+duration_s = 120.0
+notes = "hftrans win=baseline"
+
+[[steps]]
+kind = "prompt"
+title = "Heater on"
+message = "Slide the heater onto the chamber, then Continue straight away: that starts the 30 min heater-on period. The next prompt asks for the slide off."
+notes = "hftrans win=move_on"
+
+[[steps]]
+kind = "acquire"
+duration_s = 1800.0
+notes = "hftrans win=active"
+
+[[steps]]
+kind = "prompt"
+title = "Heater off"
+message = "30 min up. Slide the heater off the chamber, then Continue straight away: that starts the 2 min post-heater record."
+notes = "hftrans win=move_off"
+
+[[steps]]
+kind = "acquire"
+duration_s = 120.0
+notes = "hftrans win=post"
+
+[[steps]]
+kind = "setpoint"
+value = 0.0
+notes = "hftrans win=purge_off"
+
+[steps.target]
+name = "purge.setpoint"
+
+[[steps]]
+kind = "prompt"
+title = "Done"
+message = "Run complete; the air purge is off. Turn the radiometer window purge off by hand on the MC-500 when the radiometer is out of the chamber (leave it on while it sits under or near the hot heater). The heater is still holding."
+notes = "hftrans win=end"
