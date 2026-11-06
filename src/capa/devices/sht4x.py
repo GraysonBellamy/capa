@@ -9,8 +9,11 @@ side lives in :mod:`capa.devices._mcp2221`.
 
 Architecture:
 
-* ``open`` claims the bridge (cancel any stale transfer, set the bus
-  speed), soft-resets the sensor and reads its serial number.
+* ``open`` takes the bridge from :data:`~capa.devices._mcp2221.BUS_POOL`
+  (opening it if no other sensor on it has), soft-resets the sensor and
+  reads its serial number. Other sensors on the same bridge (a BMP58x
+  barometer) share the bus; each transaction holds the bus lock for its
+  command and its read, but not across the conversion wait.
 * ``start`` captures the run :class:`RunClock`; ``stream`` then polls at
   ``rate_hz``. Each poll is one measure command, a wait of the
   precision's maximum conversion time, and one 6-byte read — about
@@ -34,6 +37,7 @@ Architecture:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -57,13 +61,17 @@ from capa.devices._helpers import (
     reject_unless_authorized,
 )
 from capa.devices._mcp2221 import (
+    BUS_POOL,
     MAX_I2C_SPEED_HZ,
     MIN_I2C_SPEED_HZ,
     BridgeInfo,
+    BusPool,
     HidOpener,
     I2cNackError,
     Mcp2221Error,
     Mcp2221I2cBus,
+    SharedBus,
+    bridge_revision,
     enumerate_bridges,
     open_hid_handle,
 )
@@ -276,7 +284,8 @@ class Sht4xAdapterParams(BaseModel):
     high-precision conversion is 8.3 ms."""
 
     i2c_speed_hz: int = Field(ge=MIN_I2C_SPEED_HZ, le=MAX_I2C_SPEED_HZ, default=100_000)
-    """Bus clock. The sensor accepts up to 1 MHz; the bridge tops out at 400 kHz."""
+    """Bus clock. The sensor accepts up to 1 MHz; the bridge tops out at
+    400 kHz. Every sensor on one bridge must declare the same speed."""
 
     snapshot_period_s: float = Field(gt=0, default=30.0)
     """Cadence of :class:`DeviceSnapshot` emissions during a run."""
@@ -363,8 +372,9 @@ SHT4X_SETTINGS: Final = DeviceSettingsSpec(
 
 
 BusFactory = Callable[[Sht4xAdapterParams], Mcp2221I2cBus]
-"""Test seam: builds the (unopened) bridge the adapter will drive. Production
-leaves it ``None`` and the adapter builds a :class:`Mcp2221I2cBus` itself."""
+"""Test seam: builds the (unopened) bridge the adapter will drive when no
+other sensor has opened it yet. Production leaves it ``None`` and the
+adapter builds a :class:`Mcp2221I2cBus` itself."""
 
 
 def _default_bus_factory(params: Sht4xAdapterParams) -> Mcp2221I2cBus:
@@ -372,7 +382,7 @@ def _default_bus_factory(params: Sht4xAdapterParams) -> Mcp2221I2cBus:
 
 
 class Sht4xAdapter:
-    """Real SHT4x adapter (one sensor on one bridge per instance).
+    """Real SHT4x adapter (one sensor per instance; the bridge may carry others).
 
     Two construction shapes:
 
@@ -382,13 +392,13 @@ class Sht4xAdapter:
     * ``Sht4xAdapter(name=..., params=Sht4xAdapterParams(...))`` —
       programmatic path used by tests.
 
-    Both shapes accept an optional ``bus_factory`` kwarg as a test seam.
+    Both shapes accept optional ``bus_factory`` and ``bus_pool`` kwargs as
+    test seams.
     """
 
     __slots__ = (
-        "_bus",
         "_bus_factory",
-        "_bus_lock",
+        "_bus_pool",
         "_channels",
         "_events",
         "_heater_free_at",
@@ -396,7 +406,9 @@ class Sht4xAdapter:
         "_last_heater_end",
         "_last_measurement",
         "_precision",
+        "_sensor_lock",
         "_sensor_serial",
+        "_shared",
         "_state",
         "capabilities",
         "name",
@@ -413,6 +425,7 @@ class Sht4xAdapter:
         name: str,
         params: Sht4xAdapterParams | None = None,
         bus_factory: BusFactory | None = None,
+        bus_pool: BusPool | None = None,
         **params_kwargs: Any,
     ) -> None:
         if params is not None and params_kwargs:
@@ -430,10 +443,12 @@ class Sht4xAdapter:
             flags.add(Capability.SUPPORTS_AUTO_RECONNECT)
         self.capabilities = frozenset(flags)
         self._bus_factory: BusFactory = bus_factory or _default_bus_factory
-        self._bus: Mcp2221I2cBus | None = None
-        # Created at open(), on the worker loop: an anyio lock binds to the
-        # backend it is first used under.
-        self._bus_lock: anyio.Lock | None = None
+        self._bus_pool: BusPool = bus_pool if bus_pool is not None else BUS_POOL
+        self._shared: SharedBus | None = None
+        # Held across a whole sensor transaction (command, wait, read) so a
+        # command and a stream poll never interleave on this sensor. Re-entrant
+        # because identify wraps a command-then-read.
+        self._sensor_lock = threading.RLock()
         self._channels: list[ChannelSpec] = []
         self._state = AdapterRuntimeState()
         self._precision: str = params.precision
@@ -480,33 +495,42 @@ class Sht4xAdapter:
     # ------------------------------------------------------------------ lifecycle
 
     async def open(self) -> None:
-        """Claim the bridge, reset the sensor and read its serial number.
+        """Take the bridge, reset the sensor and read its serial number.
 
         Idempotent: a second call on an already-open adapter is a no-op.
         """
         if self._state.lifecycle.state in ("open", "running"):
             return
-        if self._bus_lock is None:
-            self._bus_lock = anyio.Lock()
-        bus = self._bus_factory(self.params)
+        pool = self._bus_pool
         try:
-            await anyio.to_thread.run_sync(bus.open)
-            self._sensor_serial = await anyio.to_thread.run_sync(self._identify_blocking, bus)
-        except (Mcp2221Error, Sht4xError) as exc:
-            await anyio.to_thread.run_sync(bus.close)
+            shared = await anyio.to_thread.run_sync(self._acquire_blocking)
+        except Mcp2221Error as exc:
             raise AdapterError(f"sht4x {self.name!r} open failed: {exc}", device=self.name) from exc
-        self._bus = bus
+        try:
+            self._sensor_serial = await anyio.to_thread.run_sync(self._identify_blocking, shared)
+        except (Mcp2221Error, Sht4xError) as exc:
+            await anyio.to_thread.run_sync(pool.release, shared)
+            raise AdapterError(f"sht4x {self.name!r} open failed: {exc}", device=self.name) from exc
+        self._shared = shared
         self._state.lifecycle.open()
 
     async def close(self) -> None:
-        """Release the bridge. Idempotent. The sensor needs no safe state: it
-        has no outputs, and the heater is only ever pulsed."""
+        """Release the bridge (closed once no other sensor holds it).
+        Idempotent. The sensor needs no safe state: it has no outputs, and
+        the heater is only ever pulsed."""
         if self._state.lifecycle.state == "closed":
             return
-        bus, self._bus = self._bus, None
-        if bus is not None:
-            await anyio.to_thread.run_sync(bus.close)
+        shared, self._shared = self._shared, None
+        if shared is not None:
+            await anyio.to_thread.run_sync(self._bus_pool.release, shared)
         self._state.lifecycle.close()
+
+    def _acquire_blocking(self) -> SharedBus:
+        return self._bus_pool.acquire(
+            self.resource_id,
+            i2c_speed_hz=self.params.i2c_speed_hz,
+            factory=lambda: self._bus_factory(self.params),
+        )
 
     async def start(self, ctx: AdapterStartContext) -> None:
         """Capture the :class:`RunClock` anchor and arm the streaming loop."""
@@ -540,7 +564,7 @@ class Sht4xAdapter:
         is off). Events queued by commands (a heater pulse, a reconnect)
         follow the poll that drained them.
         """
-        if self._bus is None or self._bus_lock is None:
+        if self._shared is None:
             raise AdapterError(
                 f"sht4x {self.name!r} stream() requires open() first", device=self.name
             )
@@ -561,10 +585,9 @@ class Sht4xAdapter:
             measurement: Measurement | None = None
             failure: Exception | None = None
             try:
-                async with self._bus_lock:
-                    measurement = await anyio.to_thread.run_sync(
-                        self._measure_blocking, self._precision
-                    )
+                measurement = await anyio.to_thread.run_sync(
+                    self._measure_blocking, self._precision
+                )
             except (Mcp2221Error, Sht4xError) as exc:
                 failure = exc
             t_end_ns = clock.t_mono_ns()
@@ -608,17 +631,17 @@ class Sht4xAdapter:
     async def _recover(self, failure: Exception | None) -> None:
         """After a failed poll: a NACK or CRC leaves the bus usable (the
         bridge already cancelled), so only a bridge I/O failure is worth
-        a reopen, after a back-off."""
+        a reopen, after a back-off. The reopen is of the shared bus, so it
+        also heals any other sensor on the bridge."""
         if not isinstance(failure, Mcp2221Error) or isinstance(failure, I2cNackError):
             return
         await anyio.sleep(_RECONNECT_BACKOFF_S)
-        bus = self._bus
-        if bus is None or self._state.stop_requested:
+        shared = self._shared
+        if shared is None or self._state.stop_requested:
             return
         try:
-            await anyio.to_thread.run_sync(bus.close)
-            await anyio.to_thread.run_sync(bus.open)
-            self._sensor_serial = await anyio.to_thread.run_sync(self._identify_blocking, bus)
+            await anyio.to_thread.run_sync(self._bus_pool.reopen, shared)
+            self._sensor_serial = await anyio.to_thread.run_sync(self._identify_blocking, shared)
         except (Mcp2221Error, Sht4xError) as exc:
             _log.warning("sht4x %r bridge reopen failed: %s", self.name, exc)
             return
@@ -640,7 +663,7 @@ class Sht4xAdapter:
         )
         if rejection is not None:
             return rejection
-        if self._bus is None or self._bus_lock is None:
+        if self._shared is None:
             return make_not_open_result(adapter_id=ADAPTER_ID, device_name=self.name, clock=clock)
         try:
             outcome = await self._dispatch_command(cmd)
@@ -681,10 +704,9 @@ class Sht4xAdapter:
         if kind == "heater_pulse":
             return await self._heater_pulse(cmd.payload)
         if kind == "soft_reset":
-            bus = self._bus
-            assert bus is not None and self._bus_lock is not None
-            async with self._bus_lock:
-                self._sensor_serial = await anyio.to_thread.run_sync(self._identify_blocking, bus)
+            shared = self._shared
+            assert shared is not None
+            self._sensor_serial = await anyio.to_thread.run_sync(self._identify_blocking, shared)
             return f"soft_reset serial={self._sensor_serial}"
         raise AdapterError(f"sht4x {self.name!r}: unknown command kind {kind!r}", device=self.name)
 
@@ -726,12 +748,11 @@ class Sht4xAdapter:
                 t_mono_ns=clock.t_mono_ns(),
                 t_utc=datetime.now(UTC),
             )
-        bus = self._bus
-        assert bus is not None and self._bus_lock is not None
-        async with self._bus_lock:
-            measurement = await anyio.to_thread.run_sync(
-                self._heater_blocking, bus, power_mw, duration_s
-            )
+        shared = self._shared
+        assert shared is not None
+        measurement = await anyio.to_thread.run_sync(
+            self._heater_blocking, shared, power_mw, duration_s
+        )
         now = time.monotonic()
         self._heater_pulses += 1
         self._last_heater_end = now
@@ -819,14 +840,10 @@ class Sht4xAdapter:
     async def read_once(self) -> Measurement:
         """One measurement outside the stream. Read-only, not gated; used by
         the handshake, the hardware smoke test and the manual card."""
-        bus = self._bus
-        if bus is None or self._bus_lock is None:
+        if self._shared is None:
             raise AdapterError(f"sht4x {self.name!r} is not open", device=self.name)
         try:
-            async with self._bus_lock:
-                measurement = await anyio.to_thread.run_sync(
-                    self._measure_blocking, self._precision
-                )
+            measurement = await anyio.to_thread.run_sync(self._measure_blocking, self._precision)
         except (Mcp2221Error, Sht4xError) as exc:
             raise AdapterError(f"sht4x {self.name!r} read failed: {exc}", device=self.name) from exc
         self._last_measurement = measurement
@@ -838,13 +855,12 @@ class Sht4xAdapter:
         field is already in hand."""
         if self._state.lifecycle.state == "closed":
             return None
-        bus = self._bus
         last = self._last_measurement
         return Sht4xStateSnapshot(
             precision=self._precision,
             sensor_serial=self._sensor_serial,
             bridge_serial=self.params.serial,
-            bridge_firmware=_bridge_revision(bus),
+            bridge_firmware=bridge_revision(self._shared),
             last_temperature_c=last.temperature_c if last else None,
             last_humidity_pct=last.humidity_pct if last else None,
             heater_pulses=self._heater_pulses,
@@ -859,51 +875,60 @@ class Sht4xAdapter:
 
     def _measure_blocking(self, precision: str) -> Measurement:
         """One measure command, the conversion wait, one read. Runs off-loop."""
-        bus = self._bus
-        if bus is None:
+        shared = self._shared
+        if shared is None:
             raise Mcp2221Error("bridge not open")
         command, conversion_s = _MEASURE_COMMANDS[precision]
         started = time.perf_counter()
-        bus.write(self.params.i2c_address, bytes([command]))
-        time.sleep(conversion_s)
-        payload = self._read_when_ready(bus, started + conversion_s + _READ_RETRY_BUDGET_S)
+        payload = self._command_then_read(shared, command, conversion_s)
         return Measurement.from_payload(
             payload, precision=precision, latency_s=time.perf_counter() - started
         )
 
-    def _heater_blocking(self, bus: Mcp2221I2cBus, power_mw: int, duration_s: float) -> Measurement:
+    def _heater_blocking(self, shared: SharedBus, power_mw: int, duration_s: float) -> Measurement:
         """One heater command, the pulse, then the reading it produced."""
         command, ready_s = _HEATER_COMMANDS[(power_mw, duration_s)]
         started = time.perf_counter()
-        bus.write(self.params.i2c_address, bytes([command]))
-        time.sleep(ready_s)
-        payload = self._read_when_ready(bus, started + ready_s + _READ_RETRY_BUDGET_S)
+        payload = self._command_then_read(shared, command, ready_s)
         return Measurement.from_payload(
             payload, precision="high", latency_s=time.perf_counter() - started
         )
 
-    def _identify_blocking(self, bus: Mcp2221I2cBus) -> str:
+    def _identify_blocking(self, shared: SharedBus) -> str:
         """Soft reset, then the serial number. Runs off-loop."""
-        address = self.params.i2c_address
-        bus.write(address, bytes([_CMD_SOFT_RESET]))
-        time.sleep(_SOFT_RESET_S)
-        bus.write(address, bytes([_CMD_READ_SERIAL]))
-        payload = self._read_when_ready(bus, time.perf_counter() + _READ_RETRY_BUDGET_S)
+        with self._sensor_lock:
+            with shared.lock:
+                shared.bus.write(self.params.i2c_address, bytes([_CMD_SOFT_RESET]))
+            time.sleep(_SOFT_RESET_S)
+            payload = self._command_then_read(shared, _CMD_READ_SERIAL, 0.0)
         high, low = decode_words(payload)
         return f"0x{(high << 16) | low:08x}"
 
-    def _read_when_ready(self, bus: Mcp2221I2cBus, deadline: float) -> bytes:
-        """Read the 6-byte response, retrying while the sensor NACKs
-        (it does so until its conversion is done) up to ``deadline``."""
-        while True:
-            try:
-                return bus.read(self.params.i2c_address, _RESPONSE_LEN)
-            except I2cNackError:
-                if time.perf_counter() > deadline:
-                    raise Sht4xError(
-                        f"sensor at 0x{self.params.i2c_address:02x} did not answer"
-                    ) from None
-                time.sleep(_READ_RETRY_S)
+    def _command_then_read(self, shared: SharedBus, command: int, wait_s: float) -> bytes:
+        """Send ``command``, wait ``wait_s``, then read the 6-byte response,
+        retrying while the sensor NACKs (it does so until it is done) for
+        up to the retry budget.
+
+        The sensor lock is held throughout, so a command (a heater pulse)
+        never lands inside a stream poll; the bus lock only around each
+        transfer, so other sensors on the bridge use it during the wait.
+        """
+        address = self.params.i2c_address
+        with self._sensor_lock:
+            with shared.lock:
+                shared.bus.write(address, bytes([command]))
+            sent = time.perf_counter()
+            if wait_s > 0:
+                time.sleep(wait_s)
+            deadline = sent + wait_s + _READ_RETRY_BUDGET_S
+            while True:
+                try:
+                    with shared.lock:
+                        return shared.bus.read(address, _RESPONSE_LEN)
+                except I2cNackError:
+                    if time.perf_counter() > deadline:
+                        raise Sht4xError(f"sensor at 0x{address:02x} did not answer") from None
+                    time.sleep(_READ_RETRY_S)
 
     # ------------------------------------------------------------------ records
 
@@ -991,19 +1016,19 @@ class Sht4xAdapter:
         return self._state.compute_health(clock=clock, rate_hz=self.params.rate_hz)
 
     def _snapshot_fields(self) -> dict[str, float | int | str | bool | None]:
-        bus = self._bus
+        shared = self._shared
         last = self._last_measurement
         return {
             "precision": self._precision,
             "rate_hz": self.params.rate_hz,
             "i2c_address": self.params.i2c_address,
-            "i2c_speed_hz": bus.actual_speed_hz if bus is not None else None,
+            "i2c_speed_hz": shared.bus.actual_speed_hz if shared is not None else None,
             "channel_count": len(self._channels),
             "state": self._state.lifecycle.state,
             "recoverable_errors": self._state.recoverable_error_count,
             "sensor_serial": self._sensor_serial,
             "bridge_serial": self.params.serial,
-            "bridge_revision": _bridge_revision(bus),
+            "bridge_revision": bridge_revision(self._shared),
             "last_temperature_c": last.temperature_c if last else None,
             "last_humidity_pct": last.humidity_pct if last else None,
             "last_latency_ms": round(last.latency_s * 1e3, 2) if last else None,
@@ -1011,21 +1036,22 @@ class Sht4xAdapter:
         }
 
 
-def _bridge_revision(bus: Mcp2221I2cBus | None) -> str | None:
-    if bus is None or bus.hardware_revision is None:
-        return None
-    return f"{bus.hardware_revision} / {bus.firmware_revision or '?'}"
-
-
 # ---------------------------------------------------------------------------
 # CLI handshake hook (``capa validate --strict``)
 # ---------------------------------------------------------------------------
 
 
-async def handshake(params: dict[str, Any], *, bus_factory: BusFactory | None = None) -> str:
+async def handshake(
+    params: dict[str, Any],
+    *,
+    bus_factory: BusFactory | None = None,
+    bus_pool: BusPool | None = None,
+) -> str:
     """Open, read the serial and one measurement, close. Used by ``capa validate --strict``."""
     parsed = Sht4xAdapterParams.model_validate(params)
-    adapter = Sht4xAdapter(name="handshake", params=parsed, bus_factory=bus_factory)
+    adapter = Sht4xAdapter(
+        name="handshake", params=parsed, bus_factory=bus_factory, bus_pool=bus_pool
+    )
     await adapter.open()
     try:
         measurement = await adapter.read_once()

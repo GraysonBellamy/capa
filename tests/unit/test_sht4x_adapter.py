@@ -17,7 +17,7 @@ import capa.devices.sht4x as sht4x_module
 from capa.channels.calibration import Identity
 from capa.channels.spec import ChannelKind, ChannelSpec, Sht4xReading
 from capa.core.errors import AdapterError
-from capa.devices._mcp2221 import BridgeInfo, Mcp2221I2cBus
+from capa.devices._mcp2221 import BUS_POOL, BridgeInfo, BusPool, Mcp2221I2cBus
 from capa.devices.adapter import Capability, DeviceCommand
 from capa.devices.records import ChannelSample, DeviceEvent, DeviceSnapshot, SourceRecord
 from capa.devices.registry import ADAPTERS
@@ -92,7 +92,9 @@ def _make(
         )
 
     params.setdefault("rate_hz", 10.0)
-    adapter = Sht4xAdapter(name="ambient", bus_factory=bus_factory, **params)
+    # A private pool per adapter: a test that leaves its adapter open must
+    # not hand the next test a bridge wired to the old fake.
+    adapter = Sht4xAdapter(name="ambient", bus_factory=bus_factory, bus_pool=BusPool(), **params)
     if bind:
         adapter.configure_channels(_channels())
     return adapter, fake
@@ -234,7 +236,7 @@ class TestLifecycle:
         await adapter.open()
         assert adapter.sensor_serial == "0x1643e746"
         assert fake.sensor_commands == [0x94, 0x89]
-        assert fake.cancels == 1
+        assert fake.cancels == 0  # the idle engine is not cancelled
         assert (await adapter.snapshot()).fields["bridge_revision"] == "A6 / 1.2"
         await adapter.open()  # idempotent
         assert fake.sensor_commands == [0x94, 0x89]
@@ -551,7 +553,8 @@ class TestHooks:
         def bus_factory(parsed: Sht4xAdapterParams) -> Mcp2221I2cBus:
             return Mcp2221I2cBus(opener=opener, transfer_timeout_s=0.02)
 
-        summary = await handshake({"rate_hz": 1.0}, bus_factory=bus_factory)
+        summary = await handshake({"rate_hz": 1.0}, bus_factory=bus_factory, bus_pool=BusPool())
+        assert BUS_POOL.open_keys() == []
         assert summary.startswith("sht4x serial=0x1643e746 addr=0x44 bridge=MCP2221 rev=A6 / 1.2")
         assert "T=21.85C" in summary
         assert fake.closed

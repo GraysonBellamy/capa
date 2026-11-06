@@ -1,14 +1,19 @@
-"""A scripted MCP2221 HID handle with an SHT4x on its bus, for unit tests.
+"""A scripted MCP2221 HID handle with sensors on its bus, for unit tests.
 
-:class:`FakeMcp2221Hid` answers the four HID commands
+:class:`FakeMcp2221Hid` answers the HID commands
 :class:`capa.devices._mcp2221.Mcp2221I2cBus` sends, keeping the chip's
-I2C engine state so the NACK-then-cancel dance is exercised for real.
-:class:`FakeSht4xHid` adds the sensor: measure commands queue a
-CRC-protected response, the serial command answers a fixed serial, and
-knobs corrupt a response, make the sensor NACK, or fail the HID link.
+I2C engine state so the NACK-then-cancel dance is exercised for real,
+including the real chip's trap: a cancel sent to an idle engine wedges
+it in state ``0x62`` until a chip reset. :class:`FakeSht4xHid` adds an
+SHT4x: measure commands queue a CRC-protected response, the serial
+command answers a fixed serial, and knobs corrupt a response, make the
+sensor NACK, or fail the HID link. :meth:`FakeMcp2221Hid.attach` puts
+further targets on the same bus.
 """
 
 from __future__ import annotations
+
+from typing import Protocol
 
 from capa.devices._mcp2221 import BridgeSelector, HidHandle
 from capa.devices.sht4x import crc8, raw_from_humidity, raw_from_temperature
@@ -17,8 +22,12 @@ _CMD_STATUS = 0x10
 _CMD_I2C_WRITE = 0x90
 _CMD_I2C_READ = 0x91
 _CMD_I2C_GET = 0x40
+_CMD_RESET = bytes([0x70, 0xAB, 0xCD, 0xEF])
 _STATE_IDLE = 0x00
 _STATE_NACK = 0x25
+_STATE_STOP_TIMEOUT = 0x62
+_DEFAULT_DIVIDER = 0
+"""What the real chip reports before the speed is first set."""
 
 
 def sht4x_payload(temperature_c: float, humidity_pct: float) -> bytes:
@@ -35,22 +44,37 @@ def serial_payload(serial: int) -> bytes:
     return high + bytes([crc8(high)]) + low + bytes([crc8(low)])
 
 
+class FakeI2cTarget(Protocol):
+    """A sensor attached to a :class:`FakeMcp2221Hid` by address."""
+
+    def on_write(self, data: bytes) -> None:
+        """React to an I2C write addressed to this target."""
+        ...
+
+    def on_read(self, length: int) -> bytes | None:
+        """Answer an I2C read; ``None`` NACKs it."""
+        ...
+
+
 class FakeMcp2221Hid:
     """The chip side: HID framing plus the I2C engine's state machine.
 
     ``present`` is the set of 7-bit addresses that acknowledge. A write
     or read to any other address leaves the engine NACKed until a cancel,
-    like the real chip.
+    like the real chip. Addresses with an :meth:`attach`\\ ed target are
+    answered by that target; the rest by :attr:`read_data`.
     """
 
     def __init__(self, *, present: frozenset[int] = frozenset({0x44})) -> None:
         self.present = set(present)
+        self.targets: dict[int, FakeI2cTarget] = {}
         self.commands: list[bytes] = []
         """Every command report received (without the report id)."""
         self.i2c_writes: list[tuple[int, bytes]] = []
         self.i2c_reads: list[tuple[int, int]] = []
         self.cancels = 0
-        self.speed_divider = 118
+        self.resets = 0
+        self.speed_divider = _DEFAULT_DIVIDER
         self.closed = False
         self.engine_state = _STATE_IDLE
         self.read_data: bytes = b""
@@ -89,6 +113,11 @@ class FakeMcp2221Hid:
 
     # -- the sensor side, overridable --------------------------------------
 
+    def attach(self, address: int, target: FakeI2cTarget) -> None:
+        """Put ``target`` on the bus at ``address``."""
+        self.targets[address] = target
+        self.present.add(address)
+
     def on_i2c_write(self, address: int, data: bytes) -> None:
         """Hook for a target's reaction to a write; the base does nothing."""
 
@@ -98,15 +127,29 @@ class FakeMcp2221Hid:
         response = bytearray(64)
         response[0] = command[0]
         kind = command[0]
+        if command[:4] == _CMD_RESET:
+            # The real chip drops off USB and answers nothing.
+            self.resets += 1
+            self.engine_state = _STATE_IDLE
+            self.speed_divider = _DEFAULT_DIVIDER
+            self._read_pending = None
+            return b""
         if kind == _CMD_STATUS:
             if len(command) > 2 and command[2] == 0x10:
                 self.cancels += 1
-                self.engine_state = _STATE_IDLE
+                # A cancel clears a busy engine but wedges an idle one.
+                if self.engine_state in (_STATE_IDLE, _STATE_STOP_TIMEOUT):
+                    self.engine_state = _STATE_STOP_TIMEOUT
+                else:
+                    self.engine_state = _STATE_IDLE
                 self._read_pending = None
                 response[2] = 0x10
             if len(command) > 4 and command[3] == 0x20:
-                self.speed_divider = command[4]
-                response[3] = 0x20
+                if self.engine_state == _STATE_IDLE:
+                    self.speed_divider = command[4]
+                    response[3] = 0x20
+                else:
+                    response[3] = 0x21
             response[8] = self.engine_state
             response[14] = self.speed_divider
             response[46:48] = b"A6"
@@ -120,7 +163,9 @@ class FakeMcp2221Hid:
                 address = command[3] >> 1
                 payload = bytes(command[4 : 4 + length])
                 self.i2c_writes.append((address, payload))
-                if address in self.present:
+                if address in self.targets:
+                    self.targets[address].on_write(payload)
+                elif address in self.present:
                     self.on_i2c_write(address, payload)
                 else:
                     self.engine_state = _STATE_NACK
@@ -132,7 +177,14 @@ class FakeMcp2221Hid:
                 length = command[1] | (command[2] << 8)
                 address = command[3] >> 1
                 self.i2c_reads.append((address, length))
-                if address not in self.present or self.nack_reads > 0:
+                if address in self.targets:
+                    data = self.targets[address].on_read(length)
+                    if data is None:
+                        self.engine_state = _STATE_NACK
+                        self._read_pending = None
+                    else:
+                        self._read_pending = data
+                elif address not in self.present or self.nack_reads > 0:
                     if self.nack_reads > 0:
                         self.nack_reads -= 1
                     self.engine_state = _STATE_NACK
@@ -228,6 +280,7 @@ class OpenerFor:
 
 
 __all__ = [
+    "FakeI2cTarget",
     "FakeMcp2221Hid",
     "FakeSht4xHid",
     "OpenerFor",
