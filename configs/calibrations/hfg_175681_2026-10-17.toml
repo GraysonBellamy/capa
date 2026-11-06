@@ -1,0 +1,61 @@
+# Transfer calibration of heat-flux gauge 175681 (Medtherm
+# 8-2-10-4-0-36-20680K, 10 BTU/(ft^2 s) range), 2026-10-17, against the CAPA
+# reference 232041. Procedure: docs/calibration/heat-flux-gauge-transfer.md.
+#
+# Result: S = 68.259 uV per kW/m2 through the origin
+#       = 14.650 kW/m2 per mV = 0.7752 mV per BTU/(ft2 s) = 0.6826 mV per W/cm2
+#       +-3.1 % (k=2), valid 4.2-68.8 kW/m2.
+#
+# Reproduce from the raw bundles (runs/ is gitignored; they live in
+# runs/hfg_transfer_cal/ on the CAPA PC):
+#   uv run python scripts/analyze_hfg_transfer.py \
+#     runs/hfg_transfer_cal/2026-10-17_163111_HFG2_175681_cal1- \
+#     runs/hfg_transfer_cal/2026-10-17_175952_HFG2_175681_cal1_from05 \
+#     runs/hfg_transfer_cal/2026-10-17_192123_HFG2_175681_cal1_from10
+#
+# Reference chain: NIST colleague (2022-12-19, no stated uncertainty; 3.67-
+# 17.46 kW/m2 tungsten + 15.56-56.53 kW/m2 cone heater) -> transfer standard
+# GTW-10SB-4-36-40-484 SN 223481 (9417.8 kW/m2/V + 0.013) -> CAPA reference
+# Medtherm 32-10SB-18-20608 SN 232041 (12867.29134 kW/m2/V) -> this gauge.
+# Medtherm's 2021 calibration of 223481 (1.027 mV per W/cm2, water 16 C)
+# differs from the NIST colleague's by 3.4 % and was not used.
+#
+# Uncertainty budget (k=1): reference 232041 1.5 % (assumed from its +-3 %
+# k=2); unknown cooling-water conditions in the chain ~0.3 %; linearity
+# 0.22 %; face height and positioning ~0.15 %; transfer statistics 0.10 %
+# (fit 0.075 %, ratio-estimator bias 0.062 %); zero held constant 0.10 %.
+# Combined 1.56 %, so 3.1 % at k=2.
+#
+# Superseded calibrations of 175681: Medtherm 2012, 0.7570 mV per BTU/(ft2 s)
+# (+-3 % k=2, water 13.1 C), before the gauge was stripped and repainted.
+# The "17.83 kW/m2 per mV" figure is 13.5 / 0.7570, a conversion slip; the
+# 2012 value converts to 15.00 kW/m2 per mV.
+
+name = "hfg_175681_2026-10-17"
+revision = "1"
+
+# Curve key is the gauge, not a rig channel: apply it to whichever channel
+# carries 175681's raw volts (Setup tab, Calibration section).
+[curves.hfg_175681]
+kind = "linear_two_point"
+input_unit = "V"
+output_unit = "kW/m^2"
+ref_low_raw = 0.0
+ref_low_value = 0.0
+ref_high_raw = 0.01
+ref_high_value = 146.501
+
+[curves.hfg_175681.uncertainty]
+kind = "relative"
+value = 0.0156            # standard (k=1); capa multiplies by coverage_factor
+coverage_factor = 2.0
+method = "transfer against CAPA reference 232041 (assumed +-3 % k=2, NIST-colleague chain); 12 levels 4.2-68.8 kW/m2, R D R per level with oscillation-free ratio estimator; budget in configs/calibrations/hfg_175681_2026-10-17.toml header"
+
+[curves.hfg_175681.fit_metadata]
+reference_instrument = "Medtherm 32-10SB-18-20608 (CAPA reference heat-flux gauge)"
+reference_serial = "232041"
+fitted_at = 2026-10-17T20:08:48Z
+rms_residual = 0.0947
+source_procedure_id = "capa.builtin.recipe_runner (hfg_transfer_cal methods) + scripts/analyze_hfg_transfer.py"
+capa_git_sha = "e7cef80-dirty"
+notes = "Open air, CAPA cone heater 40 mm above the gauge faces, both gauges water-cooled from the building supply (HFG2 body ~23 C), gauge faces level (0.0 mm entered), centres 33.9 mm apart. Medtherm optical coating, repainted and cured 2026-10-16. Zero in place before use: with no flux this gauge read -7.06 uV in this setup. rms_residual is in kW/m2 (0.25 % relative). Residuals show a +0.3 % (<=20 kW/m2) / -0.2 % (>=30 kW/m2) relative nonlinearity against the reference, carried as a linearity term. Levels at 59.4 and 68.8 kW/m2 lie above the reference chain's 56.5 kW/m2. Up/down repeats agree within 0.11 %."

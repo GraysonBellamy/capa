@@ -1,0 +1,71 @@
+# Open-air pilot for the HFG2 transfer calibration, run once before the
+# calibration itself (docs/calibration/heat-flux-gauge-transfer.md). The
+# heater stays centred on the reference at ~5 kW/m2 for 30 min, then at
+# ~70 kW/m2 for 20 min, with one swap to HFG2 at the end. It answers three
+# questions before the calibration run: the flux each setpoint actually
+# gives in open air, whether 60 s windows are still the right length here,
+# and how long the signal takes to settle after a move.
+#
+# Before Start:
+#   - both gauges water-cooled from the same loop for >= 5 min; HFG2 body
+#     temperature (ai4) steady near the water temperature and above the
+#     dew point from the ambient sensor
+#   - reference on ai14, HFG2 on ai8: with the heater on, HFG2 must read
+#     positive (negative = swap its leads)
+#   - faces level: measure the height difference between the two sensing
+#     faces and enter it below
+#   - slide stops A (reference centred) and B (HFG2 centred) fixed, and the
+#     centre-to-centre spacing measured
+#   - hood or room ventilation in its run state and left alone; no drafts
+#     across the gauges
+#   - heater cold, PV within 2 degC of the room, at stop A (it can't slide
+#     clear of the gauges, so the only zero is this cold one at the start)
+#   - sample extras below filled in
+#
+# During the run: watch hfg2.body_temperature. If it climbs more than
+# ~5 degC above the water temperature, stop the run (cooling problem).
+# CAPA's safety rules are not enforced yet, so this is a manual watch.
+#
+# Run with:
+#
+#   uv run capa validate --strict configs/experiments/hfg_transfer_pilot.yaml
+#   uv run capa gui configs/experiments/hfg_transfer_pilot.yaml --runs-root runs/hfg_transfer_cal
+
+hardware: ../hardware/hfg_transfer_cal.toml
+method: ../methods/hfg_transfer_pilot.method.toml
+
+procedure:
+  id: capa.builtin.recipe_runner
+  version: "0.1"
+  config:
+    auto_acknowledge_prompts: false
+    notes: "HFG2 transfer calibration: open-air pilot"
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+sample:
+  id: SET_ME   # e.g. HFG2_<serial>_pilot; a real-looking default slips through
+  material: Heat-flux gauge under calibration (HFG2)
+  notes: "Open-air pilot: stationary records at ~5 and ~70 kW/m2, one swap"
+  extra:
+    hfg2_model: null
+    hfg2_serial: null
+    hfg2_range_kw_m2: 113.6          # 10 BTU/(ft^2 s); rated to 150 % overrange
+    reference_serial: "232041"
+    heater_to_face_mm: 40.0          # standoff, heater base to reference face (as the rig tunes)
+    face_height_diff_mm: null        # HFG2 face minus reference face (+ = HFG2 higher)
+    gauge_spacing_mm: null           # centre to centre = slide travel A -> B
+    cooling_water_temp_c: null
+    cooling_water_flow_lpm: null
+    lab_air_temp_c: null
+    lab_rh_percent: null
+    ventilation: null                # hood/fan state during the run
+
+tags:
+  - real
+  - calibration
+  - heat-flux
+  - hfg-transfer
+  - pilot

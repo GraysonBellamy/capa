@@ -1,0 +1,305 @@
+name = "rad_transfer_cal"
+
+# Open-air transfer calibration of the purged, windowed radiometer (Medtherm
+# 24P-10SB-24-21062, SN 222091) against the Medtherm Schmidt-Boelter
+# reference, with the N2 purge set by the Alicat. Same rig as
+# hfg_transfer_cal.toml: the heater slides between stop A (reference
+# centred) and stop B (radiometer centred); see
+# docs/calibration/heat-flux-gauge-transfer.md. The radiometer has no body
+# thermocouple.
+
+[[devices]]
+name = "heater"
+adapter = "capa.devices.watlow"
+
+[devices.params]
+port = "COM6"
+address = 1
+protocol = "stdbus"
+parameters = [
+    "process_value",
+    "setpoint",
+]
+instances = [
+    1,
+]
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+identify_on_open = true
+io_timeout_s = 2.0
+wire_temperature_unit = "F"
+
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.nidaq"
+
+[devices.params]
+task_name = "default_task"
+rate_hz = 3.0
+snapshot_period_s = 30.0
+auto_reconnect = false
+overflow = "block"
+
+# Reference gauge, wired as in capa_real_full_fuji.toml.
+[[devices.params.channels]]
+kind = "ai_voltage"
+physical_channel = "cDAQ1Mod1/ai14"
+name = "AI_HFG"
+min_val = -0.001
+max_val = 0.02
+terminal_config = "DIFF"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+# Radiometer. The 9214's full +/-78 mV range, so a reversed pair reads
+# negative instead of clipping.
+[[devices.params.channels]]
+kind = "ai_voltage"
+physical_channel = "cDAQ1Mod1/ai8"
+name = "AI_RAD"
+min_val = -0.078
+max_val = 0.078
+terminal_config = "DIFF"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+# MC-500SCCM-D, SN 125238, firmware 5v12, gas N2. Its setpoint source must be
+# serial (front panel), and it reports in SCCM with the legacy frame field
+# names (Mass, SetPoint, Pressure, Temperature).
+[[devices]]
+name = "purge_mfc"
+adapter = "capa.devices.alicat"
+
+[devices.params]
+port = "COM7"
+unit_id = "A"
+baudrate = 19200
+rate_hz = 2.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
+[[devices]]
+name = "ambient"
+adapter = "capa.devices.sht4x"
+on_failure = "warn"
+
+[devices.params]
+i2c_address = 0x44
+precision = "high"
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
+[[channels]]
+name = "heater.pv"
+kind = "process_var"
+unit = "degF"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "process_value"
+instance = 1
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "degF"
+output_unit = "degC"
+ref_low_raw = 32.0
+ref_low_value = 0.0
+ref_high_raw = 212.0
+ref_high_value = 100.0
+
+[channels.metadata]
+capa_group = "heater_pv"
+
+[[channels]]
+name = "heater.setpoint"
+kind = "setpoint"
+unit = "degF"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "setpoint"
+instance = 1
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "degF"
+output_unit = "degC"
+ref_low_raw = 32.0
+ref_low_value = 0.0
+ref_high_raw = 212.0
+ref_high_value = 100.0
+
+[channels.metadata]
+capa_group = "heater_setpoint"
+
+# Same name and certificate as the rig channel, so the reference flux is
+# computed the same way in both places. keep_raw records the volts the
+# analysis zero-corrects.
+[[channels]]
+name = "heat_flux_gauge"
+kind = "analog_in"
+unit = "V"
+derived_unit = "kW/m^2"
+plot_group = "heat_flux"
+keep_raw = true
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "AI_HFG"
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "V"
+output_unit = "kW/m^2"
+ref_low_raw = 0.0
+ref_low_value = -0.064771278
+ref_high_raw = 0.01
+ref_high_value = 128.6081421
+
+[channels.calibration.uncertainty]
+kind = "relative"
+value = 0.015             # standard (k=1): +-3 % at k=2; capa multiplies by coverage_factor
+coverage_factor = 2.0
+method = "manufacturer cert + reference comparison"
+
+[channels.calibration.fit_metadata]
+reference_instrument = "Medtherm Corporation 32-10SB-18-20608"
+reference_serial = "232041"
+fitted_at = 1970-01-01 00:00:00+00:00
+notes = "linear fit: slope 12867.29134 kW/m^2/V, intercept -0.064771278 kW/m^2 (named NI MAX scale 'CAPA HFG'); applied software-side, not via the driver scale. fitted_at is a placeholder; replace with the actual cert date when available."
+
+[channels.metadata]
+capa_group = "heat_flux_gauge"
+gauge_type = "Schmidt-Boelter"
+position = "open air, heater centreline at stop A (transfer-calibration reference)"
+
+# Raw volts only: the session's output is this gauge's calibration.
+[[channels]]
+name = "radiometer.voltage"
+kind = "analog_in"
+unit = "V"
+derived_unit = "V"
+plot_group = "radiometer_signal"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "AI_RAD"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "V"
+output_unit = "V"
+
+[channels.metadata]
+position = "open air, heater centreline at stop B (radiometer under calibration)"
+
+# The method writes purge.setpoint in the device's unit (sccm, so 200 is
+# 0.2 L/min); the Alicat adapter sends the value as given.
+[[channels]]
+name = "purge.flow"
+kind = "mfc_flow"
+unit = "sccm"
+derived_unit = "sccm"
+plot_group = "purge"
+
+[channels.source]
+source = "alicat_frame_field"
+device = "purge_mfc"
+field = "Mass"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "sccm"
+output_unit = "sccm"
+
+[channels.metadata]
+capa_group = "purge_gas_flow"
+
+[[channels]]
+name = "purge.setpoint"
+kind = "setpoint"
+unit = "sccm"
+derived_unit = "sccm"
+plot_group = "purge"
+
+[channels.source]
+source = "alicat_frame_field"
+device = "purge_mfc"
+field = "SetPoint"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "sccm"
+output_unit = "sccm"
+
+# N2 temperature in the MFC: the purge's temperature where it leaves the
+# supply line.
+[[channels]]
+name = "purge.gas_temperature"
+kind = "temperature"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "ambient"
+
+[channels.source]
+source = "alicat_frame_field"
+device = "purge_mfc"
+field = "Temperature"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "ambient.temperature"
+kind = "temperature"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "temperature"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[channels.metadata]
+capa_group = "ambient_temperature"
+
+[[channels]]
+name = "ambient.humidity"
+kind = "humidity"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "humidity"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[channels.metadata]
+capa_group = "ambient_humidity"

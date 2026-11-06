@@ -1,0 +1,64 @@
+# Resume of the HFG2 transfer calibration at level 10 (~50 kW/m2 down, 728 degC)
+# after run 2026-10-17_175952_HFG2_175681_cal1_from05 froze in level 10's settle
+# (live-plot redraw stall, see runs/hfg_transfer_cal/gui-stall.log).
+# Levels 1-4 (cal1) and 5-9 (cal1_from05) are complete and kept; this run does
+# levels 10-12 with the same tags, timing and stops (docs/calibration/
+# heat-flux-gauge-transfer.md). Regenerate the method for a different
+# start with: uv run python scripts/make_hfg_transfer_methods.py --from-level N
+#
+# No zero is recorded (the heater is hot): the analysis uses the
+# interrupted run's cold Z1 for both runs.
+#
+# Before Start:
+#   - heater at stop A; it may already sit at 728 degC from the interrupted run
+#   - cooling water flowing; HFG2 body temperature (ai4) steady near the water
+#   - gauges, stops and faces untouched since the interrupted run
+#   - hood in the same state as before
+#
+# During the run: watch hfg2.body_temperature; more than ~5 degC above the
+# water means a cooling problem, so stop. After a Stop the heater holds its
+# setpoint: set it to 20 degC on the heater card once the run is sealed.
+#
+# Run with:
+#
+#   uv run capa gui configs/experiments/hfg_transfer_cal_resume10.yaml --runs-root runs/hfg_transfer_cal
+
+hardware: ../hardware/hfg_transfer_cal.toml
+method: ../methods/hfg_transfer_cal_from10.method.toml
+
+procedure:
+  id: capa.builtin.recipe_runner
+  version: "0.1"
+  config:
+    auto_acknowledge_prompts: false
+    notes: "HFG2 transfer calibration resumed at level 10"
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+sample:
+  id: SET_ME   # HFG2_175681_cal1_from10
+  material: Heat-flux gauge under calibration (HFG2)
+  notes: "Open-air transfer calibration, R D R per level; levels 10-12, resuming cal1_from05"
+  extra:
+    resumes_run: "2026-10-17_175952_HFG2_175681_cal1_from05"
+    hfg2_model: "8-2-10-4-0-36-20680K"
+    hfg2_serial: "175681"
+    hfg2_range_kw_m2: 113.6
+    reference_serial: "232041"
+    heater_to_face_mm: 40.0
+    face_height_diff_mm: 0.0
+    gauge_spacing_mm: 33.9
+    cooling_water_temp_c: 21.9
+    cooling_water_flow_lpm: 0.82
+    lab_air_temp_c: null
+    lab_rh_percent: null
+    ventilation: "hood on"
+    spoiled_levels: []
+
+tags:
+  - real
+  - calibration
+  - heat-flux
+  - hfg-transfer

@@ -1,0 +1,97 @@
+# Transfer calibration of the purged, windowed radiometer (Medtherm
+# 24P-10SB-24-21062, SN 222091) against the Medtherm reference, open air,
+# 5-70 kW/m2, with the N2 purge set by the Alicat
+# (docs/calibration/heat-flux-gauge-transfer.md, "Windowed radiometer with
+# purge"). The method comes from scripts/make_rad_transfer_methods.py.
+#
+# Twelve levels, as for HFG2: 5-70 kW/m2 up, then 50, 30, 10 down. At each
+# level the purge is off while the heater goes to the new setpoint, then at
+# 0.2 L/min through the settle (15 min at level 1, 10 min after) and R1 on
+# the reference. A prompt asks for the slide to the radiometer, which is
+# then held at 0.2, 0.1, 0.4 and 0.2 L/min (150 s settle + 70 s each); a
+# second prompt asks for the slide back, then R2. Before the first level,
+# cold zeros at purge off, 0.2, 0.1 and 0.4 L/min. Click Continue only once
+# the heater is at the stop. About 6 h.
+#
+# Before Start:
+#   - heater cold, PV within 2 degC of the room, at stop A (it can't slide
+#     clear of the gauges, so the cold zeros are the run's only zeros)
+#   - both gauges water-cooled from the same loop for >= 5 min, with both
+#     signals flat on the plot (the radiometer has no body thermocouple, so
+#     that is the only check that the zero is settled)
+#   - N2 cylinder and regulator open; Alicat setpoint source on serial
+#     (front panel); its setpoint reads 0 until the method sets it
+#   - radiometer window clean; gauges seated with top faces level; stops A
+#     and B set
+#   - hood or room ventilation in its run state and left alone
+#   - water temperature filled in below
+#
+# During the run: purge.flow should follow purge.setpoint within a few
+# sccm. With no body thermocouple, check the cooling-water flow by eye at
+# each prompt. CAPA's safety rules are not enforced yet.
+#
+# Stop leaves the heater and the purge at their last setpoints: after a
+# Stop, set the heater to 20 degC and the Alicat to 0 by hand. A level is
+# spoiled by a bump, a late or early slide, or a reach-wait timeout warning:
+# note the level number; resume with
+#   uv run python scripts/make_rad_transfer_methods.py --from-level N
+# and a copy of this file pointing at the _fromNN method.
+#
+# Run with:
+#
+#   uv run capa validate --strict configs/experiments/rad_transfer_cal.yaml
+#   uv run capa gui configs/experiments/rad_transfer_cal.yaml --runs-root runs/rad_transfer_cal
+#
+# Analyse with:
+#
+#   uv run python scripts/analyze_hfg_transfer.py --dut-channel radiometer.voltage \
+#     --dut-label RAD runs/rad_transfer_cal/<run> [<resumed run> ...]
+
+hardware: ../hardware/rad_transfer_cal.toml
+method: ../methods/rad_transfer_cal.method.toml
+
+procedure:
+  id: capa.builtin.recipe_runner
+  version: "0.1"
+  config:
+    auto_acknowledge_prompts: false
+    notes: "Radiometer 222091 transfer calibration: 5-70 kW/m2, N2 purge 0.1/0.2/0.4 L/min"
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+sample:
+  id: RAD_222091_cal1
+  material: Windowed radiometer under calibration (Medtherm 24P-10SB-24-21062)
+  notes: "Open-air transfer calibration, R D R per level at 0.2 L/min N2 purge, 0.1 and 0.4 L/min holds, 5-70 kW/m2"
+  extra:
+    rad_model: "24P-10SB-24-21062"
+    rad_serial: "222091"
+    rad_window: ZnSe
+    rad_view_angle_deg: 150
+    rad_range_kw_m2: 113.6           # 10 BTU/(ft^2 s), read from the model number
+    factory_kw_m2_per_mv: 16.56      # Medtherm, 2021-05-26; source temperature not stated
+    factory_cal_date: "2021-05-26"
+    factory_water_temp_c: 23.7
+    factory_water_flow_ml_s: 6.5
+    reference_serial: "232041"
+    heater_to_face_mm: 40.0          # heater base to both top faces (the reference plane)
+    window_below_top_face_mm: null   # window front sits a little below the top face; not measured
+    sensor_below_window_mm: null     # unknown
+    gauge_spacing_mm: 39.65          # centre to centre = slide travel A -> B
+    cooling_water_flow_ml_s: 17.9    # 17 gal/h = 1.07 L/min
+    cooling_water_temp_c: null
+    purge_gas: N2
+    purge_cal_l_min: 0.2
+    purge_sweep_l_min: [0.1, 0.4]
+    purge_mfc: "Alicat MC-500SCCM-D SN 125238"
+    ventilation: null                # hood/fan state during the run
+    spoiled_levels: []               # level numbers to rerun, filled in after the run
+
+tags:
+  - real
+  - calibration
+  - heat-flux
+  - radiometer
+  - hfg-transfer

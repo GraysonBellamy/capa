@@ -1,0 +1,265 @@
+name = "hfg_transfer_cal"
+
+# Open-air transfer calibration of a second heat-flux gauge (HFG2) against
+# the Medtherm Schmidt-Boelter reference. The two gauges sit side by side
+# under the CAPA heater, which slides between two stops to centre on one or
+# the other; see docs/calibration/heat-flux-gauge-transfer.md. Only what the
+# session needs: the heater controller, the NI 9214 (cDAQ1Mod1) and the
+# ambient sensor (dew point against the gauge body temperature). No chamber,
+# balance, MFC, analyzer or cameras.
+
+[[devices]]
+name = "heater"
+adapter = "capa.devices.watlow"
+
+[devices.params]
+port = "COM6"
+address = 1
+protocol = "stdbus"
+parameters = [
+    "process_value",
+    "setpoint",
+]
+instances = [
+    1,
+]
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+identify_on_open = true
+io_timeout_s = 2.0
+wire_temperature_unit = "F"
+
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.nidaq"
+
+[devices.params]
+task_name = "default_task"
+rate_hz = 3.0
+snapshot_period_s = 30.0
+auto_reconnect = false
+overflow = "block"
+
+# Reference gauge, wired as in capa_real_full_fuji.toml.
+[[devices.params.channels]]
+kind = "ai_voltage"
+physical_channel = "cDAQ1Mod1/ai14"
+name = "AI_HFG"
+min_val = -0.001
+max_val = 0.02
+terminal_config = "DIFF"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+# Gauge under calibration. Its sensitivity and polarity are what the session
+# measures, so the limits are the 9214's full +/-78 mV range: a reversed pair
+# reads negative instead of clipping.
+[[devices.params.channels]]
+kind = "ai_voltage"
+physical_channel = "cDAQ1Mod1/ai8"
+name = "AI_HFG2"
+min_val = -0.078
+max_val = 0.078
+terminal_config = "DIFF"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+# HFG2's embedded body thermocouple. It reads the cooling water when all is
+# well; max_val leaves room to see a cooling failure.
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai4"
+name = "TC_HFG2_body"
+thermocouple_type = "K"
+min_val = -20.0
+max_val = 400.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices]]
+name = "ambient"
+adapter = "capa.devices.sht4x"
+on_failure = "warn"
+
+[devices.params]
+i2c_address = 0x44
+precision = "high"
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
+[[channels]]
+name = "heater.pv"
+kind = "process_var"
+unit = "degF"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "process_value"
+instance = 1
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "degF"
+output_unit = "degC"
+ref_low_raw = 32.0
+ref_low_value = 0.0
+ref_high_raw = 212.0
+ref_high_value = 100.0
+
+[channels.metadata]
+capa_group = "heater_pv"
+
+[[channels]]
+name = "heater.setpoint"
+kind = "setpoint"
+unit = "degF"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "setpoint"
+instance = 1
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "degF"
+output_unit = "degC"
+ref_low_raw = 32.0
+ref_low_value = 0.0
+ref_high_raw = 212.0
+ref_high_value = 100.0
+
+[channels.metadata]
+capa_group = "heater_setpoint"
+
+# Same name and certificate as the rig channel, so the reference flux is
+# computed the same way in both places. keep_raw records the volts the
+# analysis zero-corrects.
+[[channels]]
+name = "heat_flux_gauge"
+kind = "analog_in"
+unit = "V"
+derived_unit = "kW/m^2"
+plot_group = "heat_flux"
+keep_raw = true
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "AI_HFG"
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "V"
+output_unit = "kW/m^2"
+ref_low_raw = 0.0
+ref_low_value = -0.064771278
+ref_high_raw = 0.01
+ref_high_value = 128.6081421
+
+[channels.calibration.uncertainty]
+kind = "relative"
+value = 0.015             # standard (k=1): +-3 % at k=2; capa multiplies by coverage_factor
+coverage_factor = 2.0
+method = "manufacturer cert + reference comparison"
+
+[channels.calibration.fit_metadata]
+reference_instrument = "Medtherm Corporation 32-10SB-18-20608"
+reference_serial = "232041"
+fitted_at = 1970-01-01 00:00:00+00:00
+notes = "linear fit: slope 12867.29134 kW/m^2/V, intercept -0.064771278 kW/m^2 (named NI MAX scale 'CAPA HFG'); applied software-side, not via the driver scale. fitted_at is a placeholder; replace with the actual cert date when available."
+
+[channels.metadata]
+capa_group = "heat_flux_gauge"
+gauge_type = "Schmidt-Boelter"
+position = "open air, heater centreline at stop A (transfer-calibration reference)"
+
+# Raw volts only: the session's output is this gauge's calibration.
+[[channels]]
+name = "hfg2.voltage"
+kind = "analog_in"
+unit = "V"
+derived_unit = "V"
+plot_group = "hfg2_signal"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "AI_HFG2"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "V"
+output_unit = "V"
+
+[channels.metadata]
+position = "open air, heater centreline at stop B (gauge under calibration)"
+
+[[channels]]
+name = "hfg2.body_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "gauge_body"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_HFG2_body"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "ambient.temperature"
+kind = "temperature"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "temperature"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[channels.metadata]
+capa_group = "ambient_temperature"
+
+[[channels]]
+name = "ambient.humidity"
+kind = "humidity"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "humidity"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[channels.metadata]
+capa_group = "ambient_humidity"

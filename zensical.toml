@@ -52,6 +52,7 @@ nav = [
             { "Tuning workflow" = "calibration/tuning-workflow.md" },
             { "Heat-flux tune procedure" = "calibration/heat-flux-tune-procedure.md" },
             { "Tune artifacts" = "calibration/tune-artifacts.md" },
+            { "Heat-flux gauge transfer" = "calibration/heat-flux-gauge-transfer.md" },
         ] },
         { Safety = [
             "safety/principles.md",

@@ -1,0 +1,109 @@
+name = "rad_fan_test"
+description = "Fan on/off at 378 C with the heater over the reference: convection on the reference vs the radiometer."
+
+[[steps]]
+kind = "prompt"
+title = "Fan test"
+message = "Heater at stop A, centred on the REFERENCE, and it stays there for the whole test. Fan on a medium setting, OFF, placed about 0.5 m to the side and aimed horizontally across the gap between the gauge faces and the heater; don't move it during the test. Keep the cooling water as it was. Continue to start: the heater goes to 378 C, then the fan prompts follow."
+notes = "fantest win=checklist"
+
+[[steps]]
+kind = "setpoint"
+value = 200.0
+notes = "fantest win=purge"
+
+[steps.target]
+name = "purge.setpoint"
+
+[[steps]]
+kind = "setpoint"
+value = 378.0
+notes = "fantest sp=378 win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 2700.0
+on_timeout = "warn"
+notes = "fantest sp=378 win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = "<="
+value = 379.0
+
+[[steps]]
+kind = "wait"
+timeout_s = 2700.0
+on_timeout = "warn"
+notes = "fantest sp=378 win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = ">="
+value = 377.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 300.0
+notes = "fantest sp=378 win=settle"
+
+[[steps]]
+kind = "acquire"
+duration_s = 180.0
+notes = "fantest sp=378 fan=off win=F0"
+
+[[steps]]
+kind = "prompt"
+title = "Fan test at 378 C"
+message = "Switch the fan ON, then Continue."
+notes = "fantest sp=378 fan=on win=switch"
+
+[[steps]]
+kind = "acquire"
+duration_s = 180.0
+notes = "fantest sp=378 fan=on win=F1"
+
+[[steps]]
+kind = "prompt"
+title = "Fan test at 378 C"
+message = "Switch the fan OFF, then Continue."
+notes = "fantest sp=378 fan=off win=switch"
+
+[[steps]]
+kind = "acquire"
+duration_s = 180.0
+notes = "fantest sp=378 fan=off win=F2"
+
+[[steps]]
+kind = "prompt"
+title = "Fan test at 378 C"
+message = "Switch the fan ON, then Continue."
+notes = "fantest sp=378 fan=on win=switch"
+
+[[steps]]
+kind = "acquire"
+duration_s = 180.0
+notes = "fantest sp=378 fan=on win=F3"
+
+[[steps]]
+kind = "prompt"
+title = "Fan test at 378 C"
+message = "Switch the fan OFF, then Continue."
+notes = "fantest sp=378 fan=off win=switch"
+
+[[steps]]
+kind = "acquire"
+duration_s = 180.0
+notes = "fantest sp=378 fan=off win=F4"
+
+[[steps]]
+kind = "safe_shutdown"
+duration_s = 0.0
+notes = "fantest win=shutdown"
+
+[steps.cool_target]
+"heater.setpoint" = 20.0
+"purge.setpoint" = 0.0

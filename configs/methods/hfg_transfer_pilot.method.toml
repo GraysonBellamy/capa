@@ -1,0 +1,91 @@
+name = "hfg_transfer_pilot"
+description = "Open-air pilot for the HFG2 transfer calibration: stationary records at the lowest and highest levels, then one R D R."
+
+[[steps]]
+kind = "prompt"
+title = "Before heating"
+message = "Cooling water flowing through both gauges; HFG2 body temperature flat on the plot (drifting less than 0.02 degC/min) and above the dew point; both gauges seated with faces level; heater cold (PV within 2 degC of the room) and at stop A, centred on the REFERENCE. Continue to record the zero; the heater heats to level 1 after it."
+notes = "hfgcal win=checklist"
+
+[[steps]]
+kind = "acquire"
+duration_s = 120.0
+notes = "hfgcal level=00 win=Z1"
+
+[[steps]]
+kind = "setpoint"
+value = 268.0
+notes = "hfgcal level=P1 q=5 dir=up win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 1200.0
+on_timeout = "warn"
+notes = "hfgcal level=P1 q=5 dir=up win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = ">="
+value = 267.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 1800.0
+notes = "hfgcal level=P1 q=5 dir=up win=stationary"
+
+[[steps]]
+kind = "setpoint"
+value = 819.0
+notes = "hfgcal level=P2 q=70 dir=up win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 1200.0
+on_timeout = "warn"
+notes = "hfgcal level=P2 q=70 dir=up win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = ">="
+value = 818.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 1200.0
+notes = "hfgcal level=P2 q=70 dir=up win=stationary"
+
+[[steps]]
+kind = "prompt"
+title = "~70 kW/m2: one swap"
+message = "Slide the heater to stop B (centred on HFG2), then Continue."
+notes = "hfgcal level=P2 q=70 win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 120.0
+notes = "hfgcal level=P2 q=70 win=D"
+
+[[steps]]
+kind = "prompt"
+title = "~70 kW/m2: one swap"
+message = "Slide the heater to stop A (centred on the REFERENCE gauge), then Continue."
+notes = "hfgcal level=P2 q=70 win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 120.0
+notes = "hfgcal level=P2 q=70 win=R2"
+
+[[steps]]
+kind = "safe_shutdown"
+duration_s = 0.0
+notes = "hfgcal win=shutdown"
+
+[steps.cool_target]
+"heater.setpoint" = 20.0
