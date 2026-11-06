@@ -174,29 +174,31 @@ The end-condition watcher subscribes to the databus and evaluates each sample fo
 
 ## `prompt`
 
-Block until the operator confirms via the Run-tab UI.
+Block until the operator clicks **Continue** in the prompt dialog.
 
 ```toml
 [[steps]]
 kind = "prompt"
 title = "Insert sample"
-message = "Place specimen in the holder and close the door. Click OK when ready."
+message = "Place specimen in the holder and close the door, then Continue."
 timeout_s = 600.0
 ```
 
 | Field | Required | Notes |
 |---|---|---|
-| `title` | no | Default `"Operator confirmation"`. |
+| `title` | no | Default `"Operator confirmation"`. Dialog heading. |
 | `message` | yes | Body text shown to the operator. |
-| `timeout_s` | no | Optional deadline. > 0. |
+| `timeout_s` | no | Optional deadline. > 0. Unset means no deadline in the GUI (see [Headless prompts](#headless-prompts)). |
 
 Lifecycle:
 
-1. `method.prompt.shown` event written with `title`, `message`, `timeout_s` in metadata.
-2. The executor polls `ctx.metadata["_prompt_confirmed"]` at 10 Hz; the Run tab sets it when the operator clicks Confirm.
-3. On confirmation: `method.prompt.acknowledged` written; step exits.
-4. On timeout: `method.prompt.unanswered` written with `reason="timeout"`; raises `MethodExecutorError`.
-5. On `external_stop`: `method.prompt.unanswered` written with `reason="external_stop"`; step exits without raising (the run is shutting down anyway).
+1. `method.prompt.shown` event written with `title`, `message`, `timeout_s` and a `prompt_id` in metadata.
+2. While it waits, the executor publishes a `method.prompt` `ProcedureTick` with `state="open"` every 2 s. The GUI's prompt dialog opens on the first one, beeps, and stays up: Esc and the title-bar close don't dismiss it.
+3. **Continue** sends a `confirm_prompt` operator command carrying the `prompt_id`. A confirm for any other id (a double-click on the previous prompt, say) is dropped.
+4. On confirmation: `method.prompt.acknowledged` written with `by="operator"`; step exits.
+5. On timeout: `method.prompt.unanswered` written with `reason="timeout"`; raises `MethodExecutorError`.
+6. On `external_stop`: `method.prompt.unanswered` written with `reason="external_stop"`; step exits without raising (the run is shutting down anyway).
+7. However it ends, a `state="closed"` tick takes the dialog down. The dialog also closes when the run leaves RUNNING.
 
 ### Headless prompts
 
@@ -205,7 +207,7 @@ For tests, batch runs, and other non-interactive paths, the [recipe runner](buil
 - Prompts auto-acknowledge after a 0-second yield.
 - `method.prompt.acknowledged` carries `by: "auto_acknowledge"` in metadata.
 
-Without `auto_acknowledge_prompts` and with no UI wired up, a headless run hits `PROMPT_HEADLESS_DEFAULT_TIMEOUT_S = 30 s` as the soft default and times out. This is deliberately *not* infinite — a CI job hanging on an unconfigured prompt would be invisible failure.
+Without `auto_acknowledge_prompts` and with no UI wired up, a prompt with no `timeout_s` hits `PROMPT_HEADLESS_DEFAULT_TIMEOUT_S = 30 s` and times out. This is deliberately *not* infinite — a CI job hanging on a prompt nobody can see would be invisible failure. In the GUI the default doesn't apply: the operator is there to answer, and Stop ends the wait.
 
 ---
 

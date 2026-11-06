@@ -114,7 +114,7 @@ class ChannelRequirement(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-OperatorCommandKind = Literal["pause", "resume", "accept_current"]
+OperatorCommandKind = Literal["pause", "resume", "accept_current", "confirm_prompt"]
 """Inbound UI commands a long-running procedure can react to.
 
 * ``pause`` / ``resume`` — freeze the iteration loop without changing
@@ -125,6 +125,10 @@ OperatorCommandKind = Literal["pause", "resume", "accept_current"]
   that emit per-target results (e.g.
   :class:`~capa.experiment.procedures.builtin.heat_flux_tune.HeatFluxTune`)
   mark the resulting point with ``accept_reason="operator_override"``.
+* ``confirm_prompt`` — release the method ``prompt`` step that is
+  waiting. ``metadata["prompt_id"]`` must name that prompt; the
+  :class:`~capa.experiment.executor.MethodExecutor` drops a confirm for
+  any other id, so a double-click can't release the next prompt.
 
 ``abort`` is intentionally **not** in this list: a UI abort is
 delivered through the existing ``external_stop`` event, which every

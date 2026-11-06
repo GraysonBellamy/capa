@@ -43,6 +43,7 @@ CAPA_OPTIONAL_GROUPS: dict[str, tuple[str, ...]] = {
     "reactive_gas_flow": ("mfc_flow",),
     "ambient_temperature": ("temperature", "tc", "analog_in"),
     "ambient_humidity": ("humidity", "analog_in"),
+    "ambient_pressure": ("pressure", "analog_in"),
 }
 
 SPECIMEN_SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (

@@ -1,0 +1,57 @@
+# Fan test on the radiometer calibration rig: is the radiometer's low-flux
+# deficit against the reference (-1 % at 4 kW/m2 on 2026-10-18) convection
+# on the reference? Method from scripts/make_rad_fan_test_method.py.
+#
+# The heater stays at stop A (over the reference) the whole time, with the
+# purge at 0.2 L/min. At 378 C (~10 kW/m2): 5 min settle, then fan off / on /
+# off / on / off, 3 min each, switched at prompts. About 22 min.
+#
+# Start it straight after rad_transfer_cal ends (its shutdown sets the heater
+# to 20 C; the method brings it back to 378 C). If you Stop this run, set the
+# heater to 20 degC and the Alicat to 0 by hand.
+#
+# Fan: medium setting (enough to replace the air at the gauge faces; the
+# ratio cancels any change in heater output, and shell cooling shows as slow
+# drift), about 0.5 m to the side, aimed horizontally across the gap between
+# the gauge faces and the heater, same place for every switch.
+#
+# Run with:
+#
+#   uv run capa gui configs/experiments/rad_fan_test.yaml --runs-root runs/rad_transfer_cal
+#
+# Analyse with (the main run supplies the cold zeros):
+#
+#   uv run python scripts/analyze_fan_test.py runs/rad_transfer_cal/<fan run> \
+#     --zero-run runs/rad_transfer_cal/2026-10-18_170659_RAD_222091_cal1
+
+hardware: ../hardware/rad_transfer_cal.toml
+method: ../methods/rad_fan_test.method.toml
+
+procedure:
+  id: capa.builtin.recipe_runner
+  version: "0.1"
+  config:
+    auto_acknowledge_prompts: false
+    notes: "Fan on/off at 378 C, heater over the reference"
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+sample:
+  id: RAD_222091_fantest1
+  material: Windowed radiometer and reference gauge, convection check
+  notes: "Fan on/off, heater at stop A, 378 C, purge 0.2 L/min"
+  extra:
+    rad_serial: "222091"
+    reference_serial: "232041"
+    heater_to_face_mm: 40.0
+    gauge_spacing_mm: 39.65
+    fan: null                        # make/model and setting
+    fan_distance_m: 0.5
+    fan_aim: null                    # e.g. "horizontal, across the gap, from the +y side"
+
+tags:
+  - real
+  - radiometer
+  - fan-test

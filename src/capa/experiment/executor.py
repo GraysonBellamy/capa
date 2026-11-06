@@ -16,6 +16,10 @@ The executor:
 * Subscribes to the data bus for ``wait`` / stability / end-condition checks.
 * Honors ``ctx.external_stop`` — every loop polls or awaits it so the
   operator's abort button stops execution promptly.
+* Holds ``prompt`` steps until the operator confirms: it publishes a
+  ``method.prompt`` :class:`~capa.runtime.emissions.ProcedureTick` for the
+  Run tab's dialog and waits for a matching ``confirm_prompt``
+  :class:`~capa.experiment.procedures.base.OperatorCommand`.
 * Raises :class:`MethodExecutorError` on a step that cannot be executed
   (e.g. unknown channel, no adapter for the bound device); the engine
   classifies that as a crashed run.
@@ -34,6 +38,7 @@ import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -90,9 +95,20 @@ channel samples arrive; no fixed-rate polling loop is used.
 """
 
 PROMPT_HEADLESS_DEFAULT_TIMEOUT_S: float = 30.0
-"""Soft default when a headless run hits a ``prompt`` step without
-``auto_acknowledge_prompts``. The executor logs a warning and aborts the
-step rather than blocking forever."""
+"""Deadline for a ``prompt`` step with no ``timeout_s`` when no UI is
+attached (``ctx.ui_sink is None``) and prompts aren't auto-acknowledged.
+Nobody can answer such a prompt, so it times out instead of blocking
+forever. With a UI attached an unset ``timeout_s`` means no deadline."""
+
+PROMPT_TICK_KIND: str = "method.prompt"
+"""``payload["kind"]`` of the :class:`ProcedureTick` a waiting prompt
+publishes. ``payload["state"]`` is ``"open"`` while it waits and
+``"closed"`` once it is answered, times out or is stopped."""
+
+PROMPT_REPUBLISH_S: float = 2.0
+"""How often a waiting prompt republishes its ``"open"`` tick. The UI
+bridge drops the oldest emissions when it backs up, so one lost tick
+must not leave the operator without a dialog."""
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +137,8 @@ class MethodExecutor:
     ``Batch`` driver — never by an interactive run."""
 
     _current_step_index: int | None = field(default=None, init=False)
+    _step_count: int | None = field(default=None, init=False)
+    _prompt_seq: int = field(default=0, init=False)
 
     # ---------------------------------------------------------------- public
 
@@ -163,6 +181,7 @@ class MethodExecutor:
     # ---------------------------------------------------------------- internals
 
     async def _run_range(self, method: Method, *, start: int, stop: int) -> None:
+        self._step_count = len(method.steps)
         for idx in range(start, stop):
             if self.ctx.external_stop.is_set():
                 self.ctx.logger.info("method.executor.stopped", at=idx)
@@ -287,13 +306,21 @@ class MethodExecutor:
         )
 
     async def _run_prompt(self, step: PromptStep) -> None:
-        """Block until operator confirms.
+        """Block until the operator confirms.
 
-        In headless mode (``auto_acknowledge_prompts``) we sleep a short
-        interval and proceed. In UI mode the engine wires a confirm pathway
-        that flips ``ctx.metadata['_prompt_confirmed']`` (set by the run
-        tab); we poll it and write a ``method.prompt.acknowledged`` event.
+        With ``auto_acknowledge_prompts`` (headless tests, batch runs) the
+        prompt acknowledges after a zero-second yield. Otherwise it waits
+        for a ``confirm_prompt`` operator command whose
+        ``metadata["prompt_id"]`` names this prompt, republishing a
+        ``"open"`` tick every :data:`PROMPT_REPUBLISH_S` for the Run tab's
+        dialog and a ``"closed"`` tick when it ends, however it ends.
+
+        An unset ``timeout_s`` means no deadline when a UI is attached and
+        :data:`PROMPT_HEADLESS_DEFAULT_TIMEOUT_S` when none is. A timeout
+        raises :class:`MethodExecutorError`; an external stop returns.
         """
+        self._prompt_seq += 1
+        prompt_id = f"{self._current_step_index}:{self._prompt_seq}"
         self.ctx.bundle_writer.write_event(
             kind="method.prompt.shown",
             message=step.message,
@@ -301,7 +328,7 @@ class MethodExecutor:
             source="method_executor",
             t_mono_ns=self.ctx.clock.t_mono_ns(),
             t_utc=datetime.now(UTC),
-            metadata={"title": step.title, "timeout_s": step.timeout_s},
+            metadata={"title": step.title, "timeout_s": step.timeout_s, "prompt_id": prompt_id},
         )
         if self.auto_acknowledge_prompts:
             await anyio.sleep(0)
@@ -312,43 +339,113 @@ class MethodExecutor:
                 source="method_executor",
                 t_mono_ns=self.ctx.clock.t_mono_ns(),
                 t_utc=datetime.now(UTC),
-                metadata={"by": "auto_acknowledge"},
+                metadata={"by": "auto_acknowledge", "prompt_id": prompt_id},
             )
             return
 
-        timeout_s = step.timeout_s or PROMPT_HEADLESS_DEFAULT_TIMEOUT_S
-        confirmed = False
-        with anyio.move_on_after(timeout_s) as scope:
-            while not self.ctx.external_stop.is_set():
-                if self._prompt_was_confirmed():
-                    confirmed = True
-                    self.ctx.bundle_writer.write_event(
-                        kind="method.prompt.acknowledged",
-                        message=f"ack: {step.message}",
-                        severity="info",
-                        source="method_executor",
-                        t_mono_ns=self.ctx.clock.t_mono_ns(),
-                        t_utc=datetime.now(UTC),
-                        metadata={"by": "operator"},
+        timeout_s = step.timeout_s
+        if timeout_s is None and self.ctx.ui_sink is None:
+            timeout_s = PROMPT_HEADLESS_DEFAULT_TIMEOUT_S
+        tick_payload: dict[str, object] = {
+            "kind": PROMPT_TICK_KIND,
+            "state": "open",
+            "prompt_id": prompt_id,
+            "title": step.title,
+            "message": step.message,
+            "step_index": self._current_step_index,
+            "step_count": self._step_count,
+        }
+        outcome: list[str] = []
+
+        async def republish_open() -> None:
+            while True:
+                self._publish_prompt_tick(tick_payload)
+                await anyio.sleep(PROMPT_REPUBLISH_S)
+
+        async def watch_confirm() -> None:
+            recv = self.ctx.operator_commands
+            if recv is not None:
+                async for cmd in recv:
+                    if cmd.kind == "confirm_prompt" and cmd.metadata.get("prompt_id") == prompt_id:
+                        outcome.append("operator")
+                        return
+                    self.ctx.logger.info(
+                        "method.prompt.command_dropped",
+                        kind=cmd.kind,
+                        prompt_id=cmd.metadata.get("prompt_id"),
+                        waiting_for=prompt_id,
                     )
-                    return
-                await anyio.sleep(0.1)
-        if not confirmed:
-            severity = "warning" if scope.cancelled_caught else "error"
-            reason = "timeout" if scope.cancelled_caught else "external_stop"
+            # No command stream, or the UI closed it: only a stop or the
+            # deadline can end this prompt now.
+            await anyio.sleep_forever()
+
+        async def watch_stop() -> None:
+            await self.ctx.external_stop.wait()
+            outcome.append("external_stop")
+
+        async def watch_deadline(deadline_s: float) -> None:
+            await anyio.sleep(deadline_s)
+            outcome.append("timeout")
+
+        try:
+            async with anyio.create_task_group() as tg:
+
+                async def first_to_finish(watcher: Callable[[], Awaitable[None]]) -> None:
+                    await watcher()
+                    tg.cancel_scope.cancel()
+
+                tg.start_soon(republish_open)
+                tg.start_soon(first_to_finish, watch_confirm)
+                tg.start_soon(first_to_finish, watch_stop)
+                if timeout_s is not None:
+                    tg.start_soon(first_to_finish, partial(watch_deadline, timeout_s))
+        finally:
+            self._publish_prompt_tick({**tick_payload, "state": "closed"})
+
+        result = outcome[0]
+        if result == "operator":
             self.ctx.bundle_writer.write_event(
-                kind="method.prompt.unanswered",
-                message=f"prompt not acknowledged: {step.message}",
-                severity=severity,
+                kind="method.prompt.acknowledged",
+                message=f"ack: {step.message}",
+                severity="info",
                 source="method_executor",
                 t_mono_ns=self.ctx.clock.t_mono_ns(),
                 t_utc=datetime.now(UTC),
-                metadata={"reason": reason},
+                metadata={"by": "operator", "prompt_id": prompt_id},
             )
-            if reason == "timeout":
-                raise MethodExecutorError(
-                    f"prompt step timed out after {timeout_s}s without confirmation"
+            return
+        self.ctx.bundle_writer.write_event(
+            kind="method.prompt.unanswered",
+            message=f"prompt not acknowledged: {step.message}",
+            severity="warning" if result == "timeout" else "error",
+            source="method_executor",
+            t_mono_ns=self.ctx.clock.t_mono_ns(),
+            t_utc=datetime.now(UTC),
+            metadata={"reason": result, "prompt_id": prompt_id},
+        )
+        if result == "timeout":
+            raise MethodExecutorError(
+                f"prompt step timed out after {timeout_s}s without confirmation"
+            )
+
+    def _publish_prompt_tick(self, payload: dict[str, object]) -> None:
+        """Mirror a prompt's state to the UI; a no-op when no UI is attached."""
+        sink = self.ctx.ui_sink
+        if sink is None:
+            return
+        # Local: capa.runtime's package import pulls this module in.
+        from capa.runtime.emissions import ProcedureTick  # noqa: PLC0415
+
+        try:
+            sink.publish(
+                ProcedureTick(
+                    procedure_id=self.ctx.config.procedure.id,
+                    t_mono_ns=self.ctx.clock.t_mono_ns(),
+                    payload=payload,
                 )
+            )
+        except Exception as exc:
+            self.ctx.logger.warning("method.prompt.tick_publish_failed", error=str(exc))
 
     async def _run_acquire(self, step: AcquireStep) -> None:
         """Pure record-window: hold for ``duration_s`` without changing any
@@ -557,12 +654,6 @@ class MethodExecutor:
         except Exception:
             return None
 
-    def _prompt_was_confirmed(self) -> bool:
-        meta = self.ctx.metadata
-        if meta is None:
-            return False
-        return bool(meta.pop("_prompt_confirmed", False))
-
     def _write_step_event(
         self,
         *,
@@ -619,6 +710,8 @@ __all__ = [
     "DEFAULT_RAMP_TICK_HZ",
     "DEFAULT_WAIT_POLL_HZ",
     "PROMPT_HEADLESS_DEFAULT_TIMEOUT_S",
+    "PROMPT_REPUBLISH_S",
+    "PROMPT_TICK_KIND",
     "CustomHandler",
     "MethodExecutor",
     "MethodExecutorError",

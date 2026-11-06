@@ -44,9 +44,9 @@ ref_high_value = 250.0
 
 [curves.sample_tc_1.uncertainty]
 kind = "absolute"
-value = 0.5
+value = 0.25
 coverage_factor = 2.0
-method = "type-K reference + ice-point cross-check, k=2"
+method = "type-K reference + ice-point cross-check; +-0.5 C at k=2"
 
 [curves.sample_tc_1.fit_metadata]
 reference_instrument = "Fluke 1551 Stik"
@@ -216,15 +216,15 @@ Every calibration declares an `uncertainty` block — *or* an explicit absence. 
 ```toml
 [curves.sample_tc_1.uncertainty]
 kind = "absolute"           # or "relative"
-value = 0.5                 # output units for "absolute", dimensionless fraction for "relative"
-coverage_factor = 2.0       # k-factor: 1 = standard, 2 = ~95% expanded
+value = 0.25                # standard (k=1) uncertainty: output units for "absolute", fraction for "relative"
+coverage_factor = 2.0       # k-factor: 1 = standard, 2 = ~95% expanded; the interval is value x k (+-0.5 here)
 method = "type-K + ice-point cross-check"
 ```
 
 | Field | Notes |
 |---|---|
 | `kind` | `"absolute"` — `value ± uncertainty` in output units. `"relative"` — `value × (1 ± uncertainty)` as a dimensionless fraction (`0.01 = 1%`). |
-| `value` | Magnitude. ≥ 0. |
+| `value` | The **standard (k=1)** uncertainty. ≥ 0. capa multiplies it by `coverage_factor`, so for a certificate's "±3 % at k=2" write `value = 0.015` with `coverage_factor = 2.0`, not `0.03`. |
 | `coverage_factor` | k-factor. Default 1.0. > 0. Recorded so an analyst five years later quotes the right confidence interval without guessing. |
 | `method` | Free-text description of how the uncertainty was estimated (residuals from a fit, manufacturer spec, …). Optional but strongly recommended. |
 

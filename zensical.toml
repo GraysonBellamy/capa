@@ -52,6 +52,7 @@ nav = [
             { "Tuning workflow" = "calibration/tuning-workflow.md" },
             { "Heat-flux tune procedure" = "calibration/heat-flux-tune-procedure.md" },
             { "Tune artifacts" = "calibration/tune-artifacts.md" },
+            { "Heat-flux gauge transfer" = "calibration/heat-flux-gauge-transfer.md" },
         ] },
         { Safety = [
             "safety/principles.md",
@@ -105,6 +106,7 @@ nav = [
             { "Fuji gas analyzer" = "devices/fuji.md" },
             { "NI-DAQ" = "devices/nidaq.md" },
             { "SHT4x ambient sensor" = "devices/sht4x.md" },
+            { "BMP58x barometer" = "devices/bmp58x.md" },
             { "USB webcams" = "devices/cameras-webcam.md" },
             { "FLIR IR cameras" = "devices/cameras-flir.md" },
             { Simulators = "devices/simulators.md" },

@@ -88,7 +88,7 @@ def _make_section(qtbot: Any) -> tuple[ChannelsSection, SetupDraft]:
 def test_channels_section_lists_channels_from_hardware_payload(qtbot: Any) -> None:
     section, _ = _make_section(qtbot)
     names = [c["name"] for c in section._model.channels()]
-    # Eight channels in sim_capa.toml.
+    # Nine channels in sim_capa.toml.
     assert names == [
         "heater.pv",
         "heater.setpoint",
@@ -98,6 +98,7 @@ def test_channels_section_lists_channels_from_hardware_payload(qtbot: Any) -> No
         "balance.mass",
         "ambient.temperature",
         "ambient.humidity",
+        "ambient.pressure",
     ]
 
 
@@ -106,7 +107,7 @@ def test_channels_section_payload_under_channels_key(qtbot: Any) -> None:
     payload = section.payload()
     assert "channels" in payload
     assert isinstance(payload["channels"], list)
-    assert len(payload["channels"]) == 8
+    assert len(payload["channels"]) == 9
 
 
 def test_channels_section_select_populates_detail_widgets(qtbot: Any) -> None:
@@ -197,7 +198,7 @@ def test_channels_section_remove_drops_row(qtbot: Any) -> None:
     section._table.selectRow(0)
     section._on_remove()
     rows = section._model.channels()
-    assert len(rows) == 7
+    assert len(rows) == 8
     assert rows[0]["name"] == "heater.setpoint"
 
 

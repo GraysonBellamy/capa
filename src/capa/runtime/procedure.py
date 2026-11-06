@@ -119,6 +119,7 @@ class ProcedureRunner:
         "_dispatcher",
         "_external_stop",
         "_logger",
+        "_loop",
         "_method_executor",
         "_op_cmd_recv",
         "_op_cmd_send",
@@ -168,6 +169,9 @@ class ProcedureRunner:
         # ``ctx.operator_commands``.
         self._op_cmd_send: MemoryObjectSendStream[OperatorCommand] | None = None
         self._op_cmd_recv: MemoryObjectReceiveStream[OperatorCommand] | None = None
+        # The loop the streams belong to, so a send from the UI thread can
+        # be handed over with ``call_soon_threadsafe``.
+        self._loop: asyncio.AbstractEventLoop | None = None
         # UI-only telemetry sink — wired by the conductor so the
         # procedure can publish ProcedureTicks without learning about
         # the bridge. ``None`` for headless / test paths; the procedure
@@ -333,17 +337,37 @@ class ProcedureRunner:
     def send_operator_command(self, cmd: OperatorCommand) -> bool:
         """Push one operator command onto the procedure's inbound stream.
 
-        Returns ``True`` if the command was queued, ``False`` if the
-        stream is unwired (procedure hasn't been built yet or the
-        runner predates the command-stream feature for this run). The
-        UI side calls this from its loop; the procedure consumer runs
-        on the conductor loop and picks the command up via
-        ``ctx.operator_commands``.
+        Returns ``True`` if the command was queued (or, from another
+        thread, handed to the conductor loop), ``False`` if the stream is
+        unwired (the procedure context hasn't been built yet) or the
+        conductor loop has closed. The UI calls this from its own thread;
+        the stream belongs to the conductor loop, so the send is marshalled
+        there with ``call_soon_threadsafe`` — a direct cross-thread send
+        would not wake a consumer parked on the stream. The procedure
+        picks the command up via ``ctx.operator_commands``.
 
         Non-blocking. A buffer-full condition (deeply unusual — the
         consumer is a tight async loop) is treated as a drop and
         logged; the UI should not freeze on operator-command delivery.
         """
+        if self._op_cmd_send is None:
+            return False
+        loop = self._loop
+        try:
+            running: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if loop is None or running is loop:
+            return self._push_operator_command(cmd)
+        try:
+            loop.call_soon_threadsafe(self._push_operator_command, cmd)
+        except RuntimeError as exc:  # conductor loop already closed
+            self._logger.warning("operator_command.drop", kind=cmd.kind, error=str(exc))
+            return False
+        return True
+
+    def _push_operator_command(self, cmd: OperatorCommand) -> bool:
+        """Put ``cmd`` on the stream; runs on the stream's own loop."""
         if self._op_cmd_send is None:
             return False
         try:
@@ -370,7 +394,11 @@ class ProcedureRunner:
             )
             self._op_cmd_send = send_stream
             self._op_cmd_recv = recv_stream
-        return ProcedureContext(
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._loop = None
+        proc_ctx = ProcedureContext(
             clock=ctx.clock,
             config=self._config,
             bundle_writer=self._bundle_writer,
@@ -386,6 +414,12 @@ class ProcedureRunner:
             operator_commands=self._op_cmd_recv,
             ui_sink=self._ui_sink,
         )
+        # The executor was built before this context existed. Rebind it so
+        # its steps see the same stop event, operator-command stream and
+        # UI sink as the procedure: a prompt step needs the last two.
+        if self._method_executor is not None:
+            self._method_executor.ctx = proc_ctx
+        return proc_ctx
 
 
 __all__ = ["ProcedureRunner"]

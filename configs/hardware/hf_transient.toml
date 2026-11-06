@@ -1,0 +1,458 @@
+name = "hf_transient"
+
+# Transient heat flux inside the CAPA chamber: Medtherm 175681 (calibrated
+# 2026-10-17, configs/calibrations/hfg_175681_2026-10-17.toml) at the
+# specimen position, centred, face level with the sample surface, 40 mm
+# below the heater base once the heater is on the chamber. The gauge sits
+# on a black-painted copper plate that the IR camera (via the mirror) and
+# the webcam view. Air purge on the MCR-200SLPM Alicat. No balance, no
+# gas analyzer.
+#
+# The reference gauge (232041, ai14) stays in the file so the per-flux tune
+# (configs/experiments/hf_transient_tune.yaml) and the test share one rig;
+# it is unplugged during the test and its channel reads nothing useful.
+
+[[devices]]
+name = "heater"
+adapter = "capa.devices.watlow"
+
+[devices.params]
+port = "COM6"
+address = 1
+protocol = "stdbus"
+parameters = [
+    "process_value",
+    "setpoint",
+]
+instances = [
+    1,
+]
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+identify_on_open = true
+io_timeout_s = 2.0
+wire_temperature_unit = "F"
+
+# The 185 SLPM air purge: Alicat MCR-200SLPM-D, SN 225873, fw 8v17.0-R23,
+# on the COM7 Prolific cable in place of the MC-500SCCM (probed 2026-10-19).
+# Frame fields Abs_Press, Flow_Temp, Volu_Flow, Mass_Flow, Mass_Flow_Setpt,
+# Gas, all flows in SLPM, gas set to Air. 8v17 takes a setpoint but can't
+# report one back (no LS), so purge.setpoint comes from the frame.
+[[devices]]
+name = "purge_mfc"
+adapter = "capa.devices.alicat"
+
+[devices.params]
+port = "COM7"
+unit_id = "A"
+baudrate = 115200
+rate_hz = 2.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
+[[devices]]
+name = "cdaq1"
+adapter = "capa.devices.nidaq"
+
+[devices.params]
+task_name = "default_task"
+rate_hz = 3.0
+snapshot_period_s = 30.0
+auto_reconnect = false
+overflow = "block"
+
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai3"
+name = "TC_outer_wall"
+thermocouple_type = "K"
+min_val = 0.0
+max_val = 400.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai2"
+name = "TC_inner_wall"
+thermocouple_type = "K"
+min_val = 0.0
+max_val = 400.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices.params.channels]]
+kind = "ai_voltage"
+physical_channel = "cDAQ1Mod1/ai13"
+name = "AI_contact_switch"
+min_val = -0.05
+max_val = 0.05
+terminal_config = "DIFF"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices.params.channels]]
+kind = "ai_voltage"
+physical_channel = "cDAQ1Mod1/ai14"
+name = "AI_HFG"
+min_val = -0.001
+max_val = 0.02
+terminal_config = "DIFF"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+# 175681, wired as in the 2026-10-17 transfer calibration.
+[[devices.params.channels]]
+kind = "ai_voltage"
+physical_channel = "cDAQ1Mod1/ai8"
+name = "AI_HFG_175681"
+min_val = -0.078
+max_val = 0.078
+terminal_config = "DIFF"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+# 175681's embedded body thermocouple.
+[[devices.params.channels]]
+kind = "thermocouple"
+physical_channel = "cDAQ1Mod1/ai4"
+name = "TC_HFG_175681_body"
+thermocouple_type = "K"
+min_val = -20.0
+max_val = 400.0
+cjc_source = "BUILT_IN"
+units = "DEG_C"
+adc_timing_mode = "HIGH_RESOLUTION"
+auto_zero_mode = "EVERY_SAMPLE"
+
+[[devices]]
+name = "ambient"
+adapter = "capa.devices.sht4x"
+on_failure = "warn"
+
+[devices.params]
+i2c_address = 0x44
+precision = "high"
+rate_hz = 1.0
+auto_reconnect = true
+snapshot_period_s = 30.0
+
+[[cameras]]
+name = "visible_cam0"
+adapter = "capa.devices.camera.webcam"
+kind = "visible"
+model_hint = "C930e"
+on_failure = "warn"
+estimated_bps = 1500000
+
+[cameras.params]
+fps = 30
+width = 1920
+height = 1080
+codec = "h264_qsv"
+pix_fmt = "nv12"
+input_format = "dshow"
+input_url = "video=Logitech Webcam C930e"
+
+[[cameras]]
+name = "ir_cam0"
+adapter = "capa_flir.flir_ir"
+kind = "ir"
+on_failure = "warn"
+estimated_bps = 4500000
+
+[cameras.params]
+circular_buffer_frames = 60
+compression = false
+discovery_timeout_s = 5.0
+
+[[channels]]
+name = "heater.pv"
+kind = "process_var"
+unit = "degF"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "process_value"
+instance = 1
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "degF"
+output_unit = "degC"
+ref_low_raw = 32.0
+ref_low_value = 0.0
+ref_high_raw = 212.0
+ref_high_value = 100.0
+
+[channels.metadata]
+capa_group = "heater_pv"
+
+[[channels]]
+name = "heater.setpoint"
+kind = "setpoint"
+unit = "degF"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "watlow_parameter"
+device = "heater"
+parameter = "setpoint"
+instance = 1
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "degF"
+output_unit = "degC"
+ref_low_raw = 32.0
+ref_low_value = 0.0
+ref_high_raw = 212.0
+ref_high_value = 100.0
+
+[channels.metadata]
+capa_group = "heater_setpoint"
+[[channels]]
+name = "purge.flow"
+kind = "mfc_flow"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+
+[channels.source]
+source = "alicat_frame_field"
+device = "purge_mfc"
+field = "Mass_Flow"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"
+
+[channels.metadata]
+capa_group = "purge_gas_flow"
+
+# The method writes purge.setpoint in the device's unit (SLPM).
+[[channels]]
+name = "purge.setpoint"
+kind = "setpoint"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+
+[channels.source]
+source = "alicat_frame_field"
+device = "purge_mfc"
+field = "Mass_Flow_Setpt"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"
+
+[[channels]]
+name = "outer_wall_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_outer_wall"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "inner_wall_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "temperatures"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_inner_wall"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[[channels]]
+name = "contact_switch"
+kind = "analog_in"
+unit = "V"
+derived_unit = "V"
+plot_group = "contact_switch"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "AI_contact_switch"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "V"
+output_unit = "V"
+
+[[channels]]
+name = "heat_flux_gauge"
+kind = "analog_in"
+unit = "V"
+derived_unit = "kW/m^2"
+plot_group = "heat_flux"
+keep_raw = true
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "AI_HFG"
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "V"
+output_unit = "kW/m^2"
+ref_low_raw = 0.0
+ref_low_value = -0.064771278
+ref_high_raw = 0.01
+ref_high_value = 128.6081421
+
+[channels.calibration.uncertainty]
+kind = "relative"
+value = 0.015             # standard (k=1): +-3 % at k=2; capa multiplies by coverage_factor
+coverage_factor = 2.0
+method = "manufacturer cert + reference comparison"
+
+[channels.calibration.fit_metadata]
+reference_instrument = "Medtherm Corporation 32-10SB-18-20608"
+reference_serial = "232041"
+fitted_at = 1970-01-01 00:00:00+00:00
+notes = "linear fit: slope 12867.29134 kW/m^2/V, intercept -0.064771278 kW/m^2 (named NI MAX scale 'CAPA HFG'); applied software-side, not via the driver scale. fitted_at is a placeholder; replace with the actual cert date when available."
+
+[channels.metadata]
+capa_group = "heat_flux_gauge"
+gauge_type = "Schmidt-Boelter"
+position = "open air, 40 mm below heater, centerline (tune only; removed for the test)"
+
+# 175681 at the specimen position. Curve hfg_175681 from
+# configs/calibrations/hfg_175681_2026-10-17.toml (68.259 uV per kW/m2
+# through the origin, +-3.1 % k=2, valid 4.2-68.8 kW/m2). keep_raw records
+# the volts so the analysis can zero-correct against the baseline.
+[[channels]]
+name = "hfg_175681"
+kind = "analog_in"
+unit = "V"
+derived_unit = "kW/m^2"
+plot_group = "heat_flux"
+keep_raw = true
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "AI_HFG_175681"
+
+[channels.calibration]
+kind = "linear_two_point"
+input_unit = "V"
+output_unit = "kW/m^2"
+ref_low_raw = 0.0
+ref_low_value = 0.0
+ref_high_raw = 0.01
+ref_high_value = 146.501
+
+[channels.calibration.uncertainty]
+kind = "relative"
+value = 0.0156            # standard (k=1); capa multiplies by coverage_factor
+coverage_factor = 2.0
+method = "transfer against CAPA reference 232041, 2026-10-17 (configs/calibrations/hfg_175681_2026-10-17.toml)"
+
+[channels.calibration.fit_metadata]
+reference_instrument = "Medtherm 32-10SB-18-20608 (CAPA reference heat-flux gauge)"
+reference_serial = "232041"
+fitted_at = 2026-10-17T20:08:48Z
+rms_residual = 0.0947
+
+[channels.metadata]
+gauge_type = "Schmidt-Boelter"
+gauge_model = "Medtherm 8-2-10-4-0-36-20680K"
+gauge_serial = "175681"
+position = "in chamber, specimen centre, face level with the sample surface, 40 mm below heater"
+
+[[channels]]
+name = "hfg_175681.body_temperature"
+kind = "tc"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "gauge_body"
+
+[channels.source]
+source = "nidaq_reading_field"
+device = "cdaq1"
+task = "default_task"
+field = "TC_HFG_175681_body"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+# --- Ambient air (SHT4x on the MCP2221 bridge; optional) ---
+
+[[channels]]
+name = "ambient.temperature"
+kind = "temperature"
+unit = "degC"
+derived_unit = "degC"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "temperature"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "degC"
+output_unit = "degC"
+
+[channels.metadata]
+capa_group = "ambient_temperature"
+
+[[channels]]
+name = "ambient.humidity"
+kind = "humidity"
+unit = "percent"
+derived_unit = "percent"
+plot_group = "ambient"
+
+[channels.source]
+source = "sht4x_reading"
+device = "ambient"
+field = "humidity"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "percent"
+output_unit = "percent"
+
+[channels.metadata]
+capa_group = "ambient_humidity"

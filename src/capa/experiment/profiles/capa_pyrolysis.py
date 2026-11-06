@@ -466,12 +466,18 @@ OPTIONAL_CHANNEL_GROUPS: tuple[ChannelRequirement, ...] = (
         kinds=(ChannelKind.HUMIDITY.value, ChannelKind.ANALOG_IN.value),
         min_count=1,
     ),
+    ChannelRequirement(
+        group="ambient_pressure",
+        kinds=(ChannelKind.PRESSURE.value, ChannelKind.ANALOG_IN.value),
+        min_count=1,
+    ),
 )
 """Optional channel groups. Preflight does not block on missing optional
 groups but warns if e.g. an ``oxidative`` atmosphere is declared without a
 ``reactive_gas_flow`` channel — the inconsistency check lives in the
 preflight runtime registry. ``ambient_temperature`` / ``ambient_humidity``
-tag the lab-air conditions logged alongside a run (an SHT4x sensor)."""
+/ ``ambient_pressure`` tag the lab-air conditions logged alongside a run
+(an SHT4x sensor and a BMP58x barometer)."""
 
 
 PREFLIGHT_CHECKS: tuple[PreflightCheck, ...] = (

@@ -179,18 +179,34 @@ See [Discovery](discovery.md) for the cross-cutting UX.
 The sensor NACKs its address while a conversion is in progress, and the
 MCP2221 answers that by parking its I2C engine in an error state in
 which every later transfer is refused until a cancel command. The driver
-cancels on every NACK and on open, so a read issued a little early, a
-process killed mid-transfer or a sensor unplugged and replugged all
-recover without operator action. The adapter also waits the datasheet's
-maximum conversion time before reading and keeps retrying a NACKed read
-for 20 ms after that, so a healthy sensor never surfaces this at all.
+cancels on every NACK, and on open when it finds the engine busy, so a
+read issued a little early, a process killed mid-transfer or a sensor
+unplugged and replugged all recover without operator action. The
+adapter also waits the datasheet's maximum conversion time before
+reading and keeps retrying a NACKed read for 20 ms after that, so a
+healthy sensor never surfaces this at all.
 
-### One sensor per bridge
+### A cancel on an idle bridge wedges it
 
-The adapter opens the bridge itself, so a second SHT4x on the same bus
-(the `0x44` and `0x45` variants can share one) is not supported yet;
-declare one device per bridge. Two bridges are told apart by `serial`
-once serial enumeration is enabled in their flash.
+The cancel has a trap of its own: sent to an *idle* engine, the chip
+forces a STOP, and on the rig's bus (the SHT45 and BMP581 breakouts
+chained) that STOP times out every time, leaving the engine in state
+`0x62`, refusing every transfer, every further cancel and the speed
+setting. The driver therefore only cancels a busy engine. A bridge already in that
+state (left so by another tool) is cured on open by a chip reset, which
+restarts the firmware the way a USB replug would and costs about
+0.7 s; nothing in the chip's flash changes.
+
+### Other sensors on the bridge
+
+A [BMP58x barometer](bmp58x.md) can share the bus: the two adapters
+declare the same `hid:mcp2221:…` resource, run on one worker and share
+one open bridge through the driver's bus pool. See [BMP58x § Sharing
+the bridge](bmp58x.md#sharing-the-bridge). Every sensor on one bridge
+must declare the same `i2c_speed_hz`. A second SHT4x (the `0x44` and
+`0x45` variants can share a bus) works the same way. Two bridges are
+told apart by `serial` once serial enumeration is enabled in their
+flash.
 
 ### Placement
 

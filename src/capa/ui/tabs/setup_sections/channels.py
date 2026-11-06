@@ -84,7 +84,7 @@ def _compose_reads_from(source: object) -> str:
         if device:
             return f"{device}.{param} (loop {instance})"
         return f"({variant})"
-    if variant in ("alicat_frame_field", "sartorius_reading", "sht4x_reading"):
+    if variant in ("alicat_frame_field", "sartorius_reading", "sht4x_reading", "bmp58x_reading"):
         field = source.get("field") or "?"
         if device:
             return f"{device}.{field}"
@@ -127,6 +127,7 @@ _VARIANT_LABELS: dict[str, str] = {
     "sartorius_reading": "Sartorius reading",
     "fuji_channel": "Fuji analyzer channel",
     "sht4x_reading": "SHT4x reading",
+    "bmp58x_reading": "BMP58x reading",
     "nidaq_reading_field": "NI-DAQ reading field",
     "nidaq_block_channel": "NI-DAQ block channel",
     "derived": "Derived expression",
@@ -158,6 +159,7 @@ _VARIANT_FIELDS: dict[str, tuple[tuple[str, str, type, str | None], ...]] = {
         ("field", "Field", str, "fuji_fields"),
     ),
     "sht4x_reading": (("field", "Field", str, "sht4x_fields"),),
+    "bmp58x_reading": (("field", "Field", str, "bmp58x_fields"),),
     "nidaq_reading_field": (
         ("task", "Task", str, "nidaq_tasks"),
         ("field", "Field", str, "nidaq_fields"),
@@ -614,6 +616,8 @@ class _SourceBindingEditor(QWidget):
             return ["value", "valid"]
         if key == "sht4x_fields":
             return ["temperature", "humidity"]
+        if key == "bmp58x_fields":
+            return ["pressure", "temperature"]
         if key is None or not self._nidaq_declared:
             return None
         device_name = self._device_combo.currentData()

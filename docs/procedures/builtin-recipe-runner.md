@@ -108,7 +108,7 @@ There is no per-step retry or recovery loop. A method either runs to completion,
 
 ## External stop
 
-The executor checks `ctx.external_stop` at every step boundary and inside each blocking step. Ramps wake on their tick cadence, waits wake from the databus/duration/stop watchers, and prompts poll the confirmation flag. When the operator hits Abort:
+The executor checks `ctx.external_stop` at every step boundary and inside each blocking step. Ramps wake on their tick cadence, waits wake from the databus/duration/stop watchers, and prompts wake from the stop watcher beside their confirm watcher. When the operator hits Abort:
 
 1. The current step exits at its next wake-up point (typically within ~100 ms for a ramp; waits and duration sleeps wake when their watcher fires).
 2. The executor logs `method.executor.stopped` with the step index where it stopped.

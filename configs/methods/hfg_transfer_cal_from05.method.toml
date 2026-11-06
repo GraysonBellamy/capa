@@ -1,0 +1,424 @@
+name = "hfg_transfer_cal_from05"
+description = "HFG2 transfer calibration resumed at level 5 of 12; same levels, tags and timing as hfg_transfer_cal."
+
+[[steps]]
+kind = "prompt"
+title = "Resume"
+message = "Resuming at level 5. Cooling water flowing through both gauges; HFG2 body temperature flat on the plot; gauges, stops and faces untouched since the interrupted run; heater at stop A, centred on the REFERENCE. No zero is recorded: the analysis uses the interrupted run's cold zero."
+notes = "hfgcal win=checklist"
+
+[[steps]]
+kind = "setpoint"
+value = 602.0
+notes = "hfgcal level=05 q=30 dir=up win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 1200.0
+on_timeout = "warn"
+notes = "hfgcal level=05 q=30 dir=up win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = ">="
+value = 601.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 600.0
+notes = "hfgcal level=05 q=30 dir=up win=settle"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=05 q=30 dir=up win=R1"
+
+[[steps]]
+kind = "prompt"
+title = "Level 5 of 12: ~30 kW/m2 (up)"
+message = "Slide the heater to stop B (centred on HFG2), then Continue."
+notes = "hfgcal level=05 q=30 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=05 q=30 dir=up win=D"
+
+[[steps]]
+kind = "prompt"
+title = "Level 5 of 12: ~30 kW/m2 (up)"
+message = "Slide the heater to stop A (centred on the REFERENCE gauge), then Continue."
+notes = "hfgcal level=05 q=30 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=05 q=30 dir=up win=R2"
+
+[[steps]]
+kind = "setpoint"
+value = 671.0
+notes = "hfgcal level=06 q=40 dir=up win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 1200.0
+on_timeout = "warn"
+notes = "hfgcal level=06 q=40 dir=up win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = ">="
+value = 670.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 600.0
+notes = "hfgcal level=06 q=40 dir=up win=settle"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=06 q=40 dir=up win=R1"
+
+[[steps]]
+kind = "prompt"
+title = "Level 6 of 12: ~40 kW/m2 (up)"
+message = "Slide the heater to stop B (centred on HFG2), then Continue."
+notes = "hfgcal level=06 q=40 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=06 q=40 dir=up win=D"
+
+[[steps]]
+kind = "prompt"
+title = "Level 6 of 12: ~40 kW/m2 (up)"
+message = "Slide the heater to stop A (centred on the REFERENCE gauge), then Continue."
+notes = "hfgcal level=06 q=40 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=06 q=40 dir=up win=R2"
+
+[[steps]]
+kind = "setpoint"
+value = 728.0
+notes = "hfgcal level=07 q=50 dir=up win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 1200.0
+on_timeout = "warn"
+notes = "hfgcal level=07 q=50 dir=up win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = ">="
+value = 727.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 600.0
+notes = "hfgcal level=07 q=50 dir=up win=settle"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=07 q=50 dir=up win=R1"
+
+[[steps]]
+kind = "prompt"
+title = "Level 7 of 12: ~50 kW/m2 (up)"
+message = "Slide the heater to stop B (centred on HFG2), then Continue."
+notes = "hfgcal level=07 q=50 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=07 q=50 dir=up win=D"
+
+[[steps]]
+kind = "prompt"
+title = "Level 7 of 12: ~50 kW/m2 (up)"
+message = "Slide the heater to stop A (centred on the REFERENCE gauge), then Continue."
+notes = "hfgcal level=07 q=50 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=07 q=50 dir=up win=R2"
+
+[[steps]]
+kind = "setpoint"
+value = 776.0
+notes = "hfgcal level=08 q=60 dir=up win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 1200.0
+on_timeout = "warn"
+notes = "hfgcal level=08 q=60 dir=up win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = ">="
+value = 775.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 600.0
+notes = "hfgcal level=08 q=60 dir=up win=settle"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=08 q=60 dir=up win=R1"
+
+[[steps]]
+kind = "prompt"
+title = "Level 8 of 12: ~60 kW/m2 (up)"
+message = "Slide the heater to stop B (centred on HFG2), then Continue."
+notes = "hfgcal level=08 q=60 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=08 q=60 dir=up win=D"
+
+[[steps]]
+kind = "prompt"
+title = "Level 8 of 12: ~60 kW/m2 (up)"
+message = "Slide the heater to stop A (centred on the REFERENCE gauge), then Continue."
+notes = "hfgcal level=08 q=60 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=08 q=60 dir=up win=R2"
+
+[[steps]]
+kind = "setpoint"
+value = 819.0
+notes = "hfgcal level=09 q=70 dir=up win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 1200.0
+on_timeout = "warn"
+notes = "hfgcal level=09 q=70 dir=up win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = ">="
+value = 818.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 600.0
+notes = "hfgcal level=09 q=70 dir=up win=settle"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=09 q=70 dir=up win=R1"
+
+[[steps]]
+kind = "prompt"
+title = "Level 9 of 12: ~70 kW/m2 (up)"
+message = "Slide the heater to stop B (centred on HFG2), then Continue."
+notes = "hfgcal level=09 q=70 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=09 q=70 dir=up win=D"
+
+[[steps]]
+kind = "prompt"
+title = "Level 9 of 12: ~70 kW/m2 (up)"
+message = "Slide the heater to stop A (centred on the REFERENCE gauge), then Continue."
+notes = "hfgcal level=09 q=70 dir=up win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=09 q=70 dir=up win=R2"
+
+[[steps]]
+kind = "setpoint"
+value = 728.0
+notes = "hfgcal level=10 q=50 dir=down win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 2700.0
+on_timeout = "warn"
+notes = "hfgcal level=10 q=50 dir=down win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = "<="
+value = 729.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 600.0
+notes = "hfgcal level=10 q=50 dir=down win=settle"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=10 q=50 dir=down win=R1"
+
+[[steps]]
+kind = "prompt"
+title = "Level 10 of 12: ~50 kW/m2 (down)"
+message = "Slide the heater to stop B (centred on HFG2), then Continue."
+notes = "hfgcal level=10 q=50 dir=down win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=10 q=50 dir=down win=D"
+
+[[steps]]
+kind = "prompt"
+title = "Level 10 of 12: ~50 kW/m2 (down)"
+message = "Slide the heater to stop A (centred on the REFERENCE gauge), then Continue."
+notes = "hfgcal level=10 q=50 dir=down win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=10 q=50 dir=down win=R2"
+
+[[steps]]
+kind = "setpoint"
+value = 602.0
+notes = "hfgcal level=11 q=30 dir=down win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 2700.0
+on_timeout = "warn"
+notes = "hfgcal level=11 q=30 dir=down win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = "<="
+value = 603.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 600.0
+notes = "hfgcal level=11 q=30 dir=down win=settle"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=11 q=30 dir=down win=R1"
+
+[[steps]]
+kind = "prompt"
+title = "Level 11 of 12: ~30 kW/m2 (down)"
+message = "Slide the heater to stop B (centred on HFG2), then Continue."
+notes = "hfgcal level=11 q=30 dir=down win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=11 q=30 dir=down win=D"
+
+[[steps]]
+kind = "prompt"
+title = "Level 11 of 12: ~30 kW/m2 (down)"
+message = "Slide the heater to stop A (centred on the REFERENCE gauge), then Continue."
+notes = "hfgcal level=11 q=30 dir=down win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=11 q=30 dir=down win=R2"
+
+[[steps]]
+kind = "setpoint"
+value = 378.0
+notes = "hfgcal level=12 q=10 dir=down win=command"
+
+[steps.target]
+name = "heater.setpoint"
+
+[[steps]]
+kind = "wait"
+timeout_s = 2700.0
+on_timeout = "warn"
+notes = "hfgcal level=12 q=10 dir=down win=reach"
+
+[steps.end_condition]
+channel = "heater.pv"
+op = "<="
+value = 379.0
+
+[[steps]]
+kind = "acquire"
+duration_s = 600.0
+notes = "hfgcal level=12 q=10 dir=down win=settle"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=12 q=10 dir=down win=R1"
+
+[[steps]]
+kind = "prompt"
+title = "Level 12 of 12: ~10 kW/m2 (down)"
+message = "Slide the heater to stop B (centred on HFG2), then Continue."
+notes = "hfgcal level=12 q=10 dir=down win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=12 q=10 dir=down win=D"
+
+[[steps]]
+kind = "prompt"
+title = "Level 12 of 12: ~10 kW/m2 (down)"
+message = "Slide the heater to stop A (centred on the REFERENCE gauge), then Continue."
+notes = "hfgcal level=12 q=10 dir=down win=move"
+
+[[steps]]
+kind = "acquire"
+duration_s = 70.0
+notes = "hfgcal level=12 q=10 dir=down win=R2"
+
+[[steps]]
+kind = "safe_shutdown"
+duration_s = 0.0
+notes = "hfgcal win=shutdown"
+
+[steps.cool_target]
+"heater.setpoint" = 20.0

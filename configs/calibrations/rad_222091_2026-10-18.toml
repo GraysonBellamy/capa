@@ -1,0 +1,93 @@
+# SUPERSEDED by rad_222091_2026-10-22.toml: in this run the radiometer sat
+# off-centre under stop B, so S below is 2.4 % low and the "Position"
+# paragraph (angular response) is wrong. Kept for the record; do not use.
+#
+# Transfer calibration of radiometer 222091 (Medtherm 24P-10SB-24-21062,
+# ZnSe window, 150 deg view, N2 purge), 2026-10-18, against the CAPA
+# reference 232041. Procedure: docs/calibration/heat-flux-gauge-transfer.md,
+# "Windowed radiometer with purge".
+#
+# Result: S = 64.129 uV per kW/m2 through the origin
+#       = 15.594 kW/m2 per mV = 0.7283 mV per BTU/(ft2 s) = 0.6413 mV per W/cm2
+#       +-3.2 % (k=2), valid 4.0-68.9 kW/m2, CENTRED under this heater with the
+#       radiometer's top face 40 mm below it, purge 0.1-0.4 L/min N2.
+#
+# Reproduce from the raw bundle (runs/ is gitignored; it lives in
+# runs/rad_transfer_cal/ on the CAPA PC):
+#   uv run python scripts/analyze_hfg_transfer.py --dut-channel radiometer.voltage \
+#     --dut-label RAD runs/rad_transfer_cal/2026-10-18_170659_RAD_222091_cal1
+#
+# Reference chain: as for hfg_175681_2026-10-17.toml (NIST colleague ->
+# 223481 -> 232041 -> this gauge). Factory calibration of 222091: Medtherm
+# 2021-05-26, 16.56 kW/m2 per mV (60.39 uV per kW/m2), water 23.7 C at
+# 6.5 mL/s, source temperature not stated. This result is 6.2 % above it;
+# 3.4 % of that is the known gap between the chain's NIST-colleague value for
+# 223481 and Medtherm's own calibration of it, in this direction, leaving
+# 2.7 %, inside the two +-3 % (k=2) uncertainties.
+#
+# Purge: 0.1 and 0.4 L/min read -0.04 % (sd 0.19 %) and -0.04 % (sd 0.16 %)
+# against 0.2 L/min over the 12 levels (each within +-0.14 % from 15 kW/m2
+# up), with no transient after a purge change. Any rate in 0.1-0.4 L/min.
+#
+# Position: with the heater centred over it the radiometer reads ~7 % LESS
+# than with the heater 39.65 mm to the side (a flat gauge reads ~5-9 % more
+# when centred): its angular response falls off faster than cosine (sensor
+# recessed behind the window). Off the centreline its relation to the
+# true flux changes by ~16 % at 39.65 mm, so this calibration holds only
+# centred, at this standoff, under this heater.
+#
+# Level dependence: flat within 0.05 % at 15-30 kW/m2, -0.14 % per 10 kW/m2
+# above that (-0.6 % at 69), and -1.0 % at 4 kW/m2. The reference is linear
+# against the radiometer read at the same instant (+-0.13 % over
+# 15-60 kW/m2), so the high-flux decline comes from the radiometer's
+# centred view, not from the reference.
+#
+# Fan test (run 2026-10-18_231045_RAD_222091_fantest1, rad_fan_test.yaml:
+# 378 C, heater over the reference, fan off/on/off/on/off, 3 min each): no
+# step in the radiometer/reference ratio within 10 s of a switch (under the
+# +-0.15 % noise), so convection on the reference is at most ~0.15 % at
+# 10 kW/m2 and not the cause of the -1 % at 4 kW/m2. The ratio instead moved
+# +0.5 to +1.1 % over 30-120 s with the fan on (-0.5 to -0.8 % off) while the
+# heater's output rose ~2 %: the radiometer's reading relative to a flat gauge
+# depends on how the heater is radiating, not only how much, consistent with
+# its angular response. The low-end deficit and the level dependence are
+# properties of radiometer + this heater, so the calibration holds for this
+# heater at steady state with no draft across it.
+#
+# Uncertainty budget (k=1): reference 232041 1.5 % (assumed from its +-3 %
+# k=2); unknown cooling-water conditions in the chain 0.3 %; level dependence
+# 0.30 % (half-range 0.53 %, rectangular); heat soak / up-down 0.20 %
+# (repeats -0.12/-0.20/-0.32 %; the field itself flattened on the last level
+# down); positioning 0.20 %; transfer statistics 0.13 % (fit 0.09 %, F
+# 0.09 %); estimator choice 0.10 % (the direct estimate where the heater was
+# steady gives 64.19); zero held constant 0.10 %; purge 0.05 %. Combined
+# 1.60 %, so 3.2 % at k=2.
+
+name = "rad_222091_2026-10-18"
+revision = "1"
+
+# Curve key is the gauge, not a rig channel: apply it to whichever channel
+# carries 222091's raw volts (Setup tab, Calibration section).
+[curves.rad_222091]
+kind = "linear_two_point"
+input_unit = "V"
+output_unit = "kW/m^2"
+ref_low_raw = 0.0
+ref_low_value = 0.0
+ref_high_raw = 0.01
+ref_high_value = 155.935
+
+[curves.rad_222091.uncertainty]
+kind = "relative"
+value = 0.016             # standard (k=1); capa multiplies by coverage_factor
+coverage_factor = 2.0
+method = "transfer against CAPA reference 232041 (assumed +-3 % k=2, NIST-colleague chain); 12 levels 4.0-68.9 kW/m2, radiometer centred, R D R per level with the oscillation-free ratio estimator; budget in configs/calibrations/rad_222091_2026-10-18.toml header"
+
+[curves.rad_222091.fit_metadata]
+reference_instrument = "Medtherm 32-10SB-18-20608 (CAPA reference heat-flux gauge)"
+reference_serial = "232041"
+fitted_at = 2026-10-18T23:24:01Z
+rms_residual = 0.0673
+source_procedure_id = "capa.builtin.recipe_runner (rad_transfer_cal method) + scripts/analyze_hfg_transfer.py"
+capa_git_sha = "e7cef80-dirty"
+notes = "Open air, CAPA cone heater 40 mm above both gauges' top faces (the radiometer's window sits a little below its top face; recess not measured, included in the calibration), radiometer centred under the heater, gauge centres 39.65 mm apart. Cooling water 22.7 C at 17.9 mL/s (factory: 23.7 C at 6.5 mL/s). N2 purge 0.2 L/min (Alicat MC-500SCCM-D SN 125238); 0.1-0.4 L/min indistinguishable. Zero in place before use: with no flux it read +0.56 uV in this setup at every purge rate. rms_residual is in kW/m2 (0.29 % relative). Reads ~7 % less centred than 39.65 mm off-centre: valid only centred at this standoff under this heater. A draft across the heater moves it ~1 % against a flat gauge (fan test): use with the heater at steady state and no drafts. Levels at 59.5 and 68.9 kW/m2 lie above the reference chain's 56.5 kW/m2."

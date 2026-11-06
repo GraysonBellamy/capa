@@ -71,6 +71,17 @@ def _sht4x_reading_binding(field: str) -> Callable[[str], dict[str, object]]:
     return _factory
 
 
+def _bmp58x_reading_binding(field: str) -> Callable[[str], dict[str, object]]:
+    def _factory(device_name: str) -> dict[str, object]:
+        return {
+            "source": "bmp58x_reading",
+            "device": device_name,
+            "field": field,
+        }
+
+    return _factory
+
+
 def _nidaq_reading_binding(task: str, field: str) -> Callable[[str], dict[str, object]]:
     def _factory(device_name: str) -> dict[str, object]:
         return {
@@ -198,6 +209,30 @@ SHT4X_AMBIENT_HUMIDITY = ChannelTemplate(
     plot_group="ambient",
 )
 
+BMP58X_AMBIENT_PRESSURE = ChannelTemplate(
+    id="bmp58x.ambient_pressure",
+    label="Ambient pressure from BMP58x",
+    kind="pressure",
+    source_factory=_bmp58x_reading_binding("pressure"),
+    default_unit="Pa",
+    default_derived_unit="Pa",
+    default_calibration={"kind": "identity", "input_unit": "Pa", "output_unit": "Pa"},
+    capa_group="ambient_pressure",
+    plot_group="ambient_pressure",
+)
+
+BMP58X_AMBIENT_TEMPERATURE = ChannelTemplate(
+    id="bmp58x.ambient_temperature",
+    label="Barometer temperature from BMP58x",
+    kind="temperature",
+    source_factory=_bmp58x_reading_binding("temperature"),
+    default_unit="degC",
+    default_derived_unit="degC",
+    default_calibration={"kind": "identity", "input_unit": "degC", "output_unit": "degC"},
+    capa_group="ambient_temperature",
+    plot_group="ambient",
+)
+
 NIDAQ_THERMOCOUPLE = ChannelTemplate(
     id="nidaq.thermocouple",
     label="Thermocouple from NI-DAQ task",
@@ -213,6 +248,8 @@ NIDAQ_THERMOCOUPLE = ChannelTemplate(
 
 __all__ = [
     "ALICAT_PURGE_FLOW",
+    "BMP58X_AMBIENT_PRESSURE",
+    "BMP58X_AMBIENT_TEMPERATURE",
     "FUJI_CO",
     "FUJI_CO2",
     "FUJI_O2",

@@ -1006,14 +1006,10 @@ class HeatFluxTune(Procedure):
         elif kind == "accept_current":
             self._accept_now = True
         else:
-            # Defensive branch — unreachable under the Literal type, but
-            # a future plugin (or a runtime-constructed cmd that bypassed
-            # validation) could land here. Log and drop rather than
-            # crash. mypy correctly flags this as unreachable from the
-            # type; the runtime safety guarantee is more valuable.
-            ctx.logger.warning(  # type: ignore[unreachable]
-                "heat_flux_tune.operator_command.unknown", kind=kind
-            )
+            # ``confirm_prompt`` belongs to method prompt steps, which a
+            # tune doesn't run; anything else is a runtime-constructed cmd
+            # that bypassed validation. Log and drop rather than crash.
+            ctx.logger.warning("heat_flux_tune.operator_command.unknown", kind=kind)
             return
         self._emit_event(
             ctx,

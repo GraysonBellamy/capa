@@ -147,7 +147,7 @@ The format is `<scheme>:<body>` where `scheme` is one of:
 | Scheme | Body | Used by |
 |---|---|---|
 | `serial` | port name | watlow, alicat, sartorius, fuji |
-| `hid` | `mcp2221:<bridge serial or any>` | sht4x |
+| `hid` | `mcp2221:<bridge serial or any>` | sht4x, bmp58x (one bridge, one shared bus) |
 | `daqmx` | chassis/device name | nidaq |
 | `webcam` | serial number | webcam |
 | `sim` | adapter-chosen name | simulators |

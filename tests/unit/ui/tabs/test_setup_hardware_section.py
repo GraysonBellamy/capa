@@ -111,14 +111,15 @@ def test_devices_section_lists_devices_from_hardware_payload(qtbot: Any) -> None
     qtbot.addWidget(section)
     section.set_draft(draft)
     devices = section._model.devices()
-    # The sim_capa fixture has 5 devices: heater, purge_mfc, balance, cdaq1,
-    # ambient.
+    # The sim_capa fixture has 6 devices: heater, purge_mfc, balance, cdaq1,
+    # ambient, baro.
     assert [d["name"] for d in devices] == [
         "heater",
         "purge_mfc",
         "balance",
         "cdaq1",
         "ambient",
+        "baro",
     ]
 
 
@@ -131,7 +132,7 @@ def test_devices_section_emits_payload_under_devices_key(qtbot: Any) -> None:
     payload = section.payload()
     assert "devices" in payload
     assert isinstance(payload["devices"], list)
-    assert len(payload["devices"]) == 5
+    assert len(payload["devices"]) == 6
 
 
 def test_devices_section_add_device_appends_row(qtbot: Any) -> None:
@@ -146,7 +147,7 @@ def test_devices_section_add_device_appends_row(qtbot: Any) -> None:
     descriptor = ADAPTERS["capa.devices.sim.watlow_sim"]
     section._on_add_device(descriptor)
     devices = section._model.devices()
-    assert len(devices) == 6
+    assert len(devices) == 7
     # New row carries the descriptor's default_params.
     assert devices[-1]["adapter"] == descriptor.id
     assert devices[-1]["params"] == descriptor.default_params
@@ -161,7 +162,7 @@ def test_devices_section_remove_drops_selected_row(qtbot: Any) -> None:
     section._table.selectRow(0)
     section._on_remove()
     devices = section._model.devices()
-    assert len(devices) == 4
+    assert len(devices) == 5
     # Original device order preserved sans the removed first row.
     assert devices[0]["name"] == "purge_mfc"
 

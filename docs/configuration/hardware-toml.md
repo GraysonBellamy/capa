@@ -141,6 +141,7 @@ binding-kind combobox by likely match.
 | `gas_concentration` | Concentration of one gas from a gas analyzer (O2, CO2, CO) |
 | `temperature` | Temperature from a sensor that is not a thermocouple or a controller (an SHT4x, an RTD) |
 | `humidity` | Relative humidity from an ambient sensor |
+| `pressure` | Absolute pressure from a barometric or process pressure sensor (a BMP58x) |
 | `video_visible` | Visible-camera frame stream (no scalar value column) |
 | `video_ir` | IR-camera frame stream |
 | `derived` | Computed from other channels (future derivation registry) |
@@ -162,10 +163,10 @@ parameter = "process_value"
 instance = 1
 ```
 
-The seven binding kinds — `watlow_parameter`, `alicat_frame_field`,
-`sartorius_reading`, `fuji_channel`, `nidaq_reading_field`,
-`nidaq_block_channel`, `derived` — are documented field-by-field on the [Channel
-bindings](channel-bindings.md) page.
+The nine binding kinds — `watlow_parameter`, `alicat_frame_field`,
+`sartorius_reading`, `fuji_channel`, `sht4x_reading`, `bmp58x_reading`,
+`nidaq_reading_field`, `nidaq_block_channel`, `derived` — are documented
+field-by-field on the [Channel bindings](channel-bindings.md) page.
 
 ### `calibration` — per-channel transform
 
