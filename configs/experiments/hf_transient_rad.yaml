@@ -57,6 +57,18 @@ device_settings:
   visible_cam0:
     zoom: 270
     tilt: 7
+    auto_exposure: false
+    exposure: -5      # longest that holds 30 fps at 1080p; the camera resets to -4 (16 fps) on stream start
+    auto_focus: false
+    focus: 15         # middle of the sharp plateau (0-35) on the sample holder
+    gain: 48          # fir ~195/255, char ~28; leaves red headroom for the 35 kW/m2 heater glow
+    auto_white_balance: false
+    white_balance: 5300   # neutral on white paper under the top light, heater off
+    sharpness: 64     # no in-camera sharpening (0-64 identical); 128+ adds halos
+    brightness: 128
+    contrast: 128
+    saturation: 128
+    backlight_compensation: 0
 
 sample:
   id: SET_ME   # HFT_222091_<flux>kW_r<n>, e.g. HFT_222091_20kW_r1

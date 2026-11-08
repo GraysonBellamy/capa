@@ -7,6 +7,7 @@ hardware tier (``CAPA_HARDWARE_TESTS=1``); not covered here.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,109 @@ def _solid_frame(width: int, height: int, color: tuple[int, int, int]) -> np.nda
     arr[..., 1] = color[1]
     arr[..., 2] = color[2]
     return arr
+
+
+class _FakeCodec:
+    def __init__(self, intra_only: bool) -> None:
+        self.intra_only = intra_only
+
+
+class _FakeCodecContext:
+    name = "mjpeg"
+    pix_fmt = "yuvj422p"
+
+    def __init__(self, width: int, height: int, intra_only: bool) -> None:
+        self.width = width
+        self.height = height
+        self.codec = _FakeCodec(intra_only)
+
+
+class _FakeInputStream:
+    """Stand-in for the camera's PyAV video stream."""
+
+    type = "video"
+    average_rate = 30
+
+    def __init__(self, width: int = 64, height: int = 48, *, intra_only: bool = True) -> None:
+        self.codec_context = _FakeCodecContext(width, height, intra_only)
+
+
+class _FakeInput:
+    """Stand-in for the pump's PyAV input container."""
+
+    def __init__(self, stream: _FakeInputStream | None = None) -> None:
+        self.streams = (stream or _FakeInputStream(),)
+        self.closed = 0
+
+    def demux(self, _stream: object) -> Any:
+        return iter(())
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+def _packets(n: int) -> Callable[[object], object | None]:
+    """A fake ``_next_packet`` that delivers ``n`` packets, then EOF."""
+    left = [n]
+
+    def next_packet(_demuxer: object) -> object | None:
+        if left[0] == 0:
+            return None
+        left[0] -= 1
+        return object()
+
+    return next_packet
+
+
+def _patch_pump(
+    monkeypatch: pytest.MonkeyPatch, next_packet: Callable[[object], object | None]
+) -> list[object]:
+    """Feed the pump ``next_packet``'s packets, each decoding to a solid
+    frame. Returns the list of packets the pump decoded."""
+    decoded: list[object] = []
+
+    def fake_decode(_stream: object, packet: object) -> list[object]:
+        decoded.append(packet)
+        return [object()]
+
+    monkeypatch.setattr("capa.devices.camera.webcam.adapter._next_packet", next_packet)
+    monkeypatch.setattr("capa.devices.camera.webcam.adapter._decode_packet", fake_decode)
+    monkeypatch.setattr(
+        "capa.devices.camera.webcam.adapter._reformat_to_rgb24",
+        lambda _frame: _solid_frame(64, 48, (10, 200, 30)),
+    )
+    return decoded
+
+
+def _mjpeg_file(path: Path, frames: int, width: int = 64, height: int = 48) -> Path:
+    """Write ``frames`` distinct MJPEG frames to an MKV that stands in for a
+    camera's stream."""
+    with av.open(str(path), mode="w", format="matroska") as out:
+        stream = out.add_stream("mjpeg", rate=30)
+        assert isinstance(stream, av.VideoStream)
+        stream.width = width
+        stream.height = height
+        stream.pix_fmt = "yuvj422p"
+        for i in range(frames):
+            frame = av.VideoFrame.from_ndarray(
+                _solid_frame(width, height, (40 * i, 100, 200)), format="rgb24"
+            )
+            frame.pts = i
+            for packet in stream.encode(frame):
+                out.mux(packet)
+        for packet in stream.encode(None):
+            out.mux(packet)
+    return path
+
+
+async def _pump_finished(cam: WebcamAdapter) -> None:
+    import anyio
+
+    task = cam._pump_task
+    assert task is not None
+    with anyio.fail_after(2.0):
+        while not task.done():
+            await anyio.sleep(0.01)
 
 
 class TestWebcamPreviewBetweenRuns:
@@ -584,29 +688,14 @@ class TestInputPumpLifecycle:
         """Pump opens the input, decodes a few frames into the preview
         stream, then exits cleanly when ``stop_input_pump`` fires."""
         decoded = 0
-        pump_container_closed = {"n": 0}
+        container = _FakeInput()
 
-        def fake_advance(_decoder: object) -> object | None:
+        def fake_next_packet(_demuxer: object) -> object | None:
             nonlocal decoded
             decoded += 1
             if decoded > 3:
                 return None
             return object()
-
-        def fake_reformat(_frame: object) -> np.ndarray:
-            return _solid_frame(64, 48, (10, 200, 30))
-
-        class _FakeStream:
-            type = "video"
-
-        class _FakeContainer:
-            streams = (_FakeStream(),)
-
-            def decode(self, _stream: object) -> object:
-                return object()
-
-            def close(self) -> None:
-                pump_container_closed["n"] += 1
 
         cam = _make(codec="mpeg4")
         # Real av.open during the dshow/V4L2 probe in cam.open(); the
@@ -615,10 +704,9 @@ class TestInputPumpLifecycle:
 
         monkeypatch.setattr(
             "capa.devices.camera.webcam.adapter.av.open",
-            lambda *_a, **_kw: _FakeContainer(),
+            lambda *_a, **_kw: container,
         )
-        monkeypatch.setattr("capa.devices.camera.webcam.adapter._advance_decoder", fake_advance)
-        monkeypatch.setattr("capa.devices.camera.webcam.adapter._reformat_to_rgb24", fake_reformat)
+        _patch_pump(monkeypatch, fake_next_packet)
 
         await cam.start_input_pump()
 
@@ -640,7 +728,7 @@ class TestInputPumpLifecycle:
         await cam.close()
 
         assert decoded >= 1, "pump never advanced the decoder"
-        assert pump_container_closed["n"] == 1, "pump's input container closed exactly once"
+        assert container.closed == 1, "pump's input container closed exactly once"
         assert len(previews) >= 1
         assert previews[0][:2] == b"\xff\xd8"
 
@@ -652,7 +740,7 @@ class TestInputPumpLifecycle:
         stays current. The pump must NOT close the input container."""
         decoded = 0
 
-        def fake_advance(_decoder: object) -> object | None:
+        def fake_next_packet(_demuxer: object) -> object | None:
             nonlocal decoded
             decoded += 1
             # Stay alive long enough for the test to exercise both
@@ -660,27 +748,12 @@ class TestInputPumpLifecycle:
             # pump explicitly via stop_input_pump.
             return object()
 
-        def fake_reformat(_frame: object) -> np.ndarray:
-            return _solid_frame(64, 48, (10, 200, 30))
-
-        class _FakeStream:
-            type = "video"
-
         pump_opened = {"n": 0}
-        pump_closed = {"n": 0}
+        container = _FakeInput()
 
-        class _FakeContainer:
-            streams = (_FakeStream(),)
-
-            def decode(self, _stream: object) -> object:
-                return object()
-
-            def close(self) -> None:
-                pump_closed["n"] += 1
-
-        def fake_av_open(*_a: object, **_kw: object) -> _FakeContainer:
+        def fake_av_open(*_a: object, **_kw: object) -> _FakeInput:
             pump_opened["n"] += 1
-            return _FakeContainer()
+            return container
 
         cam = _make(codec="mpeg4")
         # Real av.open for the dshow/V4L2 probe inside cam.open() AND
@@ -690,8 +763,7 @@ class TestInputPumpLifecycle:
         await cam.start_recording(tmp_path / "v.mkv")
 
         monkeypatch.setattr("capa.devices.camera.webcam.adapter.av.open", fake_av_open)
-        monkeypatch.setattr("capa.devices.camera.webcam.adapter._advance_decoder", fake_advance)
-        monkeypatch.setattr("capa.devices.camera.webcam.adapter._reformat_to_rgb24", fake_reformat)
+        _patch_pump(monkeypatch, fake_next_packet)
 
         await cam.start_input_pump()
 
@@ -711,7 +783,7 @@ class TestInputPumpLifecycle:
         # container was not closed by stop_recording.
         assert cam._pump_task is not None
         assert not cam._pump_task.done(), "pump must outlive stop_recording"
-        assert pump_closed["n"] == 0, "input container must NOT close on stop_recording"
+        assert container.closed == 0, "input container must NOT close on stop_recording"
         assert pump_opened["n"] == 1, "input container should open exactly once per pool"
 
         # Let it run a bit more to verify post-recording pumping works.
@@ -720,7 +792,191 @@ class TestInputPumpLifecycle:
 
         await cam.stop_input_pump()
         await cam.close()
-        assert pump_closed["n"] == 1, "input container closed exactly once at close()"
+        assert container.closed == 1, "input container closed exactly once at close()"
+
+    async def test_input_opened_at_configured_size_and_rate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without a size and rate DirectShow opened the C930e at 640x480
+        and every frame was upscaled to the configured 1920x1080."""
+        opened: list[dict[str, Any]] = []
+
+        def fake_av_open(*_a: object, **kw: Any) -> _FakeInput:
+            opened.append(kw)
+            return _FakeInput()
+
+        cam = _make(fps=30.0, width=64, height=48)
+        await cam.open()
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter.av.open", fake_av_open)
+        _patch_pump(monkeypatch, _packets(1))
+        await cam.start_input_pump()
+        await cam.close()
+
+        assert opened[0]["options"] == {"video_size": "64x48", "framerate": "30"}
+
+    async def test_start_input_pump_returns_once_streaming(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The C930e resets its exposure when streaming starts, so settings
+        sent after ``start_input_pump`` must land after the first frame."""
+        import time
+
+        delivered: list[int] = []
+
+        def slow_first_packet(_demuxer: object) -> object | None:
+            if delivered:
+                return None
+            time.sleep(0.2)
+            delivered.append(1)
+            return object()
+
+        cam = _make()
+        await cam.open()
+        monkeypatch.setattr(
+            "capa.devices.camera.webcam.adapter.av.open", lambda *_a, **_kw: _FakeInput()
+        )
+        _patch_pump(monkeypatch, slow_first_packet)
+        await cam.start_input_pump()
+        assert delivered == [1], "start_input_pump returned before the first frame"
+        await cam.close()
+
+    async def test_wrong_capture_size_warns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        cam = _make(width=64, height=48)
+        await cam.open()
+        monkeypatch.setattr(
+            "capa.devices.camera.webcam.adapter.av.open",
+            lambda *_a, **_kw: _FakeInput(_FakeInputStream(width=640, height=480)),
+        )
+        _patch_pump(monkeypatch, _packets(1))
+
+        events: list[CameraEvent] = []
+
+        async def drain() -> None:
+            async for ev in cam.event_stream():
+                events.append(ev)
+
+        import anyio
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(drain)
+            await cam.start_input_pump()
+            await cam.close()
+
+        mismatches = [(ev.message, ev.severity) for ev in events if ev.kind == "capture_mismatch"]
+        assert mismatches == [("camera sends 640x480, not the configured 64x48", "warning")]
+        # The preview tile counts every pump_warning as a dropped frame.
+        assert not [ev for ev in events if ev.kind == "pump_warning"]
+
+    async def test_set_resolution_reopens_a_running_input(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The camera captures at the configured size, so a new size has to
+        reopen the input rather than wait for the next recording."""
+        from capa.devices.adapter import DeviceCommand
+
+        opened: list[dict[str, Any]] = []
+
+        def fake_av_open(*_a: object, **kw: Any) -> _FakeInput:
+            opened.append(kw["options"])
+            return _FakeInput()
+
+        cam = _make(width=64, height=48)
+        await cam.open()
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter.av.open", fake_av_open)
+        _patch_pump(monkeypatch, lambda _demuxer: object())
+        await cam.start_input_pump()
+
+        result = await cam.command(
+            DeviceCommand(
+                kind="set_resolution",
+                payload={"width": 32, "height": 24},
+                issued_by="op-1",
+                authorization_id="auth-test",
+                confirmed_by="op-1",
+            )
+        )
+        assert result.accepted, result.detail
+        await cam.close()
+
+        assert [o["video_size"] for o in opened] == ["64x48", "32x24"]
+
+
+class TestCopyCodec:
+    """``codec = "copy"`` writes the camera's own packets to the MKV: no
+    re-encode, so no generation loss and no encoder CPU."""
+
+    async def test_copies_camera_packets_unchanged(self, tmp_path: Path) -> None:
+        from fractions import Fraction
+
+        source = _mjpeg_file(tmp_path / "camera.mkv", frames=4)
+        out = tmp_path / "v.mkv"
+        cam = _make(codec="copy")
+        await cam.open()
+        sent: list[bytes] = []
+        with av.open(str(source)) as camera:
+            in_stream = camera.streams.video[0]
+            await cam._note_input(in_stream)
+            await cam.start_recording(out)
+            for packet in camera.demux(in_stream):
+                if packet.size:
+                    sent.append(bytes(packet))
+                    await cam._record_packet(packet)
+            await cam.stop_recording()
+        health = await cam.snapshot()
+        await cam.close()
+
+        assert health.frame_count == 4
+        with av.open(str(out)) as video:
+            stream = video.streams.video[0]
+            assert stream.codec_context.name == "mjpeg"
+            assert (stream.codec_context.width, stream.codec_context.height) == (64, 48)
+            packets = [p for p in video.demux(stream) if p.size]
+            times = [p.pts * p.time_base for p in packets if p.pts is not None]
+            md = {k.upper(): v for k, v in video.metadata.items()}
+        assert [bytes(p) for p in packets] == sent
+        # Frame N sits at N / fps, as the receipts' frame_idx says.
+        assert [round(t, 2) for t in times] == [round(Fraction(i, 30), 2) for i in range(4)]
+        assert md["CAPA_CODEC"] == "copy"
+        assert md["CAPTURE_FORMAT"].startswith("mjpeg yuvj422p 64x48")
+
+    async def test_needs_the_camera_streaming(self, tmp_path: Path) -> None:
+        cam = _make(codec="copy")
+        await cam.open()
+        with pytest.raises(AdapterError, match="isn't streaming"):
+            await cam.start_recording(tmp_path / "v.mkv")
+        await cam.close()
+
+    async def test_decodes_only_the_frames_a_preview_needs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Five packets in well under the 2 Hz preview interval: one decode."""
+        cam = _make(codec="copy")
+        await cam.open()
+        monkeypatch.setattr(
+            "capa.devices.camera.webcam.adapter.av.open", lambda *_a, **_kw: _FakeInput()
+        )
+        decoded = _patch_pump(monkeypatch, _packets(5))
+        await cam.start_input_pump()
+        await _pump_finished(cam)
+        await cam.close()
+        assert len(decoded) == 1
+
+    async def test_decodes_every_packet_of_an_inter_coded_input(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An H.264 camera's frames depend on earlier ones, so none can be
+        skipped."""
+        cam = _make(codec="copy")
+        await cam.open()
+        monkeypatch.setattr(
+            "capa.devices.camera.webcam.adapter.av.open",
+            lambda *_a, **_kw: _FakeInput(_FakeInputStream(intra_only=False)),
+        )
+        decoded = _patch_pump(monkeypatch, _packets(5))
+        await cam.start_input_pump()
+        await _pump_finished(cam)
+        await cam.close()
+        assert len(decoded) == 5
 
 
 class TestPreviewEncoding:

@@ -1,13 +1,16 @@
-"""``WebcamAdapter`` — PyAV-driven H.264 → MKV.
+"""``WebcamAdapter`` — PyAV-driven capture → MKV.
 
 The adapter has a single long-lived input pump
 (:meth:`WebcamAdapter._run_input_loop`) that opens the
 :class:`av.container.InputContainer` once at :meth:`start_input_pump`
-and closes it at :meth:`stop_input_pump`. The pump unconditionally emits
-2 Hz preview JPEGs onto ``preview_stream`` so the operator always has a
-live tile between runs, and additionally encodes each frame to the
-output container + emits a :class:`FrameReceipt` while ``_recording``
-is set.
+and closes it at :meth:`stop_input_pump`. The input is opened at the
+configured frame size and rate, so the camera picks a capture format
+that delivers both (MJPEG for a C930e at 1080p30). The pump
+unconditionally emits 2 Hz preview JPEGs onto ``preview_stream`` so the
+operator always has a live tile between runs, and while ``_recording``
+is set it also records each frame + emits a :class:`FrameReceipt`:
+re-encoded with ``codec``, or, with ``codec = "copy"``, the camera's own
+packets written to the MKV unchanged.
 
 Two consumer paths:
 
@@ -38,6 +41,7 @@ import sys
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
@@ -76,6 +80,7 @@ from capa.devices.camera.base import (
 from capa.devices.camera.metadata import WebcamMetadata
 from capa.devices.camera.webcam.constants import (
     _BASE_CAPABILITIES,
+    COPY_CODEC,
     DEFAULT_CODEC,
     DEFAULT_FPS,
     DEFAULT_PIX_FMT,
@@ -83,13 +88,15 @@ from capa.devices.camera.webcam.constants import (
     OPEN_RETRY_DELAYS_S,
     PREVIEW_DETAIL_INTERVAL_NS,
     PREVIEW_INTERVAL_NS,
+    STREAM_START_TIMEOUT_S,
     _platform_default_format,
 )
 from capa.devices.camera.webcam.encoding import (
-    _advance_decoder,
+    _decode_packet,
     _drain_stream,
     _encode_preview_jpeg,
     _is_transient_open_error,
+    _next_packet,
     _reformat_to_rgb24,
 )
 from capa.devices.camera.webcam.probe import _probe_dshow_format_info_sync, _probe_v4l2_info
@@ -110,6 +117,7 @@ class WebcamAdapter:
     """
 
     __slots__ = (
+        "_capture_format",
         "_clock",
         "_codec",
         "_dropped_frames",
@@ -121,6 +129,7 @@ class WebcamAdapter:
         "_frame_recv",
         "_frame_send",
         "_height",
+        "_in_stream",
         "_info",
         "_input_format",
         "_input_url",
@@ -210,6 +219,10 @@ class WebcamAdapter:
         self._output_path: Path | None = None
         self._output_container: Any = None
         self._output_stream: Any = None
+        # The open input's video stream and what the camera actually sends
+        # (e.g. "mjpeg yuvj422p 1920x1080 @ 30 fps"); set by the pump.
+        self._in_stream: Any = None
+        self._capture_format: str | None = None
 
         self._frame_send: MemoryObjectSendStream[FrameReceipt]
         self._frame_recv: MemoryObjectReceiveStream[FrameReceipt]
@@ -571,8 +584,9 @@ class WebcamAdapter:
         Verbs (gated on capability flags populated by the open() probe):
 
         * **STREAM_FORMAT** — ``set_resolution`` ``{"width", "height"}``,
-          ``set_framerate`` ``{"fps"}``. Apply on the *next* start_recording;
-          rejected during an active recording.
+          ``set_framerate`` ``{"fps"}``. Reopen a running input at the new
+          format straight away (the camera captures at it, so it can't
+          wait for the next recording); rejected during a recording.
         * **EXPOSURE_CONTROL** — ``set_exposure`` ``{"value"}``,
           ``set_auto_exposure`` ``{"enable"}``.
         * **FOCUS_CONTROL** — ``set_focus`` ``{"value"}``,
@@ -637,7 +651,7 @@ class WebcamAdapter:
             if self._recording:
                 raise AdapterError(
                     f"webcam {self._spec.name!r}: set_resolution refused "
-                    "during recording (applies to the next start_recording)"
+                    "during recording; it reopens the camera input"
                 )
             width = int(cmd.payload["width"])
             height = int(cmd.payload["height"])
@@ -647,6 +661,7 @@ class WebcamAdapter:
                 )
             self._width = width
             self._height = height
+            await self._restart_input_pump()
             return f"set_resolution width={width} height={height}"
         if kind == "set_framerate":
             if CameraCapability.STREAM_FORMAT not in self.capabilities:
@@ -654,12 +669,13 @@ class WebcamAdapter:
             if self._recording:
                 raise AdapterError(
                     f"webcam {self._spec.name!r}: set_framerate refused "
-                    "during recording (applies to the next start_recording)"
+                    "during recording; it reopens the camera input"
                 )
             fps = float(cmd.payload["fps"])
             if fps <= 0:
                 raise AdapterError(f"webcam {self._spec.name!r}: set_framerate fps must be > 0")
             self._fps = fps
+            await self._restart_input_pump()
             return f"set_framerate fps={fps}"
 
         # ---- UVC numeric set ----
@@ -710,8 +726,9 @@ class WebcamAdapter:
         Returns ``(receipt, preview_bytes, drop_reason)``:
 
         * ``receipt`` is ``None`` when the adapter is not actively
-          recording (preview-only mode) or when the encoder rejected the
-          frame.
+          recording (preview-only mode), when the encoder rejected the
+          frame, or with ``codec = "copy"``, which records packets in
+          :meth:`_mux_packet_sync` instead.
         * ``preview_bytes`` is ``None`` on throttled ticks (2 Hz cap, or
           10 Hz between runs while :meth:`set_preview_detail` is on).
         * ``drop_reason`` is non-``None`` only when the encoder rejected
@@ -740,10 +757,14 @@ class WebcamAdapter:
         recording = self._recording
         out_container = self._output_container
         out_stream = self._output_stream
-        if recording and out_container is not None and out_stream is not None:
-            idx = self._frame_count
+        if (
+            recording
+            and self._codec != COPY_CODEC
+            and out_container is not None
+            and out_stream is not None
+        ):
             video_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
-            video_frame.pts = idx
+            video_frame.pts = self._frame_count
             try:
                 # time_base set by the stream; PyAV remuxes pts via that.
                 for packet in out_stream.encode(video_frame):
@@ -757,15 +778,7 @@ class WebcamAdapter:
                     f"{type(exc).__name__}: {exc} (shape={frame.shape}, encoder={self._codec})"
                 )
             else:
-                self._frame_count = idx + 1
-                self._last_frame_t_mono_ns = t_mono_ns
-                receipt = FrameReceipt(
-                    name=self._spec.name,
-                    frame_idx=idx,
-                    t_mono_ns=t_mono_ns,
-                    t_utc=self._clock.to_wall_ns(t_mono_ns),
-                    capture_latency_s=capture_latency_s,
-                )
+                receipt = self._count_frame(t_mono_ns, capture_latency_s)
 
         # Preview is unconditional: the live tile must stay current
         # whether or not we're recording. 2 Hz cap, JPEG-encoded thumbnail,
@@ -773,19 +786,86 @@ class WebcamAdapter:
         # on every frame the consumer cannot use (28 of 30 at webcam rate).
         # DROP_OLDEST is enforced by ``_preview_send`` having capacity 2;
         # ``send_nowait`` from the wrapper silently drops on backpressure.
-        # A pop-out window asks for full-size, faster frames. Honoured only
-        # between runs: while recording, previews stay 2 Hz thumbnails
-        # whatever was asked, so the recording never pays for them.
-        detail = self._preview_detail and not recording
-        interval = PREVIEW_DETAIL_INTERVAL_NS if detail else PREVIEW_INTERVAL_NS
         preview_bytes: bytes | None = None
-        if (
-            self._last_preview_t_mono_ns is None
-            or t_mono_ns - self._last_preview_t_mono_ns >= interval
-        ):
-            preview_bytes = _encode_preview_jpeg(frame, full_size=detail)
+        if self._preview_due(t_mono_ns, recording=recording):
+            preview_bytes = _encode_preview_jpeg(
+                frame, full_size=self._preview_detail and not recording
+            )
             self._last_preview_t_mono_ns = t_mono_ns
         return receipt, preview_bytes, drop_reason
+
+    def _preview_due(self, t_mono_ns: int, *, recording: bool) -> bool:
+        """Whether the next preview is due at ``t_mono_ns``.
+
+        2 Hz thumbnails, or 10 Hz full-size frames for a pop-out window.
+        The pop-out rate is honoured only between runs: while recording,
+        previews stay 2 Hz thumbnails whatever was asked, so the recording
+        never pays for them.
+        """
+        detail = self._preview_detail and not recording
+        interval = PREVIEW_DETAIL_INTERVAL_NS if detail else PREVIEW_INTERVAL_NS
+        last = self._last_preview_t_mono_ns
+        return last is None or t_mono_ns - last >= interval
+
+    def _count_frame(self, t_mono_ns: int, capture_latency_s: float) -> FrameReceipt:
+        """Advance the frame index past a recorded frame; return its receipt."""
+        idx = self._frame_count
+        self._frame_count = idx + 1
+        self._last_frame_t_mono_ns = t_mono_ns
+        return FrameReceipt(
+            name=self._spec.name,
+            frame_idx=idx,
+            t_mono_ns=t_mono_ns,
+            t_utc=self._clock.to_wall_ns(t_mono_ns),
+            capture_latency_s=capture_latency_s,
+        )
+
+    def _mux_packet_sync(self, packet: av.Packet[Any]) -> tuple[FrameReceipt | None, str | None]:
+        """Write one camera packet to the MKV unchanged (``codec = "copy"``).
+
+        Timestamps are rewritten to the frame index at the configured rate,
+        as the encoder path's are, so MKV frame N is receipt N. Returns
+        ``(receipt, drop_reason)`` as :meth:`_push_frame_sync` does.
+        """
+        t_mono_ns = self._clock.t_mono_ns()
+        out_container = self._output_container
+        out_stream = self._output_stream
+        if not self._recording or out_container is None or out_stream is None:
+            return None, None
+        packet.stream = out_stream
+        packet.time_base = 1 / Fraction(self._fps).limit_denominator(1001)
+        packet.pts = packet.dts = self._frame_count
+        packet.duration = 1
+        try:
+            out_container.mux(packet)
+        except av.error.FFmpegError as exc:
+            self._dropped_frames += 1
+            return None, f"{type(exc).__name__}: {exc} (codec=copy)"
+        return self._count_frame(t_mono_ns, 0.0), None
+
+    async def _record_packet(self, packet: av.Packet[Any]) -> None:
+        """Record one camera packet (``codec = "copy"``) off the asyncio loop."""
+        receipt, drop_reason = await anyio.to_thread.run_sync(self._mux_packet_sync, packet)
+        await self._publish(receipt, drop_reason, None)
+
+    async def _publish(
+        self,
+        receipt: FrameReceipt | None,
+        drop_reason: str | None,
+        preview_bytes: bytes | None,
+    ) -> None:
+        """Send a frame's receipt, drop warning and preview to their streams."""
+        if drop_reason is not None:
+            await self._emit_event(
+                kind="pump_warning",
+                message=f"frame dropped: {drop_reason}",
+                severity="warning",
+            )
+        if receipt is not None:
+            await self._frame_send.send(receipt)
+        if preview_bytes is not None:
+            with contextlib.suppress(anyio.WouldBlock):
+                self._preview_send.send_nowait(preview_bytes)
 
     async def push_frame(
         self,
@@ -797,8 +877,9 @@ class WebcamAdapter:
         :class:`FrameReceipt` if recording; always emit a 2 Hz preview JPEG.
 
         Returns the receipt when one was produced (recording succeeded);
-        returns ``None`` when not recording (preview-only) or when the
-        encoder rejected the frame. Encoder-reject paths land a
+        returns ``None`` when not recording (preview-only), when the
+        encoder rejected the frame, or with ``codec = "copy"`` (the pump
+        records the camera's packets instead). Encoder-reject paths land a
         ``pump_warning`` on the event stream.
 
         Used by the long-lived input pump (:meth:`_run_input_loop`) and
@@ -811,17 +892,7 @@ class WebcamAdapter:
         receipt, preview_bytes, drop_reason = await anyio.to_thread.run_sync(
             self._push_frame_sync, frame, capture_latency_s
         )
-        if drop_reason is not None:
-            await self._emit_event(
-                kind="pump_warning",
-                message=f"frame dropped: {drop_reason}",
-                severity="warning",
-            )
-        if receipt is not None:
-            await self._frame_send.send(receipt)
-        if preview_bytes is not None:
-            with contextlib.suppress(anyio.WouldBlock):
-                self._preview_send.send_nowait(preview_bytes)
+        await self._publish(receipt, drop_reason, preview_bytes)
         return receipt
 
     async def _open_input_with_retry(self) -> Any:
@@ -835,14 +906,21 @@ class WebcamAdapter:
         is sized for a worst-case C930e release on Windows 11; longer holds
         indicate the camera is genuinely in use by another process and
         re-raising surfaces that.
+
+        The input is opened at the configured frame size and rate. Without
+        them DirectShow opens a C930e at its default 640×480, and every
+        frame was upscaled to the configured size; with them it picks the
+        capture format that delivers both (MJPEG at 1080p30), and a size or
+        rate the camera can't deliver fails the open.
         """
+        options = {"video_size": f"{self._width}x{self._height}", "framerate": f"{self._fps:g}"}
         deadline = time.monotonic() + OPEN_RETRY_DEADLINE_S
         attempt = 0
         last_exc: OSError | None = None
         for delay in OPEN_RETRY_DELAYS_S:
             try:
                 return await anyio.to_thread.run_sync(
-                    lambda: av.open(self._input_url, format=self._input_format)
+                    lambda: av.open(self._input_url, format=self._input_format, options=options)
                 )
             except OSError as exc:
                 if not _is_transient_open_error(exc) or time.monotonic() >= deadline:
@@ -861,14 +939,16 @@ class WebcamAdapter:
         # One more attempt after the last sleep — if it still fails, surface it.
         try:
             return await anyio.to_thread.run_sync(
-                lambda: av.open(self._input_url, format=self._input_format)
+                lambda: av.open(self._input_url, format=self._input_format, options=options)
             )
         except OSError as exc:
             if last_exc is not None and _is_transient_open_error(exc):
                 raise AdapterError(
-                    f"webcam {self._spec.name!r}: av.open kept returning a "
-                    f"transient I/O error after {attempt + 1} retries; the "
-                    f"camera is likely held by another process. Last error: {exc}",
+                    f"webcam {self._spec.name!r}: av.open kept returning an I/O "
+                    f"error after {attempt + 1} retries. DirectShow returns it "
+                    f"while another process holds the camera, and when the camera "
+                    f"can't deliver {self._width}x{self._height} at {self._fps:g} fps. "
+                    f"Last error: {exc}",
                 ) from exc
             raise
 
@@ -882,6 +962,13 @@ class WebcamAdapter:
         :attr:`_recording` is set — so the live tile stays current
         between runs and ``av.open`` happens exactly once per pool open.
 
+        Returns once the first frame arrives (or the pump gives up, or
+        :data:`STREAM_START_TIMEOUT_S` passes). A camera applies some
+        settings of its own when it starts streaming — the C930e resets
+        its exposure — so camera settings must be sent after this returns
+        or the stream start overwrites them; the experiment's
+        ``device_settings`` are applied after the pool opens.
+
         Idempotent: a second call while the pump is already running
         returns without action. Requires :meth:`open` to have completed.
 
@@ -893,11 +980,40 @@ class WebcamAdapter:
         if self._pump_task is not None and not self._pump_task.done():
             return
         self._pump_stop = asyncio.Event()
+        streaming = asyncio.Event()
         loop = asyncio.get_running_loop()
-        self._pump_task = loop.create_task(
-            self._run_input_loop(),
+        pump = loop.create_task(
+            self._run_input_loop(streaming),
             name=f"webcam-input-{self._spec.name}",
         )
+        self._pump_task = pump
+        first_frame = loop.create_task(streaming.wait())
+        try:
+            await asyncio.wait(
+                {pump, first_frame},
+                timeout=STREAM_START_TIMEOUT_S,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            first_frame.cancel()
+        if not streaming.is_set() and not pump.done():
+            _logger.warning(
+                "webcam.stream_start_slow",
+                camera=self._spec.name,
+                waited_s=STREAM_START_TIMEOUT_S,
+            )
+
+    async def _restart_input_pump(self) -> None:
+        """Reopen a running input so the camera captures at a new format.
+
+        The camera reapplies its own settings when the stream restarts, so
+        the experiment's ``device_settings`` (re-planned before Start) send
+        exposure again.
+        """
+        if self._pump_task is None or self._pump_task.done():
+            return
+        await self.stop_input_pump()
+        await self.start_input_pump()
 
     async def stop_input_pump(self) -> None:
         """Signal the input pump to exit and await it. Idempotent.
@@ -926,22 +1042,31 @@ class WebcamAdapter:
                     await task
         self._pump_stop = None
 
-    async def _run_input_loop(self) -> None:
+    async def _run_input_loop(self, streaming: asyncio.Event) -> None:
         """Long-lived input pump (pool lifetime).
 
-        Opens the PyAV input container with retry, then loops:
-        ``decode → reformat → push_frame``. ``push_frame`` always emits a
-        2 Hz preview JPEG and additionally encodes + emits a
-        :class:`FrameReceipt` while :attr:`_recording` is set. Exits when
-        :attr:`_pump_stop` is set, when the decoder reaches EOF, or on
-        cancellation.
+        Opens the PyAV input container with retry, then loops over the
+        camera's packets: ``decode → reformat → push_frame`` for each frame
+        it needs, and with ``codec = "copy"`` the packet itself goes to the
+        MKV while recording. ``push_frame`` emits a 2 Hz preview JPEG and,
+        when re-encoding, encodes + emits a :class:`FrameReceipt` while
+        :attr:`_recording` is set. Sets ``streaming`` at the first packet.
+        Exits when :attr:`_pump_stop` is set, when the input reaches EOF,
+        or on cancellation.
+
+        A frame is decoded only when it is used: every frame while
+        re-encoding a recording, otherwise only those a preview is due
+        for, so copying a 1080p MJPEG stream decodes 2 frames a second,
+        not 30. Inputs whose frames don't decode on their own (H.264 from
+        a camera) decode every packet.
 
         ``av.open`` is wrapped in :meth:`_open_input_with_retry` so the
         Windows DirectShow filter-graph hold-time after a previous close
-        is absorbed transparently. Decode + reformat each run in a worker
-        thread so the per-frame CPU work doesn't block the asyncio loop.
+        is absorbed transparently. Reads, decodes, reformats and muxes run
+        in a worker thread so the per-frame work doesn't block the asyncio
+        loop.
 
-        When ``CAPA_WEBCAM_FRAME_DIAG=1`` is set, the first 150 input
+        When ``CAPA_WEBCAM_FRAME_DIAG=1`` is set, the first 150 decoded
         frames are logged at INFO with ``frame.format.name`` /
         ``width`` / ``height`` / ``pts``.
         """
@@ -965,56 +1090,104 @@ class WebcamAdapter:
 
         try:
             in_stream = next(s for s in in_container.streams if s.type == "video")
-            decoder = in_container.decode(in_stream)
+            await self._note_input(in_stream)
+            copy = self._codec == COPY_CODEC
+            intra_only = bool(in_stream.codec_context.codec.intra_only)
+            demuxer = in_container.demux(in_stream)
             while self._open and not self._pump_stop.is_set():
-                frame = await anyio.to_thread.run_sync(_advance_decoder, decoder)
-                if frame is None or self._pump_stop.is_set() or not self._open:
+                packet = await anyio.to_thread.run_sync(_next_packet, demuxer)
+                if packet is None or self._pump_stop.is_set() or not self._open:
                     break
-                if diag_remaining > 0 and diag_log is not None:
-                    diag_log.info(
-                        "webcam_frame_diag",
-                        camera=self._spec.name,
-                        frame_idx=self._frame_count,
-                        format=frame.format.name,
-                        width=frame.width,
-                        height=frame.height,
-                        pts=frame.pts,
-                        time_base=str(frame.time_base) if frame.time_base else None,
-                    )
-                    diag_remaining -= 1
-                rgb = await anyio.to_thread.run_sync(_reformat_to_rgb24, frame)
-                if self._pump_stop.is_set() or not self._open:
-                    break
-                # ``push_frame`` handles both preview-only and recording
-                # modes — _push_frame_sync checks _recording per-frame and
-                # falls back to preview-only emission when not recording.
-                # Encoder-reject paths land a pump_warning event and the
-                # loop continues with the next frame.
-                await self.push_frame(rgb)
+                streaming.set()
+                recording = self._recording
+                if (
+                    not intra_only
+                    or (recording and not copy)
+                    or self._preview_due(self._clock.t_mono_ns(), recording=recording)
+                ):
+                    frames = await anyio.to_thread.run_sync(_decode_packet, in_stream, packet)
+                    for frame in frames:
+                        if diag_remaining > 0 and diag_log is not None:
+                            diag_log.info(
+                                "webcam_frame_diag",
+                                camera=self._spec.name,
+                                frame_idx=self._frame_count,
+                                format=frame.format.name,
+                                width=frame.width,
+                                height=frame.height,
+                                pts=frame.pts,
+                                time_base=str(frame.time_base) if frame.time_base else None,
+                            )
+                            diag_remaining -= 1
+                        rgb = await anyio.to_thread.run_sync(_reformat_to_rgb24, frame)
+                        if self._pump_stop.is_set() or not self._open:
+                            break
+                        # ``push_frame`` handles both preview-only and recording
+                        # modes — _push_frame_sync checks _recording per-frame and
+                        # falls back to preview-only emission when not recording.
+                        # Encoder-reject paths land a pump_warning event and the
+                        # loop continues with the next frame.
+                        await self.push_frame(rgb)
+                if copy:
+                    await self._record_packet(packet)
         finally:
+            self._in_stream = None
             with contextlib.suppress(BaseException):
                 await anyio.to_thread.run_sync(in_container.close)
+
+    async def _note_input(self, in_stream: Any) -> None:
+        """Record what the camera actually sends, and warn when its frame
+        size isn't the configured one (the encoder would rescale it)."""
+        self._in_stream = in_stream
+        ctx = in_stream.codec_context
+        rate = in_stream.average_rate
+        fps = f"{float(rate):g} fps" if rate else "unknown fps"
+        self._capture_format = f"{ctx.name} {ctx.pix_fmt} {ctx.width}x{ctx.height} @ {fps}"
+        _logger.info("webcam.input_opened", camera=self._spec.name, format=self._capture_format)
+        if (ctx.width, ctx.height) != (self._width, self._height):
+            message = (
+                f"camera sends {ctx.width}x{ctx.height}, not the configured "
+                f"{self._width}x{self._height}"
+            )
+            _logger.warning("webcam.capture_mismatch", camera=self._spec.name, detail=message)
+            # Not a pump_warning: the preview tile counts those as dropped frames.
+            await self._emit_event(kind="capture_mismatch", severity="warning", message=message)
 
     # -------------------------------------------------------------- internals
 
     def _open_encoder(self) -> None:
-        """Open the output container + stream."""
+        """Open the output container + stream.
+
+        With ``codec = "copy"`` the stream copies the camera's (its codec,
+        size and pixel format), so the camera must already be streaming.
+        """
         assert self._output_path is not None
+        copy = self._codec == COPY_CODEC
+        if copy and self._in_stream is None:
+            raise AdapterError(
+                f"webcam {self._spec.name!r}: codec 'copy' records the camera's own "
+                "frames, but the camera isn't streaming"
+            )
         container = av.open(str(self._output_path), mode="w", format="matroska")
         # MKV container metadata anchor.
         anchor_utc = self._clock.to_wall_ns(self._clock.t_mono_ns())
         container.metadata["run_started_utc"] = anchor_utc.isoformat()
         container.metadata["camera_name"] = self._spec.name
         container.metadata["capa_codec"] = self._codec
+        if self._capture_format is not None:
+            container.metadata["capture_format"] = self._capture_format
 
-        stream = container.add_stream(self._codec, rate=int(self._fps))
-        assert isinstance(stream, av.VideoStream)
-        stream.width = self._width
-        stream.height = self._height
-        stream.pix_fmt = self._pix_fmt
-        # Sensible default tuning for libx264; harmless for other codecs.
-        if self._codec in ("libx264", "h264"):
-            stream.options = {"preset": "veryfast", "tune": "zerolatency"}
+        if copy:
+            stream = container.add_stream_from_template(self._in_stream)
+        else:
+            stream = container.add_stream(self._codec, rate=int(self._fps))
+            assert isinstance(stream, av.VideoStream)
+            stream.width = self._width
+            stream.height = self._height
+            stream.pix_fmt = self._pix_fmt
+            # Sensible default tuning for libx264; harmless for other codecs.
+            if self._codec in ("libx264", "h264"):
+                stream.options = {"preset": "veryfast", "tune": "zerolatency"}
 
         self._output_container = container
         self._output_stream = stream
@@ -1023,10 +1196,11 @@ class WebcamAdapter:
         """Flush the encoder, close the container."""
         if self._output_container is None or self._output_stream is None:
             return
-        # Flush remaining packets.
-        with contextlib.suppress(av.error.EOFError):
-            for packet in self._output_stream.encode(None):
-                self._output_container.mux(packet)
+        # Flush remaining packets; a copied stream has no encoder to flush.
+        if self._codec != COPY_CODEC:
+            with contextlib.suppress(av.error.EOFError):
+                for packet in self._output_stream.encode(None):
+                    self._output_container.mux(packet)
         self._output_container.close()
 
     async def _emit_event(self, *, kind: str, message: str, severity: str) -> None:

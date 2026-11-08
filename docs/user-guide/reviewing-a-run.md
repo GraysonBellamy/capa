@@ -162,7 +162,8 @@ doesn't drown the event view.
 ### Video
 
 Visible-camera files (`video/<name>.mkv`) are Matroska with libx264 by
-default — play with VLC, ffmpeg, or any standard tool. FLIR IR files
+default, or the camera's own MJPEG on the rig profiles (`codec = "copy"`)
+— play with VLC, ffmpeg, or any standard tool. FLIR IR files
 (`video/<name>.csq`) are the **native radiometric container**; they
 preserve per-frame temperature data and require the FLIR SDK or
 Researcher IR tools to read pixels. Capa does not transcode them.
