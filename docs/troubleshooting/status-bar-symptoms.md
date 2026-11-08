@@ -60,7 +60,7 @@ WHERE kind = 'saturation_deadline';
 **Likely cause, ranked.**
 
 1. **Writer thread stalled on fsync.** Slow disk, full disk, SMB share dropping packets, encrypted FUSE mount, antivirus scanning every parquet write. Check the `disk` pill — if it's yellow or red, this is almost certainly your cause.
-2. **Camera encode pinning a writer-thread CPU.** A high-resolution / high-fps `libx264` encode can saturate one core; the writer thread can't keep up with the inbound frame rate. The mitigation lives in the per-camera params: swap to `h264_qsv` (Intel iGPU), `h264_nvenc` (NVIDIA), or `mjpeg` (no encode).
+2. **Camera encode pinning a writer-thread CPU.** A high-resolution / high-fps `libx264` encode can saturate one core; the writer thread can't keep up with the inbound frame rate. The mitigation lives in the per-camera params: swap to `copy` (records the camera's own MJPEG; no encode), `h264_qsv` (Intel iGPU), or `h264_nvenc` (NVIDIA).
 3. **A slow `BLOCK`-policy databus subscriber on the conductor side.** Rare today; only relevant if a plugin has wired a safety-critical subscriber that does heavy work.
 
 **Verify in the dock.**
@@ -82,7 +82,7 @@ The `metadata_json` field typically contains `resource_id`, `blocked_s`, and `de
 **What to do.**
 
 - **Disk-related:** free space, switch `runs_root` to a faster volume, or pause antivirus on the runs directory.
-- **Encode-related:** edit the camera params in your [hardware.toml](../configuration/hardware-toml.md) to `codec = "h264_qsv"` (or `h264_nvenc` / `mjpeg`) and reload. See [cameras-webcam.md](../devices/cameras-webcam.md) and [cameras-flir.md](../devices/cameras-flir.md).
+- **Encode-related:** edit the camera params in your [hardware.toml](../configuration/hardware-toml.md) to `codec = "copy"` (or `h264_qsv` / `h264_nvenc`) and reload. See [cameras-webcam.md](../devices/cameras-webcam.md) and [cameras-flir.md](../devices/cameras-flir.md).
 - **Subscriber-related:** identify the plugin via `capa plugins list`, audit its `DataBus.subscribe` calls. A `BLOCK` policy on a subscriber that does anything CPU-heavy is a bug.
 
 The full mechanics live in [Saturation and deadlines](../safety/saturation-and-deadlines.md).

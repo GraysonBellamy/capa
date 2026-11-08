@@ -58,7 +58,7 @@ The status bar polls live metrics from the conductor and UI ring buffers at 1 Hz
 **What to check, in order.**
 1. **Loop lag pill** — high conductor loop lag means the loop itself is CPU-starved; nothing downstream gets done. Likely a `CustomStep` procedure handler doing inline CPU work, see [runtime-architecture.md §11](../architecture/runtime-architecture.md#11-procedure-cpu-offload).
 2. **Disk pill** — writer fsync slows when disk is full or slow; writer inbox fills; conductor drain blocks on `await writer.submit/record_frame`; bridges back up.
-3. **Camera config** — high-resolution / high-fps video encode (libx264) on a CPU-bound writer thread is the canonical cause. Swap to `h264_qsv` (Intel iGPU) / `h264_nvenc` (NVIDIA) / `mjpeg` (no encode) in the camera params.
+3. **Camera config** — high-resolution / high-fps video encode (libx264) on a CPU-bound writer thread is the canonical cause. Swap to `copy` (the camera's own MJPEG, no encode) / `h264_qsv` (Intel iGPU) / `h264_nvenc` (NVIDIA) in the camera params.
 4. **A BLOCK-policy DataBus subscriber doing slow work** — the conductor drain `await`s `bus.publish`, so a slow subscriber stalls it.
 
 **What it is NOT.** This pill does not reflect bridge latency p99. The legacy "sink lag" metric used `latency_p99_ms`, a 1024-sample ring — which on low-rate bridges (Watlow at 2 Hz = ~8.5 minutes per window) meant one bad startup observation pinned the readout for ages. `sat` reads current state only.

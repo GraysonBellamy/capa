@@ -17,8 +17,8 @@ _BASE_CAPABILITIES: frozenset[CameraCapability] = frozenset(
         CameraCapability.SERIAL_SELECT,
         CameraCapability.MODEL_HINT,
         CameraCapability.LIVE_PREVIEW,
-        # STREAM_FORMAT is always supported — PyAV reopens the input with
-        # the new resolution/framerate on the next start_recording().
+        # STREAM_FORMAT is always supported — the input is reopened at the
+        # new resolution/framerate as soon as either changes.
         # UVC control flags are added at open() time after duvc-ctl probes
         # the device; off Windows / on cameras with no controllable UVC
         # properties they stay absent.
@@ -30,6 +30,11 @@ DEFAULT_CODEC = "libx264"
 DEFAULT_PIX_FMT = "yuv420p"
 DEFAULT_FPS = 30
 
+COPY_CODEC = "copy"
+"""``codec`` value that records the camera's own packets (MJPEG from a UVC
+webcam at 1080p) without re-encoding: no generation loss and no encoder CPU,
+at the camera's bitrate. ``pix_fmt`` is ignored."""
+
 OPEN_RETRY_DELAYS_S: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 2.0, 2.0)
 """Backoff schedule for transient ``av.open`` failures (Windows DirectShow
 hold-time after ``cam.close()``). Cumulative ≈ 7.75 s, which covers the
@@ -39,6 +44,10 @@ normally open first try, so retries are dormant on Linux/macOS."""
 OPEN_RETRY_DEADLINE_S: float = 8.0
 """Hard ceiling on retries; if we haven't opened by then the underlying
 problem is not transient and we surface the original error."""
+
+STREAM_START_TIMEOUT_S: float = OPEN_RETRY_DEADLINE_S + 5.0
+"""How long :meth:`WebcamAdapter.start_input_pump` waits for the first frame:
+the open-retry budget plus the time a camera takes to start streaming."""
 
 PREVIEW_INTERVAL_NS = 500_000_000
 """2 Hz preview cadence (; Camera Protocol docstring). At 30 fps the

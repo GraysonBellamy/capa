@@ -46,9 +46,11 @@ The defaults live in [`constants.py`](https://github.com/GraysonBellamy/capa/blo
 | Frame rate | `30 fps` | `CameraSpec.params["fps"]` |
 | libx264 tuning | `preset=veryfast, tune=zerolatency` | not user-overridable |
 
-The keyframe interval is **not pinned** by the adapter — libx264 chooses its own GOP based on the scene-change detector and the `zerolatency` tune. Operators who need a guaranteed keyframe cadence (for example, frame-accurate extraction at fixed intervals without decoding the whole stream) must transcode the `.mkv` after the run with their preferred GOP setting.
+The rig's hardware profiles set `codec = "copy"`: the MKV holds the camera's own MJPEG frames, unchanged (1920×1080 `yuvj422p`, about 2–4 MB/s for a C930e). Every MJPEG frame is a keyframe, so any frame can be extracted or seeked to directly. See [Encoder choice](../devices/cameras-webcam.md#encoder-choice).
 
-The encoder is opened in [`_open_encoder`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/camera/webcam/adapter.py) and the container metadata carries `run_started_utc`, `camera_name`, and `capa_codec` so an external tool can re-correlate by absolute time without parsing the bundle manifest.
+With an encoder, the keyframe interval is **not pinned** by the adapter — libx264 chooses its own GOP based on the scene-change detector and the `zerolatency` tune. Operators who need a guaranteed keyframe cadence (for example, frame-accurate extraction at fixed intervals without decoding the whole stream) must transcode the `.mkv` after the run with their preferred GOP setting.
+
+The encoder is opened in [`_open_encoder`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/camera/webcam/adapter.py) and the container metadata carries `run_started_utc`, `camera_name`, `capa_codec`, and `capture_format` (what the camera sent, e.g. `mjpeg yuvj422p 1920x1080 @ 30 fps`) so an external tool can re-correlate by absolute time without parsing the bundle manifest. Visible recordings made before November 2026 were captured at 640×480 and stretched to the configured size; see [Capture format](../devices/cameras-webcam.md#capture-format).
 
 **The container is owned by the adapter, not by the storage sink.** [`video_sink.py`'s module docstring](https://github.com/GraysonBellamy/capa/blob/main/src/capa/storage/video_sink.py) is explicit about the division: the sink writes only the frame-index parquet. If the adapter forgets to close its container handle on shutdown, the result is a truncated `.mkv` — and the sidecar is still complete.
 

@@ -1,11 +1,11 @@
 ---
-description: USB visible-light webcams in capa — the PyAV-to-MKV pipeline, libx264 encoding, per-OS v4l2/avfoundation/dshow demuxers, UVC controls and declaring them in an experiment, and disconnect recovery.
+description: USB visible-light webcams in capa — the PyAV-to-MKV pipeline, capture format, copying the camera's MJPEG or encoding with libx264, per-OS v4l2/avfoundation/dshow demuxers, UVC controls and declaring them in an experiment, and disconnect recovery.
 ---
 
 # USB webcams
 
 **Audience:** operators with one or more USB cameras on the rig (typically a visible-light camera mounted above the sample).
-**Scope:** capa's webcam adapter — the PyAV → MKV pipeline, the always-on preview pump, encoder choice and its saturation implications, UVC controls, and recovery from disconnect mid-run.
+**Scope:** capa's webcam adapter — the PyAV → MKV pipeline, the capture format, the always-on preview pump, encoder choice and its saturation implications, UVC controls, and recovery from disconnect mid-run.
 
 ---
 
@@ -20,6 +20,7 @@ description: USB visible-light webcams in capa — the PyAV-to-MKV pipeline, lib
 | Resource scheme | `webcam:<selector>` |
 | Container | Matroska (`.mkv`) |
 | Default codec | `libx264` |
+| Rig codec | `copy` — the camera's MJPEG, written unchanged |
 | Default frame size / rate | `1280×720 @ 30 fps` |
 | Preview cadence | 2 Hz (`PREVIEW_INTERVAL_NS = 500_000_000`) |
 
@@ -46,20 +47,20 @@ can open via the per-OS demuxer:
 
 ## Configuration
 
-```toml title="configs/hardware/webcam_real.toml"
+```toml title="configs/hardware/capa_real_full.toml"
 [[cameras]]
 name = "visible_cam0"
 adapter = "capa.devices.camera.webcam"
 kind = "visible"
-estimated_bps = 1_500_000        # 30 fps × 720p H.264 ≈ 2 Mbps; gives headroom
+model_hint = "C930e"
 on_failure = "warn"
+estimated_bps = 4000000          # bytes/s: the C930e's MJPEG runs 16–31 Mbit/s
 
 [cameras.params]
 fps = 30
-width = 1280
-height = 720
-codec = "libx264"
-pix_fmt = "yuv420p"
+width = 1920
+height = 1080
+codec = "copy"
 input_format = "dshow"
 input_url = "video=Logitech Webcam C930e"
 ```
@@ -72,12 +73,46 @@ existing way.
 
 | Key | Default | Notes |
 |---|---|---|
-| `fps` | `30` (`DEFAULT_FPS`) | Encoder target. Must be > 0. |
-| `width` / `height` | `1280` / `720` | Frame size. The dshow `list_options` probe (Windows) enumerates the device's supported sizes — see [Quirks](#quirks). |
-| `codec` | `"libx264"` (`DEFAULT_CODEC`) | See [Encoder choice](#encoder-choice). |
-| `pix_fmt` | `"yuv420p"` (`DEFAULT_PIX_FMT`) | H.264-compatible default. |
+| `fps` | `30` (`DEFAULT_FPS`) | Capture and recording rate. Must be > 0. |
+| `width` / `height` | `1280` / `720` | Capture size: the camera is opened at it — see [Capture format](#capture-format). The dshow `list_options` probe (Windows) enumerates the device's supported sizes — see [Quirks](#quirks). |
+| `codec` | `"libx264"` (`DEFAULT_CODEC`) | `"copy"` or an FFmpeg encoder. See [Encoder choice](#encoder-choice). |
+| `pix_fmt` | `"yuv420p"` (`DEFAULT_PIX_FMT`) | Encoder pixel format. Ignored with `copy`. |
 | `input_url` | platform default | OS-specific demuxer URL. |
 | `input_format` | platform default | PyAV format name. |
+
+`estimated_bps` is in **bytes** per second; the Setup tab's disk-fill
+estimate multiplies it by the run length.
+
+## Capture format
+
+The input is opened with the configured `width`×`height` and `fps`
+(FFmpeg's `video_size` and `framerate`), and the camera picks a
+format that delivers both. Without them DirectShow opens a C930e at
+its default 640×480, and capa recordings before November 2026 are
+that 640×480 stretched to the configured 1920×1080.
+
+The C930e offers:
+
+| Format | 640×480 | 1280×720 | 1920×1080 |
+|---|---|---|---|
+| Uncompressed YUYV | 30 fps | 10 fps | 5 fps |
+| MJPEG | 30 fps | 30 fps | 30 fps |
+
+so 1080p at 30 fps is MJPEG, compressed in the camera before it
+reaches the PC.
+
+A size or rate the camera can't deliver fails the open. DirectShow
+reports that as the same I/O error as a camera another process holds,
+so it surfaces after the open-retry budget (about 8 s) with both
+causes named. A camera that opens at a size other than the
+configured one (V4L2 drivers can adjust it) logs
+`webcam.capture_mismatch` and emits a `capture_mismatch` camera event,
+`camera sends WxH, not the configured WxH`. The format the camera
+actually sends is logged (`webcam.input_opened`) and written to the
+MKV's `capture_format` tag.
+
+`set_resolution` and `set_framerate` reopen a running input at once,
+since the camera captures at that format.
 
 ## Encoder choice
 
@@ -86,14 +121,17 @@ cause of the `sat` (saturation) pill turning yellow. Choices that ship:
 
 | `codec` | Hardware | When to use | Saturation risk |
 |---|---|---|---|
+| `copy` | none | A camera that sends compressed frames (MJPEG at 1080p). The best quality available: the camera's frames, bit for bit. | Lowest: no encode, and only the frames a preview needs are decoded (about 6 % of one core at 1080p30). Files run at the camera's bitrate, 2–4 MB/s for a C930e at 1080p30. |
 | `libx264` | CPU only | Default. Available everywhere. | Highest CPU — watch the `sat` pill on dense rigs. |
-| `h264_qsv` | Intel Quick Sync | Intel iGPU available. | Low CPU; lowest sustained risk. |
+| `h264_qsv` | Intel Quick Sync | Intel iGPU available. | Low CPU; lowest sustained risk. capa sets no quality target, and at 1080p30 it ran at about 0.6 Mbit/s: heavy compression. |
 | `h264_nvenc` | NVIDIA NVENC | Discrete NVIDIA GPU available. | Very low CPU. |
 | `mjpeg` | CPU | Diagnostic / max-fidelity at small frame sizes. | Very large output files; disk I/O becomes the limit before CPU does. |
 
-If the `sat` pill goes yellow on a rig that's idle elsewhere, switch
-from `libx264` to one of the hardware encoders before trying to lower
-fps or resolution. See [saturation
+Every encoder decodes the camera's frame, converts it to RGB and back,
+and compresses it again; `copy` does none of that. If the `sat` pill
+goes yellow on a rig that's idle elsewhere, switch to `copy` (or from
+`libx264` to a hardware encoder) before trying to lower fps or
+resolution. See [saturation
 deadline](../safety/saturation-and-deadlines.md) for the escalation
 contract.
 
@@ -101,9 +139,14 @@ contract.
 
 One long-lived input pump opens the camera once at
 `start_input_pump` and closes it once at `stop_input_pump` — *not*
-per-recording. The pump unconditionally emits 2 Hz preview JPEGs onto
-`preview_stream` and, while `_recording=True`, additionally encodes
-each frame to the output container and emits a `FrameReceipt`.
+per-recording. `start_input_pump` returns once the first frame
+arrives (see [Settings and the stream
+start](#settings-and-the-stream-start)). The pump unconditionally
+emits 2 Hz preview JPEGs onto `preview_stream` and, while
+`_recording=True`, additionally records each frame — the camera's
+packet itself with `copy`, otherwise re-encoded — and emits a
+`FrameReceipt`. MKV frame *N* is receipt *N*: timestamps are the frame
+index at the configured rate.
 
 This is the design point that fixed the multi-second freeze of the
 live preview tile after every run-stop on Windows. The DirectShow
@@ -161,6 +204,23 @@ Values are in the camera's own units; the range and step come from the
 camera. Pan and tilt are arc-seconds (3600 = 1°) on most cameras, and
 exposure is UVC log2 seconds. Setting a value puts that control in
 manual mode, so setting exposure turns auto exposure off.
+
+A frame can't be shorter than its exposure. On a C930e at 1080p, −5
+is the longest exposure that holds 30 fps; at −4, or with auto
+exposure in dim light, the camera drops to about 16 fps and the
+recording plays back fast, since its timestamps assume the
+configured rate.
+
+### Settings and the stream start
+
+A C930e resets its exposure (to −4, manual, in testing) when it starts
+streaming, and a value set before that is lost; gain and the other controls
+keep theirs. `start_input_pump` therefore returns only once the first
+frame has arrived, so the experiment's `device_settings`, applied
+after the pool opens, land after the reset. The reset reads back
+honestly, so the re-plan before Start catches it if the stream
+restarts (a resolution or frame-rate change) after the settings were
+applied.
 
 `read_state_snapshot()` reads every control the camera has, live, as a
 `WebcamStateSnapshot`: each control's value, its auto mode (exposure,
@@ -261,20 +321,21 @@ underlying problem isn't transient and the original error is surfaced.
 
 ### `pix_fmt` mismatches
 
-PyAV will silently re-format frames if the requested `pix_fmt` doesn't
-match the device's native format. The `_reformat_to_rgb24` helper
-handles the preview path; the encoder takes the requested `pix_fmt`
-verbatim. If the device cannot deliver the requested format the open
-will fail loudly — but if it can deliver a *similar* one, you may not
-notice the reformat cost until the saturation pill goes yellow.
+`pix_fmt` is the encoder's output format, not the camera's. Each
+decoded frame goes to RGB (`_reformat_to_rgb24`) and the encoder
+converts it to `pix_fmt`, rescaling it if its size differs from the
+stream's. With `copy` none of this happens: the MKV holds the camera's
+own format (`yuvj422p` MJPEG for a C930e).
 
 ### Preview throttling and CPU impact
 
 The 2 Hz preview encodes one JPEG every 15 frames (at 30 fps).
 `PREVIEW_MAX_WIDTH = 320` keeps the payload well under 30 kB at
-`PREVIEW_JPEG_QUALITY = 70`. The encode itself runs in the worker
-thread already used for H.264, so the dominant cost is the recording
-encoder, not the preview.
+`PREVIEW_JPEG_QUALITY = 70`. A frame is decoded only when it's used:
+every frame while re-encoding a recording, otherwise only those a
+preview is due for. With `copy` that is 2 decodes a second instead of
+30. Cameras that send inter-coded frames (H.264) decode every packet,
+since their frames depend on earlier ones.
 
 ### No sim equivalent
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from capa.devices.camera.webcam.adapter import WebcamAdapter
 from capa.devices.camera.webcam.constants import (
+    COPY_CODEC,
     DEFAULT_CODEC,
     DEFAULT_FPS,
     DEFAULT_PIX_FMT,
@@ -28,6 +29,7 @@ _register(DESCRIPTOR)
 
 
 __all__ = [
+    "COPY_CODEC",
     "DEFAULT_CODEC",
     "DEFAULT_FPS",
     "DEFAULT_PIX_FMT",

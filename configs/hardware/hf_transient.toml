@@ -148,14 +148,13 @@ adapter = "capa.devices.camera.webcam"
 kind = "visible"
 model_hint = "C930e"
 on_failure = "warn"
-estimated_bps = 1500000
+estimated_bps = 4000000
 
 [cameras.params]
 fps = 30
 width = 1920
 height = 1080
-codec = "h264_qsv"
-pix_fmt = "nv12"
+codec = "copy"
 input_format = "dshow"
 input_url = "video=Logitech Webcam C930e"
 

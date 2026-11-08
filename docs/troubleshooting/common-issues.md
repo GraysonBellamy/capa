@@ -79,12 +79,12 @@ This is a per-machine setup issue, not a runtime issue. Once `PATH` is right it 
 
 ```toml
 [devices.visible_cam0.params]
-codec = "h264_qsv"     # Intel iGPU (zero-CPU encode on supported chipsets)
+codec = "copy"         # record the camera's own MJPEG: no encode, ~6 % of a core at 1080p30
+# codec = "h264_qsv"   # Intel iGPU (zero-CPU encode on supported chipsets)
 # codec = "h264_nvenc" # NVIDIA GPU encode
-# codec = "mjpeg"      # no inter-frame compression; much larger files; near-zero CPU
 ```
 
-Defaults live in [`devices/camera/webcam/constants.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/camera/webcam/constants.py). The hardware-accelerated codecs require either an Intel CPU with Quick Sync or an NVIDIA GPU; `mjpeg` works everywhere but produces bundles 5–10× larger.
+Defaults live in [`devices/camera/webcam/constants.py`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/camera/webcam/constants.py). `copy` needs a camera that sends compressed frames (a UVC webcam's MJPEG at 720p and up) and writes them at the camera's bitrate, 2–4 MB/s for a C930e at 1080p30. The hardware-accelerated codecs require either an Intel CPU with Quick Sync or an NVIDIA GPU.
 
 Reload the config and try a short test run. The `sat` pill should stay green; the diagnostics dock should show every camera's Age stable below 1 s. See also [cameras-webcam.md](../devices/cameras-webcam.md).
 

@@ -1,14 +1,14 @@
-"""PyAV decode / RGB reformat / preview-JPEG helpers.
+"""PyAV demux / decode / RGB reformat / preview-JPEG helpers.
 
-Each function runs once per frame in the input pump and is wrapped by
-:func:`anyio.to_thread.run_sync` at the call site so the libav and
-libjpeg CPU cost stays off the asyncio loop.
+Each function runs per packet or per frame in the input pump and is
+wrapped by :func:`anyio.to_thread.run_sync` at the call site so the
+blocking read and the libav and libjpeg CPU cost stay off the asyncio loop.
 """
 
 from __future__ import annotations
 
 import io
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import av
@@ -38,18 +38,27 @@ def _is_transient_open_error(exc: BaseException) -> bool:
     return getattr(exc, "errno", None) == 5
 
 
-def _advance_decoder(decoder: Any) -> av.VideoFrame | None:
-    """Pull the next decoded frame from a PyAV decoder; ``None`` at EOF.
+def _next_packet(demuxer: Iterator[av.Packet[Any]]) -> av.Packet[Any] | None:
+    """Pull the next non-empty packet from a PyAV demuxer; ``None`` at EOF.
 
-    Wrapped in :func:`anyio.to_thread.run_sync` by :meth:`WebcamAdapter._run_input_loop`
-    so the per-frame libav decode (~33 ms at 30 fps from a UVC source) does
-    not block the asyncio loop.
+    The demuxer ends with an empty flush packet, which is skipped. Wrapped in
+    :func:`anyio.to_thread.run_sync` by :meth:`WebcamAdapter._run_input_loop`
+    because the read blocks until the camera delivers the next frame.
     """
-    frame = next(decoder, None)
-    if frame is None:
-        return None
-    assert isinstance(frame, av.VideoFrame)
-    return frame
+    for packet in demuxer:
+        if packet.size:
+            return packet
+    return None
+
+
+def _decode_packet(stream: Any, packet: av.Packet[Any]) -> list[av.VideoFrame]:
+    """Decode one packet with the input stream's decoder.
+
+    Capture packets are whole frames (MJPEG, raw), so one packet gives one
+    frame. Wrapped by :func:`anyio.to_thread.run_sync`: a 1080p MJPEG decode
+    takes a few milliseconds.
+    """
+    return [frame for frame in stream.decode(packet) if isinstance(frame, av.VideoFrame)]
 
 
 def _reformat_to_rgb24(frame: av.VideoFrame) -> np.ndarray:
