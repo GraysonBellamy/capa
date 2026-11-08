@@ -523,13 +523,9 @@ def _set_property_value(cam: Any, prop: UvcProperty, value: int) -> None:
     enum_val = _resolve_prop_enum(prop)
     if enum_val is None:
         raise AdapterError(f"duvc-ctl: unknown property {prop.name!r} (group {prop.group.value})")
-    setting = _duvc.PropSetting(int(value), _duvc.CamMode.Manual)
-    if prop.group is UvcGroup.CAMERA:
-        result = cam.set(enum_val, setting)
-    else:
-        # The Camera class only exposes ``set`` for CamProp; VidProp set goes
-        # through the module-level ``set_video_property``.
-        result = _duvc.set_video_property(cam.device, enum_val, setting)
+    # ``Camera.set`` takes a CamProp or a VidProp and returns a Result. The
+    # module-level ``set_video_property`` returns a bare bool, not a Result.
+    result = cam.set(enum_val, _duvc.PropSetting(int(value), _duvc.CamMode.Manual))
     if not result.is_ok():
         err = result.error()
         raise AdapterError(f"duvc-ctl: set {prop.name} = {value} failed: {err.description()}")
@@ -548,11 +544,7 @@ def _set_property_auto(cam: Any, prop: UvcProperty, enable: bool) -> None:
     # Auto→Manual round-trip without an intervening value).
     current = _get_property_state(cam, prop)
     value = current.value if current is not None else 0
-    setting = _duvc.PropSetting(int(value), mode)
-    if prop.group is UvcGroup.CAMERA:
-        result = cam.set(enum_val, setting)
-    else:
-        result = _duvc.set_video_property(cam.device, enum_val, setting)
+    result = cam.set(enum_val, _duvc.PropSetting(int(value), mode))
     if not result.is_ok():
         err = result.error()
         raise AdapterError(f"duvc-ctl: set {prop.name} auto={enable} failed: {err.description()}")

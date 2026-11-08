@@ -220,10 +220,12 @@ class _FakeCamera:
         return _FakeResult(value=r)
 
     def set(self, prop_enum: str, setting: _FakePropSetting) -> _FakeResult:
+        """Takes a CamProp or a VidProp, like the real ``Camera.set``."""
         self.set_calls.append((prop_enum, setting.value, setting.mode))
         if prop_enum in self._set_fails:
             return _FakeResult(error=_FakeError(f"refused {prop_enum}"))
-        self._cam_props[prop_enum] = setting
+        props = self._vid_props if hasattr(_FakeVideoEnum, prop_enum) else self._cam_props
+        props[prop_enum] = setting
         return _FakeResult(value=None)
 
 
@@ -237,7 +239,6 @@ def fake_duvc(monkeypatch: pytest.MonkeyPatch) -> Any:
     mod.list_devices = lambda: []  # default; tests override
     mod.open_camera = lambda dev: _FakeResult(error=_FakeError("override me"))
     mod.get_device_capabilities = lambda dev: _FakeResult(error=_FakeError("override me"))
-    mod.set_video_property = lambda dev, prop, setting: _FakeResult(value=None)
     mod.CamProp = _FakeCameraEnum
     mod.VidProp = _FakeVideoEnum
     mod.CamMode = _FakeCamMode
@@ -382,6 +383,27 @@ class TestPropertySetSucceeds:
         await ctrl.probe_capabilities()
         await ctrl.set_value(UvcProperty("Focus", UvcGroup.CAMERA), 250)
         assert cam.set_calls == [("Focus", 250, _FakeCamMode.Manual)]
+
+    async def test_set_video_property_goes_through_camera_set(self, fake_duvc: Any) -> None:
+        """Gain, white balance and the image controls set through
+        ``Camera.set`` too, and read back through ``get``."""
+        from capa.devices.camera._uvc import UvcController, UvcGroup, UvcProperty, UvcPropertyState
+
+        device = _FakeDevice(name="X", path="p")
+        cam = _FakeCamera(device)
+        fake_duvc.list_devices = lambda: [device]
+        fake_duvc.open_camera = lambda d: _FakeResult(value=cam)
+        fake_duvc.get_device_capabilities = lambda d: _FakeResult(
+            value=_FakeDeviceCapabilities(camera_supported=[], video_supported=["Gain"])
+        )
+
+        ctrl = await UvcController.find(model_hint=None, serial=None)
+        assert ctrl is not None
+        await ctrl.probe_capabilities()
+        gain = UvcProperty("Gain", UvcGroup.VIDEO)
+        await ctrl.set_value(gain, 0)
+        assert cam.set_calls == [("Gain", 0, _FakeCamMode.Manual)]
+        assert await ctrl.get(gain) == UvcPropertyState(value=0, auto=False)
 
 
 class TestPropertySetFails:
