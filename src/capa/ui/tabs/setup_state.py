@@ -49,15 +49,19 @@ class SetupDraft:
 
     # -- editing operations -------------------------------------------------
 
-    def mark_dirty(self, section: str) -> None:
+    def mark_dirty(self, section: str, *, unapplied: bool = True) -> None:
         """Note that ``section`` has unsaved edits.
 
         Section keys use dotted names so the outline-status code can
         resolve nested entries (``"hardware.devices"`` vs
         ``"hardware.channels"``) without parsing.
+
+        ``unapplied=False`` is for edits the rig picks up without Apply &
+        Connect — a method change, which Start reads from the Method tab.
         """
         self.dirty_sections.add(section)
-        self.unapplied = True
+        if unapplied:
+            self.unapplied = True
 
     def clear_dirty(self) -> None:
         """Reset dirty tracking after a successful save."""

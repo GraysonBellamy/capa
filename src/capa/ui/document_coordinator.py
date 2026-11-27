@@ -302,7 +302,9 @@ class DocumentCoordinator(QObject):
             section.refresh()
 
     def _mark_setup_dirty(self, section_id: str) -> None:
-        self._setup_tab.draft.mark_dirty(section_id)
+        # The experiment file has unsaved edits, but nothing needs
+        # applying: Start reads the method from the Method tab.
+        self._setup_tab.draft.mark_dirty(section_id, unapplied=False)
         self._setup_tab._refresh_problem_markers()
         self._setup_tab._refresh_source_label()
 

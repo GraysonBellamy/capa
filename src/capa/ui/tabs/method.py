@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from capa.core.errors import CapaError
 from capa.experiment.method import (
     AcquireStep,
     ChannelRef,
@@ -129,7 +130,9 @@ class MethodTab(QWidget):
 
     Construct via ``MethodTab(parent=main_window)``. The tab owns its
     own model state; it does not reach into the controller or live run
-    state. Methods are loaded/saved via :class:`QFileDialog`. The
+    state. Start in the Run tab pulls :meth:`method_for_run` at click
+    time, so what the tab shows is what runs, saved or not. Methods are
+    loaded/saved via :class:`QFileDialog`. The
     channel pickers in the step form list whatever
     :meth:`set_channel_options_source` supplies."""
 
@@ -143,11 +146,23 @@ class MethodTab(QWidget):
     :class:`DocumentCoordinator` consumes this to mirror the path back
     into the Setup draft so a Setup-side save stays consistent."""
 
+    methodEdited = Signal()  # noqa: N815 - Qt signal naming convention
+    """Emitted when the operator edits the displayed method — a step
+    added, removed or changed, or the open step form's entry turning
+    invalid or valid again. Start in the Run tab runs whatever the tab
+    holds, so the Run tab refreshes its header on this."""
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._method_path: Path | None = None
         self._method_name: str = "untitled"
         self._method_description: str = ""
+        # Edited since the last load, clear or save.
+        self._modified: bool = False
+        # Row whose detail form holds an entry that failed validation and
+        # so never reached the model. Start must not silently run the
+        # older value the table still holds.
+        self._rejected_row: int | None = None
 
         self._model = MethodTableModel()
         self._detail_widget: ModelForm | None = None
@@ -222,6 +237,11 @@ class MethodTab(QWidget):
         self._model.modelReset.connect(self._on_table_changed)
         self._model.rowsInserted.connect(self._on_table_changed)
         self._model.rowsRemoved.connect(self._on_table_changed)
+        # Operator edits only — load/clear go through ``set_steps``,
+        # which resets the model rather than changing rows.
+        self._model.dataChanged.connect(self._on_steps_edited)
+        self._model.rowsInserted.connect(self._on_steps_edited)
+        self._model.rowsRemoved.connect(self._on_steps_edited)
         upper.addWidget(self._table)
 
         # Detail container — replaced on every selection change.
@@ -313,19 +333,38 @@ class MethodTab(QWidget):
         Returns ``None`` when the model has no steps (Method requires
         ``min_length=1``); the toolbar's Save action handles that
         explicitly."""
-        steps = self._model.steps()
-        if not steps:
+        if not self._model.steps():
             return None
         try:
-            return Method.model_validate(
-                {
-                    "name": self._method_name,
-                    "description": self._method_description,
-                    "steps": [step.model_dump(mode="python") for step in steps],
-                }
-            )
+            return self._build_method()
         except ValidationError:
             return None
+
+    def method_for_run(self) -> Method | None:
+        """The method Start should run: exactly what the tab shows.
+
+        ``None`` when the tab is empty (a free run). Raises
+        :class:`~capa.core.errors.CapaError` when what the tab shows
+        can't run as-is — the steps don't form a valid method, or the
+        open step form holds an entry that failed validation, so the
+        table still has the step's previous value."""
+        if not self._model.steps():
+            return None
+        if self._rejected_row is not None:
+            raise CapaError(
+                f"Step {self._rejected_row + 1} in the Method tab has an invalid "
+                "entry, so the step still holds its previous value. Fix the "
+                "entry before starting."
+            )
+        try:
+            return self._build_method()
+        except ValidationError as exc:
+            raise CapaError(f"The method in the Method tab is not valid:\n\n{exc}") from exc
+
+    def is_modified(self) -> bool:
+        """``True`` when the method has been edited since it was last
+        loaded, cleared or saved."""
+        return self._modified
 
     def load_method(self, method: Method, *, path: Path | None = None) -> None:
         """Load a method into the table from the given source."""
@@ -336,6 +375,7 @@ class MethodTab(QWidget):
         self._reset_detail()
         if self._model.rowCount() > 0:
             self._select_row(0)
+        self._modified = False
         self._refresh_source_label()
         self.methodChanged.emit()
 
@@ -351,6 +391,7 @@ class MethodTab(QWidget):
         self._method_path = None
         self._model.set_steps(())
         self._reset_detail()
+        self._modified = False
         self._refresh_source_label()
         self.methodChanged.emit()
 
@@ -404,6 +445,7 @@ class MethodTab(QWidget):
         if err is not None:
             self._show_save_error(err)
             return
+        self._mark_saved()
         self.methodSaved.emit(self._method_path)
 
     def _on_save_as(self) -> None:
@@ -421,10 +463,16 @@ class MethodTab(QWidget):
         err = self._save_to(path)
         if err is None:
             self._method_path = path
-            self._refresh_source_label()
+            self._mark_saved()
             self.methodSaved.emit(path)
         else:
             self._show_save_error(err)
+
+    def _mark_saved(self) -> None:
+        self._modified = False
+        self._refresh_source_label()
+        # Listeners showing the modified marker (the tab title) refresh.
+        self.methodEdited.emit()
 
     def _show_save_error(self, message: str) -> None:
         """Show the save-failed dialog. Pulled out of :meth:`_save_to` so
@@ -434,7 +482,12 @@ class MethodTab(QWidget):
         QMessageBox.warning(self, "Save failed", message)
 
     def _on_validate(self) -> None:
-        method = self.method()
+        # Same check Start runs, so Validate can't pass what Start refuses.
+        try:
+            method = self.method_for_run()
+        except CapaError as exc:
+            QMessageBox.warning(self, "Validate", str(exc))
+            return
         if method is None:
             QMessageBox.information(
                 self,
@@ -476,6 +529,17 @@ class MethodTab(QWidget):
     def _on_table_changed(self, *_args: object) -> None:
         self._render_graph()
 
+    def _on_steps_edited(self, *_args: object) -> None:
+        self._modified = True
+        self._refresh_source_label()
+        self.methodEdited.emit()
+
+    def _set_rejected_row(self, row: int | None) -> None:
+        if row == self._rejected_row:
+            return
+        self._rejected_row = row
+        self.methodEdited.emit()
+
     # ------------------------------------------------------------------ detail panel
 
     def _build_detail_for_row(self, row: int | None) -> None:
@@ -490,6 +554,9 @@ class MethodTab(QWidget):
                 if w is not None:
                     w.deleteLater()
         self._detail_widget = None
+        # A rebuilt form shows the model's value, so any rejected entry
+        # in the old form is gone.
+        self._set_rejected_row(None)
 
         if row is None:
             return
@@ -515,8 +582,13 @@ class MethodTab(QWidget):
                 new_step = step_cls.model_validate(values)
             except ValidationError:
                 form.validate()  # paints inline errors; do not write back.
+                self._set_rejected_row(row)
                 return
-            self._model.replace_step(row, new_step)
+            self._set_rejected_row(None)
+            # A form refresh that changes nothing (e.g. the channel list
+            # reloading) is not an edit.
+            if new_step != self._model.step_at(row):
+                self._model.replace_step(row, new_step)
 
         form.valuesChanged.connect(_on_form_changed)
         if layout is not None:
@@ -545,6 +617,17 @@ class MethodTab(QWidget):
             idx,
             QItemSelectionModel.SelectionFlag.ClearAndSelect
             | QItemSelectionModel.SelectionFlag.Rows,
+        )
+
+    def _build_method(self) -> Method:
+        """Validate the table's steps into a :class:`Method`. Raises
+        Pydantic's ``ValidationError``."""
+        return Method.model_validate(
+            {
+                "name": self._method_name,
+                "description": self._method_description,
+                "steps": [step.model_dump(mode="python") for step in self._model.steps()],
+            }
         )
 
     def _save_to(self, path: Path) -> str | None:
@@ -583,8 +666,15 @@ class MethodTab(QWidget):
                 display = self._method_path.relative_to(Path.cwd()).as_posix()
             except ValueError:
                 display = self._method_path.name
-            self._source_label.setText(f"source: {display}")
-            self._source_label.setToolTip(str(self._method_path))
+            if self._modified:
+                self._source_label.setText(f"source: {display} (modified)")
+                self._source_label.setToolTip(
+                    f"{self._method_path}\n\nEdited since it was loaded or saved. "
+                    "Start runs these edits; Save writes them to the file."
+                )
+            else:
+                self._source_label.setText(f"source: {display}")
+                self._source_label.setToolTip(str(self._method_path))
         else:
             self._source_label.setText(f"{self._method_name} (unsaved)")
             self._source_label.setToolTip("")

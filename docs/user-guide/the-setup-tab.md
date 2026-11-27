@@ -434,8 +434,9 @@ dirty and which rows in the Problems panel are still relevant.
 When you click Apply & Connect:
 
 1. The current draft is composed with the Method tab's in-memory method
-   buffer (so a method-edit-then-Apply works without saving the method
-   first).
+   buffer. Method edits don't need Apply & Connect at all: Start puts
+   the Method tab's current method into the applied config (see
+   [the Method tab](the-method-tab.md#when-edits-take-effect)).
 2. The composed `ExperimentConfig` is re-validated end-to-end.
 3. The tab emits `applyRequested(config, source_path)` to the main
    window.

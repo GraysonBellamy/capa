@@ -451,6 +451,17 @@ class ExperimentConfig(BaseModel):
         """Tuple of channel names declared by this section of the config."""
         return self.hardware.channel_names()
 
+    def with_method(self, method: Method | None) -> ExperimentConfig:
+        """This config with ``method`` in place of its own, re-validated.
+
+        ``model_copy(update=...)`` would skip the method's channel
+        cross-check, so the copy goes back through validation. Nested
+        models are reused as-is, which keeps this cheap enough to call
+        on every Method-tab edit. Raises :class:`ConfigError` (or a
+        Pydantic ``ValidationError``) when a step targets a channel the
+        hardware doesn't declare."""
+        return type(self).model_validate({**dict(self), "method": method})
+
     @classmethod
     def load(cls, path: str | Path) -> ExperimentConfig:
         """Load and validate an experiment file (YAML or TOML).

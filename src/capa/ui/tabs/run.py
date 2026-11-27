@@ -13,13 +13,18 @@ Before that, Start reads the devices the experiment declares
 :class:`~capa.ui.device_settings_dialog.DeviceSettingsDialog` offers to
 apply the declared values first; what the devices report is recorded in
 the bundle either way.
+
+The config Start runs is the one Apply & Connect loaded, passed through
+the composer set with :meth:`RunTab.set_run_config_composer`. The main
+window's composer puts the Method tab's current method in, so method
+edits take effect at the next Start without reconnecting the hardware.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Final
 
 import structlog
@@ -27,11 +32,13 @@ from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from capa.core.errors import CapaError
 from capa.core.ringbuffer import RingBufferRegistry
 from capa.experiment.config import ExperimentConfig
 from capa.runtime.device_settings import SettingsPlan
@@ -93,7 +100,14 @@ class RunTab(QWidget):
         super().__init__(parent)
         self._controller: RunController = controller
         self._operator_provider = operator_provider
+        # The config Apply & Connect loaded.
         self._config: ExperimentConfig | None = None
+        # Applied config → the config Start runs. ``None`` runs the
+        # applied config unchanged.
+        self._compose_run_config: Callable[[ExperimentConfig], ExperimentConfig] | None = None
+        # The config composed at the Start click, held across the
+        # device-settings check.
+        self._run_config: ExperimentConfig | None = None
         # True from a Start click until the run starts or the operator
         # backs out of the device-settings dialog.
         self._starting: bool = False
@@ -203,7 +217,7 @@ class RunTab(QWidget):
         """Stage a config for the next :meth:`_on_start_clicked`. Replaces
         the live plot pane with one matching the new channel set."""
         self._config = config
-        self._run_id_label.setText(self._build_run_id_text(config))
+        self._refresh_header()
         # Build a placeholder plot pane against an empty registry so the UI
         # has axes/legends visible before Start is clicked.
         empty = RingBufferRegistry()
@@ -223,10 +237,35 @@ class RunTab(QWidget):
         pool = self._controller.worker_pool
         return pool is not None and pool.state is PoolState.OPEN
 
+    def set_run_config_composer(
+        self, composer: Callable[[ExperimentConfig], ExperimentConfig] | None
+    ) -> None:
+        """Set how Start turns the applied config into the one it runs.
+
+        Called at every Start click and header refresh. It raises
+        :class:`~capa.core.errors.CapaError` when the run can't start as
+        composed; Start then refuses with that message."""
+        self._compose_run_config = composer
+        self.refresh_method()
+
+    def refresh_method(self) -> None:
+        """Show the method Start would run now. Slot for the Method tab's
+        change signals; ignored while a run is starting or active, when
+        the header describes the run in flight."""
+        if self._controller.is_active or self._starting:
+            return
+        self._refresh_header()
+
     # ------------------------------------------------------------------ control
 
     def _on_start_clicked(self) -> None:
         if self._config is None or self._controller.is_active or self._starting:
+            return
+        try:
+            self._run_config = self._composed_config()
+        except CapaError as exc:
+            self._refresh_header()
+            QMessageBox.warning(self, "Cannot start", str(exc))
             return
         check = self._controller.check_device_settings()
         if check is None:
@@ -265,10 +304,13 @@ class RunTab(QWidget):
 
     def _abandon_start(self) -> None:
         self._starting = False
+        self._run_config = None
         self._start_btn.setEnabled(self.can_start())
+        self._refresh_header()
 
     def _start(self, device_settings: Mapping[str, Mapping[str, Any]] | None) -> None:
-        if self._config is None or self._controller.is_active:
+        config, self._run_config = self._run_config, None
+        if config is None or self._controller.is_active:
             self._start_btn.setEnabled(self.can_start())
             return
         # Hand the controller a fresh start; it will rebuild buffers and
@@ -277,12 +319,13 @@ class RunTab(QWidget):
         # which matches the numerics dock — by the time RUNNING fires,
         # the controller has finished rebuilding buffers.
         try:
-            self._controller.start(self._config, device_settings_observed=device_settings)
+            self._controller.start(config, device_settings_observed=device_settings)
         except RuntimeError as exc:
             # The hardware went away, or settings are mid-apply.
             _logger.warning("ui.run_tab.start_refused", error=str(exc))
             self._start_btn.setEnabled(self.can_start())
             return
+        self._show_header(self._build_run_id_text(config))
         self._run_started_mono = time.monotonic()
         self._elapsed_timer.start()
         self._start_btn.setEnabled(False)
@@ -350,7 +393,7 @@ class RunTab(QWidget):
         m, s = divmod(rem, 60)
         self._elapsed_label.setText(f"{h:02d}:{m:02d}:{s:02d}")
 
-    def _build_run_id_text(self, config: ExperimentConfig) -> str:
+    def _build_run_id_text(self, config: ExperimentConfig, *, mode: str | None = None) -> str:
         """Compose the header's run-id label.
 
         Folds the sample / procedure / mode triplet into one line.
@@ -359,13 +402,42 @@ class RunTab(QWidget):
         now collapsed into the header so the Run tab only has one
         "what's loaded" surface above the plot.
         """
-        if config.method is None:
-            mode = "Free run"
-        else:
-            mode = f"Method: {getattr(config.method, 'name', None) or 'method'}"
+        if mode is None:
+            if config.method is None:
+                mode = "Free run"
+            else:
+                mode = f"Method: {getattr(config.method, 'name', None) or 'method'}"
         return f"sample: {config.sample.id}  ·  procedure: {config.procedure.id}  ·  {mode}"
 
     # ------------------------------------------------------------------ internal
+
+    def _composed_config(self) -> ExperimentConfig:
+        """The config Start would run now. Raises
+        :class:`~capa.core.errors.CapaError` when it can't run."""
+        assert self._config is not None
+        if self._compose_run_config is None:
+            return self._config
+        return self._compose_run_config(self._config)
+
+    def _refresh_header(self) -> None:
+        """Show what Start will run, or why it can't."""
+        if self._config is None:
+            return
+        try:
+            config = self._composed_config()
+        except CapaError as exc:
+            text = self._build_run_id_text(
+                self._config, mode="Method: not valid — see the Method tab"
+            )
+            self._show_header(text, problem=str(exc))
+            return
+        self._show_header(self._build_run_id_text(config))
+
+    def _show_header(self, text: str, *, problem: str | None = None) -> None:
+        self._run_id_label.setText(text)
+        color = COLOR_WARN if problem is not None else COLOR_IDLE
+        self._run_id_label.setStyleSheet(f"color: {color.name()};")
+        self._run_id_label.setToolTip(problem or "")
 
     def _set_plot_pane(self, registry: RingBufferRegistry, config: ExperimentConfig) -> None:
         # Tear down the old pane, build a new one bound to ``registry``.
