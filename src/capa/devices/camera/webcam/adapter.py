@@ -84,6 +84,7 @@ from capa.devices.camera.webcam.constants import (
     DEFAULT_CODEC,
     DEFAULT_FPS,
     DEFAULT_PIX_FMT,
+    DSHOW_RTBUFSIZE_BYTES,
     OPEN_RETRY_DEADLINE_S,
     OPEN_RETRY_DELAYS_S,
     PREVIEW_DETAIL_INTERVAL_NS,
@@ -912,8 +913,14 @@ class WebcamAdapter:
         frame was upscaled to the configured size; with them it picks the
         capture format that delivers both (MJPEG at 1080p30), and a size or
         rate the camera can't deliver fails the open.
+
+        A DirectShow input also gets a :data:`DSHOW_RTBUFSIZE_BYTES` frame
+        queue, so a pump that falls behind for a while catches up instead
+        of DirectShow discarding frames.
         """
         options = {"video_size": f"{self._width}x{self._height}", "framerate": f"{self._fps:g}"}
+        if self._input_format == "dshow":
+            options["rtbufsize"] = str(DSHOW_RTBUFSIZE_BYTES)
         deadline = time.monotonic() + OPEN_RETRY_DEADLINE_S
         attempt = 0
         last_exc: OSError | None = None

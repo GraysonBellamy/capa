@@ -45,6 +45,16 @@ OPEN_RETRY_DEADLINE_S: float = 8.0
 """Hard ceiling on retries; if we haven't opened by then the underlying
 problem is not transient and we surface the original error."""
 
+DSHOW_RTBUFSIZE_BYTES: int = 100_000_000
+"""FFmpeg ``rtbufsize`` for a DirectShow input: the bytes of camera frames
+DirectShow queues while the input pump is late reading them. FFmpeg's
+default, 3,041,280 B, holds about 40 1080p MJPEG frames (~75 kB each), and
+DirectShow starts discarding frames once the queue passes 62 % of it, after
+under a second of stall. The 25 kW runs of 2026-11-09 had read stalls up to
+0.7 s, and the worst queued ~1.8 MB, 59 % of the default. 100 MB holds about
+20 s of 1080p MJPEG before the first drop. The queue only grows while the
+pump is behind, so the size costs nothing in normal running."""
+
 STREAM_START_TIMEOUT_S: float = OPEN_RETRY_DEADLINE_S + 5.0
 """How long :meth:`WebcamAdapter.start_input_pump` waits for the first frame:
 the open-retry budget plus the time a camera takes to start streaming."""

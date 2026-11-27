@@ -114,6 +114,14 @@ MKV's `capture_format` tag.
 `set_resolution` and `set_framerate` reopen a running input at once,
 since the camera captures at that format.
 
+A DirectShow input is opened with a 100 MB frame queue (FFmpeg's
+`rtbufsize`). The input pump sometimes reads late: on the 25 kW runs
+of November 2026, stalls of up to 0.7 s came about 30 times an hour,
+and DirectShow queued the frames and delivered them in a burst
+afterwards. FFmpeg's default queue, about 3 MB, starts discarding
+frames at 62 % full, under a second of 1080p MJPEG; the worst of those
+stalls reached 59 %. 100 MB holds about 20 s.
+
 ## Encoder choice
 
 The encoder is the dominant CPU cost of recording and the most common
