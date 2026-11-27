@@ -197,7 +197,7 @@ The flux and PV rolling windows are **cleared** at the top of every iteration (s
 
 The σT⁴ fallback ([`sigma_t4_setpoint_c`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/experiment/procedures/builtin/heat_flux_tune/setpoint.py)) is empirical, not physical. It solves `F = k(T_h⁴ − T_∞⁴)` for `T_h` with `k` fixed by the 650 °C / 50 kW/m² anchor on the CAPA cone. The result is a *guess* — iteration 1 is going to be wrong by tens of °C, the runaway detector might fire, and the procedure will hill-climb. The `n_iter_max = 14` default is sized so a cold-start session has 4–5 iterations of hill-climbing before convergence still completes in the budget.
 
-A `lookup` source that finds an artifact but cannot bracket the target falls through to `operator`, then to `sigma_t4`. The artifact never silently extrapolates.
+A `lookup` source that finds no artifact, or one that cannot bracket the target, falls through to `sigma_t4`. The artifact never silently extrapolates, and `lookup` never uses `operator_initial_setpoint_c`: that field is set only with `initial_guess = "operator"`, and config validation refuses it otherwise.
 
 ---
 

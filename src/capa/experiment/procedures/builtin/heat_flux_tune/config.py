@@ -35,8 +35,10 @@ class HeatFluxTuneError(CapaError):
 InitialGuessSource = Literal["lookup", "operator", "sigma_t4"]
 """How to pick the first heater setpoint per target.
 
-* ``lookup``: most-recent on-disk artifact (default).
-* ``operator``: ``operator_initial_setpoint_c`` from the config.
+* ``lookup``: most-recent on-disk artifact (default); σT⁴ when it doesn't
+  cover the target.
+* ``operator``: ``operator_initial_setpoint_c`` from the config, the only
+  source that uses it.
 * ``sigma_t4``: σT⁴ fallback for a genuine cold start.
 """
 
@@ -105,8 +107,9 @@ class HeatFluxTuneConfig(BaseModel):
         json_schema_extra={
             "capa_help": (
                 "How to pick the first heater setpoint. ``lookup`` interpolates the "
-                "most recent on-disk artifact; ``operator`` uses the supplied "
-                "value; ``sigma_t4`` is the cold-start σT⁴ fallback."
+                "most recent on-disk artifact, falling back to σT⁴ when it doesn't "
+                "cover the target; ``operator`` uses the supplied value; "
+                "``sigma_t4`` is the cold-start σT⁴ fallback."
             ),
             "capa_group": "initial_setpoint",
             "capa_group_subtitle": "First-iteration heater setpoint",
@@ -117,10 +120,11 @@ class HeatFluxTuneConfig(BaseModel):
         json_schema_extra={
             "capa_unit": "°C",
             "capa_help": (
-                "Required when ``initial_guess = operator``. Operator-supplied "
-                "known-safe starting setpoint."
+                "Operator-supplied known-safe starting setpoint. Set only with "
+                "``initial_guess = operator``, where it is required."
             ),
             "capa_group": "initial_setpoint",
+            "capa_shown_when": {"initial_guess": "operator"},
         },
     )
 
@@ -399,6 +403,18 @@ class HeatFluxTuneConfig(BaseModel):
             "capa_group_subtitle": "Safety limits (advanced)",
         },
     )
+    pre_start_prompt: str | None = Field(
+        default=None,
+        json_schema_extra={
+            "capa_help": (
+                "Checklist shown before the tune does anything (e.g. cooling water "
+                "flowing to the reference gauge). The tune waits for Continue; "
+                "stopping at the prompt ends the run without touching the heater. "
+                "Leave unset for no prompt, and for headless runs, where an "
+                "unanswered prompt times out and fails the run."
+            ),
+        },
+    )
     hold_at_completion: bool = Field(
         default=False,
         json_schema_extra={
@@ -480,6 +496,11 @@ class HeatFluxTuneConfig(BaseModel):
             )
         if self.initial_guess == "operator" and self.operator_initial_setpoint_c is None:
             raise ValueError("initial_guess='operator' requires operator_initial_setpoint_c")
+        if self.initial_guess != "operator" and self.operator_initial_setpoint_c is not None:
+            raise ValueError(
+                f"operator_initial_setpoint_c is used only with initial_guess='operator'; "
+                f"with initial_guess={self.initial_guess!r}, remove it"
+            )
         if any(t <= 0 for t in self.targets_kw_m2):
             raise ValueError("every target_kw_m2 must be positive")
         if self.hold_at_completion and len(self.targets_kw_m2) > 1:

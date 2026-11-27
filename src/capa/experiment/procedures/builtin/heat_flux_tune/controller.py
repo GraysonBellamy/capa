@@ -46,6 +46,8 @@ from capa.calibration.tune_artifact import (
     save_artifact,
 )
 from capa.devices.records import ChannelSample
+from capa.experiment.executor import MethodExecutor
+from capa.experiment.method import PromptStep
 from capa.experiment.procedures.base import (
     ChannelRequirement,
     OperatorCommand,
@@ -276,6 +278,11 @@ class HeatFluxTune(Procedure):
             except TuneArtifactError as exc:
                 ctx.logger.warning("heat_flux_tune.prior_load_failed", error=str(exc))
                 prior_artifact = None
+
+        # Before the session task group: its operator-command consumer
+        # would otherwise take the prompt's Continue.
+        if not await self._pre_start_prompt(ctx):
+            return
 
         # Session-level task group hosts the operator-command consumer so
         # pause/resume/accept_current survive across per-target loops. The
@@ -1113,6 +1120,30 @@ class HeatFluxTune(Procedure):
             raise HeatFluxTuneError(
                 f"adapter rejected setpoint {value_c} on {channel_name}: {result.detail}"
             )
+
+    async def _pre_start_prompt(self, ctx: ProcedureContext) -> bool:
+        """Show :attr:`HeatFluxTuneConfig.pre_start_prompt` and wait for Continue.
+
+        Reuses the method executor's prompt, so the Run tab's prompt
+        dialog shows it and its events land in the bundle as for a method
+        prompt. Returns ``False`` when the run was stopped at the prompt:
+        the tune then ends without commanding the heater.
+        """
+        message = self.cfg.pre_start_prompt
+        if not message:
+            return True
+        await MethodExecutor(ctx=ctx).run_segment(
+            PromptStep(title="Before the tune", message=message)
+        )
+        if ctx.external_stop.is_set():
+            self._emit_event(
+                ctx,
+                kind="heat_flux_tune.stopped_before_start",
+                message="tune stopped at the pre-start prompt; heater not commanded",
+                severity="warning",
+            )
+            return False
+        return True
 
     async def _gauge_sanity_check(self, ctx: ProcedureContext) -> None:
         """Gauge-alive sanity check before the iteration loop.

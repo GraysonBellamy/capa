@@ -69,6 +69,20 @@ def test_config_operator_initial_requires_value() -> None:
         )
 
 
+@pytest.mark.parametrize("source", ["lookup", "sigma_t4"])
+def test_config_operator_initial_refused_with_other_sources(source: str) -> None:
+    """The operator's setpoint belongs to ``initial_guess='operator'`` only;
+    a lookup never falls back to it, so declaring it elsewhere is an error."""
+    with pytest.raises(ValueError, match="only with initial_guess='operator'"):
+        HeatFluxTuneConfig.model_validate(
+            {
+                "targets_kw_m2": [50.0],
+                "initial_guess": source,
+                "operator_initial_setpoint_c": 600.0,
+            }
+        )
+
+
 def test_config_defaults_are_sensible() -> None:
     cfg = HeatFluxTuneConfig.model_validate({"targets_kw_m2": [50.0], "t_set_max_c": 900.0})
     assert cfg.t_settle_max_s == 1200.0
@@ -675,6 +689,21 @@ def test_choose_initial_lookup_outside_bracket_falls_to_sigma_t4() -> None:
     assert sp > 25.0
 
 
+def test_choose_initial_lookup_miss_ignores_operator_setpoint() -> None:
+    """A lookup that can't bracket the target goes to σT⁴, never to the
+    operator's setpoint."""
+    sp, source = choose_initial_setpoint(
+        target_kw_m2=10.0,  # below bracket
+        source="lookup",
+        operator_setpoint_c=600.0,
+        prior_artifact=_artifact_with_points(),
+        t_min_c=25.0,
+        t_set_max_c=900.0,
+    )
+    assert source == "sigma_t4"
+    assert sp != 600.0
+
+
 def test_choose_initial_operator_overrides_when_set() -> None:
     sp, source = choose_initial_setpoint(
         target_kw_m2=50.0,
@@ -1129,3 +1158,100 @@ def test_emit_tick_error_is_none_before_any_iteration() -> None:
     )
     tick = sink.publish.call_args.args[0]
     assert tick.payload["error_kw_m2"] is None
+
+
+# ---------------------------------------------------------------------------
+# pre_start_prompt
+# ---------------------------------------------------------------------------
+
+
+def _prompt_ctx() -> tuple[object, object]:
+    """A MagicMock context with a live operator-command stream, a real stop
+    event and a UI sink that records ticks. Returns ``(ctx, send_stream)``."""
+    from unittest.mock import MagicMock
+
+    import anyio
+
+    from capa.experiment.procedures.base import OperatorCommand
+
+    send_stream, recv_stream = anyio.create_memory_object_stream[OperatorCommand](max_buffer_size=4)
+    ctx = MagicMock()
+    ctx.operator_commands = recv_stream
+    ctx.external_stop = anyio.Event()
+    ctx.clock.t_mono_ns.return_value = 0
+    ctx.config.procedure.id = "capa.builtin.heat_flux_tune"
+    return ctx, send_stream
+
+
+def _event_kinds(ctx: object) -> list[str]:
+    return [c.kwargs["kind"] for c in ctx.bundle_writer.write_event.call_args_list]  # type: ignore[attr-defined]
+
+
+def _prompt_proc(prompt: str | None) -> HeatFluxTune:
+    raw: dict[str, object] = {
+        "targets_kw_m2": [25.0],
+        "t_set_max_c": 900.0,
+        "initial_guess": "operator",
+        "operator_initial_setpoint_c": 558.0,
+    }
+    if prompt is not None:
+        raw["pre_start_prompt"] = prompt
+    return HeatFluxTune.from_config(raw)
+
+
+@pytest.mark.anyio
+async def test_pre_start_prompt_unset_skips_the_prompt() -> None:
+    ctx, _ = _prompt_ctx()
+    assert await _prompt_proc(None)._pre_start_prompt(ctx) is True  # type: ignore[arg-type]
+    assert _event_kinds(ctx) == []
+
+
+@pytest.mark.anyio
+async def test_pre_start_prompt_waits_for_continue() -> None:
+    """The prompt reaches the Run tab's dialog as a method prompt tick and
+    releases only on a confirm for its own prompt id."""
+    import anyio
+
+    from capa.experiment.executor import PROMPT_TICK_KIND
+    from capa.experiment.procedures.base import OperatorCommand
+
+    ctx, send = _prompt_ctx()
+    proc = _prompt_proc("Cooling water flowing to the reference gauge?")
+    result: list[bool] = []
+
+    async def run_prompt() -> None:
+        result.append(await proc._pre_start_prompt(ctx))  # type: ignore[arg-type]
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(run_prompt)
+        payload: dict[str, object] = {}
+        for _ in range(100):
+            await anyio.sleep(0)
+            calls = ctx.ui_sink.publish.call_args_list  # type: ignore[attr-defined]
+            if calls:
+                payload = calls[0].args[0].payload
+                break
+        assert payload["kind"] == PROMPT_TICK_KIND
+        assert payload["state"] == "open"
+        assert payload["message"] == "Cooling water flowing to the reference gauge?"
+        assert result == []  # still waiting
+
+        await send.send(
+            OperatorCommand(kind="confirm_prompt", metadata={"prompt_id": payload["prompt_id"]})
+        )
+
+    assert result == [True]
+    assert "method.prompt.shown" in _event_kinds(ctx)
+
+
+@pytest.mark.anyio
+async def test_stop_at_pre_start_prompt_ends_the_tune_without_commanding_the_heater() -> None:
+    ctx, _ = _prompt_ctx()
+    ctx.external_stop.set()  # type: ignore[attr-defined]
+    proc = _prompt_proc("Cooling water flowing to the reference gauge?")
+
+    await proc.run(ctx)  # type: ignore[arg-type]
+
+    assert "heat_flux_tune.stopped_before_start" in _event_kinds(ctx)
+    ctx.authorization.issue.assert_not_called()  # type: ignore[attr-defined]
+    ctx.dispatcher.dispatch.assert_not_called()  # type: ignore[attr-defined]

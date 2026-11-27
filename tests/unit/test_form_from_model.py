@@ -13,6 +13,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QLabel, QLineEdit, QSpinBox
 
+from capa.experiment.procedures.builtin.heat_flux_tune.config import HeatFluxTuneConfig
 from capa.experiment.profiles.capa_pyrolysis import CapaPyrolysisMetadata
 from capa.ui.forms import build_form
 from capa.ui.forms.widgets import CollapsibleGroup
@@ -536,6 +537,55 @@ def test_hidden_when_row_follows_sibling_value(qtbot: Any) -> None:
     form.set_values({"shape": "disk"})
     assert grain.isHidden()
     assert "grain_um" not in form.values()
+
+
+class _ShownWhenDemo(BaseModel):
+    source: Literal["lookup", "operator", "model"] = "lookup"
+    start_c: float | None = Field(
+        default=None, json_schema_extra={"capa_shown_when": {"source": "operator"}}
+    )
+
+
+def test_shown_when_row_shows_only_for_its_value(qtbot: Any) -> None:
+    """A ``capa_shown_when`` row shows only while the sibling holds the
+    value, and is left out of ``values()`` whenever it is hidden."""
+    form = build_form(_ShownWhenDemo)
+    qtbot.addWidget(form)
+    start = form._fields["start_c"]
+    assert start.isHidden()
+    assert form._labels["start_c"].isHidden()
+    assert "start_c" not in form.values()
+
+    combo = form._fields["source"].findChild(QComboBox)
+    assert combo is not None
+    combo.setCurrentIndex(combo.findData("operator"))
+    assert not start.isHidden()
+    start.set_value(600.0)
+    assert form.values()["start_c"] == pytest.approx(600.0)
+
+    combo.setCurrentIndex(combo.findData("model"))
+    assert start.isHidden()
+    assert "start_c" not in form.values()
+
+    # set_values blocks widget signals; the row must still follow.
+    form.set_values({"source": "operator"})
+    assert not start.isHidden()
+
+
+def test_heat_flux_tune_form_hides_operator_setpoint_unless_operator(qtbot: Any) -> None:
+    """The tune's starting setpoint from the operator is offered only with
+    ``initial_guess = operator``; a lookup form never saves it."""
+    form = build_form(HeatFluxTuneConfig)
+    qtbot.addWidget(form)
+    form.set_values({"targets_kw_m2": [30.0], "operator_initial_setpoint_c": 601.2})
+    assert form._fields["operator_initial_setpoint_c"].isHidden()
+    assert "operator_initial_setpoint_c" not in form.values()
+    HeatFluxTuneConfig.model_validate(form.values())
+
+    form.set_values({"initial_guess": "operator"})
+    assert not form._fields["operator_initial_setpoint_c"].isHidden()
+    assert form.values()["operator_initial_setpoint_c"] == pytest.approx(601.2)
+    HeatFluxTuneConfig.model_validate(form.values())
 
 
 def test_grouped_form_preserves_field_order_across_groups(qtbot: Any) -> None:
