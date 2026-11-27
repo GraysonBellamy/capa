@@ -29,6 +29,12 @@ domain_profile:
         purity: "UHP 5.0"
         target_flow_slpm: 100.0
 
+# The purge MFC's gas follows the purge species above (the Setup tab
+# writes it); validation refuses a gas that differs.
+device_settings:
+  purge_mfc:
+    gas: N2
+
 tags:
   - real
   - partial

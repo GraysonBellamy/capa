@@ -135,7 +135,7 @@ Controls the gas atmosphere the specimen sees during the run.
 
 | Field | Notes |
 |---|---|
-| `species` | Common name: `"N2"`, `"Ar"`, `"He"`, `"air"`, `"5% O2/N2"`. |
+| `species` | Common name: `"N2"`, `"Ar"`, `"He"`, `"air"`, `"5% O2/N2"`. Also sets the gas of the MFC mapped to `purge_gas_flow`, when the MFC knows it as one gas: see [Device settings](device-settings.md#the-purge-mfc-follows-the-capa-profile). |
 | `purity` | Grade / purity: `"UHP 5.0"`, `"99.999%"`, `"zero-grade air"`. |
 | `supplier` | Optional. |
 | `cylinder_lot` | Optional. |

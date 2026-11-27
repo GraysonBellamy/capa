@@ -53,16 +53,76 @@ def test_payload_round_trips_the_declared_settings(qtbot: Any) -> None:
 
 def test_edits_flow_into_the_experiment_payload(qtbot: Any) -> None:
     tab, section = _tab(qtbot)
-    _spec, form = section._forms["purge_mfc"]
-    form._fields["gas"].set_value("Ar")
     _spec, balance = section._forms["balance"]
     balance._fields["stability_range"].set_value(None)  # untick Set
-    form.valuesChanged.emit()
+    balance._fields["filter_mode"].set_value("stable")
+    balance.valuesChanged.emit()
 
     settings = tab.draft.document.experiment_payload["device_settings"]
-    assert settings["purge_mfc"] == {"gas": "Ar"}
-    assert settings["balance"] == {"filter_mode": "very stable"}
+    assert settings["balance"] == {"filter_mode": "stable"}
     assert "device_settings" in tab.draft.dirty_sections
+
+
+# ---------------------------------------------------------------------------
+# The purge MFC's gas follows the CAPA profile's purge gas
+# ---------------------------------------------------------------------------
+
+
+def _set_purge_species(tab: SetupTab, species: str) -> None:
+    """Type ``species`` as the purge gas in CAPA Profile → Atmosphere."""
+    form = tab._sections["capa_profile"]._pane_forms["atmosphere"]  # type: ignore[attr-defined]
+    purge = dict(form.values()["purge"])
+    form.set_values({"purge": {**purge, "species": species}})
+    form.valuesChanged.emit()
+
+
+def test_purge_mfc_gas_is_read_only_and_follows_the_profile(qtbot: Any) -> None:
+    tab, section = _tab(qtbot)
+    _spec, form = section._forms["purge_mfc"]
+    gas = form.field_widget("gas")
+    assert gas is not None
+    assert not gas.isEnabled()
+    assert not section._gas_notes["purge_mfc"].isHidden()
+
+    _set_purge_species(tab, "argon")
+    settings = tab.draft.document.experiment_payload["device_settings"]
+    # Named as the MFC names it, in the draft and in the refreshed form.
+    assert settings["purge_mfc"] == {"gas": "Ar"}
+    assert form.values()["gas"] == "Ar"
+    assert not [p for p in tab.draft.validate() if p.code == "capa_profile.purge_gas_mismatch"]
+
+
+def test_a_purge_mixture_leaves_the_mfc_gas_to_device_settings(qtbot: Any) -> None:
+    """A mixture isn't one gas the MFC knows, so its gas is set here."""
+    tab, section = _tab(qtbot)
+    _set_purge_species(tab, "5% O2/N2")
+    _spec, form = section._forms["purge_mfc"]
+    gas = form.field_widget("gas")
+    assert gas is not None
+    assert gas.isEnabled()
+    assert section._gas_notes["purge_mfc"].isHidden()
+    assert tab.draft.document.experiment_payload["device_settings"]["purge_mfc"] == {"gas": "N2"}
+
+
+def test_opening_a_config_writes_the_purge_mfc_gas(qtbot: Any, tmp_path: Path) -> None:
+    """A file without the purge MFC's gas gets it from the profile on open,
+    so it doesn't open with an error."""
+    configs = SIM_CAPA_EXP.parent.parent
+    text = SIM_CAPA_EXP.read_text(encoding="utf-8")
+    assert "  purge_mfc:\n    gas: N2\n" in text
+    exp = tmp_path / SIM_CAPA_EXP.name
+    exp.write_text(
+        # Absolute hardware / method refs, so they resolve from tmp_path.
+        text.replace("../hardware/", f"{(configs / 'hardware').as_posix()}/")
+        .replace("../methods/", f"{(configs / 'methods').as_posix()}/")
+        .replace("  purge_mfc:\n    gas: N2\n", ""),
+        encoding="utf-8",
+    )
+    tab = SetupTab()
+    qtbot.addWidget(tab)
+    assert tab.load_path(exp)
+    assert tab.draft.document.experiment_payload["device_settings"]["purge_mfc"] == {"gas": "N2"}
+    assert not [p for p in tab.draft.problems if p.code == "capa_profile.purge_gas_mismatch"]
 
 
 def test_a_device_with_nothing_set_is_left_out(qtbot: Any) -> None:
@@ -199,7 +259,10 @@ async def test_capture_fills_the_forms_from_the_devices(qtbot: Any) -> None:
             break
 
     settings = tab.draft.document.experiment_payload["device_settings"]
-    assert settings["purge_mfc"] == {"gas": "Ar"}
+    # The MFC reported Ar, but its gas follows the profile's purge gas.
+    assert settings["purge_mfc"] == {"gas": "N2"}
+    _spec, form = section._forms["purge_mfc"]
+    assert form.values()["gas"] == "N2"
     assert settings["balance"] == {"filter_mode": "unstable", "app_filter": "filling"}
     # The camera couldn't be read, so its declaration is untouched.
     assert settings["ir_cam0"] == DECLARED["ir_cam0"]

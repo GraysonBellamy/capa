@@ -392,21 +392,45 @@ def test_device_settings_entry_must_be_a_mapping(configs_dir: Path) -> None:
     ]
 
 
-def test_purge_gas_differing_from_profile_species_warns(configs_dir: Path) -> None:
+def _purge_gas_problems(doc: ConfigDocument) -> list[ConfigProblem]:
+    return [p for p in validate(doc) if p.code == "capa_profile.purge_gas_mismatch"]
+
+
+def test_purge_gas_differing_from_profile_species_is_an_error(configs_dir: Path) -> None:
+    """The purge MFC's gas follows the profile's purge gas, so a file whose
+    two disagree is refused, pointing at the purge gas in CAPA Profile."""
     doc = _sim_capa(configs_dir)
     doc.experiment_payload["device_settings"]["purge_mfc"] = {"gas": "Ar"}
-    (problem,) = _settings_problems(doc)
-    assert problem.severity == "warning"
-    assert problem.code == "capa_profile.purge_gas_mismatch"
-    assert problem.path == ("device_settings", "purge_mfc", "gas")
+    (problem,) = _purge_gas_problems(doc)
+    assert problem.severity == "error"
+    assert problem.section == "capa_profile"
+    assert problem.path == ("domain_profile", "metadata", "atmosphere", "purge", "species")
+    assert "'Ar'" in problem.message and "'N2'" in problem.message
+
+
+def test_purge_gas_missing_from_device_settings_is_an_error(configs_dir: Path) -> None:
+    doc = _sim_capa(configs_dir)
+    del doc.experiment_payload["device_settings"]["purge_mfc"]
+    (problem,) = _purge_gas_problems(doc)
+    assert "doesn't set its gas" in problem.message
+
+
+def test_invalid_purge_gas_is_reported_once(configs_dir: Path) -> None:
+    """A gas the MFC doesn't know is the device_settings check's to report."""
+    doc = _sim_capa(configs_dir)
+    doc.experiment_payload["device_settings"]["purge_mfc"] = {"gas": "N3"}
+    assert _purge_gas_problems(doc) == []
 
 
 @pytest.mark.parametrize("species", ["nitrogen", "5% O2/N2"])
 def test_purge_gas_check_accepts_aliases_and_skips_mixtures(
     configs_dir: Path, species: str
 ) -> None:
+    """``nitrogen`` is the MFC's ``N2``; a mixture isn't one gas the MFC
+    knows, so its gas is left to Device settings."""
     doc = _sim_capa(configs_dir)
     doc.experiment_payload["domain_profile"]["metadata"]["atmosphere"]["purge"]["species"] = species
+    assert _purge_gas_problems(doc) == []
     assert _settings_problems(doc) == []
 
 

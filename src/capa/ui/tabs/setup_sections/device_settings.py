@@ -13,6 +13,10 @@ with unsaved edits in Devices / Cameras.
 report — set the rig up on the manual cards once, then save it into the
 experiment.
 
+Under the CAPA profile, the gas of the MFC that measures the purge flow
+follows the profile's purge gas (:func:`capa.config.capa_profile.mirrored_purge_gas`):
+the Setup tab writes it, and its field here is shown read-only.
+
 The section writes ``experiment_payload["device_settings"]``; entries
 whose device left the hardware are listed with a Remove button rather
 than dropped silently.
@@ -31,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from capa.config.capa_profile import mirrored_purge_gas
 from capa.devices.registry import ensure_adapters_loaded, get_descriptor
 from capa.devices.settings import DeviceSettingsSpec, capture_settings
 from capa.ui.async_util import schedule_bg
@@ -45,6 +50,12 @@ if TYPE_CHECKING:
     from capa.ui.tabs.setup_state import SetupDraft
 
 
+_MIRRORED_GAS_NOTE = (
+    "This MFC measures the purge flow, so its gas follows the purge gas in "
+    "CAPA Profile → Atmosphere. Change it there."
+)
+
+
 class DeviceSettingsSection(SectionWidget):
     """Editor for the experiment's ``device_settings``."""
 
@@ -55,6 +66,8 @@ class DeviceSettingsSection(SectionWidget):
         self._controller: RunController | None = None
         self._suppress_signals = False
         self._forms: dict[str, tuple[DeviceSettingsSpec, ModelForm]] = {}
+        # Per form, the note shown while its gas follows the CAPA profile.
+        self._gas_notes: dict[str, QLabel] = {}
         self._orphans: dict[str, Mapping[str, Any]] = {}
         self._layout_key: tuple[tuple[str, str, frozenset[str]], ...] | None = None
         self._hardware_names: frozenset[str] = frozenset()
@@ -138,6 +151,9 @@ class DeviceSettingsSection(SectionWidget):
                 raw = declared.get(name)
                 form.set_values(dict(raw) if isinstance(raw, Mapping) else {}, replace=True)
             self._orphans = dict(orphans)
+            self._lock_mirrored_gas(
+                mirrored_purge_gas(document.experiment_payload, document.hardware_payload)
+            )
         finally:
             self._suppress_signals = False
 
@@ -165,6 +181,7 @@ class DeviceSettingsSection(SectionWidget):
             if widget is not None:
                 widget.deleteLater()
         self._forms = {}
+        self._gas_notes = {}
         if not devices and not orphans:
             empty = QLabel(
                 "No device in this hardware has settings an experiment can declare "
@@ -188,10 +205,31 @@ class DeviceSettingsSection(SectionWidget):
             form = build_form(spec.model, parent=group, hidden_fields=hidden)
             form.valuesChanged.connect(self._on_form_changed)
             group.add_widget(form)
+            if form.field_widget("gas") is not None:
+                note = QLabel(_MIRRORED_GAS_NOTE, group)
+                note.setWordWrap(True)
+                note.setStyleSheet(f"color: {COLOR_IDLE.name()};")
+                note.setVisible(False)
+                group.add_widget(note)
+                self._gas_notes[name] = note
             self._body_layout.addWidget(group)
             self._forms[name] = (spec, form)
         for name in orphans:
             self._body_layout.addWidget(self._orphan_row(name))
+
+    def _lock_mirrored_gas(self, mirrored: tuple[str, str] | None) -> None:
+        """Show the purge MFC's gas read-only while it follows the CAPA
+        profile; every other gas field stays editable."""
+        for name, (_spec, form) in self._forms.items():
+            gas = form.field_widget("gas")
+            if gas is None:
+                continue
+            locked = mirrored is not None and mirrored[0] == name
+            gas.setEnabled(not locked)
+            gas.setToolTip(_MIRRORED_GAS_NOTE if locked else "")
+            note = self._gas_notes.get(name)
+            if note is not None:
+                note.setVisible(locked)
 
     def _orphan_row(self, name: str) -> QWidget:
         row = QWidget(self._body)

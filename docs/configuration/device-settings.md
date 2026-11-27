@@ -59,7 +59,22 @@ exception: it keeps every setting it takes, through a power cycle.
 
 | Field | Values | Notes |
 |---|---|---|
-| `gas` | A gas name: `N2`, `Air`, `Ar`, `CO2`, … | Any alicatlib name or alias (`nitrogen` → `N2`); a typo is a validation error with suggestions. Custom mixtures are not supported. |
+| `gas` | A gas name: `N2`, `Air`, `Ar`, `CO2`, … | Any alicatlib name or alias (`nitrogen` → `N2`); a typo is a validation error with suggestions. Custom mixtures are not supported. Under the CAPA profile, the MFC mapped to `purge_gas_flow` takes its gas from the profile's purge gas: see below. |
+
+#### The purge MFC follows the CAPA profile
+
+Under the [CAPA profile](capa-profile.md), the gas of the MFC whose
+channel is mapped to `purge_gas_flow` is the profile's
+`atmosphere.purge.species`, as the MFC names it (`nitrogen` → `N2`).
+You name the purge gas once, in **CAPA Profile → Atmosphere**: the Setup
+tab writes `device_settings.<purge MFC>.gas` from it whenever either
+changes, and when a config is opened. **Device settings** shows that gas
+greyed out, with a note pointing to the profile. A file whose two
+disagree fails validation (`capa_profile.purge_gas_mismatch`).
+
+A species the MFC doesn't know as one gas — a mixture such as
+`5% O2/N2` — leaves the MFC's gas to Device settings, where it stays
+editable and unchecked.
 
 ### Sartorius balance (`capa.devices.sartorius`, `capa.devices.sim.sartorius_sim`)
 
@@ -223,7 +238,7 @@ device_settings: purge_mfc gas: the device doesn't offer SF6
 | `device_settings.unknown_device` | error | The key isn't a device or camera in the hardware profile. |
 | `device_settings.unsupported_adapter` | error | That device's adapter has no declarable settings. |
 | `device_settings.<pydantic type>` | error | A field is unknown or its value is invalid, e.g. `device_settings.extra_forbidden`, `device_settings.literal_error`, `device_settings.int_type` (a webcam value that isn't a whole number), `device_settings.value_error` (a webcam auto toggle declared on together with its value). |
-| `capa_profile.purge_gas_mismatch` | warning | Under the CAPA profile, the purge MFC's declared gas differs from `atmosphere.purge.species`. Skipped when the species isn't a gas name the MFC knows (a mixture such as `5% O2/N2`). |
+| `capa_profile.purge_gas_mismatch` | error | Under the CAPA profile, the purge MFC's declared gas is unset or differs from `atmosphere.purge.species` (see [The purge MFC follows the CAPA profile](#the-purge-mfc-follows-the-capa-profile)). Skipped when the species isn't a gas name the MFC knows (a mixture such as `5% O2/N2`), or when the declared gas is itself invalid, which `device_settings.value_error` reports. |
 
 Values that depend on the device itself — whether the MFC offers the
 gas, whether the camera has the range — can only be checked when the

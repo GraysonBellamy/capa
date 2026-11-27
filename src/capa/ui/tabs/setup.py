@@ -74,12 +74,17 @@ _HARDWARE_PAYLOAD_KEYS: frozenset[str] = frozenset({"devices", "channels", "came
 # an edit changes one of these keys, the listed sections (other than the
 # editing one) re-read the draft so their widgets never hold a stale
 # copy — a stale section would write its old copy back on its next edit.
+# Device settings follows the profile and the channels too: the purge
+# MFC's gas is written from the CAPA profile's purge gas
+# (:meth:`SetupDraft.mirror_purge_gas`), for the device mapped to
+# purge_gas_flow.
 _SECTIONS_SHOWING_KEY: dict[str, tuple[str, ...]] = {
     "devices": ("hardware", "device_settings"),
     "cameras": ("hardware", "device_settings"),
-    "channels": ("channels", "calibration", "capa_profile", "hardware"),
+    "channels": ("channels", "calibration", "capa_profile", "hardware", "device_settings"),
     "sample": ("experiment",),
-    "domain_profile": ("experiment", "capa_profile"),
+    "domain_profile": ("experiment", "capa_profile", "device_settings"),
+    "device_settings": ("device_settings",),
 }
 
 
@@ -1287,6 +1292,12 @@ class SetupTab(QWidget):
             slice_payload = section.payload()
             if slice_payload is not None:
                 changed = self._apply_payload(section_id, slice_payload)
+                if self._draft.mirror_purge_gas():
+                    changed.add("device_settings")
+                    if section_id == "device_settings":
+                        # Its own copy of the purge MFC's gas (from
+                        # Capture) was just replaced by the profile's.
+                        self._refresh_section(section_id)
                 self._refresh_sections_showing(changed, except_section=section_id)
         self._draft.mark_dirty(section_id)
         # An edit invalidates any sticky apply-outcome state; the

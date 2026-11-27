@@ -29,6 +29,7 @@ from capa.config.capa_profile import (
     CAPA_REQUIRED_GROUPS,
     is_capa_profile,
     profile_model_fields,
+    purge_gas_mismatch,
     sample_specimen_mismatches,
 )
 from capa.config.problems import ConfigProblem, Section
@@ -612,7 +613,7 @@ def _layer3_domain(config: Any, document: ConfigDocument) -> list[ConfigProblem]
             )
     problems.extend(_capa_metadata_problems(profile_ref.metadata, document))
     problems.extend(_capa_sample_problems(config, profile_ref.metadata, document))
-    problems.extend(_capa_purge_gas_problems(config, profile_ref.metadata, document))
+    problems.extend(_capa_purge_gas_problems(document))
     return problems
 
 
@@ -689,61 +690,35 @@ def _capa_sample_problems(
     return problems
 
 
-def _capa_purge_gas_problems(
-    config: Any, metadata: Any, document: ConfigDocument
-) -> list[ConfigProblem]:
-    """Warn when the purge MFC is set to a different gas than the profile's
-    ``atmosphere.purge.species`` records.
+def _capa_purge_gas_problems(document: ConfigDocument) -> list[ConfigProblem]:
+    """Flag a purge MFC gas that isn't the CAPA profile's purge gas.
 
-    The purge MFC is the device behind the ``purge_gas_flow`` channel.
-    Both names go through that device's settings model, so ``"nitrogen"``
-    and ``"N2"`` agree; a species the model doesn't know as a gas (a
-    mixture such as ``"5% O2/N2"``) is not checked.
+    The purge MFC's ``device_settings`` gas follows the profile's
+    ``atmosphere.purge.species``
+    (:func:`~capa.config.capa_profile.mirrored_purge_gas`); the Setup tab
+    writes it from the species, so a mismatch means the experiment file
+    was edited by hand. A species the MFC doesn't know as one gas (a
+    mixture such as ``"5% O2/N2"``) leaves the MFC's gas to Device
+    settings and is not checked.
     """
-    from capa.devices.registry import get_descriptor  # noqa: PLC0415
-
-    atmosphere = metadata.get("atmosphere") if isinstance(metadata, Mapping) else None
-    purge = atmosphere.get("purge") if isinstance(atmosphere, Mapping) else None
-    species = purge.get("species") if isinstance(purge, Mapping) else None
-    if not isinstance(species, str):
+    mismatch = purge_gas_mismatch(document.experiment_payload, document.hardware_payload)
+    if mismatch is None:
         return []
-    purge_device = next(
-        (
-            getattr(ch.source, "device", None)
-            for ch in config.hardware.channels
-            if (ch.metadata or {}).get("capa_group") == "purge_gas_flow"
-        ),
-        None,
-    )
-    entry = config.device_settings.get(purge_device) if purge_device else None
-    gas = entry.get("gas") if isinstance(entry, Mapping) else None
-    if not isinstance(gas, str):
-        return []
-    device = next((d for d in config.hardware.devices if d.name == purge_device), None)
-    descriptor = get_descriptor(device.adapter) if device is not None else None
-    if descriptor is None or descriptor.settings is None:
-        return []
-    model = descriptor.settings.model
-    if "gas" not in model.model_fields:
-        return []
-    try:
-        declared = model.model_validate({"gas": gas}).gas  # type: ignore[attr-defined]
-        recorded = model.model_validate({"gas": species}).gas  # type: ignore[attr-defined]
-    except ValidationError:
-        return []
-    if declared == recorded:
-        return []
+    device, gas, declared = mismatch
+    declared_text = "doesn't set its gas" if declared is None else f"sets its gas to {declared!r}"
     return [
         ConfigProblem(
-            severity="warning",
+            severity="error",
             code="capa_profile.purge_gas_mismatch",
             message=(
-                f"device_settings sets {purge_device!r} to {gas!r}, but the CAPA profile "
-                f"records the purge gas as {species!r}"
+                f"{device!r} measures the purge flow, so its gas follows the CAPA profile's "
+                f"purge gas, {gas!r}, but device_settings {declared_text}. Set the purge "
+                "gas in CAPA Profile; the Setup tab writes the MFC's gas from it."
             ),
-            section="device_settings",
-            path=("device_settings", purge_device, "gas"),
+            section="capa_profile",
+            path=("domain_profile", "metadata", "atmosphere", "purge", "species"),
             source_file=document.experiment_path,
+            fix_label="Edit purge gas",
         )
     ]
 
