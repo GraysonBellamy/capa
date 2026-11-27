@@ -59,21 +59,36 @@ def test_validate_metadata_requires_dimensions(field: str) -> None:
     assert [err["loc"] for err in exc_info.value.errors()] == [("specimen", field)]
 
 
-def test_holder_and_insulation_masses_are_optional() -> None:
+_OPTIONAL_MASSES = (
+    "mounted_mass_g",
+    "specimen_holder_mass_g",
+    "insulation_mass_g",
+    "retainer_mass_g",
+    "assembly_mass_g",
+)
+
+
+def test_specimen_assembly_masses_are_optional() -> None:
     meta = cap.validate_metadata(_good_metadata())
-    assert meta.specimen.specimen_holder_mass_g is None
-    assert meta.specimen.insulation_mass_g is None
+    for field in _OPTIONAL_MASSES:
+        assert getattr(meta.specimen, field) is None
 
     raw = _good_metadata()
-    raw["specimen"]["specimen_holder_mass_g"] = 42.5
-    raw["specimen"]["insulation_mass_g"] = 3.1
+    values = {
+        "mounted_mass_g": 9.8,
+        "specimen_holder_mass_g": 42.5,
+        "insulation_mass_g": 3.1,
+        "retainer_mass_g": 6.4,
+        "assembly_mass_g": 61.8,
+    }
+    raw["specimen"].update(values)
     meta = cap.validate_metadata(raw)
-    assert meta.specimen.specimen_holder_mass_g == 42.5
-    assert meta.specimen.insulation_mass_g == 3.1
+    for field, value in values.items():
+        assert getattr(meta.specimen, field) == value
 
 
-@pytest.mark.parametrize("field", ["specimen_holder_mass_g", "insulation_mass_g"])
-def test_holder_and_insulation_masses_must_be_positive(field: str) -> None:
+@pytest.mark.parametrize("field", _OPTIONAL_MASSES)
+def test_specimen_assembly_masses_must_be_positive(field: str) -> None:
     raw = _good_metadata()
     raw["specimen"][field] = 0.0
     with pytest.raises(ValidationError):

@@ -82,20 +82,17 @@ class CapaSpecimen(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    # The specimen itself: always shown at the top of the Setup form.
     id: str = Field(min_length=1)
     material: str = Field(min_length=1)
-    initial_mass_g: float = Field(
+    form: SpecimenForm
+    particle_size_um: float | None = Field(
+        default=None,
         gt=0,
         json_schema_extra={
-            "capa_unit": "g",
-            "capa_help": "Initial sample mass on the load cell, before heating begins.",
-        },
-    )
-    thickness_mm: float = Field(
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "mm",
-            "capa_help": "Specimen thickness; for a powder or granulate, the bed depth.",
+            "capa_unit": "µm",
+            "capa_help": "Median particle size for powder / granulate runs.",
+            "capa_hidden_when": {"form": "disk"},
         },
     )
     diameter_mm: float = Field(
@@ -107,18 +104,107 @@ class CapaSpecimen(BaseModel):
             ),
         },
     )
-    form: SpecimenForm
-    particle_size_um: float | None = Field(
+    thickness_mm: float = Field(
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "mm",
+            "capa_help": "Specimen thickness; for a powder or granulate, the bed depth.",
+        },
+    )
+    conditioning: str | None = None
+    """Free-text description of pre-test conditioning (drying, desiccator,
+    storage humidity, etc.)."""
+
+    notes: str | None = None
+
+    # Masses, in the order the loaded holder is built up: the specimen
+    # alone, as mounted, each holder part, then the whole assembly.
+    initial_mass_g: float = Field(
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "g",
+            "capa_help": (
+                "Initial mass of the specimen alone, before heating: without the "
+                "holder, insulation, retainer or anything bonded to it."
+            ),
+            "capa_group": "masses",
+            "capa_group_open": True,
+            "capa_group_subtitle": "specimen alone, as mounted, holder parts, whole assembly",
+        },
+    )
+    mounted_mass_g: float | None = Field(
+        default=None,
+        gt=0,
+        title="Mounted specimen mass",
+        json_schema_extra={
+            "capa_unit": "g",
+            "capa_help": (
+                "The specimen with whatever is bonded to it (adhesive, backing foil "
+                "and its coating), weighed before the test. Leave unset when "
+                "nothing is bonded to the specimen."
+            ),
+            "capa_group": "masses",
+        },
+    )
+    specimen_holder_mass_g: float | None = Field(
         default=None,
         gt=0,
         json_schema_extra={
-            "capa_unit": "µm",
-            "capa_help": "Median particle size for powder / granulate runs.",
-            "capa_hidden_when": {"form": "disk"},
+            "capa_unit": "g",
+            "capa_help": "Mass of the empty specimen holder, without insulation.",
+            "capa_group": "masses",
+        },
+    )
+    insulation_mass_g: float | None = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "capa_unit": "g",
+            "capa_help": (
+                "Mass of the insulation packed in the holder. Leave unset when the holder has none."
+            ),
+            "capa_group": "masses",
+        },
+    )
+    retainer_mass_g: float | None = Field(
+        default=None,
+        gt=0,
+        title="Retainer mass",
+        json_schema_extra={
+            "capa_unit": "g",
+            "capa_help": (
+                "Mass of the ring or clamp that holds the specimen or its backing in "
+                "the holder. Leave unset when there is none."
+            ),
+            "capa_group": "masses",
+        },
+    )
+    assembly_mass_g: float | None = Field(
+        default=None,
+        gt=0,
+        title="Assembly mass",
+        json_schema_extra={
+            "capa_unit": "g",
+            "capa_help": (
+                "The loaded specimen holder as it goes into the rig (holder, "
+                "insulation, retainer and mounted specimen), weighed on an external "
+                "balance before the test."
+            ),
+            "capa_group": "masses",
         },
     )
 
-    specimen_holder: str = Field(min_length=1)
+    # The holder's description and size: they describe the rig and carry
+    # over between runs.
+    specimen_holder: str = Field(
+        min_length=1,
+        json_schema_extra={
+            "capa_help": 'What holds the specimen, e.g. "stainless steel cup".',
+            "capa_group": "specimen_holder",
+            "capa_group_open": True,
+            "capa_group_subtitle": "the cup the specimen sits in; carries over between runs",
+        },
+    )
     """Specimen-holder description (e.g. ``"stainless steel cup"``). The
     holder geometry varies by run — depth and diameter, plus optional
     insulation, change the exposed surface area."""
@@ -129,6 +215,7 @@ class CapaSpecimen(BaseModel):
         json_schema_extra={
             "capa_unit": "mm",
             "capa_help": "Outside / nominal diameter of the holder cup.",
+            "capa_group": "specimen_holder",
         },
     )
     specimen_holder_depth_mm: float | None = Field(
@@ -140,32 +227,9 @@ class CapaSpecimen(BaseModel):
                 "Internal cup depth. Together with diameter, captures the "
                 "cavity geometry that affects exposed surface area."
             ),
+            "capa_group": "specimen_holder",
         },
     )
-    specimen_holder_mass_g: float | None = Field(
-        default=None,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "g",
-            "capa_help": "Mass of the empty specimen holder, without insulation.",
-        },
-    )
-    insulation_mass_g: float | None = Field(
-        default=None,
-        gt=0,
-        json_schema_extra={
-            "capa_unit": "g",
-            "capa_help": (
-                "Mass of the insulation packed in the holder. Leave unset when the holder has none."
-            ),
-        },
-    )
-
-    conditioning: str | None = None
-    """Free-text description of pre-test conditioning (drying, desiccator,
-    storage humidity, etc.)."""
-
-    notes: str | None = None
 
 
 class HeaterProgram(BaseModel):
@@ -225,7 +289,8 @@ should fail preflight if the secondary (O2) MFC is reading non-zero."""
 
 
 class PurgeGas(BaseModel):
-    """Purge / sweep gas spec — the inert atmosphere flow."""
+    """Purge / sweep gas spec — the main atmosphere flow: inert, or air for
+    an oxidative run."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -473,9 +538,9 @@ OPTIONAL_CHANNEL_GROUPS: tuple[ChannelRequirement, ...] = (
     ),
 )
 """Optional channel groups. Preflight does not block on missing optional
-groups but warns if e.g. an ``oxidative`` atmosphere is declared without a
-``reactive_gas_flow`` channel — the inconsistency check lives in the
-preflight runtime registry. ``ambient_temperature`` / ``ambient_humidity``
+groups, but a declared reactive gas without a ``reactive_gas_flow``
+channel is refused — the inconsistency check lives in the preflight
+runtime registry. ``ambient_temperature`` / ``ambient_humidity``
 / ``ambient_pressure`` tag the lab-air conditions logged alongside a run
 (an SHT4x sensor and a BMP58x barometer)."""
 
@@ -489,8 +554,9 @@ PREFLIGHT_CHECKS: tuple[PreflightCheck, ...] = (
     PreflightCheck(
         id="capa.atmosphere_consistency",
         description=(
-            "Declared atmosphere mode is consistent with declared channels: "
-            "oxidative/reactive_blend modes must declare a reactive_gas_flow."
+            "Declared atmosphere is consistent with declared channels: a "
+            "reactive gas (atmosphere.reactive, or mode reactive_blend) needs "
+            "a reactive_gas_flow channel. An air purge is oxidative without one."
         ),
         blocking=True,
     ),
@@ -505,7 +571,10 @@ PREFLIGHT_CHECKS: tuple[PreflightCheck, ...] = (
     ),
     PreflightCheck(
         id="capa.purge_flow_established",
-        description="Purge gas flow has been seen >= target * 0.5 for >=3 s.",
+        description=(
+            "Purge gas flow has been seen >= target * 0.5 for >=3 s, unless the "
+            "method waits for it itself (timed, aborting) before any heater command."
+        ),
         blocking=True,
     ),
     PreflightCheck(

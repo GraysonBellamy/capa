@@ -90,6 +90,7 @@ def test_clear_per_run_fields_keeps_rig_level_specimen_fields() -> None:
                     "id": "P-1",
                     "material": "PMMA",
                     "initial_mass_g": 5.0,
+                    "mounted_mass_g": 5.6,
                     "thickness_mm": 6.0,
                     "diameter_mm": 70.0,
                     "form": "disk",
@@ -97,6 +98,8 @@ def test_clear_per_run_fields_keeps_rig_level_specimen_fields() -> None:
                     "specimen_holder_diameter_mm": 75.0,
                     "specimen_holder_mass_g": 40.0,
                     "insulation_mass_g": 3.0,
+                    "retainer_mass_g": 6.0,
+                    "assembly_mass_g": 140.0,
                     "conditioning": "dried 24 h",
                     "notes": "box B",
                 },
@@ -112,6 +115,7 @@ def test_clear_per_run_fields_keeps_rig_level_specimen_fields() -> None:
         "form": "disk",
         "specimen_holder": "stainless steel cup",
         "specimen_holder_diameter_mm": 75.0,
+        "conditioning": "dried 24 h",
     }
     assert metadata["program"] == {"target_heat_flux_kw_m2": 50.0}
     assert out["sample"] == {"id": "", "extra": {"lot": "B7"}}

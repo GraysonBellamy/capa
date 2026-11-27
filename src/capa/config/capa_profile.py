@@ -62,18 +62,21 @@ PER_RUN_SPECIMEN_KEYS: frozenset[str] = frozenset(
         "id",
         "material",
         "initial_mass_g",
+        "mounted_mass_g",
         "thickness_mm",
         "diameter_mm",
         "specimen_holder_mass_g",
         "insulation_mass_g",
-        "conditioning",
+        "retainer_mass_g",
+        "assembly_mass_g",
         "notes",
     }
 )
-"""Specimen fields entered fresh for every run: the specimen under test,
-plus the holder and insulation masses weighed with it. The rest of the
-specimen block (``form``, ``specimen_holder`` and its dimensions)
-describes the rig and carries over. See :func:`clear_per_run_fields`."""
+"""Specimen fields entered fresh for every run: the specimen under test
+(and as mounted), plus the holder, insulation and retainer masses weighed
+with it and the whole loaded assembly. The rest of the specimen block (``form``, ``specimen_holder`` and
+its dimensions, which describe the rig, and ``conditioning``, which a
+series of specimens shares) carries over. See :func:`clear_per_run_fields`."""
 
 _POSITIVE_SAMPLE_KEYS: frozenset[str] = frozenset({"mass_g", "thickness_mm"})
 """``sample`` keys that :class:`~capa.experiment.config.SampleInfo`
