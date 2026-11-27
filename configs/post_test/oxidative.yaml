@@ -1,0 +1,24 @@
+# Post-test record for one oxidative run (oxidative_25kw, oxidative_30kw).
+# After each run, copy this into the run's folder as post_test.yaml and fill
+# it in; leave anything you didn't measure blank.
+#
+# The run folder was sealed when the run ended (manifest.sha256), and this
+# file isn't in that manifest: `capa catalog verify` lists it as an extra
+# file and calls the run "partial". `sha256sum -c manifest.sha256` still
+# passes, and every file the run recorded is unchanged.
+
+run_id:              # the run folder name, e.g. 2026-11-10_101500_OX30_RO-07
+measured_by:
+balance:             # the external balance used
+
+masses_g:
+  cup_assembly:      # the whole loaded sample cup, as it came off the holder (before: the Setup tab's assembly mass)
+  cup:
+  insulation:
+  residue:           # char / ash separated from the foil, as far as it comes off
+  foil:              # foil, adhesive and any residue that wouldn't come off
+  ring:              # copper ring
+
+residue_state:       # e.g. intact char disk, cracked char, fragments, all ash
+
+observations: |

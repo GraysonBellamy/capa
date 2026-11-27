@@ -1,0 +1,146 @@
+# Oxidative pyrolysis / smouldering of wood at 25 kW/m2 under the air
+# purge: building compressed air, dried through silica beads upstream of the
+# MCR-200, 185 SLPM
+# (20.9 % O2 nominal; not measured, no gas analyzer on this rig). Heater
+# 40 mm above the specimen surface, on the chamber for a fixed 45 min.
+# The FLIR records the back-surface copper foil.
+#
+# Each day, before the first run:
+#   1. Tune open air over reference gauge 232041 at 40 mm with
+#      configs/experiments/flux_tune.yaml (set to 25 kW/m2, starting from
+#      560.5 C). It first asks you to confirm the gauge's cooling water, and
+#      ends with the heater HOLDING; leave it there for the day's runs.
+#   2. Open this config. In the Setup tab's Heater program pane, click
+#      "Apply latest tune": it writes the tuned heater_setpoint_c and
+#      flux_calibration_ref. Reopening the config resets them to the values
+#      below, so apply again after a reopen.
+#
+# Each run:
+#   3. Setup tab: operator, and the specimen fields cleared on every open:
+#      id (the specimen's label from its records, with the condition in
+#      front if the label lacks it, e.g. OX25_RO-07), material, and the
+#      dry wood's mass ("initial mass"), thickness and diameter from its
+#      records (measured before it was glued to the foil); weighed that day
+#      on the external balance: the mounted specimen (wood + adhesive +
+#      painted foil), the empty sample cup (the "holder mass" field), the
+#      insulation, the copper ring (the "retainer mass" field) and the whole
+#      loaded cup (the "assembly mass" field); grain orientation in notes.
+#      Conditioning carries over from this file.
+#   4. Put the loaded sample cup on the holder.
+#   5. Start. The method (configs/methods/oxidative_45min.method.toml)
+#      never touches the heater. After the checklist it turns the purge on
+#      at 185 SLPM, ending the run if purge.flow hasn't reached 180 within
+#      30 s (air supply shut), records 30 s of
+#      flush and a 2 min baseline, prompts for the heater to go on, records
+#      45 min from that Continue, prompts for the heater to come off,
+#      records 5 min more, then turns the purge off. The
+#      step.entered/exited events tagged "ox win=..." mark the
+#      windows; contact_switch may time the heater moves more sharply than
+#      the prompt clicks.
+#
+# A run records ~27 GB (IR ~4.3 MB/s, webcam ~4 MB/s over ~55 min): keep
+# 30 GB free before each Start. Stop leaves the purge at its last setpoint:
+# set the MCR-200 to 0 by hand after a Stop.
+#
+#   uv run capa validate --strict configs/experiments/oxidative_25kw.yaml
+#   uv run capa gui configs/experiments/oxidative_25kw.yaml --runs-root runs/oxidative
+
+hardware: ../hardware/capa_real_full.toml
+method: ../methods/oxidative_45min.method.toml
+
+procedure:
+  id: capa.builtin.recipe_runner
+  version: "0.1"
+  config:
+    auto_acknowledge_prompts: false
+    notes: "Oxidative pyrolysis of wood, 25 kW/m2, air purge 185 SLPM, 45 min heater-on"
+
+operator:   # cleared when the GUI opens the config: re-enter it in the Setup tab
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+domain_profile:
+  id: capa.profiles.capa_pyrolysis
+  metadata:
+    specimen:
+      form: disk
+      # The profile's "specimen holder" is the sample cup: enter the empty
+      # cup's mass as the holder mass each run. The holder the cup sits on
+      # (on the balance) has no field; sample extras describe it.
+      specimen_holder: "stainless steel sample cup, 70 mm bottom opening"
+      specimen_holder_diameter_mm: 82.0   # inside diameter
+      specimen_holder_depth_mm: 25.15
+      conditioning: "vacuum-dried to constant mass; adhesive applied, then vacuum-dried again"
+    program:
+      target_heat_flux_kw_m2: 25.0
+      heater_setpoint_c: 560.5   # 2026-11-09 tune; "Apply latest tune" replaces it with the day's tune
+    atmosphere:
+      mode: oxidative
+      purge:
+        species: Air
+        purity: "building compressed air, dried through silica beads upstream of the MFC"
+        target_flow_slpm: 185.0
+
+device_settings:
+  purge_mfc:
+    gas: Air
+  balance:
+    filter_mode: very stable
+  ir_cam0:
+    temperature_range:
+      min_c: 0.0
+      max_c: 650.0
+    # Effective emissivity of the foil seen through the gold mirror:
+    # foil 0.92 x mirror rho 0.9783 (2026-10-12 refit). The IR analysis
+    # redoes this in post; this only puts the live view close.
+    emissivity: 0.90
+  visible_cam0:
+    zoom: 270
+    tilt: 7
+    auto_exposure: false
+    exposure: -5      # longest that holds 30 fps at 1080p; the camera resets to -4 (16 fps) on stream start
+    auto_focus: false
+    focus: 15         # middle of the sharp plateau (0-35) on the sample holder
+    gain: 48          # fir ~195/255, char ~28; leaves red headroom for the 35 kW/m2 heater glow
+    auto_white_balance: false
+    white_balance: 5300   # neutral on white paper under the top light, heater off
+    sharpness: 64     # no in-camera sharpening (0-64 identical); 128+ adds halos
+    brightness: 128
+    contrast: 128
+    saturation: 128
+    backlight_compensation: 0
+
+sample:
+  id: ""   # mirrored from the specimen id entered in the Setup tab
+  extra:
+    nominal_diameter_mm: 70.0
+    nominal_thickness_mm: 7.0
+    heater_to_surface_mm: 40.0
+    target_flux_kw_m2: 25.0
+    heater_on_duration_s: 2700.0
+    o2_mole_fraction_nominal: 0.209   # air; not measured
+    purge_gas: Air
+    purge_source: "building compressed air, dried through silica beads upstream of the MFC"
+    purge_flow_slpm: 185.0
+    purge_mfc: "Alicat MCR-200SLPM-D SN 225873"
+    sample_cup_mass_nominal_g: 84.07   # the run's weighed value goes in the Setup tab's holder mass
+    # The balance is tared with the holder alone, so balance.mass is the whole
+    # loaded cup: cup + insulation + foil + ring + adhesive + specimen.
+    balance_load: "tared with the holder; the loaded sample cup (Kaowool rings, foil-backed specimen, copper ring) then goes on"
+    surface_vs_cup_rim_mm: 0.0        # specimen surface flush with the rim
+    cup_bottom_opening_mm: 70.0
+    ir_aperture_mm: 65.0              # the 65 mm ID insulation rings under the specimen narrow the view
+    insulation: "Kaowool M Board, binder burned out beforehand: 65 mm ID rings under the specimen, 70 mm ID rings around it"
+    back_foil: "copper, 0.0005 in (12.7 um), pre-oxidized, fresh each run, Medtherm High Temperature Optical Coating"
+    foil_retainer: "copper ring"
+    specimen_mount: "Cotronics Resbond 904 zirconia adhesive, specimen to foil"
+    ir_target: "back-surface foil, through the 65 mm ID insulation rings and the 70 mm cup opening"
+    ir_view: "via gold mirror (rho = 0.9783, 2026-10-12 refit)"
+    foil_emissivity: 0.92
+
+tags:
+  - real
+  - capa
+  - oxidative
+  - wood
+  - 25kW

@@ -1,0 +1,61 @@
+# Open-air heater tune to one target flux, ahead of specimen tests (e.g.
+# oxidative_25kw.yaml): heater off the chamber, reference gauge 232041
+# centred 40 mm below it. hold_at_completion leaves the heater HOLDING at
+# the converged setpoint for the day's runs; the test config's Setup tab
+# then picks it up with "Apply latest tune". A non-converged
+# (warn_proceeded) tune cools instead of holding: rerun it.
+#
+# The tune starts with a prompt to confirm the gauge's cooling water: the
+# reference has no body thermocouple, so nothing else checks it.
+#
+# The first setpoint comes from initial_guess:
+#   operator - operator_initial_setpoint_c. Use it when the flux differs
+#              from the latest tune's: set targets_kw_m2 and
+#              operator_initial_setpoint_c from the tunes below or the
+#              open-air estimates.
+#   lookup   - the latest tune (configs/calibrations/flux/latest.toml), so a
+#              same-flux day starts from yesterday's result. Remove
+#              operator_initial_setpoint_c (the Setup tab hides it). A latest
+#              tune at another flux doesn't cover the target, and the tune
+#              then starts from the sigma-T^4 guess, tens of C low.
+# Open-air estimates (40 mm; F = k(T^4 - Ta^4) + h(T - Ta) fit to the
+# open-air tunes and the 2026-10-17 transfer-cal reference readings):
+#   20 kW/m2 -> 514 C,  25 -> 558,  30 -> 602,  35 -> 638,  40 -> 671,
+#   50 -> 728,  70 -> 819
+# Tuned so far: 20 -> 512-514 (2026-10-19/20), 25 -> 560.5 (2026-11-09),
+# 30 -> 601.1-601.2 (2026-11-10), 35 -> 637.8 (2026-11-11).
+# From a cold start the flux reads high and drifts down ~0.3-0.5 kW/m2 over
+# the first ~30 min while the heater soaks, so a cold tune's first
+# iterations overshoot; it still converges, just slower.
+#
+#   uv run capa validate --strict configs/experiments/flux_tune.yaml
+#   uv run capa gui configs/experiments/flux_tune.yaml --runs-root runs/flux_tune
+
+hardware: ../hardware/flux_tune.toml
+
+procedure:
+  id: capa.builtin.heat_flux_tune
+  version: "0.1.0"
+  config:
+    targets_kw_m2: [30.0]
+    initial_guess: operator
+    operator_initial_setpoint_c: 601.2   # the 2026-11-10 30 kW tune
+    pre_start_prompt: "Cooling water flowing to reference gauge 232041 (check the flow, not just the valve). Heater off the chamber; reference gauge centred 40 mm below the heater. Continue starts the tune."
+    hold_at_completion: true
+    operator_id: gbellamy
+    geometry: "open air, 40 mm below heater, centerline (heater off the chamber)"
+    gauge_calibration_ref: "Medtherm 32-10SB-18-20608 SN 232041, 13026.52 kW/m2/V (2026-11-22, via NIST 223481 cone-heater value)"
+
+operator:
+  id: gbellamy
+  display_name: Grayson Bellamy
+
+sample:
+  id: TUNE_30kW   # TUNE_<flux>kW
+  material: none (reference gauge, open air)
+  notes: "Single-target open-air tune ahead of specimen tests"
+
+tags:
+  - real
+  - heat-flux
+  - tune

@@ -229,6 +229,26 @@ output_unit = "slpm"
 [channels.metadata]
 capa_group = "purge_gas_flow"
 
+# The method writes purge.setpoint in the device's unit (SLPM). The
+# MCR-200's 8v17 firmware takes a setpoint but can't report one back (no
+# LS), so the value comes from the frame.
+[[channels]]
+name = "purge.setpoint"
+kind = "setpoint"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+
+[channels.source]
+source = "alicat_frame_field"
+device = "purge_mfc"
+field = "Mass_Flow_Setpt"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"
+
 [[channels]]
 name = "outer_wall_temperature"
 kind = "tc"

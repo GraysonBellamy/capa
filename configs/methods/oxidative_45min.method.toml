@@ -1,0 +1,77 @@
+name = "oxidative_45min"
+description = "Specimen under the 185 SLPM air purge: 30 s flush, 2 min baseline, heater on the chamber for a fixed 45 min, 5 min after the heater comes off, purge off. The heater is never commanded: it keeps the setpoint the morning tune left it holding."
+
+[[steps]]
+notes = "ox win=checklist"
+safety_overrides = []
+kind = "prompt"
+title = "Before the test"
+message = "Heater tuned and HOLDING at the day's setpoint, off the chamber. Sample cup on the holder, mass reading steady. Air supply open through the silica-bead dryer; MCR-200 setpoint source on serial. Continue turns the purge on (185 SLPM), then records 30 s of flush and the 2 min baseline."
+
+[[steps]]
+notes = "ox win=purge_on"
+safety_overrides = []
+kind = "setpoint"
+value = 185.0
+
+[steps.target]
+name = "purge.setpoint"
+
+[[steps]]
+notes = "ox win=purge_reach"
+safety_overrides = []
+kind = "wait"
+timeout_s = 30.0
+on_timeout = "abort"
+
+[steps.end_condition]
+channel = "purge.flow"
+op = ">="
+value = 180.0
+
+[[steps]]
+notes = "ox win=flush"
+safety_overrides = []
+kind = "acquire"
+duration_s = 30.0
+
+[[steps]]
+notes = "ox win=baseline"
+safety_overrides = []
+kind = "acquire"
+duration_s = 120.0
+
+[[steps]]
+notes = "ox win=move_on"
+safety_overrides = []
+kind = "prompt"
+title = "Heater on"
+message = "Slide the heater onto the chamber, then Continue straight away: that starts the 45 min heater-on period. The next prompt asks for the slide off."
+
+[[steps]]
+notes = "ox win=active"
+safety_overrides = []
+kind = "acquire"
+duration_s = 360.0
+
+[[steps]]
+notes = "ox win=move_off"
+safety_overrides = []
+kind = "prompt"
+title = "Heater off"
+message = "45 min up. Slide the heater off the chamber, then Continue straight away: that starts the 5 min post-heater record, after which the purge turns off and the run ends."
+
+[[steps]]
+notes = "ox win=post"
+safety_overrides = []
+kind = "acquire"
+duration_s = 300.0
+
+[[steps]]
+notes = "ox win=purge_off"
+safety_overrides = []
+kind = "setpoint"
+value = 0.0
+
+[steps.target]
+name = "purge.setpoint"

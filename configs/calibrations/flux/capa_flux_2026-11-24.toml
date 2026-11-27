@@ -1,0 +1,22 @@
+id = "capa_flux_2026-11-24"
+rig = "flux_tune"
+heater_device = "heater"
+heater_setpoint_channel = "heater.setpoint"
+heater_pv_channel = "heater.pv"
+flux_channel = "heat_flux_gauge"
+geometry = "open air, 40 mm below heater, centerline (heater off the chamber)"
+accepted_at = 2026-11-24 15:59:01.253047+00:00
+procedure_id = "capa.builtin.heat_flux_tune"
+procedure_version = "0.1.0"
+gauge_calibration_ref = "Medtherm 32-10SB-18-20608 SN 232041, 13026.52 kW/m2/V (2026-11-22, via NIST 223481 cone-heater value)"
+
+[[points]]
+target_flux_kw_m2 = 50.0
+heater_setpoint_c = 722.8187590845791
+measured_flux_mean_kw_m2 = 49.85552780676724
+measured_flux_std_kw_m2 = 0.17378574086703477
+measured_flux_slope_kw_m2_per_min = -0.055797563674704065
+heater_pv_mean_c = 722.8476132993345
+soak_s = 2604.8630754
+accepted = true
+accept_reason = "algorithm_converged"
