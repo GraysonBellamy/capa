@@ -12,8 +12,13 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from sartoriuslib.devices.models import CalRecord, ParameterEntry, Reading
-from sartoriuslib.errors import SartoriusError
+from sartoriuslib.devices.models import AdjustmentResult, CalRecord, ParameterEntry, Reading
+from sartoriuslib.errors import (
+    SartoriusAdjustmentAbortedError,
+    SartoriusAdjustmentNotStartedError,
+    SartoriusAdjustmentTimeoutError,
+    SartoriusError,
+)
 from sartoriuslib.protocol.base import ProtocolKind
 from sartoriuslib.registry.aliases import (
     resolve_auto_zero,
@@ -46,6 +51,7 @@ from capa.devices.records import (
 )
 from capa.devices.sartorius import (
     ADAPTER_ID,
+    BalanceAdjustmentError,
     SartoriusAdapter,
     SartoriusAdapterParams,
     SartoriusStateSnapshot,
@@ -89,6 +95,8 @@ class StubBalance:
         # pathway). Each list captures the *kwargs the adapter forwarded* so
         # tests can assert both payload mapping and ``confirm=True`` pass-through.
         self.internal_adjust_calls: list[dict[str, Any]] = []
+        # Raised by ``internal_adjust`` instead of returning a result.
+        self.raise_on_adjust: BaseException | None = None
         self.set_filter_mode_calls: list[dict[str, Any]] = []
         self.set_display_unit_calls: list[dict[str, Any]] = []
         self.set_auto_zero_calls: list[dict[str, Any]] = []
@@ -112,10 +120,11 @@ class StubBalance:
             3: StabilityRange.ACCURATE,
             4: StabilityDelay.SHORT,
         }
+        # Completion time DDMMYYhhmmss = 27-11-26 15:56:49, one digit per byte.
         self.cal_record = CalRecord(
             temperature_celsius=22.4,
-            signature=b"\x01" * 9,
-            counters=b"\x00\x02\x00",
+            signature=bytes([2, 7, 1, 1, 2, 6, 1, 5, 5]),
+            counters=bytes([6, 4, 9]),
             padding=0,
             raw=b"",
         )
@@ -175,8 +184,29 @@ class StubBalance:
     async def zero(self) -> None:
         self.zero_calls += 1
 
-    async def internal_adjust(self, *, cal_type: int | None = None, confirm: bool = False) -> None:
-        self.internal_adjust_calls.append({"cal_type": cal_type, "confirm": confirm})
+    async def internal_adjust(
+        self,
+        *,
+        cal_type: int | None = None,
+        confirm: bool = False,
+        wait: bool = False,
+        timeout: float = 120.0,
+    ) -> AdjustmentResult:
+        self.internal_adjust_calls.append(
+            {"cal_type": cal_type, "confirm": confirm, "wait": wait, "timeout": timeout}
+        )
+        if self.raise_on_adjust is not None:
+            raise self.raise_on_adjust
+        now = datetime.now(UTC)
+        return AdjustmentResult(
+            cal_record=self.cal_record,
+            previous_cal_record=self.cal_record,
+            started_at=now,
+            finished_at=now,
+            duration_s=24.4,
+            polls=98,
+            transient_errors=0,
+        )
 
     async def set_filter_mode(self, mode: Any, *, confirm: bool = False) -> None:
         self.set_filter_mode_calls.append({"mode": mode, "confirm": confirm})
@@ -455,6 +485,49 @@ class TestInternalAdjust:
             assert stub.internal_adjust_calls[0]["cal_type"] is None
             # CAPA's authorization gate covers the library's confirm gate.
             assert stub.internal_adjust_calls[0]["confirm"] is True
+            # The command returns when the balance has finished, not at its ACK.
+            assert stub.internal_adjust_calls[0]["wait"] is True
+            assert stub.internal_adjust_calls[0]["timeout"] == 120.0
+            assert result.detail == "internal calibration done in 24 s at 22.4 °C"
+        finally:
+            await adapter.close()
+
+    async def test_timeout_comes_from_the_adapter_params(self) -> None:
+        stub = StubBalance()
+
+        async def factory() -> Any:
+            return stub
+
+        adapter = SartoriusAdapter(
+            name="balance", port="fake://stub", adjust_timeout_s=45.0, balance_factory=factory
+        )
+        await adapter.open()
+        try:
+            await adapter.internal_adjust(issued_by="alice", confirmed_by="alice")
+            assert stub.internal_adjust_calls[0]["timeout"] == 45.0
+        finally:
+            await adapter.close()
+
+    @pytest.mark.parametrize(
+        ("error", "outcome"),
+        [
+            (SartoriusAdjustmentAbortedError, "aborted"),
+            (SartoriusAdjustmentTimeoutError, "timeout"),
+            (SartoriusAdjustmentNotStartedError, "not_started"),
+        ],
+    )
+    async def test_each_ending_without_a_record_has_its_outcome(
+        self, error: type[SartoriusError], outcome: str
+    ) -> None:
+        adapter, stub = _make_adapter()
+        stub.raise_on_adjust = error("from the library")
+        await adapter.open()
+        try:
+            with pytest.raises(BalanceAdjustmentError) as info:
+                await adapter.internal_adjust(issued_by="alice", confirmed_by="alice")
+            assert info.value.outcome == outcome
+            assert info.value.device == "balance"
+            assert isinstance(info.value.__cause__, error)
         finally:
             await adapter.close()
 
@@ -626,6 +699,7 @@ class TestReadStateSnapshot:
                 display_unit="g",
                 tare_behavior="with stability",
                 cal_temperature_c=22.4,
+                cal_timestamp=datetime(2026, 11, 27, 15, 56, 49),
                 cal_on_record=True,
             )
         finally:

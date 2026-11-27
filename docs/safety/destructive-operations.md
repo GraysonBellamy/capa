@@ -21,9 +21,9 @@ The full list of `destructive=True` dispatches in the Manual Control cards, as o
 |---|---|---|
 | Watlow | `set_setpoint` (from the "Cool to safe" button) | Drives the heater to a low setpoint; commits via the same write path as ordinary setpoints but is gated because a stuck low setpoint mid-experiment is destructive to the run. [`watlow.py:352`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/watlow.py#L352) |
 | Watlow | `write_parameter` | Persistent parameter write to the controller — survives power-cycle. [`watlow.py:422`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/watlow.py#L422) |
-| Sartorius balance | `internal_adjust` | Triggers the balance's motorized internal calibration cycle. [`balance.py:172`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/balance.py#L172) |
-| Sartorius balance | `save_menu` | Save menu settings to EEPROM. [`balance.py:234`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/balance.py#L234) |
-| Sartorius balance | `reload_menu` | Reload menu settings from EEPROM. [`balance.py:250`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/balance.py#L250) |
+| Sartorius balance | `internal_adjust` | Runs the balance's motorized internal calibration (~25 s) and waits for it; the card's Cancel (`abort_adjustment`) is not destructive and needs no confirmation. [`balance.py:325`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/balance.py#L325) |
+| Sartorius balance | `save_menu` | Save menu settings to EEPROM. [`balance.py:341`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/balance.py#L341) |
+| Sartorius balance | `reload_menu` | Reload menu settings from EEPROM. [`balance.py:415`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/balance.py#L415) |
 | Alicat MFC | `set_gas` (with `save=True`) | Persist gas selection to EEPROM (the session-only variant is non-destructive). [`alicat.py:189`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/alicat.py#L189) |
 | Alicat MFC | `hold_valves_closed` | Force the controller's valves fully closed regardless of setpoint. [`alicat.py:251`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/alicat.py#L251) |
 | Alicat MFC | `totalizer_reset` | Zero a totalizer's accumulated flow history. [`alicat.py:280`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/ui/manual/cards/alicat.py#L280) |

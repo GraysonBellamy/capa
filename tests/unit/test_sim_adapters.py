@@ -249,6 +249,63 @@ class TestSartoriusSim:
         assert snapshot.stability_range == "max fast"
         assert snapshot.display_unit == "g"
 
+    async def test_internal_calibration_runs_and_is_on_record(self) -> None:
+        sim = SartoriusSim(name="balance", mass_signal=Constant(5.0), adjust_duration_s=0.05)
+        await sim.open()
+        before = await sim.read_state_snapshot()
+        assert before is not None
+        assert before.cal_on_record is False
+        result = await sim.command(
+            DeviceCommand(kind="internal_adjust", payload={}, issued_by="op", confirmed_by="op")
+        )
+        assert result.accepted
+        assert result.detail.startswith("internal calibration done in")
+        after = await sim.read_state_snapshot()
+        assert after is not None
+        assert after.cal_on_record is True
+        assert after.cal_temperature_c == 22.0
+        assert after.cal_timestamp is not None
+
+    async def test_internal_calibration_can_be_aborted(self) -> None:
+        import anyio
+
+        from capa.devices.sartorius import BalanceAdjustmentError
+
+        sim = SartoriusSim(
+            name="balance", mass_signal=Constant(5.0), adjust_duration_s=30.0, abort_tail_s=0.0
+        )
+        await sim.open()
+        errors: list[BaseException] = []
+
+        async def calibrate() -> None:
+            try:
+                await sim.command(
+                    DeviceCommand(
+                        kind="internal_adjust", payload={}, issued_by="op", confirmed_by="op"
+                    )
+                )
+            except BalanceAdjustmentError as exc:
+                errors.append(exc)
+
+        with anyio.fail_after(5.0):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(calibrate)
+                await anyio.sleep(0.05)
+                abort = await sim.command(
+                    DeviceCommand(
+                        kind="abort_adjustment", payload={}, issued_by="op", confirmed_by="op"
+                    )
+                )
+                assert abort.detail.startswith("abort sent")
+        assert [e.outcome for e in errors] == ["aborted"]  # type: ignore[attr-defined]
+        snapshot = await sim.read_state_snapshot()
+        assert snapshot is not None
+        assert snapshot.cal_on_record is False
+        idle = await sim.command(
+            DeviceCommand(kind="abort_adjustment", payload={}, issued_by="op", confirmed_by="op")
+        )
+        assert idle.detail == "no internal calibration was running"
+
     async def test_unknown_mode_is_refused(self) -> None:
         sim = SartoriusSim(name="balance", mass_signal=Constant(5.0))
         await sim.open()

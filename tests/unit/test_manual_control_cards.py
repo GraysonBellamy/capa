@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -801,6 +802,7 @@ class TestBalanceCardReadback:
                 display_unit="lb",
                 tare_behavior="at stability",
                 cal_temperature_c=21.7,
+                cal_timestamp=datetime(2026, 11, 27, 15, 56, 49),
                 cal_on_record=True,
             )
         )
@@ -814,12 +816,144 @@ class TestBalanceCardReadback:
             "display_unit": "lb",
             "tare_behavior": "at stability",
         }
-        assert "Last cal: 21.7 °C" in card._subtitle_label.text()
+        assert (
+            "Last cal: 21.7 °C at 2026-11-27 15:56 (balance clock)" in card._subtitle_label.text()
+        )
 
         card.apply_snapshot(SartoriusStateSnapshot(cal_temperature_c=21.0, cal_on_record=False))
         for combo in card._param_combos.values():
             assert combo.currentIndex() == -1
         assert "Last cal: none since power-up" in card._subtitle_label.text()
+
+
+def _calibrating_balance(controller: RunController, op: OperatorIdProvider, **params: Any) -> Any:
+    """Open a pool with one stub balance whose ``internal_adjust`` behaves
+    per ``params`` (``adjust_s``, ``adjust_outcome``) and return its card."""
+    cfg = _make_config((DeviceConfig(name="balance.main", adapter=STUB_BALANCE, params=params),))
+    _open_pool_sync(controller, cfg)
+    return BalanceCard(spec=cfg.hardware.devices[0], controller=controller, operator_provider=op)
+
+
+def _button(card: Any, text: str) -> QPushButton:
+    return next(b for b in card.findChildren(QPushButton) if b.text() == text)
+
+
+async def _until(condition: Any, *, timeout_s: float = 5.0) -> None:
+    for _ in range(int(timeout_s / 0.01)):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition never held")
+
+
+class TestBalanceCardCalibration:
+    @pytest.fixture(autouse=True)
+    def _confirm_yes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            QMessageBox, "question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+        )
+
+    def test_card_shows_the_calibration_then_its_result(
+        self, qtbot: Any, controller: RunController, op_provider: OperatorIdProvider
+    ) -> None:
+        from capa.ui.manual.cards.balance import CALIBRATING_TEXT
+        from tests.fixtures.stub_sartorius import CAL_DONE_DETAIL
+
+        card = _calibrating_balance(controller, op_provider, adjust_s=0.3)
+        qtbot.addWidget(card)
+        run, cancel, tare = (
+            _button(card, "Run internal calibration…"),
+            _button(card, "Cancel"),
+            _button(card, "Tare"),
+        )
+        assert not cancel.isEnabled()
+        seen: dict[str, Any] = {}
+
+        async def _go() -> None:
+            run.click()
+            await _until(lambda: card.calibrating)
+            seen.update(
+                status=card._status_label.text(),
+                run=run.isEnabled(),
+                tare=tare.isEnabled(),
+                cancel=cancel.isEnabled(),
+                progress=not card._cal_progress.isHidden(),
+            )
+            await _drain_tasks()
+
+        _run_async(_go())
+        assert seen == {
+            "status": CALIBRATING_TEXT,
+            "run": False,
+            "tare": False,
+            "cancel": True,
+            "progress": True,
+        }
+        assert not card.calibrating
+        assert card._status_label.text() == f"✓ {CAL_DONE_DETAIL}"
+        assert run.isEnabled() and tare.isEnabled()
+        assert not cancel.isEnabled()
+        assert card._cal_progress.isHidden()
+        adapter = _adapter_for(controller, "balance.main")
+        assert [c.kind for c in adapter.commands_received] == ["internal_adjust"]
+        # "Last cal" is re-read as soon as the calibration ends.
+        assert adapter.readback_count == 1
+
+    @pytest.mark.parametrize("outcome", ["aborted", "timeout", "not_started"])
+    def test_each_ending_without_a_calibration_says_so(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+        outcome: str,
+    ) -> None:
+        from capa.ui.manual.cards.balance import _CAL_ENDINGS
+
+        card = _calibrating_balance(controller, op_provider, adjust_outcome=outcome)
+        qtbot.addWidget(card)
+        _click(card, "Run internal calibration…")
+        text, _level = _CAL_ENDINGS[outcome]  # type: ignore[index]
+        assert card._status_label.text() == text
+        assert not card.calibrating
+        assert _button(card, "Tare").isEnabled()
+
+    def test_cancel_stops_the_calibration(
+        self, qtbot: Any, controller: RunController, op_provider: OperatorIdProvider
+    ) -> None:
+        from capa.ui.manual.cards.balance import CANCELLED_TEXT
+
+        card = _calibrating_balance(controller, op_provider, adjust_s=30.0)
+        qtbot.addWidget(card)
+
+        async def _go() -> None:
+            _button(card, "Run internal calibration…").click()
+            await _until(lambda: card.calibrating)
+            _button(card, "Cancel").click()
+            await _drain_tasks()
+
+        _run_async(_go())
+        assert card._status_label.text() == CANCELLED_TEXT
+        assert not card.calibrating
+        adapter = _adapter_for(controller, "balance.main")
+        assert [c.kind for c in adapter.commands_received] == [
+            "internal_adjust",
+            "abort_adjustment",
+        ]
+
+    def test_declined_confirmation_sends_nothing(
+        self,
+        qtbot: Any,
+        controller: RunController,
+        op_provider: OperatorIdProvider,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(QMessageBox, "question", lambda *a, **kw: QMessageBox.StandardButton.No)
+        card = _calibrating_balance(controller, op_provider)
+        qtbot.addWidget(card)
+        _click(card, "Run internal calibration…")
+        assert card._status_label.text() == "cancelled"
+        assert not card.calibrating
+        assert _adapter_for(controller, "balance.main").commands_received == []
 
 
 # ============================================================================
