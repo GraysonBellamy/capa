@@ -85,6 +85,13 @@ class StubWatlowController:
         self.identify_calls = 0
         self.raise_on_poll: BaseException | None = None
         self.raise_on_set_setpoint: BaseException | None = None
+        # ``read_parameter`` answers from ``settings`` (keyed by the name or
+        # id as passed, and instance); unlisted parameters read 0.
+        # ``raise_on_read_parameter`` maps a name or id to the error its
+        # read raises (persistent, not one-shot).
+        self.settings: dict[tuple[str | int, int], float | int | None] = {}
+        self.raise_on_read_parameter: dict[str | int, BaseException] = {}
+        self.read_parameter_calls: list[tuple[str | int, int]] = []
 
     async def __aenter__(self) -> StubWatlowController:
         self.aentered = True
@@ -204,6 +211,21 @@ class StubWatlowController:
             {"name": name_or_id, "value": value, "instance": instance, "confirm": confirm}
         )
         spec = PARAMETERS.resolve(name_or_id)
+        return ParameterEntry(spec=spec, instance=instance, value=value, raw=b"")
+
+    async def read_parameter(
+        self,
+        name_or_id: str | int,
+        *,
+        instance: int = 1,
+        timeout: float | None = None,
+    ) -> ParameterEntry:
+        del timeout
+        self.read_parameter_calls.append((name_or_id, instance))
+        if name_or_id in self.raise_on_read_parameter:
+            raise self.raise_on_read_parameter[name_or_id]
+        spec = PARAMETERS.resolve(name_or_id)
+        value = self.settings.get((name_or_id, instance), 0)
         return ParameterEntry(spec=spec, instance=instance, value=value, raw=b"")
 
     async def read_pv(self, *, instance: int = 1, timeout: float | None = None) -> Reading:

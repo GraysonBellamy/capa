@@ -27,23 +27,28 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import cache
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import structlog
 import watlowlib
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from watlowlib import (
     Controller,
     DeviceInfo,
     DeviceProfile,
     OverflowPolicy,
+    ParameterEntry,
     ProtocolKind,
     Reading,
     Sample,
     Unit,
     WatlowError,
+    WatlowTransportError,
     sample_to_row,
 )
+from watlowlib.protocol.stdbus.tlv import DataType
+from watlowlib.registry.enumerations import load_enumerations
 from watlowlib.streaming.recorder import record as watlow_record
 from watlowlib.transport.base import ByteSize, Parity, SerialSettings, StopBits
 from watlowlib.units import to_pint
@@ -93,6 +98,24 @@ _PROTOCOL_BY_NAME: Final[dict[ProtocolName, ProtocolKind]] = {
     "modbus_rtu": ProtocolKind.MODBUS_RTU,
     "auto": ProtocolKind.AUTO,
 }
+
+PM_SETTINGS_PARAMETERS: Final[tuple[str | int, ...]] = (
+    "control_mode",  # Auto / Manual / Off
+    "heat_algorithm",  # PID / On / Off
+    "heat_proportional_band",  # in the wire temperature unit
+    "time_integral",  # s per repeat
+    "time_derivative",  # s
+    "tru_tune_enable",
+    "tru_tune_band",
+    "tru_tune_gain",
+    "autotune_aggressiveness",
+    "autotune_set_point",  # % of the setpoint
+    "autotune_status",
+    4014,  # analog input filter, s (the name "filter" resolves to 26026)
+)
+"""EZ-ZONE PM loop settings recorded with every snapshot: how the loop is
+controlling, not what it reads. TRU-TUNE+ rewrites the PID gains while
+holding, so they are re-read each snapshot rather than once per run."""
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +178,14 @@ class WatlowAdapterParams(BaseModel):
     snapshot_period_s: float = Field(gt=0, default=30.0)
     """Cadence of :class:`DeviceSnapshot` emissions during a run."""
 
+    settings_parameters: tuple[str | int, ...] | None = None
+    """Parameters (name or id) read into every :class:`DeviceSnapshot`
+    (run start, then every ``snapshot_period_s``), keyed by canonical name,
+    for each of ``instances``. Enumerated values are stored as their labels
+    ("Yes", "PID", ...). ``None`` (the default) means
+    :data:`PM_SETTINGS_PARAMETERS` for the ``ezzone`` profile and none for
+    the others; ``[]`` turns it off. See :meth:`settings`."""
+
     identify_on_open: bool = True
     """Run :meth:`Controller.identify` immediately after opening, populating
     the cached :class:`DeviceInfo` used by :meth:`WatlowAdapter.snapshot`."""
@@ -188,6 +219,28 @@ class WatlowAdapterParams(BaseModel):
     the assertion entirely — :attr:`Sample.unit` will be ``None`` for
     temperature parameters and the per-channel drift check becomes a
     no-op."""
+
+    def settings(self) -> tuple[str | int, ...]:
+        """The settings parameters in effect, with the profile default applied."""
+        if self.settings_parameters is not None:
+            return self.settings_parameters
+        return PM_SETTINGS_PARAMETERS if self.profile == "ezzone" else ()
+
+    @model_validator(mode="after")
+    def _check_settings_parameters(self) -> WatlowAdapterParams:
+        registry = self.device_profile().registry
+        names: list[str] = []
+        for ident in self.settings():
+            try:
+                names.append(registry.resolve(ident).name)
+            except WatlowError as exc:
+                raise ValueError(
+                    f"settings_parameters: {ident!r} is not a {self.profile!r} parameter"
+                ) from exc
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise ValueError(f"settings_parameters: duplicate names {duplicates}")
+        return self
 
     def to_serial_settings(self) -> SerialSettings:
         """Build the :class:`SerialSettings` watlowlib expects.
@@ -440,8 +493,9 @@ class WatlowAdapter:
         """Build a :class:`DeviceSnapshot` from the library snapshot + live health.
 
         Reads ``controller.snapshot()`` (I/O-free) for cached identity,
-        family, capabilities, and the session counters, and projects
-        into capa's emission shape. Health derives from the shared
+        family, capabilities, and the session counters, plus the
+        ``settings_parameters`` off the wire, and projects into capa's
+        emission shape. Health derives from the shared
         :meth:`AdapterRuntimeState.compute_health` for parity with the
         other real adapters.
         """
@@ -574,6 +628,44 @@ class WatlowAdapter:
             out["loops"] = info.loops
             if info.configured_protocol is not None:
                 out["configured_protocol"] = info.configured_protocol.value
+        out["wire_temperature_unit"] = self.params.wire_temperature_unit
+        out.update(await self._read_settings())
+        return out
+
+    async def _read_settings(self) -> dict[str, float | int | str | bool | None]:
+        """Read ``settings_parameters`` for the snapshot, best-effort.
+
+        A read the device rejects records ``None`` and the rest carry on. A
+        transport failure (timeout, lost port) records ``None`` for everything
+        left, so a dead bus costs one timeout per snapshot, not one per setting.
+        """
+        out: dict[str, float | int | str | bool | None] = {}
+        if self._controller is None:
+            return out
+        registry = self.params.device_profile().registry
+        bus_down = False
+        for ident in self.params.settings():
+            name = registry.resolve(ident).name
+            for instance in self.params.instances:
+                key = name if instance == 1 else f"{name}[{instance}]"
+                out[key] = None
+                if bus_down:
+                    continue
+                try:
+                    entry = await self._controller.read_parameter(
+                        ident, instance=instance, timeout=self.params.io_timeout_s
+                    )
+                except WatlowTransportError as exc:
+                    bus_down = True
+                    _logger.warning(
+                        "watlow.settings_read_aborted", device=self.name, at=key, error=str(exc)
+                    )
+                except WatlowError as exc:
+                    _logger.debug(
+                        "watlow.settings_read_failed", device=self.name, at=key, error=str(exc)
+                    )
+                else:
+                    out[key] = _setting_value(entry)
         return out
 
     # =====================================================================
@@ -1032,6 +1124,23 @@ class WatlowAdapter:
 # ---------------------------------------------------------------------------
 # CLI handshake hook (``capa validate --strict``)
 # ---------------------------------------------------------------------------
+
+
+@cache
+def _enum_labels() -> dict[int, str]:
+    """Watlow's label for each enumeration code (59 → "No", 71 → "PID").
+
+    Codes are unique across the whole enumeration table, so no
+    per-parameter mapping is needed.
+    """
+    return {row[3]: row[1] for row in load_enumerations()}
+
+
+def _setting_value(entry: ParameterEntry) -> float | int | str | bool | None:
+    """A settings read as recorded: enumerations by label, the rest as read."""
+    if entry.spec.data_type == DataType.PACKED and isinstance(entry.value, int):
+        return _enum_labels().get(entry.value, entry.value)
+    return entry.value
 
 
 async def handshake(params: dict[str, Any]) -> str:

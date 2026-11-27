@@ -11,6 +11,7 @@ protocol = "stdbus"
 parameters = [
     "process_value",
     "setpoint",
+    "output_power",  # PID output %, logged to device_records (no channel)
 ]
 instances = [
     1,
