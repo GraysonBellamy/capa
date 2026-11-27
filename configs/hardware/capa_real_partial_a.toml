@@ -193,6 +193,7 @@ kind = "mass"
 unit = "g"
 derived_unit = "g"
 plot_group = "mass"
+plot_despike = true   # hide the Cubis's one-sample ±tare glitches in the plot (recorded as is)
 [channels.metadata]
 capa_group = "mass"
 [channels.source]

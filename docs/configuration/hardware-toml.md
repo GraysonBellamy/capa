@@ -115,6 +115,7 @@ One entry per named scientific signal. Each entry maps onto a
 | `sample_rate_hz` | float | no | Producer sampling rate hint. |
 | `plot_group` | str | no | `"temperatures"`, `"flows"`, `"mass"` — UI grouping. |
 | `plot` | bool | no | `false` leaves the channel off the Run tab's plots. It is still recorded, shown in the Numerics dock and available to alarms and procedures. Default `true`. |
+| `plot_despike` | bool | no | `true` draws the channel's trace as a running median of 3, hiding single-sample spikes; the newest point waits one sample. Display only: recording, Numerics and alarms see every sample. Default `false`. |
 | `alarms` | array of tables | no | Declarative alarm bands. |
 | `sinks` | array of strings | no | Which named sinks receive the channel. Defaults to `["scalars"]`. |
 | `decimate_to_hz` | float | no | Plot-only decimation (disk capture stays at native rate). Default 60. |

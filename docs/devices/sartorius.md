@@ -222,6 +222,20 @@ If first-open seems unusually slow on your rig, check:
 3. `protocol` matches what the balance is configured for — `"auto"`
    adds a probe step that pays the cold-open cost twice.
 
+### One-sample ±tare readings
+
+The rig's MSE1203S Cubis, polled at 50 Hz with net-weight reads
+(xBPI `0x1E`), returns about one reading in 50 000 off by exactly the
+stored tare: `+tare` is the gross weight (tare not subtracted), `-tare`
+is the tare subtracted twice. The frame's checksum is valid, so it is
+the balance, not the line. Seen at about 4 per hour since 2026-10-07.
+
+The value is recorded as sent, in `balance.mass` and
+`device_records/sartorius.parquet`. Analysis should drop single samples
+more than 1 g from both neighbours. The rig configs set
+`plot_despike = true` on `balance.mass` so the live trace (and its
+autorange) doesn't jump.
+
 ### Sim does not model the race
 
 [`capa.devices.sim.sartorius_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/sartorius_sim.py)

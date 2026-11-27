@@ -72,6 +72,7 @@ CHANNEL_KEY_ORDER: tuple[str, ...] = (
     "derived_unit",
     "plot_group",
     "plot",
+    "plot_despike",
     "sample_rate_hz",
     "keep_raw",
     "source",

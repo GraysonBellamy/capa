@@ -130,6 +130,21 @@ def peak_decimate(
     return x[idx], y[idx]
 
 
+def median3(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Running median of 3: drops single-sample spikes, keeps steps.
+
+    Each point becomes the median of itself and its two neighbours. The
+    newest point has no successor yet, so it is held back until the next
+    sample arrives; the first point is kept as it is. Arrays shorter than
+    three are returned as they are.
+    """
+    if y.size < 3:
+        return x, y
+    a, b, c = y[:-2], y[1:-1], y[2:]
+    mid = np.maximum(np.minimum(a, b), np.minimum(np.maximum(a, b), c))
+    return x[:-1], np.concatenate((y[:1], mid))
+
+
 class PlotPane(QWidget):
     """Container that owns one sub-plot per ``plot_group``.
 
@@ -161,6 +176,7 @@ class PlotPane(QWidget):
         # Per-channel factor into the unit the axis shows
         # (:func:`~capa.ui.display_units.display_unit`): Pa plots as kPa.
         self._scales: dict[str, float] = {}
+        self._despike: set[str] = {ch.name for ch in self._channels if ch.plot_despike}
         # Last-seen ``total_kept`` per channel — used in ``_refresh`` to
         # skip ``setData`` for curves whose ring buffer has not advanced
         # since the previous repaint tick. ``-1`` forces a first paint.
@@ -319,7 +335,10 @@ class PlotPane(QWidget):
             if scale != 1.0:
                 v = v * scale
             # Convert t_mono_ns → seconds-since-run-start for display.
-            curve.setData(*peak_decimate(t_ns.astype("float64") / 1e9, v))
+            t_s = t_ns.astype("float64") / 1e9
+            if channel in self._despike:
+                t_s, v = median3(t_s, v)
+            curve.setData(*peak_decimate(t_s, v))
             self._last_kept[channel] = kept
             new_data = True
         if new_data and not self._has_data:
@@ -345,4 +364,4 @@ class PlotPane(QWidget):
         self._reposition_overlays()
 
 
-__all__ = ["MAX_CURVE_POINTS", "REPAINT_INTERVAL_MS", "PlotPane", "peak_decimate"]
+__all__ = ["MAX_CURVE_POINTS", "REPAINT_INTERVAL_MS", "PlotPane", "median3", "peak_decimate"]
