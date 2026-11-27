@@ -1,0 +1,127 @@
+# NIST calibration of transfer-standard heat-flux gauge 223481 (Medtherm
+# GTW-10SB-4-36-40-484, Schmidt-Boelter, 10 W/cm2 range, absorptance 0.94,
+# no window; "brand new UMD Medtherm" on the sheet), 2022-12-19, in the NIST
+# Fire Research Division's tungsten-lamp rig against NIST's new reference
+# gauge SN 140461 (1.897 kW/m2 per mV), with a cone-heater validation. This is
+# the parent of the CAPA reference 232041 (12867.29134 kW/m2/V). Digitized
+# 2026-11-21 from photos of the paper sheets (20261121_175516.jpg: NIST
+# reduction; 20261121_175526.jpg: Medtherm certificate).
+#
+# Result (incident, as NIST reported it): q = 9417.8 kW/m2/V x V + 0.013 kW/m2
+#   = 9.4178 kW/m2 per mV = 106.18 uV per kW/m2, fitted to the four tungsten
+#   points only, 3.67-17.46 kW/m2. The sheet carries 9.41782649.
+# No uncertainty is stated; +-3 % (k=2) is assumed, as for the chain behind
+# 232041. 140461 is the blackbody-calibrated reference that NIST TN 2282
+# (Leventon et al., 2024) describes replacing 124421; its own blackbody
+# calibration is 1.5 % (k=1) there.
+#
+# Tungsten lamp (q from 140461 at 1.897 kW/m2 per mV; voltages as printed):
+#
+#   lamp A  q nominal  140461 V    223481 V    fit kW/m2  140461 kW/m2  resid
+#   4.5      3.5       1.936E-03   3.900E-04    3.686      3.67         +0.37 %
+#   5        5         3.402E-03   6.819E-04    6.435      6.45         -0.29 %
+#   6       10         6.407E-03   1.290E-03   12.16      12.15         +0.03 %
+#   6.8     15         9.204E-03   1.853E-03   17.46      17.46         +0.01 %
+#
+# Cone-calorimeter heater validation (not in the fit):
+#
+#   140461 V    223481 V    fit kW/m2  140461 kW/m2  resid   q/V kW/m2 per mV
+#   8.200E-03   1.665E-03   15.68      15.56         +0.81 %   9.343
+#   1.236E-02   2.513E-03   23.66      23.45         +0.92 %   9.330
+#   1.638E-02   3.333E-03   31.39      31.06         +1.05 %   9.323
+#   0.0298      0.006052    57.00      56.53         +0.82 %   9.341
+#
+# The sheet's residual columns are fractions under a "[%]" label (3.659E-03
+# is 0.37 %); averages 0.03 % (tungsten) and 0.90 % (cone). Refitting the
+# printed voltages gives 9415.2 V + 0.014, within 0.03 % of the sheet.
+#
+# Under the cone heater the tungsten fit reads 0.9 % HIGH against 140461:
+# the cone points alone give 9.334 kW/m2 per mV (107.13 uV per kW/m2). The
+# CAPA heater is a cone-type source, so a chain built on the tungsten fit
+# (232041 via 223481) may read cone-heater flux ~0.9 % high; on the cone
+# constant 232041 would be ~12756 kW/m2/V instead of 12867. Whether the
+# difference is spectral or convective, and in which gauge, is not shown.
+#
+# Medtherm certificate 22348-R1-1, 2021-11-29 ("Calibration after repair of
+# water tubes"; received for recalibration 2021-11-15), P.O. CC, reference
+# standard 215863, calibrated by 31, incident: 1.027 mV per W/cm2 (inverse
+# 0.9737 W/cm2 per mV) = 102.70 uV per kW/m2 = 9.737 kW/m2 per mV, full scale
+# 10.27 mV at 10 W/cm2, +-3 % k=2, water 16.0 C at 12.5 mL/s, ambient 23 +-3 C.
+# NIST (tungsten) reads 223481 3.39 % more sensitive (the sheet's
+# "Delta Sensitivity"); the cone points, 4.3 % more.
+#
+# Unexplained on the sheet: "1.29811E-05 (kW m-2) mV-1" printed under
+# "Medtherm - 11/29/2021"; it matches neither certificate value.
+#
+# Measured 2026-11-21: body 0.620 in diameter x 1.018 in long; water tubes
+# about 4.25 in (rough); leads 36-37 in. No body thermocouple. Medtherm
+# publishes no key for GTW model numbers; in GTW-10SB-4-36-40-484 the "4"
+# fits the tube length and the "36" the lead length; "40" is unknown.
+#
+# 2026-11-22 comparison against the CAPA reference 232041, its child (a check
+# of 232041, not a recalibration: this file's curve stays on NIST's value).
+# Open-air transfer, CAPA heater at 40 mm, 223481 on HFG2 (ai8, left, stop
+# B), 232041 right (stop A), faces level to +-0.5 mm (entered 0.0), centres
+# 42.07 mm apart, building water. No body TC: a K probe taped to the water
+# tubes (ai1, cooling_water.temperature) read 21.35 C at the zero and
+# 19.9-25.8 C over the D windows; it also sees the heater. Bundle
+# runs/hfg_transfer_cal/2026-11-22_141726_HFG2_223481_cal1;
+#   uv run python scripts/analyze_hfg_transfer.py --ref-slope 12867.29134 \
+#     --body-channel cooling_water.temperature --dut-label 223481 \
+#     runs/hfg_transfer_cal/2026-11-22_141726_HFG2_223481_cal1
+# On 232041's scale (12867.29 kW/m2/V): S = 108.461 +- 0.057 uV per kW/m2
+# through the origin, 12 levels 4.0-67.8 kW/m2 (9.2199 kW/m2 per mV, 1.0846
+# mV per W/cm2); F = 1.0153 (the stops differ more than at 34.4 mm, 11-21:
+# 1.0083). Up/down repeats -0.50 % (10), -0.11 % (30), +0.11 % (50 kW/m2);
+# residuals rms 0.17 %, worst -0.37 % at 4.0 kW/m2; quadratic curvature
+# +0.01 % (t = 0.1): linear against 232041, so 180253's ~1 % fall over the
+# range on 11-21 was 180253's, not 232041's.
+# Against this gauge's references: NIST 2022 tungsten fit +2.15 %, NIST 2022
+# cone points +1.24 %, Medtherm 2021 +5.61 %. Read as 232041 reading 2.1 %
+# low on NIST's tungsten scale (232041 would be 13143 kW/m2/V) or 1.2 % low
+# on its cone scale (13027 kW/m2/V). With 180253 (corrected NIST 2013
+# +3.6 %), the two NIST calibrations agree within 1.4 % through 232041; the
+# two Medtherm certificates disagree by 3.7 % (+1.9 % vs +5.6 %).
+#
+# Uncertainty of the comparison (k=1), rough: NIST 2022 value 1.5 %
+# (assumed, none stated); face height +-0.5 mm at ~1 %/mm (geometry guess,
+# not measured) 0.3 %; statistics and F 0.1 %. Combined 1.5 %, so +-3.1 % at
+# k=2. Not included: the stop asymmetry. The bracketed and ratio estimates
+# differ by 1.5 %; the result follows the bracketed scale (centred flux equal
+# at both stops), as on 10-17 and 11-21. Swapping the gauges' positions would
+# bound it.
+#
+# Adopted 2026-11-22: 232041 moved to 13026.52 kW/m2/V (this comparison
+# against NIST's cone-heater value), in every rig hardware config and as
+# scripts/analyze_hfg_transfer.py's default --ref-slope. The cone value was
+# chosen over the tungsten fit because it is the same kind of source as the
+# CAPA heater and covers 15.6-56.5 kW/m2, where the tungsten fit stops at 17.5.
+
+name = "hfg_223481_2022-12-19"
+revision = "1"
+
+# Curve key is the gauge, not a rig channel. The Setup tab applies a set by
+# channel name, so this curve applies to no channel as is; it is the record
+# of 223481's value. To read 223481 in kW/m2 live, copy these numbers into
+# the calibration of the channel that carries its volts.
+[curves.hfg_223481]
+kind = "linear_two_point"
+input_unit = "V"
+output_unit = "kW/m^2"
+ref_low_raw = 0.0
+ref_low_value = 0.013
+ref_high_raw = 0.01
+ref_high_value = 94.191  # 9417.8 kW/m2/V x 0.01 V + 0.013, NIST tungsten fit
+
+[curves.hfg_223481.uncertainty]
+kind = "relative"
+value = 0.015             # standard (k=1); +-3 % k=2 ASSUMED, none stated by NIST; capa multiplies by coverage_factor
+coverage_factor = 2.0
+method = "NIST Fire Research Division tungsten-lamp calibration 2022-12-19 against reference 140461 (1.897 kW/m2 per mV), 3.67-17.46 kW/m2; cone-heater validation 15.6-56.5 kW/m2 reads +0.9 %; Medtherm 2021-11-29 certificate 3.4 % less sensitive (see configs/calibrations/hfg_223481_2022-12-19.toml header)"
+
+[curves.hfg_223481.fit_metadata]
+reference_instrument = "NIST Fire Research Division reference heat-flux gauge (blackbody-calibrated, per NIST TN 2282)"
+reference_serial = "140461"
+fitted_at = 2022-12-19T00:00:00Z
+source_procedure_id = "NIST tungsten-lamp transfer calibration with cone-heater validation (paper sheet)"
+notes = "Incident flux, 9417.8 kW/m2/V + 0.013 kW/m2 (9.4178 kW/m2 per mV = 106.18 uV per kW/m2), tungsten points only; cone points alone 9.334 kW/m2 per mV. fitted_at is the calibration date (time not stated). Digitized 2026-11-21 from photos of the paper sheets."

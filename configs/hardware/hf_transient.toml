@@ -333,19 +333,21 @@ output_unit = "kW/m^2"
 ref_low_raw = 0.0
 ref_low_value = -0.064771278
 ref_high_raw = 0.01
-ref_high_value = 128.6081421
+ref_high_value = 130.2004287  # 13026.52 kW/m2/V x 0.01 V - 0.064771278 (2026-11-22)
 
 [channels.calibration.uncertainty]
 kind = "relative"
-value = 0.015             # standard (k=1): +-3 % at k=2; capa multiplies by coverage_factor
+value = 0.016             # standard (k=1): +-3.2 % at k=2, mostly NIST's unstated value (1.5 % assumed); capa multiplies by coverage_factor
 coverage_factor = 2.0
-method = "manufacturer cert + reference comparison"
+method = "transfer from NIST-calibrated 223481 (NIST 2022 cone-heater value), open air, 2026-11-22 (configs/calibrations/hfg_223481_2022-12-19.toml)"
 
 [channels.calibration.fit_metadata]
-reference_instrument = "Medtherm Corporation 32-10SB-18-20608"
-reference_serial = "232041"
-fitted_at = 1970-01-01 00:00:00+00:00
-notes = "linear fit: slope 12867.29134 kW/m^2/V, intercept -0.064771278 kW/m^2 (named NI MAX scale 'CAPA HFG'); applied software-side, not via the driver scale. fitted_at is a placeholder; replace with the actual cert date when available."
+reference_instrument = "Medtherm GTW-10SB-4-36-40-484 (NIST-calibrated transfer standard)"
+reference_serial = "223481"
+fitted_at = 2026-11-22T17:28:03Z
+source_procedure_id = "capa.builtin.recipe_runner (hfg_transfer_cal methods) + scripts/analyze_hfg_transfer.py"
+capa_git_sha = "80ff2d0-dirty"
+notes = "This gauge: Medtherm 32-10SB-18-20608 SN 232041. Slope 13026.52 kW/m^2/V = previous 12867.29134 x 1.012375: on 2026-11-22 (run 2026-11-22_141726_HFG2_223481_cal1) 223481 read 108.461 uV per kW/m^2 on the previous scale, against NIST's 2022 cone-heater value 107.135 (9334 kW/m^2/V). NIST's tungsten-lamp fit would give 13143 (+0.9 %); 180253's corrected NIST 2013 value 13328 (+2.3 %). Intercept -0.064771278 kW/m^2 kept from the NI MAX scale 'CAPA HFG'. Applied software-side, not via the driver scale. The transfer's stop asymmetry (1.5 % between estimators) is not in the uncertainty."
 
 [channels.metadata]
 capa_group = "heat_flux_gauge"
@@ -353,8 +355,8 @@ gauge_type = "Schmidt-Boelter"
 position = "open air, 40 mm below heater, centerline (tune only; removed for the test)"
 
 # 175681 at the specimen position. Curve hfg_175681 from
-# configs/calibrations/hfg_175681_2026-10-17.toml (68.259 uV per kW/m2
-# through the origin, +-3.1 % k=2, valid 4.2-68.8 kW/m2). keep_raw records
+# configs/calibrations/hfg_175681_2026-10-17.toml (67.425 uV per kW/m2
+# through the origin, +-3.3 % k=2, revision 2 of 2026-11-22, valid 4.2-68.8 kW/m2). keep_raw records
 # the volts so the analysis can zero-correct against the baseline.
 [[channels]]
 name = "hfg_175681"
@@ -377,11 +379,11 @@ output_unit = "kW/m^2"
 ref_low_raw = 0.0
 ref_low_value = 0.0
 ref_high_raw = 0.01
-ref_high_value = 146.501
+ref_high_value = 148.314
 
 [channels.calibration.uncertainty]
 kind = "relative"
-value = 0.0156            # standard (k=1); capa multiplies by coverage_factor
+value = 0.0166            # standard (k=1); capa multiplies by coverage_factor
 coverage_factor = 2.0
 method = "transfer against CAPA reference 232041, 2026-10-17 (configs/calibrations/hfg_175681_2026-10-17.toml)"
 
@@ -389,7 +391,7 @@ method = "transfer against CAPA reference 232041, 2026-10-17 (configs/calibratio
 reference_instrument = "Medtherm 32-10SB-18-20608 (CAPA reference heat-flux gauge)"
 reference_serial = "232041"
 fitted_at = 2026-10-17T20:08:48Z
-rms_residual = 0.0947
+rms_residual = 0.0959
 
 [channels.metadata]
 gauge_type = "Schmidt-Boelter"

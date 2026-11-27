@@ -28,7 +28,7 @@ procedure:
     hold_at_completion: true
     operator_id: gbellamy
     geometry: "open air, 40 mm below heater, centerline (heater off the chamber)"
-    gauge_calibration_ref: "Medtherm 32-10SB-18-20608 SN 232041, 12867.29134 kW/m2/V"
+    gauge_calibration_ref: "Medtherm 32-10SB-18-20608 SN 232041, 13026.52 kW/m2/V (2026-11-22, via NIST 223481 cone-heater value)"
 
 operator:
   id: gbellamy

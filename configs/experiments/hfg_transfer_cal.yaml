@@ -13,15 +13,21 @@
 #   - heater cold, PV within 2 degC of the room, at stop A. The heater
 #     can't slide clear of the gauges, so the run's only zero is this cold
 #     one at the start
-#   - both gauges water-cooled from the same loop for >= 5 min; HFG2 body
-#     temperature (ai4) steady near the water temperature and above the
-#     dew point from the ambient sensor
+#   - both gauges water-cooled from the same loop for >= 5 min;
+#     cooling_water.temperature (K probe on ai1, taped to the water tubes)
+#     flat (< 0.02 degC/min) and above the dew point from the ambient
+#     sensor
 #   - gauges seated with faces level, stops A and B set
 #   - hood or room ventilation in its run state and left alone
 #   - sample extras below filled in
 #
-# During the run: watch hfg2.body_temperature. If it climbs more than
-# ~5 degC above the water temperature, stop the run (cooling problem).
+# During the run: watch cooling_water.temperature. The taped TC sees the
+# heater, so it steps up when the heater does (+0.4 degC at level 1 on
+# 2026-11-22; expect more at higher levels). A climb that keeps going after
+# the level has settled is a cooling problem: stop the run. The building
+# supply drifts slowly by itself (+0.04-0.06 degC/min on 2026-11-22); that
+# moves both gauges' zeros by the same flux (-17 W/m2 per degC each), so it
+# cancels in the calibration and is no reason to stop.
 # CAPA's safety rules are not enforced yet, so this is a manual watch.
 # A level is spoiled by a bump, a late or early slide, or a reach-wait
 # timeout warning: note the level number and rerun that level afterwards.

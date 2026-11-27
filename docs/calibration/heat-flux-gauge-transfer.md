@@ -17,7 +17,7 @@ The reference carries a manufacturer calibration (3 %, k = 2). HFG2 inherits it 
 
 | File | What it is |
 |---|---|
-| [configs/hardware/hfg_transfer_cal.toml](https://github.com/GraysonBellamy/capa/blob/main/configs/hardware/hfg_transfer_cal.toml) | Heater, NI 9214 (reference on ai14, HFG2 on ai8 at ±78 mV, HFG2 body TC on ai4, type K), ambient sensor. No chamber devices. |
+| [configs/hardware/hfg_transfer_cal.toml](https://github.com/GraysonBellamy/capa/blob/main/configs/hardware/hfg_transfer_cal.toml) | Heater, NI 9214 (reference on ai14, HFG2 on ai8 at ±78 mV, cooling-water TC on ai1, type K: the ice-point spare probe taped to the water tubes, for gauges without a body TC; 180253's body TC was ai7, type T, and 175681's ai4, type K), ambient temperature, RH and pressure. No chamber devices. |
 | [configs/experiments/hfg_transfer_pilot.yaml](https://github.com/GraysonBellamy/capa/blob/main/configs/experiments/hfg_transfer_pilot.yaml) | Pilot run, about 75 min. |
 | [configs/experiments/hfg_transfer_cal.yaml](https://github.com/GraysonBellamy/capa/blob/main/configs/experiments/hfg_transfer_cal.yaml) | Calibration run, about 3.5 h. |
 | `configs/methods/hfg_transfer_{pilot,cal}.method.toml` | Generated from the script below; don't edit by hand. |
@@ -34,7 +34,7 @@ Both experiments run [`capa.builtin.recipe_runner`](../procedures/builtin-recipe
 
 ## Setup
 
-- **Gauges.** Side by side, both water-cooled from one loop at a steady flow, with the water above the dew point. The ambient sensor gives air temperature and RH; HFG2's body TC should sit at the water temperature. Take the zero only once the body temperature is flat (under 0.02 °C/min): the zero includes the face's heat exchange with the room, so it moves when the water temperature does. On 2026-10-17 the supply drifted 1.3 °C over the first 35 min of the session and both zeros moved with it. Mount both gauges the same way, flush in the same board or holder: the cooled face also picks up convection from the hot air under the heater, and that depends on how the gauge sits.
+- **Gauges.** Side by side, both water-cooled from one loop at a steady flow, with the water above the dew point. The ambient sensor gives air temperature and RH; The water TC on the tubes (`cooling_water.temperature`) tracks the supply. Take the zero only once it is flat (under 0.02 °C/min): the zero includes the face's heat exchange with the room, so it moves when the water temperature does. On 2026-10-17 the supply drifted 1.3 °C over the first 35 min of the session and both zeros moved with it. Mount both gauges the same way, flush in the same board or holder: the cooled face also picks up convection from the hot air under the heater, and that depends on how the gauge sits.
 - **Face height.** Measure the height difference between the two sensing faces and record it. Height matters far more than lateral position: on the centreline the field is at a lateral extremum, so a small sideways error costs little, while the vertical gradient is first-order.
 - **Slide stops.** Fixed stops at A (reference centred) and B (HFG2 centred). The stops are the lateral positioning; placing the heater by eye is not repeatable enough. The heater can't slide clear of the gauges, so the only zero is taken at the start with the heater cold (PV within 2 °C of the room) over A. A heater 8 °C above the room still puts about 0.04 kW/m² on the reference, 0.8 % of the 5 kW/m² level.
 - **Air.** Hood or room ventilation in its run state and left alone, no drafts across the gauges, doors closed.
@@ -83,7 +83,7 @@ Each level:
 
 Click Continue only once the heater is against the stop. Each window step carries a tag such as `hfgcal level=03 q=15 dir=up win=R1` in its `method.step.entered` and `method.step.exited` events, so the analysis finds the windows from the bundle alone.
 
-**During the run, watch `hfg2.body_temperature`.** More than about 5 °C above the water and rising means a cooling problem: stop the run. CAPA's safety rules are not enforced yet, so this is the operator's job.
+**During the run, watch `cooling_water.temperature`.** The taped TC sees the heater, so it steps up whenever the heater does (+0.4 °C at the 4 kW/m² level on 2026-11-22; expect more at higher levels). A climb that keeps going after the level has settled means a cooling problem: stop the run. The building supply also drifts slowly by itself (+0.04 to +0.06 °C/min on 2026-11-22). That moves both gauges' zeros by the same flux (−17 W/m² per °C for 232041 and for 223481), so it cancels in the transfer and is no reason to stop. CAPA's safety rules are not enforced yet, so this is the operator's job.
 
 **A level is spoiled** by a bump, a slide while a window is recording, or a `method.wait.timeout` warning. Note it in the sample's `spoiled_levels` and rerun that level.
 
@@ -178,8 +178,8 @@ These are in-chamber data at one flux. The pilot confirms them in open air at bo
 
 | Gauge | Date | Sensitivity | U (k=2) | Range, kW/m² | Record |
 |---|---|---|---|---|---|
-| 175681 (Medtherm 8-2-10-4-0-36-20680K) | 2026-10-17 | 68.259 µV per kW/m² (14.650 kW/m² per mV) | 3.1 % | 4.2–68.8 | [configs/calibrations/hfg_175681_2026-10-17.toml](https://github.com/GraysonBellamy/capa/blob/main/configs/calibrations/hfg_175681_2026-10-17.toml) |
-| 222091 (Medtherm 24P-10SB-24-21062, ZnSe window, N2 purge) | 2026-10-22 | 65.759 µV per kW/m² (15.207 kW/m² per mV), centred, top face 40 mm, purge 0.2 L/min (0.1–0.4 indistinguishable) | 3.3 % | 14.8–69.5 | [configs/calibrations/rad_222091_2026-10-22.toml](https://github.com/GraysonBellamy/capa/blob/main/configs/calibrations/rad_222091_2026-10-22.toml) |
+| 175681 (Medtherm 8-2-10-4-0-36-20680K) | 2026-10-17 | 67.425 µV per kW/m² (14.831 kW/m² per mV), revision 2 (reference rescaled 2026-11-22; was 68.259) | 3.3 % | 4.2–68.8 | [configs/calibrations/hfg_175681_2026-10-17.toml](https://github.com/GraysonBellamy/capa/blob/main/configs/calibrations/hfg_175681_2026-10-17.toml) |
+| 222091 (Medtherm 24P-10SB-24-21062, ZnSe window, N2 purge) | 2026-10-22 | 64.955 µV per kW/m² (15.395 kW/m² per mV), revision 2 (reference rescaled 2026-11-22; was 65.759), centred, top face 40 mm, purge 0.2 L/min (0.1–0.4 indistinguishable) | 3.4 % | 14.8–69.5 | [configs/calibrations/rad_222091_2026-10-22.toml](https://github.com/GraysonBellamy/capa/blob/main/configs/calibrations/rad_222091_2026-10-22.toml) |
 
 Each record's header carries the reference chain, the uncertainty budget, the conditions and the command that reproduces it from the bundles. The bundles themselves are under `runs/`, which git ignores: keep a copy of each calibration's run folders somewhere backed up.
 

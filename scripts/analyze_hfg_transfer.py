@@ -66,8 +66,11 @@ REF_CHANNEL = "heat_flux_gauge"
 PV_CHANNEL = "heater.pv"
 AIR_CHANNEL = "ambient.temperature"
 FLOW_CHANNEL = "purge.flow"
-REF_SLOPE_KW_M2_PER_V = 12867.29134
-"""CAPA reference 232041, transferred from 223481 (NIST colleague, 2022-12-19)."""
+REF_SLOPE_KW_M2_PER_V = 13026.52
+"""CAPA reference 232041 since 2026-11-22: transferred from 223481 against its
+NIST 2022 cone-heater value (configs/calibrations/hfg_223481_2022-12-19.toml).
+Bundles analysed before then used 12867.29134; pass ``--ref-slope 12867.29134``
+to reproduce those numbers."""
 KW_M2_PER_BTU_FT2_S = 11.356526682
 RESIDUAL_LIMIT_PCT = 0.6
 

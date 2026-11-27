@@ -8,7 +8,7 @@
 #
 # Before Start:
 #   - both gauges water-cooled from the same loop for >= 5 min; HFG2 body
-#     temperature (ai4) steady near the water temperature and above the
+#     temperature (ai7) steady near the water temperature and above the
 #     dew point from the ambient sensor
 #   - reference on ai14, HFG2 on ai8: with the heater on, HFG2 must read
 #     positive (negative = swap its leads)

@@ -4,9 +4,9 @@
 # "Windowed radiometer with purge". Supersedes rad_222091_2026-10-18.toml,
 # where the radiometer sat off-centre under stop B (see "Position" below).
 #
-# Result: S = 65.759 uV per kW/m2 through the origin
-#       = 15.207 kW/m2 per mV = 0.7468 mV per BTU/(ft2 s) = 0.6576 mV per W/cm2
-#       +-3.3 % (k=2), valid 14.8-69.5 kW/m2, CENTRED under this heater with
+# Result: S = 64.955 uV per kW/m2 through the origin
+#       = 15.395 kW/m2 per mV = 0.7377 mV per BTU/(ft2 s) = 0.6496 mV per W/cm2
+#       +-3.4 % (k=2) (revision 2; see below), valid 14.8-69.5 kW/m2, CENTRED under this heater with
 #       the radiometer's top face 40 mm below it, purge 0.2 L/min N2
 #       (0.1-0.4 L/min indistinguishable on 2026-10-18).
 #
@@ -78,19 +78,26 @@
 # +0.5 to +1.1 % over 30-120 s as the heater's output rose ~2 %: use the
 # radiometer with the heater at steady state and no draft across it.
 #
-# Uncertainty budget (k=1): reference 232041 1.5 % (assumed from its +-3 %
-# k=2); unknown cooling-water conditions in the chain 0.3 %; seating 0.5 %
+# Uncertainty budget (k=1): reference 232041 1.6 % (its 2026-11-22 value;
+# NIST's unstated uncertainty assumed 1.5 %); unknown cooling-water conditions in the chain 0.3 %; seating 0.5 %
 # (judgement: a gross mis-seating moved S by 2.5 %, a careful re-seat should
 # repeat to a fifth of that); zero 0.05 % (the 0.3 uV day-to-day repeat on
 # each gauge is 0.03 % at 14.8 kW/m2; rounded up); level dependence 0.14 %
 # (half-range 0.24 %, rectangular); heat soak / up-down 0.15 % (repeats
 # -0.27 % at 30, -0.15 % at 50 kW/m2); transfer statistics 0.12 % (fit
 # 0.05 %, F 0.11 %); estimator choice 0.05 % (the direct estimate over the
-# same levels gives 65.795); purge 0.05 %. Combined 1.63 %, so 3.3 % at
+# same levels gives 65.795); purge 0.05 %. Combined 1.72 %, so 3.4 % at
 # k=2.
+#
+# Revision 2 (2026-11-22): rescaled by 1/1.012375 when the reference 232041
+# moved from 12867.29134 to 13026.52 kW/m2/V
+# (configs/calibrations/hfg_223481_2022-12-19.toml); the reproduce command
+# above now gives these numbers. Revision 1: 65.759 uV per kW/m2
+# (15.207 kW/m2 per mV), ref_high_value 152.071, +-3.3 % k=2. Against the
+# 2021 factory value this result is now +7.6 % (was +8.9 %).
 
 name = "rad_222091_2026-10-22"
-revision = "1"
+revision = "2"
 
 # Curve key is the gauge, not a rig channel: apply it to whichever channel
 # carries 222091's raw volts (Setup tab, Calibration section).
@@ -101,19 +108,19 @@ output_unit = "kW/m^2"
 ref_low_raw = 0.0
 ref_low_value = 0.0
 ref_high_raw = 0.01
-ref_high_value = 152.071
+ref_high_value = 153.953
 
 [curves.rad_222091.uncertainty]
 kind = "relative"
-value = 0.0163            # standard (k=1); capa multiplies by coverage_factor
+value = 0.0172            # standard (k=1); capa multiplies by coverage_factor
 coverage_factor = 2.0
-method = "transfer against CAPA reference 232041 (assumed +-3 % k=2, NIST-colleague chain); 9 levels 14.8-69.5 kW/m2, radiometer centred, R D R per level with the oscillation-free ratio estimator, zeros from a settled cold bundle on 2026-10-23; budget in configs/calibrations/rad_222091_2026-10-22.toml header"
+method = "transfer against CAPA reference 232041 (13026.52 kW/m2/V since 2026-11-22, +-3.2 % k=2); 9 levels 14.8-69.5 kW/m2, radiometer centred, R D R per level with the oscillation-free ratio estimator, zeros from a settled cold bundle on 2026-10-23; budget in configs/calibrations/rad_222091_2026-10-22.toml header"
 
 [curves.rad_222091.fit_metadata]
 reference_instrument = "Medtherm 32-10SB-18-20608 (CAPA reference heat-flux gauge)"
 reference_serial = "232041"
 fitted_at = 2026-10-23T15:00:00Z
-rms_residual = 0.0488
+rms_residual = 0.0494
 source_procedure_id = "capa.builtin.recipe_runner (rad_transfer_cal_single method) + scripts/analyze_hfg_transfer.py"
 capa_git_sha = "e7cef80-dirty"
 notes = "Open air, CAPA cone heater 40 mm above both gauges' top faces (the radiometer's window sits a little below its top face; recess not measured, included in the calibration), radiometer centred under the heater, gauge centres 36.449 mm apart. Cooling water 22.5 C at 17.9 mL/s (factory: 23.7 C at 6.5 mL/s). N2 purge 0.2 L/min (Alicat MC-500SCCM-D SN 125238). Zero in place before use. rms_residual is in kW/m2 (0.14 % relative). Reads 13.5 % more centred than 36.449 mm off-centre and depends strongly on seating: valid only centred and seated as calibrated, at this standoff, under this heater, at steady state with no drafts. Below 14.8 kW/m2 it read 1-2.5 % low against this slope with a settled zero; cause unresolved. Levels above 56.5 kW/m2 lie above the reference chain's range."
