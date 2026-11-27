@@ -134,6 +134,28 @@ class TestExperimentConfig:
         ec = self._make(m)
         assert ec.method is not None
 
+    def test_with_method_swaps_the_method(self) -> None:
+        ec = self._make(None)
+        m = Method(
+            name="edited",
+            steps=(HoldStep(target=ChannelRef(name="heater.setpoint"), value=5, duration_s=1),),
+        )
+        swapped = ec.with_method(m)
+        assert swapped.method == m
+        assert swapped.hardware is ec.hardware
+        assert ec.method is None
+        assert swapped.with_method(None).method is None
+
+    def test_with_method_checks_targets(self) -> None:
+        """The swap re-runs the channel cross-check that ``model_copy``
+        would skip."""
+        m = Method(
+            name="bad",
+            steps=(HoldStep(target=ChannelRef(name="ghost"), value=1, duration_s=1),),
+        )
+        with pytest.raises(ConfigError, match="ghost"):
+            self._make(None).with_method(m)
+
     def test_load_minimal_hardware_fixture(self, configs_dir: Path) -> None:
         with open(configs_dir / "hardware/sim_minimal.toml", "rb") as f:
             data = tomllib.load(f)

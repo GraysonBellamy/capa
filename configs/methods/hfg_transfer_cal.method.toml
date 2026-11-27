@@ -4,7 +4,7 @@ description = "HFG2 transfer calibration against the reference: 5-70 kW/m2 up, 5
 [[steps]]
 kind = "prompt"
 title = "Before heating"
-message = "Cooling water flowing through both gauges; HFG2 body temperature flat on the plot (drifting less than 0.02 degC/min) and above the dew point; both gauges seated with faces level; heater cold (PV within 2 degC of the room) and at stop A, centred on the REFERENCE. Continue to record the zero; the heater heats to level 1 after it."
+message = "Cooling water flowing through both gauges; cooling water temperature flat on the plot (drifting less than 0.02 degC/min) and above the dew point; both gauges seated with faces level; heater cold (PV within 2 degC of the room) and at stop A, centred on the REFERENCE. Continue to record the zero; the heater heats to level 1 after it."
 notes = "hfgcal win=checklist"
 
 [[steps]]

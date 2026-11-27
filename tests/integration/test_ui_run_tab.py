@@ -110,9 +110,12 @@ class _FakeController(QObject):
 
     # The real RunController exposes start/abort but RunTab tests don't
     # exercise them — leave as no-ops to keep the seam minimal.
-    def start(self, _config: Any, *, device_settings_observed: Any = None) -> None:
+    def start(self, config: Any, *, device_settings_observed: Any = None) -> None:
+        self.started_config = config
         self.started_with = device_settings_observed
         self.is_active = True
+
+    started_config: Any = None
 
     def check_device_settings(self) -> Any:
         return self.settings_check
@@ -314,3 +317,64 @@ async def test_cancelling_the_settings_dialog_does_not_start(
     opened[0].reject()
     assert fake_controller.started_with == "not started"
     assert tab._start_btn.isEnabled()
+
+
+# ---------------------------------------------------------------------------
+# Start runs the composed config (the Method tab's current method)
+# ---------------------------------------------------------------------------
+
+
+def test_start_runs_the_composed_config(qtbot: Any, fake_controller: _FakeController) -> None:
+    applied = _config()
+    composed = applied.model_copy(update={"tags": ("composed",)})
+    tab = _tab(qtbot, fake_controller)
+    tab.set_run_config_composer(lambda cfg: composed if cfg is applied else cfg)
+    tab.load_config(applied)
+
+    tab._on_start_clicked()
+
+    assert fake_controller.started_config is composed
+
+
+def test_start_refuses_when_the_composer_fails(
+    qtbot: Any, fake_controller: _FakeController, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    from capa.core.errors import CapaError
+
+    warnings: list[str] = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda _parent, _title, text: warnings.append(text))
+
+    def _fail(_cfg: ExperimentConfig) -> ExperimentConfig:
+        raise CapaError("Step 2 has an invalid entry")
+
+    tab = _tab(qtbot, fake_controller)
+    tab.set_run_config_composer(_fail)
+    tab._on_start_clicked()
+
+    assert warnings == ["Step 2 has an invalid entry"]
+    assert fake_controller.started_with == "not started"
+    assert "not valid" in tab._run_id_label.text()
+    assert tab._run_id_label.toolTip() == "Step 2 has an invalid entry"
+
+
+def test_header_follows_method_edits_until_a_run_starts(
+    qtbot: Any, fake_controller: _FakeController
+) -> None:
+    from capa.experiment.method import Method, SafeShutdownStep
+
+    method: list[Method | None] = [None]
+    tab = _tab(qtbot, fake_controller)
+    tab.set_run_config_composer(lambda cfg: cfg.model_copy(update={"method": method[0]}))
+    assert tab._run_id_label.text().endswith("Free run")
+
+    method[0] = Method(name="edited", steps=(SafeShutdownStep(),))
+    tab.refresh_method()
+    assert tab._run_id_label.text().endswith("Method: edited")
+
+    # Once running, the header describes the run in flight.
+    tab._on_start_clicked()
+    method[0] = None
+    tab.refresh_method()
+    assert tab._run_id_label.text().endswith("Method: edited")

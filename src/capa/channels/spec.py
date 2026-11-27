@@ -356,6 +356,12 @@ class ChannelSpec(BaseModel):
     alarms and procedures like any other channel; it only has no curve. For
     a flag or a state that would draw a flat line."""
 
+    plot_despike: bool = False
+    """Hide single-sample spikes from this channel's trace: the plot draws a
+    running median of 3, so its newest point waits one sample. Display only;
+    the recording, Numerics dock and alarms see every sample. For a device
+    with known one-sample glitches (the Cubis balance's ±tare readings)."""
+
     alarms: tuple[AlarmBand, ...] = ()
 
     sinks: tuple[str, ...] = ("scalars",)

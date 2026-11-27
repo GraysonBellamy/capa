@@ -12,7 +12,10 @@ The Specimen pane is the one place the operator describes the
 specimen. Every edit also rewrites the experiment's ``sample`` block
 from it (:func:`capa.config.capa_profile.sample_from_specimen`); the
 Operator & sample section shows that block read-only while the profile
-is active.
+is active. Likewise the Atmosphere pane's purge gas is the one place the
+purge gas is named: the Setup tab writes the purge MFC's
+``device_settings`` gas from it, and Device settings shows that gas
+read-only.
 
 The mapping panel is the operator-visible payoff for the hardware
 side: every required group reports a green ✓ / red ✗ chip, and
@@ -94,6 +97,16 @@ _PANES: tuple[tuple[str, str, type[BaseModel]], ...] = (
     ("atmosphere", "Atmosphere", Atmosphere),
 )
 """``(metadata key, pane title, model)`` for each dedicated pane."""
+
+_PANE_HINTS: dict[str, str] = {
+    "specimen": "The experiment's sample block (run id, catalog entry) is filled from here.",
+    "atmosphere": (
+        "The purge gas also sets the gas of the MFC mapped to purge_gas_flow, in "
+        "Device settings, when the MFC knows it as one gas."
+    ),
+}
+"""Hint under a pane's title, for panes that fill in other parts of the
+experiment."""
 
 _RecordView: type[BaseModel] = create_model(
     "_RecordView",
@@ -235,12 +248,7 @@ class CapaProfileSection(SectionWidget):
         outer.addWidget(self._editor)
 
         for key, pane_title, model_cls in _PANES:
-            hint = (
-                "The experiment's sample block (run id, catalog entry) is filled from here."
-                if key == "specimen"
-                else None
-            )
-            frame, box = _bordered(pane_title, hint)
+            frame, box = _bordered(pane_title, _PANE_HINTS.get(key))
             form = build_form(model_cls, parent=frame)
             form.valuesChanged.connect(self._on_metadata_changed)
             box.addWidget(form)

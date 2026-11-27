@@ -12,10 +12,12 @@ from PySide6.QtCore import QEvent, QObject
 from capa.channels.calibration import Identity
 from capa.channels.spec import ChannelKind, ChannelSpec, WatlowParameter
 from capa.core.ringbuffer import RingBufferRegistry
-from capa.ui.plots.pane import MAX_CURVE_POINTS, PlotPane, peak_decimate
+from capa.ui.plots.pane import MAX_CURVE_POINTS, PlotPane, median3, peak_decimate
 
 
-def _channel(name: str, *, plot_group: str | None, plot: bool = True) -> ChannelSpec:
+def _channel(
+    name: str, *, plot_group: str | None, plot: bool = True, plot_despike: bool = False
+) -> ChannelSpec:
     return ChannelSpec(
         name=name,
         kind=ChannelKind.PROCESS_VAR,
@@ -25,6 +27,7 @@ def _channel(name: str, *, plot_group: str | None, plot: bool = True) -> Channel
         calibration=Identity(input_unit="degC", output_unit="degC"),
         plot_group=plot_group,
         plot=plot,
+        plot_despike=plot_despike,
     )
 
 
@@ -102,6 +105,45 @@ def test_peak_decimate_keeps_both_ends_and_every_extreme() -> None:
     assert out_y.min() == -50.0
     # Every point is a real sample, not a bucket average.
     assert np.array_equal(out_y, y[np.searchsorted(x, out_x)])
+
+
+def test_median3_drops_a_one_sample_spike_and_keeps_a_step() -> None:
+    x = np.arange(8.0)
+    y = np.array([92.4, 92.4, 436.4, 92.4, 92.4, 80.0, 80.0, 80.0])
+    out_x, out_y = median3(x, y)
+    # The newest point waits for its successor.
+    assert np.array_equal(out_x, x[:-1])
+    assert np.array_equal(out_y, [92.4, 92.4, 92.4, 92.4, 92.4, 80.0, 80.0])
+
+
+def test_median3_leaves_a_short_trace_alone() -> None:
+    x = np.arange(2.0)
+    y = np.array([1.0, 500.0])
+    assert median3(x, y) == (x, y)
+
+
+def test_only_a_despiked_channel_hides_a_spike(qtbot: Any) -> None:
+    registry = RingBufferRegistry()
+    pane = PlotPane(
+        registry=registry,
+        channels=[
+            _channel("mass", plot_group="mass", plot_despike=True),
+            _channel("raw", plot_group="mass"),
+        ],
+    )
+    qtbot.addWidget(pane)
+    pane.show()
+    qtbot.waitExposed(pane)
+    for name in ("mass", "raw"):
+        buf = registry.register(name, decimate_to_hz=0.0)
+        for i, value in enumerate((92.4, 92.4, 436.4, 92.4, 92.4)):
+            buf.push_raw(i * 100_000_000, value)
+    pane._refresh()
+    _, mass = pane._curves["mass"].getData()
+    _, raw = pane._curves["raw"].getData()
+    assert mass is not None and raw is not None
+    assert mass.max() == pytest.approx(92.4)
+    assert raw.max() == pytest.approx(436.4)
 
 
 def test_a_deep_ring_reaches_its_curve_decimated_end_to_end(qtbot: Any) -> None:

@@ -31,6 +31,14 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 import anyio
 
 from capa.devices.records import ChannelSample
+from capa.experiment.method import (
+    CustomStep,
+    HoldStep,
+    Method,
+    RampStep,
+    SetpointStep,
+    WaitStep,
+)
 from capa.experiment.procedures.base import Problem
 from capa.experiment.profiles.base import ChannelRequirement
 
@@ -209,9 +217,16 @@ async def _required_channel_mappings(ctx: ProfilePreflightContext) -> Problem | 
 
 @register("capa.atmosphere_consistency")
 async def _atmosphere_consistency(ctx: ProfilePreflightContext) -> Problem | None:
-    """Oxidative / reactive_blend modes must declare a reactive_gas_flow channel."""
-    mode = ctx.profile_metadata.get("atmosphere", {}).get("mode")
-    if mode not in ("oxidative", "reactive_blend"):
+    """A reactive gas needs a reactive_gas_flow channel to log its flow.
+
+    ``reactive_blend`` always has one; any other mode has one when the
+    profile declares ``atmosphere.reactive`` (e.g. O2 metered into an N2
+    purge). An air purge is ``oxidative`` with no reactive gas, so it
+    needs no second flow channel.
+    """
+    atmosphere = ctx.profile_metadata.get("atmosphere", {})
+    mode = atmosphere.get("mode")
+    if mode != "reactive_blend" and atmosphere.get("reactive") is None:
         return None
     has_reactive = any(
         ch.metadata.get("capa_group") == "reactive_gas_flow" for ch in ctx.config.hardware.channels
@@ -220,7 +235,8 @@ async def _atmosphere_consistency(ctx: ProfilePreflightContext) -> Problem | Non
         return Problem(
             code="capa.atmosphere_inconsistent",
             message=(
-                f"atmosphere.mode={mode!r} requires a channel tagged capa_group='reactive_gas_flow'"
+                f"atmosphere.mode={mode!r} with a reactive gas requires a channel "
+                f"tagged capa_group='reactive_gas_flow'"
             ),
             severity="error",
             blocking=True,
@@ -357,9 +373,51 @@ def _method_heater_setpoint_c(profile_metadata: dict[str, Any]) -> float | None:
         return None
 
 
+def _method_gates_purge(ctx: ProfilePreflightContext, threshold: float) -> bool:
+    """Whether the method checks the purge itself before it can heat.
+
+    True when a ``wait`` on a purge_gas_flow channel, for at least
+    ``threshold``, with a ``timeout_s`` that aborts (or shuts down safely),
+    comes before any step that commands a heater_setpoint channel. Such a
+    method turns the purge on after Start and stops if the flow doesn't
+    come up, so the purge needn't be running at Start. A custom step ahead
+    of the wait may command anything, so it counts as heating.
+    """
+    method = getattr(ctx.config, "method", None)
+    if not isinstance(method, Method):
+        return False
+    purge_channels: set[str] = set()
+    heater_channels: set[str] = set()
+    for ch in ctx.config.hardware.channels:
+        group = ch.metadata.get("capa_group")
+        if group == "purge_gas_flow":
+            purge_channels.add(ch.name)
+        elif group == "heater_setpoint":
+            heater_channels.add(ch.name)
+    for step in method.steps:
+        if isinstance(step, WaitStep):
+            cond = step.end_condition
+            if (
+                cond is not None
+                and cond.channel in purge_channels
+                and cond.op in (">", ">=")
+                and cond.value >= threshold
+                and step.timeout_s is not None
+                and step.on_timeout in ("abort", "safe_shutdown")
+            ):
+                return True
+        elif isinstance(step, CustomStep) or (
+            isinstance(step, HoldStep | RampStep | SetpointStep)
+            and step.target.name in heater_channels
+        ):
+            return False
+    return False
+
+
 @register("capa.purge_flow_established", category="dynamic")
 async def _purge_flow_established(ctx: ProfilePreflightContext) -> Problem | None:
-    """Purge flow has been seen at >= target * 0.5 for >=3 s."""
+    """Purge flow has been seen at >= target * 0.5 for >=3 s, unless the
+    method checks it itself before heating (see :func:`_method_gates_purge`)."""
     target = ctx.profile_metadata.get("atmosphere", {}).get("purge", {}).get("target_flow_slpm")
     if target is None:
         return Problem(
@@ -373,6 +431,8 @@ async def _purge_flow_established(ctx: ProfilePreflightContext) -> Problem | Non
         # intentionally not flowed). Nothing to verify.
         return None
     threshold = float(target) * 0.5
+    if _method_gates_purge(ctx, threshold):
+        return None
     samples = await _sample_for(
         ctx,
         group_key="capa_group",

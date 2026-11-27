@@ -8,12 +8,19 @@ prior to ignition" using the preserved native row.
 Keeps the menu settings the real adapter exposes (filter mode, stability
 range, …) as state so the manual card and declarative ``device_settings``
 can read back what they set. Saving / reloading the menu is a no-op.
+
+``internal_adjust`` takes as long as a real calibration (~24 s) and can be
+stopped with ``abort_adjustment``, so the manual card's calibration flow can
+be tried without the rig. Only the command's timing and outcome are faked:
+the readings meanwhile stay the mass signal.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import datetime
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, get_args
 
@@ -48,6 +55,7 @@ from capa.devices.sartorius import (
     SARTORIUS_SETTINGS,
     AppFilterLabel,
     AutoZeroLabel,
+    BalanceAdjustmentError,
     FilterModeLabel,
     SartoriusStateSnapshot,
     StabilityDelayLabel,
@@ -80,6 +88,9 @@ _MENU_CHOICES: Final[dict[str, tuple[str, ...]]] = {
 }
 """Menu setting → the labels its ``set_<setting>`` command accepts."""
 
+_SIM_CAL_TEMPERATURE_C: Final[float] = 22.0
+"""Balance temperature the simulated calibration records."""
+
 
 @dataclass(slots=True)
 class SartoriusSim:
@@ -110,14 +121,29 @@ class SartoriusSim:
         }
     )
     """Runtime menu, keyed like :data:`_MENU_CHOICES`."""
+    adjust_duration_s: float = 24.4
+    """How long a simulated internal calibration takes (the rig's MSE1203S
+    takes 24.3–24.5 s)."""
+    abort_tail_s: float = 2.5
+    """How long after ``abort_adjustment`` the simulated calibration ends, as
+    the real balance takes to unload its internal weight."""
     capabilities: frozenset[Capability] = frozenset(
-        {Capability.HAS_TARE, Capability.HAS_ZERO, Capability.HAS_PARAMETER_CONFIG}
+        {
+            Capability.HAS_TARE,
+            Capability.HAS_ZERO,
+            Capability.HAS_INTERNAL_CAL,
+            Capability.HAS_PARAMETER_CONFIG,
+        }
     )
     _lifecycle: AdapterLifecycle = field(default_factory=AdapterLifecycle)
     _channels: list[ChannelSpec] = field(default_factory=list)
     _clock: RunClock | None = None
     _seq: int = 0
     _sequence: int = 0
+    _abort: anyio.Event | None = None
+    """Set by ``abort_adjustment``; present only while a calibration runs."""
+    _cal_timestamp: datetime | None = None
+    """When the last simulated calibration finished; ``None`` before one."""
 
     @classmethod
     def from_params(
@@ -304,14 +330,55 @@ class SartoriusSim:
                 )
             self.menu[setting] = mode
             return make_accepted_result(detail=f"{cmd.kind} mode={mode!r}", clock=clock)
+        if cmd.kind == "internal_adjust":
+            return make_accepted_result(detail=await self._calibrate(), clock=clock)
+        if cmd.kind == "abort_adjustment":
+            if self._abort is None:
+                return make_accepted_result(
+                    detail="no internal calibration was running", clock=clock
+                )
+            self._abort.set()
+            return make_accepted_result(
+                detail="abort sent; the balance unloads its internal weight in a few seconds",
+                clock=clock,
+            )
         return make_accepted_result(detail=f"sim ack {cmd.kind}", clock=clock)
 
+    async def _calibrate(self) -> str:
+        """Run a simulated internal calibration: :attr:`adjust_duration_s`
+        unless aborted, in which case it ends :attr:`abort_tail_s` later
+        without a new record — the real adapter's outcomes."""
+        if self._abort is not None:
+            raise AdapterError(
+                f"sartorius_sim {self.name!r}: an internal calibration is already running"
+            )
+        abort = self._abort = anyio.Event()
+        started = time.monotonic()
+        try:
+            with anyio.move_on_after(self.adjust_duration_s):
+                await abort.wait()
+            if abort.is_set():
+                await anyio.sleep(self.abort_tail_s)
+                raise BalanceAdjustmentError(
+                    f"sartorius_sim {self.name!r}: internal calibration aborted",
+                    outcome="aborted",
+                    device=self.name,
+                )
+        finally:
+            self._abort = None
+        self._cal_timestamp = datetime.now().replace(microsecond=0)
+        return (
+            f"internal calibration done in {time.monotonic() - started:.0f} s "
+            f"at {_SIM_CAL_TEMPERATURE_C:.1f} °C"
+        )
+
     async def read_state_snapshot(self) -> SartoriusStateSnapshot | None:
-        """The menu settings — the real adapter's read-back, without a
-        calibration record. ``None`` before :meth:`open`, like the real adapter."""
+        """The menu settings and, once one has run, the simulated last
+        calibration. ``None`` before :meth:`open`, like the real adapter."""
         if self._lifecycle.state == "closed":
             return None
         menu = self.menu
+        calibrated = self._cal_timestamp is not None
         return SartoriusStateSnapshot(
             filter_mode=menu["filter_mode"],
             app_filter=menu["app_filter"],
@@ -320,6 +387,9 @@ class SartoriusSim:
             auto_zero=menu["auto_zero"],
             display_unit=self.unit.value,
             tare_behavior=menu["tare_behavior"],
+            cal_temperature_c=_SIM_CAL_TEMPERATURE_C if calibrated else None,
+            cal_timestamp=self._cal_timestamp,
+            cal_on_record=calibrated,
         )
 
     async def tare(

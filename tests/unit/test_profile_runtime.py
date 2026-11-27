@@ -488,3 +488,159 @@ async def test_flux_calibration_freshness_stale_artifact_warns(tmp_path: Path) -
     assert problem.severity == "warning"
     assert problem.blocking is False
     assert problem.metadata["age_days"] >= 14
+
+
+def _reactive_channel() -> MagicMock:
+    channel = MagicMock()
+    channel.metadata = {"capa_group": "reactive_gas_flow"}
+    return channel
+
+
+@pytest.mark.anyio
+async def test_atmosphere_air_purge_is_oxidative_without_reactive_channel() -> None:
+    """An air purge is oxidative with no second gas: no reactive_gas_flow
+    channel is needed."""
+    from capa.experiment.profiles.runtime import _atmosphere_consistency
+
+    ctx = _ctx(adapters_started=True)
+    ctx.profile_metadata = {
+        "atmosphere": {"mode": "oxidative", "purge": {"species": "Air"}},
+    }
+
+    assert await _atmosphere_consistency(ctx) is None
+
+
+@pytest.mark.anyio
+async def test_atmosphere_declared_reactive_gas_needs_its_flow_channel() -> None:
+    """O2 metered into an N2 purge declares a reactive gas; without a
+    reactive_gas_flow channel its flow would go unlogged."""
+    from capa.experiment.profiles.runtime import _atmosphere_consistency
+
+    ctx = _ctx(adapters_started=True)
+    ctx.profile_metadata = {
+        "atmosphere": {
+            "mode": "oxidative",
+            "purge": {"species": "N2"},
+            "reactive": {"species": "O2"},
+        },
+    }
+
+    problem = await _atmosphere_consistency(ctx)
+    assert problem is not None
+    assert problem.code == "capa.atmosphere_inconsistent"
+    assert problem.blocking is True
+
+    ctx.config.hardware.channels = (_reactive_channel(),)
+    assert await _atmosphere_consistency(ctx) is None
+
+
+@pytest.mark.anyio
+async def test_atmosphere_reactive_blend_always_needs_flow_channel() -> None:
+    from capa.experiment.profiles.runtime import _atmosphere_consistency
+
+    ctx = _ctx(adapters_started=True)
+    ctx.profile_metadata = {"atmosphere": {"mode": "reactive_blend", "purge": {}}}
+
+    problem = await _atmosphere_consistency(ctx)
+    assert problem is not None
+    assert problem.blocking is True
+
+
+# ---------------------------------------------------------------------------
+# purge_flow_established defers to a method that gates on the purge itself
+# ---------------------------------------------------------------------------
+
+
+def _channel(name: str, group: str) -> MagicMock:
+    channel = MagicMock()
+    channel.name = name
+    channel.metadata = {"capa_group": group}
+    return channel
+
+
+def _purge_ctx(steps: list[dict[str, object]]) -> ProfilePreflightContext:
+    from capa.experiment.method import Method
+
+    ctx = _ctx(adapters_started=True)
+    ctx.config.hardware.channels = (
+        _channel("purge.flow", "purge_gas_flow"),
+        _channel("heater.setpoint", "heater_setpoint"),
+    )
+    ctx.config.method = Method.model_validate({"name": "t", "steps": steps})
+    ctx.profile_metadata = {"atmosphere": {"purge": {"target_flow_slpm": 185.0}}}
+    return ctx
+
+
+_PROMPT: dict[str, object] = {"kind": "prompt", "message": "Chamber closed?"}
+_PURGE_ON: dict[str, object] = {
+    "kind": "setpoint",
+    "target": {"name": "purge.setpoint"},
+    "value": 185.0,
+}
+_HEAT: dict[str, object] = {
+    "kind": "hold",
+    "target": {"name": "heater.setpoint"},
+    "value": 600.0,
+    "duration_s": 60.0,
+}
+
+
+def _gate(
+    *, value: float = 180.0, timeout_s: float | None = 30.0, on_timeout: str = "abort"
+) -> dict[str, object]:
+    step: dict[str, object] = {
+        "kind": "wait",
+        "end_condition": {"channel": "purge.flow", "op": ">=", "value": value},
+        "on_timeout": on_timeout,
+    }
+    if timeout_s is not None:
+        step["timeout_s"] = timeout_s
+    return step
+
+
+@pytest.mark.anyio
+async def test_purge_check_defers_to_method_purge_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A method that turns the purge on and aborts unless it comes up,
+    before it heats, needs no purge flowing at Start."""
+    from capa.experiment.profiles import runtime as runtime_mod
+
+    async def _no_sampling(*args: object, **kwargs: object) -> list[object]:
+        raise AssertionError("the deferred check must not wait on samples")
+
+    monkeypatch.setattr(runtime_mod, "_sample_for", _no_sampling)
+    ctx = _purge_ctx([_PROMPT, _PURGE_ON, _gate(), _HEAT])
+
+    assert await runtime_mod._purge_flow_established(ctx) is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "steps",
+    [
+        pytest.param([_HEAT, _PURGE_ON, _gate()], id="gate-after-heating"),
+        pytest.param(
+            [{"kind": "custom", "handler_id": "x"}, _PURGE_ON, _gate()],
+            id="custom-step-first",
+        ),
+        pytest.param([_PURGE_ON, _gate(on_timeout="warn"), _HEAT], id="timeout-only-warns"),
+        pytest.param([_PURGE_ON, _gate(timeout_s=None), _HEAT], id="no-timeout"),
+        pytest.param([_PURGE_ON, _gate(value=50.0), _HEAT], id="below-threshold"),
+    ],
+)
+async def test_purge_check_still_needs_flow_without_a_method_gate(
+    monkeypatch: pytest.MonkeyPatch, steps: list[dict[str, object]]
+) -> None:
+    from capa.experiment.profiles import runtime as runtime_mod
+
+    async def _silent(*args: object, **kwargs: object) -> list[object]:
+        return []
+
+    monkeypatch.setattr(runtime_mod, "_sample_for", _silent)
+    ctx = _purge_ctx(steps)
+
+    problem = await runtime_mod._purge_flow_established(ctx)
+    assert problem is not None
+    assert problem.code == "capa.purge_silent"
+    assert problem.blocking is True

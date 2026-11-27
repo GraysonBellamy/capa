@@ -14,6 +14,10 @@ Single source of truth for:
   derived from it. Layer 3 flags any drift between the two.
 * the per-run fields (operator, specimen measurements) that every opened
   config starts without.
+* the purge gas → purge MFC mirror. The profile's
+  ``atmosphere.purge.species`` is where the operator names the purge gas;
+  the purge MFC's ``device_settings`` gas is derived from it, so the gas
+  is entered once. Layer 3 flags any drift between the two.
 
 Pure data + pure functions — no Qt, no I/O.
 """
@@ -22,6 +26,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any
+
+from pydantic import ValidationError
 
 CAPA_PROFILE_ID = "capa.profiles.capa_pyrolysis"
 """``domain_profile.id`` of the CAPA pyrolysis profile. Mirrors
@@ -62,18 +68,21 @@ PER_RUN_SPECIMEN_KEYS: frozenset[str] = frozenset(
         "id",
         "material",
         "initial_mass_g",
+        "mounted_mass_g",
         "thickness_mm",
         "diameter_mm",
         "specimen_holder_mass_g",
         "insulation_mass_g",
-        "conditioning",
+        "retainer_mass_g",
+        "assembly_mass_g",
         "notes",
     }
 )
-"""Specimen fields entered fresh for every run: the specimen under test,
-plus the holder and insulation masses weighed with it. The rest of the
-specimen block (``form``, ``specimen_holder`` and its dimensions)
-describes the rig and carries over. See :func:`clear_per_run_fields`."""
+"""Specimen fields entered fresh for every run: the specimen under test
+(and as mounted), plus the holder, insulation and retainer masses weighed
+with it and the whole loaded assembly. The rest of the specimen block (``form``, ``specimen_holder`` and
+its dimensions, which describe the rig, and ``conditioning``, which a
+series of specimens shares) carries over. See :func:`clear_per_run_fields`."""
 
 _POSITIVE_SAMPLE_KEYS: frozenset[str] = frozenset({"mass_g", "thickness_mm"})
 """``sample`` keys that :class:`~capa.experiment.config.SampleInfo`
@@ -225,6 +234,155 @@ def sample_specimen_mismatches(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Purge gas → purge MFC mirror.
+# ---------------------------------------------------------------------------
+
+
+def _purge_species(experiment_payload: Mapping[str, Any]) -> Any:
+    """``domain_profile.metadata.atmosphere.purge.species``, or ``None``."""
+    node: Any = experiment_payload.get("domain_profile")
+    for key in ("metadata", "atmosphere", "purge", "species"):
+        if not isinstance(node, Mapping):
+            return None
+        node = node.get(key)
+    return node
+
+
+def _purge_flow_device(hardware_payload: Mapping[str, Any]) -> str | None:
+    """The device behind the channel mapped to ``purge_gas_flow``."""
+    channels = hardware_payload.get("channels")
+    if not isinstance(channels, Iterable) or isinstance(channels, str | bytes):
+        return None
+    for channel in channels:
+        if not isinstance(channel, Mapping):
+            continue
+        metadata = channel.get("metadata")
+        if not isinstance(metadata, Mapping) or metadata.get("capa_group") != "purge_gas_flow":
+            continue
+        source = channel.get("source")
+        device = source.get("device") if isinstance(source, Mapping) else None
+        return device if isinstance(device, str) and device else None
+    return None
+
+
+def _gas_setting_model(hardware_payload: Mapping[str, Any], device: str) -> Any:
+    """The settings model of ``device``'s adapter when it has a ``gas``
+    setting (an Alicat MFC), else ``None``."""
+    from capa.devices.registry import require_descriptor  # noqa: PLC0415
+
+    devices = hardware_payload.get("devices")
+    if not isinstance(devices, Iterable) or isinstance(devices, str | bytes):
+        return None
+    adapter_id = next(
+        (
+            row.get("adapter")
+            for row in devices
+            if isinstance(row, Mapping) and row.get("name") == device
+        ),
+        None,
+    )
+    if not isinstance(adapter_id, str):
+        return None
+    try:
+        settings = require_descriptor(adapter_id).settings
+    except KeyError:
+        return None
+    if settings is None or "gas" not in settings.model.model_fields:
+        return None
+    return settings.model
+
+
+def mirrored_purge_gas(
+    experiment_payload: Mapping[str, Any],
+    hardware_payload: Mapping[str, Any],
+) -> tuple[str, str] | None:
+    """``(device, gas)`` when the purge MFC's gas follows the CAPA profile.
+
+    That is when the experiment declares the CAPA profile, a channel is
+    mapped to ``purge_gas_flow``, its device has a ``gas`` setting, and
+    the profile's ``atmosphere.purge.species`` is a gas that setting
+    knows. ``gas`` is the species as the setting names it (``"nitrogen"``
+    → ``"N2"``). ``None`` otherwise — notably for a species the device
+    doesn't know as one gas (a mixture such as ``"5% O2/N2"``), whose MFC
+    gas is then set in Device settings.
+    """
+    if not is_capa_profile(experiment_payload):
+        return None
+    species = _purge_species(experiment_payload)
+    if not isinstance(species, str) or not species.strip():
+        return None
+    device = _purge_flow_device(hardware_payload)
+    if device is None:
+        return None
+    model = _gas_setting_model(hardware_payload, device)
+    if model is None:
+        return None
+    try:
+        gas = model.model_validate({"gas": species.strip()}).gas
+    except ValidationError:
+        return None
+    return (device, gas) if isinstance(gas, str) else None
+
+
+def device_settings_with_purge_gas(
+    experiment_payload: Mapping[str, Any],
+    hardware_payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """The experiment's ``device_settings`` with the purge MFC's gas set
+    from the CAPA profile (:func:`mirrored_purge_gas`).
+
+    ``None`` when the gas doesn't follow the profile, so the caller leaves
+    ``device_settings`` as it is. Other devices and the MFC's other
+    settings are kept.
+    """
+    mirrored = mirrored_purge_gas(experiment_payload, hardware_payload)
+    if mirrored is None:
+        return None
+    device, gas = mirrored
+    declared = experiment_payload.get("device_settings")
+    out = {
+        name: dict(entry) if isinstance(entry, Mapping) else entry
+        for name, entry in (declared.items() if isinstance(declared, Mapping) else ())
+    }
+    entry = out.get(device)
+    out[device] = {**(entry if isinstance(entry, Mapping) else {}), "gas": gas}
+    return out
+
+
+def purge_gas_mismatch(
+    experiment_payload: Mapping[str, Any],
+    hardware_payload: Mapping[str, Any],
+) -> tuple[str, str, str | None] | None:
+    """``(device, profile gas, declared gas)`` when the purge MFC's declared
+    ``device_settings`` gas isn't the one :func:`mirrored_purge_gas` gives.
+
+    Gases compare as the device's setting names them, so ``"nitrogen"``
+    matches ``"N2"``; an unset gas is a mismatch. ``None`` when they agree,
+    when the gas doesn't follow the profile, or when the declared entry
+    or gas is itself invalid — device_settings validation reports those.
+    """
+    mirrored = mirrored_purge_gas(experiment_payload, hardware_payload)
+    if mirrored is None:
+        return None
+    device, gas = mirrored
+    declared = experiment_payload.get("device_settings")
+    entry = declared.get(device) if isinstance(declared, Mapping) else None
+    if entry is None:
+        return device, gas, None
+    if not isinstance(entry, Mapping):
+        return None
+    actual = entry.get("gas")
+    if actual is None:
+        return device, gas, None
+    model = _gas_setting_model(hardware_payload, device)
+    try:
+        actual_gas = model.model_validate({"gas": actual}).gas
+    except ValidationError:
+        return None
+    return None if actual_gas == gas else (device, gas, actual)
+
+
 __all__ = [
     "CAPA_OPTIONAL_GROUPS",
     "CAPA_PROFILE_ID",
@@ -233,9 +391,12 @@ __all__ = [
     "SPECIMEN_SAMPLE_FIELDS",
     "clear_per_run_fields",
     "current_capa_mappings",
+    "device_settings_with_purge_gas",
     "is_capa_profile",
+    "mirrored_purge_gas",
     "profile_model_fields",
     "profile_specimen",
+    "purge_gas_mismatch",
     "sample_from_specimen",
     "sample_specimen_mismatches",
 ]

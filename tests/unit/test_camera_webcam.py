@@ -24,6 +24,7 @@ from capa.devices.camera.base import (
 )
 from capa.devices.camera.webcam import (
     DEFAULT_FPS,
+    DSHOW_RTBUFSIZE_BYTES,
     WebcamAdapter,
 )
 
@@ -812,7 +813,8 @@ class TestInputPumpLifecycle:
         await cam.start_input_pump()
         await cam.close()
 
-        assert opened[0]["options"] == {"video_size": "64x48", "framerate": "30"}
+        options = opened[0]["options"]
+        assert (options["video_size"], options["framerate"]) == ("64x48", "30")
 
     async def test_start_input_pump_returns_once_streaming(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1184,6 +1186,40 @@ class TestOpenInputRetry:
             await cam._open_input_with_retry()
         assert attempts["n"] == 1
         await cam.close()
+
+
+class TestOpenInputOptions:
+    """A DirectShow input gets the large ``rtbufsize`` frame queue; other
+    inputs don't (the option is DirectShow's)."""
+
+    @pytest.mark.parametrize(
+        ("input_format", "rtbufsize"),
+        [("dshow", str(DSHOW_RTBUFSIZE_BYTES)), ("v4l2", None)],
+    )
+    async def test_open_options(
+        self, monkeypatch: pytest.MonkeyPatch, input_format: str, rtbufsize: str | None
+    ) -> None:
+        cam = WebcamAdapter(
+            spec=_spec(),
+            clock=RunClock.now(),
+            fps=30.0,
+            width=1920,
+            height=1080,
+            codec="copy",
+            input_url="video=Logitech Webcam C930e",
+            input_format=input_format,
+        )
+        seen: dict[str, Any] = {}
+        sentinel = object()
+
+        def _fake_av_open(url: str, *, format: str, options: dict[str, str]) -> object:
+            seen.update(url=url, format=format, options=options)
+            return sentinel
+
+        monkeypatch.setattr("capa.devices.camera.webcam.adapter.av.open", _fake_av_open)
+        assert await cam._open_input_with_retry() is sentinel
+        assert seen["format"] == input_format
+        assert seen["options"].get("rtbufsize") == rtbufsize
 
 
 class TestDshowFormatInfoProbe:

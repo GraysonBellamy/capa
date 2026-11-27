@@ -45,6 +45,7 @@ The fields are grouped (by `capa_group` metadata on each Pydantic field) so the 
 | `targets_kw_m2` | kW/m² | — | One or more target fluxes. Typically ascending (`(25, 50, 75)`) so the heater warms monotonically across the session. Multiple targets become a calibration sweep; single target is the daily-tune case. |
 | `t_set_max_c` | °C | 900 | Per-session hard ceiling on commanded heater setpoint. Preflight refuses anything above 1000 °C (the rig-survival limit). |
 | `operator_id` | — | `None` | Recorded into the artifact for audit. |
+| `pre_start_prompt` | — | `None` | Checklist shown before the tune does anything (e.g. the reference gauge's cooling water); the tune waits for Continue in the Run tab's prompt dialog. Stopping at the prompt ends the run without commanding the heater. Leave unset for headless runs, where an unanswered prompt times out after 30 s and fails the run. |
 | `tolerance_kw_m2` | kW/m² | `None` | Convergence band. Leave unset for the default `max(0.1, 0.005 × target)` per target. |
 
 ### Initial setpoint (`initial_setpoint`)
@@ -53,8 +54,8 @@ How to pick the first heater setpoint for each target. Detail in [Initial setpoi
 
 | Field | Default | Notes |
 |---|---|---|
-| `initial_guess` | `lookup` | `lookup` interpolates the most recent on-disk artifact. `operator` uses `operator_initial_setpoint_c`. `sigma_t4` is the σT⁴ cold-start fallback. |
-| `operator_initial_setpoint_c` | `None` | **Required** when `initial_guess = "operator"`; otherwise ignored. Config validation refuses the missing-pair case. |
+| `initial_guess` | `lookup` | `lookup` interpolates the most recent on-disk artifact, and uses σT⁴ when that doesn't cover the target. `operator` uses `operator_initial_setpoint_c`. `sigma_t4` is the σT⁴ cold-start fallback. |
+| `operator_initial_setpoint_c` | `None` | Only with `initial_guess = "operator"`: required there, refused by config validation with any other `initial_guess`. The Setup tab shows the field only while `initial_guess` is `operator`. |
 
 ### Channels (`channels`, advanced)
 

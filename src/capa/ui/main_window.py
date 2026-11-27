@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Final
 
 import structlog
+from pydantic import ValidationError
 from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
@@ -209,6 +210,14 @@ class MainWindow(QMainWindow):
         # changed which procedures are registered.
         self._procedure_uses_method: dict[str, bool] = {}
         self._setup_tab.procedureChanged.connect(self._on_procedure_changed)
+
+        # Start runs the Method tab's current method, so the Run tab's
+        # header follows every method edit, and the tab title shows when
+        # the method differs from its file.
+        self._run_tab.set_run_config_composer(self._compose_run_config)
+        self._method_tab.methodChanged.connect(self._run_tab.refresh_method)
+        self._method_tab.methodEdited.connect(self._run_tab.refresh_method)
+        self._method_tab.methodEdited.connect(self._update_method_tab_title)
 
         # Numerics / Camera-preview docks are constructed when a config
         # loads — both need the parsed config (channels / cameras). Until
@@ -508,15 +517,16 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # Plugin set may have changed between configs (different
+        # plugins.lock, different mode). Re-discover so the Method-tab
+        # gate and the Run tab's run-config composer (both reached from
+        # the loads below) see the new procedures' ``uses_method`` values.
+        self._refresh_procedure_uses_method_cache()
         if reload_setup_tab:
             self._setup_tab.load_config(cfg, path=path)
         self._run_tab.load_config(cfg)
         self._manual_dock.load_config(cfg)
         self._operator_provider.set_operator_id(cfg.operator.id)
-        # Plugin set may have changed between configs (different
-        # plugins.lock, different mode). Re-discover so the Method-tab
-        # gate picks up any new procedures' ``uses_method`` values.
-        self._refresh_procedure_uses_method_cache()
 
         # Method tab is populated by DocumentCoordinator._on_setup_draft_loaded
         # in response to setup_tab's draftLoaded signal — loading it again
@@ -956,9 +966,27 @@ class MainWindow(QMainWindow):
             return
         if self._method_tab.has_method():
             name = self._method_tab.current_method_name()
-            self._tabs.setTabText(_METHOD_TAB_INDEX, f"Method — {name}")
+            marker = " *" if self._method_tab.is_modified() else ""
+            self._tabs.setTabText(_METHOD_TAB_INDEX, f"Method — {name}{marker}")
         else:
             self._tabs.setTabText(_METHOD_TAB_INDEX, "Method")
+
+    def _compose_run_config(self, applied: ExperimentConfig) -> ExperimentConfig:
+        """The config Start runs: ``applied`` with the Method tab's method.
+
+        Method edits made after Apply & Connect take effect at the next
+        Start without reconnecting the hardware. A procedure that doesn't
+        use a method keeps ``applied`` as-is (FreeRun refuses a config
+        that carries one). The ``uses_method`` cache was rebuilt when
+        ``applied`` was loaded, so this never runs plugin discovery.
+        Raises :class:`CapaError` when the method can't run."""
+        if not self._procedure_uses_method.get(applied.procedure.id, True):
+            return applied
+        method = self._method_tab.method_for_run()
+        try:
+            return applied.with_method(method)
+        except (ValidationError, CapaError) as exc:
+            raise CapaError(f"The method in the Method tab doesn't fit this rig:\n\n{exc}") from exc
 
     def _on_procedure_changed(self, procedure_id: object) -> None:
         """Setup-tab procedure selection changed — gate the Method tab.

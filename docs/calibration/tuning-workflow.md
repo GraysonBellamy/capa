@@ -35,8 +35,8 @@ Choose `initial_guess` based on what you have on hand:
 
 | Source | Use when |
 |---|---|
-| `lookup` (default) | A recent artifact is on disk under `configs/calibrations/flux/`. The most common case — yesterday's tune is the prior. |
-| `operator` | You're characterising a new rig by hand and know a safe starting setpoint. Requires `operator_initial_setpoint_c`. |
+| `lookup` (default) | A recent artifact is on disk under `configs/calibrations/flux/` and covers the target. The most common case — yesterday's tune is the prior. A target the latest artifact doesn't cover starts from σT⁴. |
+| `operator` | You know a safe starting setpoint: a new rig characterised by hand, or a target the latest artifact doesn't cover. Requires `operator_initial_setpoint_c`, which the other sources refuse. |
 | `sigma_t4` | Truly cold start, no artifact, no operator knowledge. The σT⁴ fallback is anchored at 50 kW/m² ≈ 650 °C and will be wrong by tens of °C — the procedure hill-climbs in iterations 1–4. |
 
 Defaults are tuned for the daily-tune workflow: 1 target (`[50]`), `lookup` priors, 900 °C ceiling. For a calibration sweep, change `targets_kw_m2` to the ascending list of points you want, e.g. `[25, 50, 75, 100]`.

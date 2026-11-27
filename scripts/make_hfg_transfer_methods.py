@@ -104,12 +104,12 @@ def shutdown() -> str:
 # The heater can't slide clear of the gauges, so the only zero is the opening
 # one, taken cold with the heater over stop A. A heater 8 degC above the room
 # still puts ~0.04 kW/m2 on the reference (0.8 % of the 5 kW/m2 level).
-# The body temperature, not the time on water, says when the zero is good:
+# The water temperature, not the time on water, says when the zero is good:
 # on 2026-10-17 the supply drifted 1.3 degC over the session and the zero
 # moved with it.
 CHECKLIST = (
-    "Cooling water flowing through both gauges; HFG2 body temperature flat on "
-    "the plot (drifting less than 0.02 degC/min) and above the dew point; "
+    "Cooling water flowing through both gauges; cooling water temperature flat "
+    "on the plot (drifting less than 0.02 degC/min) and above the dew point; "
     "both gauges seated with faces level; heater cold (PV within 2 degC of the "
     "room) and at stop A, centred on the REFERENCE. Continue to record the zero; "
     "the heater heats to level 1 after it."
@@ -125,7 +125,7 @@ def zero(name: str) -> str:
 def resume_checklist(level: int) -> str:
     return (
         f"Resuming at level {level}. Cooling water flowing through both gauges; "
-        "HFG2 body temperature flat on the plot; gauges, stops "
+        "cooling water temperature flat on the plot; gauges, stops "
         "and faces untouched since the interrupted run; heater at stop A, centred "
         "on the REFERENCE. No zero is recorded: the analysis uses the interrupted "
         "run's cold zero."

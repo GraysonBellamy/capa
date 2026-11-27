@@ -50,21 +50,23 @@ def choose_initial_setpoint(
 ) -> tuple[float, str]:
     """Pick the first setpoint for ``target_kw_m2``.
 
-    Priority chain:
+    By ``source``:
 
-    1. ``lookup`` — interpolated from the most recent on-disk artifact
-       when one is available and brackets the target.
-    2. ``operator`` — ``operator_initial_setpoint_c`` when set.
-    3. ``sigma_t4`` — empirical σT⁴ fallback.
+    * ``lookup`` — interpolated from the most recent on-disk artifact
+      when one is available and brackets the target, else σT⁴.
+    * ``operator`` — ``operator_setpoint_c``.
+    * ``sigma_t4`` — empirical σT⁴ fallback.
 
-    Returns the chosen setpoint (clamped to ``[t_min_c, t_set_max_c]``)
-    and a short reason string for logging.
+    ``operator_setpoint_c`` is used by the ``operator`` source only, so a
+    lookup that misses never falls back to it. Returns the chosen
+    setpoint (clamped to ``[t_min_c, t_set_max_c]``) and a short reason
+    string for logging.
     """
     if source == "lookup" and prior_artifact is not None:
         guess = prior_artifact.setpoint_for_target(target_kw_m2)
         if guess is not None:
             return max(t_min_c, min(t_set_max_c, guess)), "lookup"
-    if operator_setpoint_c is not None:
+    if source == "operator" and operator_setpoint_c is not None:
         return (
             max(t_min_c, min(t_set_max_c, operator_setpoint_c)),
             "operator",

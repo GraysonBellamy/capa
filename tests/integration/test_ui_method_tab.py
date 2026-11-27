@@ -186,6 +186,165 @@ def test_load_method_emits_methodChanged(qtbot: Any) -> None:  # noqa: N802
         tab.clear()
 
 
+# ---------------------------------------------------------------------------
+# What Start runs: the tab's current contents, saved or not.
+# ---------------------------------------------------------------------------
+
+
+def _hold_spin(tab: MethodTab) -> Any:
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    tab._select_row(1)
+    form = tab._detail_widget
+    assert form is not None
+    spin = form._fields["value"].findChild(QDoubleSpinBox)
+    assert spin is not None
+    return spin
+
+
+def test_method_for_run_returns_unsaved_edits(qtbot: Any) -> None:
+    tab = MethodTab()
+    qtbot.addWidget(tab)
+    tab.load_method(_fixture_method(), path=Path("/tmp/fixture.method.toml"))
+    assert not tab.is_modified()
+
+    with qtbot.waitSignal(tab.methodEdited, timeout=1000):
+        _hold_spin(tab).setValue(650.0)
+
+    method = tab.method_for_run()
+    assert method is not None
+    assert method.steps[1].value == 650.0
+    assert tab.is_modified()
+    assert tab._source_label.text().endswith("(modified)")
+
+
+def test_method_for_run_is_none_when_empty(qtbot: Any) -> None:
+    tab = MethodTab()
+    qtbot.addWidget(tab)
+    assert tab.method_for_run() is None
+
+
+def test_method_for_run_refuses_a_rejected_entry(qtbot: Any) -> None:
+    """A form entry that fails validation never reaches the table, so
+    the table still holds the step's old value. Start must not quietly
+    run that old value."""
+    from capa.core.errors import CapaError
+
+    tab = MethodTab()
+    qtbot.addWidget(tab)
+    tab.load_method(_fixture_method())
+    tab._select_row(1)
+    form = tab._detail_widget
+    assert form is not None
+    # A hold with neither duration nor end condition is invalid.
+    # ``set_values`` is silent, so emit the signal an operator edit would.
+    form.set_values({"duration_s": None})
+    with qtbot.waitSignal(tab.methodEdited, timeout=1000):
+        form.valuesChanged.emit()
+    assert tab._model.step_at(1).duration_s == 300.0  # type: ignore[union-attr]
+
+    with pytest.raises(CapaError, match="Step 2"):
+        tab.method_for_run()
+
+    # Selecting another row rebuilds the form from the table, dropping
+    # the rejected entry — what's shown is what runs again.
+    tab._select_row(0)
+    assert tab.method_for_run() is not None
+
+
+def test_save_clears_modified(qtbot: Any, tmp_path: Path) -> None:
+    out = tmp_path / "fixture.method.toml"
+    tab = MethodTab()
+    qtbot.addWidget(tab)
+    tab.load_method(_fixture_method(), path=out)
+    _hold_spin(tab).setValue(650.0)
+    assert tab.is_modified()
+
+    tab._on_save()
+
+    assert not tab.is_modified()
+    assert not tab._source_label.text().endswith("(modified)")
+    with open(out, "rb") as fp:
+        assert Method.model_validate(tomllib.load(fp)).steps[1].value == 650.0  # type: ignore[union-attr]
+
+
+def test_reloading_the_channel_list_is_not_an_edit(qtbot: Any) -> None:
+    """Showing the tab refreshes the step form's channel pickers; that
+    must not mark the method modified."""
+    from capa.ui.forms import ChannelOption
+
+    tab = MethodTab()
+    qtbot.addWidget(tab)
+    tab.set_channel_options_source(
+        lambda: (ChannelOption(name="heater.setpoint", kind="setpoint", unit="degC"),)
+    )
+    tab.load_method(_fixture_method())
+    tab._select_row(1)
+    tab.show()
+    tab.set_channel_options_source(
+        lambda: (
+            ChannelOption(name="heater.setpoint", kind="setpoint", unit="degC"),
+            ChannelOption(name="purge.flow", kind="mfc_flow", unit="slpm"),
+        )
+    )
+    assert not tab.is_modified()
+
+
+def test_main_window_start_runs_the_edited_method(qtbot: Any, tmp_path: Path) -> None:
+    """Edits made after the config is applied reach the run without a
+    save or a reconnect, and the tab title flags the unsaved edit."""
+    from capa.experiment.config import ExperimentConfig
+    from capa.ui.main_window import MainWindow
+
+    repo_root = Path(__file__).resolve().parents[2]
+    exp_path = repo_root / "configs" / "experiments" / "sim_capa_pyrolysis.yaml"
+    if not exp_path.is_file():
+        pytest.skip("sim CAPA experiment fixture missing")
+    cfg = ExperimentConfig.load(exp_path)
+
+    window = MainWindow(runs_root=tmp_path, configure_logging_for_bundle=False)
+    qtbot.addWidget(window)
+    window._apply_loaded_config(cfg, exp_path)
+
+    tab = window.method_tab
+    tab._select_row(0)
+    form = tab._detail_widget
+    assert form is not None
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    spin = form._fields["value"].findChild(QDoubleSpinBox)
+    assert spin is not None
+    spin.setValue(612.0)
+
+    run_cfg = window._compose_run_config(cfg)
+    assert run_cfg.method.steps[0].value == 612.0
+    assert run_cfg.hardware is cfg.hardware
+    assert window._tabs.tabText(1).endswith(" *")
+    # The Setup draft is not flagged as needing Apply & Connect.
+    assert not window.setup_tab.draft.unapplied
+
+
+def test_main_window_start_keeps_no_method_for_free_run(qtbot: Any, tmp_path: Path) -> None:
+    """A procedure that doesn't use a method keeps the applied config —
+    FreeRun refuses a config that carries a method."""
+    from capa.experiment.config import ExperimentConfig
+    from capa.ui.main_window import MainWindow
+
+    repo_root = Path(__file__).resolve().parents[2]
+    freerun = repo_root / "configs" / "experiments" / "sim_freerun.yaml"
+    if not freerun.is_file():
+        pytest.skip("free-run experiment fixture missing")
+    cfg = ExperimentConfig.load(freerun)
+
+    window = MainWindow(runs_root=tmp_path, configure_logging_for_bundle=False)
+    qtbot.addWidget(window)
+    window._apply_loaded_config(cfg, freerun)
+    # Even if the tab somehow holds a method, FreeRun doesn't get it.
+    window.method_tab.load_method(_fixture_method())
+
+    assert window._compose_run_config(cfg) is cfg
+
+
 def test_main_window_autoloads_method_from_experiment(qtbot: Any, tmp_path: Path) -> None:
     """Opening an experiment that declares ``method:`` must populate the
     Method tab from that file — the whole point of this wiring."""

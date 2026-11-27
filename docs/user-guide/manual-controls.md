@@ -141,10 +141,13 @@ The dialog spells out exactly what's about to happen — for example:
 
 > Confirm destructive operation:
 >
->   Trigger internal calibration on balance_main. Requires ~30 s; the
->   balance refuses other commands during the cal cycle.
+>   Run internal calibration on the balance (motorized weight). Sample
+>   must be off the pan.
 >
-> Proceed?
+> Operator: opA
+>
+> The balance replaces its calibration. Keep the pan clear and the
+> bench still for about 25 s, until this card says it is done.
 
 This is a standard modal `QMessageBox` — click Yes / No, not hold-to-
 confirm. (The 1-second hold-to-confirm pattern is used only for the
@@ -153,6 +156,26 @@ where the cost of a misclick is much higher.)
 
 Non-destructive commands (Tare, Zero, setpoint changes, gas select)
 dispatch immediately on click.
+
+### Balance internal calibration
+
+After you confirm, the balance card shows **Calibrating — keep the pan
+clear** with a progress bar counting the seconds (it fills at the usual
+~25 s), greys out its other controls and enables **Cancel**. You don't
+need to watch the balance's display: the card says how it ended.
+
+| Card says | What happened |
+|---|---|
+| `✓ internal calibration done in 24 s at 26.9 °C` | New calibration; **Last cal** is updated straight away. |
+| `… the balance had already started it, so capa waited for that one` | The balance was already calibrating (isoCAL); nothing new was started. |
+| Calibration cancelled | You pressed Cancel; the balance keeps its previous calibration. |
+| Calibration stopped before it finished | Stopped from the balance's front panel, or the balance gave up (pan not clear, bench too unsteady). Previous calibration kept. |
+| No result within the time limit | capa stopped waiting after `adjust_timeout_s` (default 120 s) but the balance was **not** stopped. Check its display before weighing. |
+| The balance … never started calibrating | Check its display for a message, clear the pan and try again. |
+
+Cancel sends the balance's abort command; it unloads its internal weight
+over a few seconds before the card reports. Closing capa mid-calibration
+does not abort it: the balance finishes on its own.
 
 A confirmation in flight:
 
@@ -164,8 +187,10 @@ A confirmation in flight:
 
 Each card shows the device's current state above its controls — a heater
 card shows `PV` and `SP`, a balance shows the temperature at its last
-calibration (`Last cal: 22.4 °C`, or `none since power-up`; the balance
-keeps no date), an MFC shows its active gas and setpoint, an IR camera
+calibration and when it finished (`Last cal: 22.4 °C at 2026-11-27
+15:56 (balance clock)`, or `none since power-up`; the time is the
+balance's own clock, which need not match the PC's), an MFC shows its
+active gas and setpoint, an IR camera
 shows its active temperature range. A setting the card can change — an
 MFC's gas, a balance's filter mode — is selected from what the device
 reports, and stays empty until the device has reported it. Every field

@@ -62,6 +62,7 @@ is `extra="forbid"`.
 | `auto_reconnect` | `true` | Transient `SartoriusConnectionError`s increment a degradation counter without ending the stream. Toggles `SUPPORTS_AUTO_RECONNECT`. |
 | `snapshot_period_s` | `30.0` | Health-ping cadence. |
 | `overflow` | `"block"` | `"block"` or `"drop_newest"`. |
+| `adjust_timeout_s` | `120.0` | How long `internal_adjust` waits for the balance to finish before reporting a timeout. The rig's MSE1203S takes ~24.5 s; a noisy bench takes longer. A timeout stops the waiting, not the balance. |
 
 ## Channels and emission shape
 
@@ -106,6 +107,19 @@ with the error fields populated but do not emit a `ChannelSample` —
 the sample's `status` does not get to lie about a value that didn't
 arrive.
 
+Readings taken while the balance runs an **internal calibration** are
+not pan weights: off-scale for ~6 s, then a fake *stable* 1300 g for
+~9 s, then 0 g. The adapter keeps their native rows but emits no
+`ChannelSample` for them, so `balance.mass` shows a gap rather than a
+plateau. Two signals mark them: a calibration capa itself is waiting
+for, and — on a Cubis balance over xBPI — measurement-flags bit `0x04`,
+which is clear on every reading taken during a calibration (sartoriuslib
+`docs/protocol.md` §8.1). The flag also catches an isoCAL the balance
+starts on its own. `events.sqlite` gets an `adjusting` event (severity
+`warning`, `metadata.started_by` = `capa` or `balance`) where the gap
+starts and an `adjusting_ended` event (`withheld_readings`,
+`duration_s`) where it ends. The periodic snapshot carries `adjusting`.
+
 See [channel bindings](../configuration/channel-bindings.md) for the
 selector contract.
 
@@ -126,7 +140,8 @@ selector contract.
 |---|---|---|
 | `tare()` | `"tare"` | Cheap (does not move mass) but still gated. |
 | `zero()` | `"zero"` | Same. |
-| `internal_adjust()` | `"internal_adjust"` | Runs the internal calibration weight; **takes minutes** — refuse during a live run. |
+| `internal_adjust()` | `"internal_adjust"` | Runs the internal calibration weight and returns once the balance has finished (~25 s). See [Internal calibration](#internal-calibration). Between runs only. |
+| `abort_adjustment()` | `"abort_adjustment"` | Stops a running internal calibration (xBPI `0x29`); the balance keeps its previous calibration. Accepted whether or not one is running. |
 | `set_filter_mode(...)` | `"set_filter_mode"` | Reconfigures the balance's digital filter. |
 | `set_display_unit(...)` | `"set_display_unit"` | Display-only; does not change the wire scale. |
 | `set_auto_zero(...)` | `"set_auto_zero"` | Auto-zero on/off; saved with `save_menu`. |
@@ -136,7 +151,7 @@ selector contract.
 | — | `"set_stability_range"` | How narrow a band the reading must stay in to count as stable (p03): `"max accuracy"`, `"very accurate"`, `"accurate"`, `"fast"`, `"very fast"` or `"max fast"`. |
 | — | `"set_stability_delay"` | How long the reading must stay in band before it's stable (p04): `"none"`, `"short"`, `"average"` or `"long"`. |
 | `save_menu()` / `reload_menu()` | matching kinds | Persist / discard parameter changes. |
-| `read_last_cal_record()` | n/a | Read-only — not gated. The temperature at the last calibration and whether one is on record since power-up; the balance keeps no date. |
+| `read_last_cal_record()` | n/a | Read-only — not gated. The temperature at the last calibration and when it finished, on the balance's own clock; empty after a power-up until the next calibration. |
 | `read_state_snapshot()` | n/a | Read-only — not gated. Filter mode, application filter, stability range and delay, auto-zero, display unit, tare behavior and the last calibration, for the manual-control card. |
 
 sartoriuslib has no typed accessor for p02–p04, so the adapter reads and
@@ -207,6 +222,20 @@ If first-open seems unusually slow on your rig, check:
 3. `protocol` matches what the balance is configured for — `"auto"`
    adds a probe step that pays the cold-open cost twice.
 
+### One-sample ±tare readings
+
+The rig's MSE1203S Cubis, polled at 50 Hz with net-weight reads
+(xBPI `0x1E`), returns about one reading in 50 000 off by exactly the
+stored tare: `+tare` is the gross weight (tare not subtracted), `-tare`
+is the tare subtracted twice. The frame's checksum is valid, so it is
+the balance, not the line. Seen at about 4 per hour since 2026-10-07.
+
+The value is recorded as sent, in `balance.mass` and
+`device_records/sartorius.parquet`. Analysis should drop single samples
+more than 1 g from both neighbours. The rig configs set
+`plot_despike = true` on `balance.mass` so the live trace (and its
+autorange) doesn't jump.
+
 ### Sim does not model the race
 
 [`capa.devices.sim.sartorius_sim`](https://github.com/GraysonBellamy/capa/blob/main/src/capa/devices/sim/sartorius_sim.py)
@@ -217,12 +246,41 @@ gates can be exercised offline — but the latency cost of the cold-open
 itself is not reproduced. Acceptance test runs that depend on the
 cold-open timing must hit a real balance.
 
-### Internal calibration is long-running
+### Internal calibration
 
-`internal_adjust()` runs the balance's internal weight and takes
-minutes. It must not be issued during a live run — but the adapter
-does not refuse; the responsibility sits with the procedure / operator
-UI. Treat it as a between-runs maintenance command.
+`internal_adjust()` starts the balance's motorized internal-weight
+calibration and **waits for it to finish** — 24.3–24.5 s on the rig's
+MSE1203S, longer on a noisy bench — through sartoriuslib's
+`internal_adjust(wait=True)`. It must not be issued during a live run;
+the adapter does not refuse, the manual card does. Treat it as a
+between-runs maintenance command.
+
+How it ends:
+
+| Ending | Result |
+|---|---|
+| New calibration record | Accepted; the detail gives the time taken and the balance temperature. |
+| Already running (an isoCAL the balance started) | Nothing is sent; capa waits for that one instead, and says so in the detail. |
+| Stopped without a new record (`abort_adjustment`, the front panel, or the balance gave up) | `BalanceAdjustmentError`, `outcome="aborted"`. |
+| Still running after `adjust_timeout_s` | `BalanceAdjustmentError`, `outcome="timeout"`. The balance is **not** stopped. |
+| Acknowledged but never started | `BalanceAdjustmentError`, `outcome="not_started"`. |
+
+`BalanceAdjustmentError` is an `AdapterError` carrying the sartoriuslib
+error as `__cause__`.
+
+Closing the adapter mid-calibration (the GUI closing, a config reload)
+stops the waiting between status polls and sends nothing: the port stays
+in sync and the balance finishes on its own. Only `abort_adjustment`
+sends `0x29`.
+
+While the calibration runs, the wait polls the balance status every
+0.25 s (~4 ms of bus time each) alongside the weight stream; mass
+samples are withheld as described under
+[Channels and emission shape](#channels-and-emission-shape).
+
+The calibration record's time is on the **balance's** clock, whatever
+its front panel is set to — the rig's runs about 2 h ahead of UTC —
+so capa shows it labelled as such and never compares it with PC time.
 
 ### Wire jitter is tracked
 
@@ -238,7 +296,10 @@ instrument anything else.
 takes one `mass_signal` spec (any of the [signal
 kinds](simulators.md#signal-generators)), an optional `unit` /
 `protocol`, a `tick_period_s`, and `stable_after_s`. Capabilities are
-`HAS_TARE | HAS_ZERO` only. See [Simulators](simulators.md).
+`HAS_TARE | HAS_ZERO | HAS_INTERNAL_CAL | HAS_PARAMETER_CONFIG`. Its
+`internal_adjust` takes 24.4 s and honours `abort_adjustment`, so the
+manual card's calibration flow can be tried offline; its readings stay
+the mass signal throughout. See [Simulators](simulators.md).
 
 ## See also
 

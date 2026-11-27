@@ -10,21 +10,28 @@ Gated entirely on the adapter's :class:`Capability` flagset:
   display unit / tare    — ``HAS_PARAMETER_CONFIG``
 * save / reload menu     — ``HAS_PARAMETER_CONFIG`` (destructive — EEPROM)
 
-The menu settings and the last calibration ("Last cal: 22.4 °C") are read
-from the balance via :meth:`ManualClient.device_readback` (the adapter's
-``read_state_snapshot``) once the pool is open, and again after each command
-that changes them.
+The menu settings and the last calibration ("Last cal: 22.4 °C at …") are
+read from the balance via :meth:`ManualClient.device_readback` (the
+adapter's ``read_state_snapshot``) once the pool is open, and again after
+each command that changes them.
+
+The internal calibration takes ~25 s. While it runs the card shows its
+progress and a Cancel button, greys out its other controls, and then says
+how it ended.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Final, get_args
 
 import structlog
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -32,8 +39,10 @@ from PySide6.QtWidgets import (
 
 from capa.devices.adapter import Capability
 from capa.devices.sartorius import (
+    AdjustmentOutcome,
     AppFilterLabel,
     AutoZeroLabel,
+    BalanceAdjustmentError,
     FilterModeLabel,
     SartoriusStateSnapshot,
     StabilityDelayLabel,
@@ -41,8 +50,9 @@ from capa.devices.sartorius import (
     TareBehaviorLabel,
 )
 from capa.experiment.config import DeviceConfig
+from capa.ui.async_util import schedule_bg
 from capa.ui.manual.cards.base import DeviceCard, select_or_add
-from capa.ui.state import RunController
+from capa.ui.state import RunController, RunUiState
 from capa.ui.statusbar import OperatorIdProvider
 
 _logger = structlog.get_logger("capa.ui.manual.balance")
@@ -57,6 +67,40 @@ STABILITY_DELAYS: Final[tuple[str, ...]] = get_args(StabilityDelayLabel)
 AUTO_ZERO_MODES: Final[tuple[str, ...]] = get_args(AutoZeroLabel)
 DISPLAY_UNITS: Final[tuple[str, ...]] = ("g", "kg", "mg", "ct", "oz")
 TARE_BEHAVIORS: Final[tuple[str, ...]] = get_args(TareBehaviorLabel)
+
+
+TYPICAL_CAL_S: Final[int] = 25
+"""How long an internal calibration usually takes (24.3–24.5 s on the rig's
+MSE1203S); the progress bar fills over this time."""
+
+CALIBRATING_TEXT: Final[str] = "Calibrating — keep the pan clear"
+
+_CAL_ENDINGS: Final[dict[AdjustmentOutcome, tuple[str, str]]] = {
+    "aborted": (
+        "Calibration stopped before it finished, from the balance's front panel or by "
+        "the balance itself (pan not clear, or the bench too unsteady). The previous "
+        "calibration is kept.",
+        "warn",
+    ),
+    "timeout": (
+        "No result within the time limit (the adapter's adjust_timeout_s). capa stopped "
+        "waiting but did not stop the balance: check its display before weighing.",
+        "error",
+    ),
+    "not_started": (
+        "The balance accepted the command but never started calibrating. Check its "
+        "display for a message, clear the pan and try again.",
+        "error",
+    ),
+    "in_progress": (
+        "A calibration was already running on the balance. Wait for it to finish.",
+        "warn",
+    ),
+}
+"""Status line and level for each way a calibration can end without a new
+calibration, other than a Cancel from this card."""
+
+CANCELLED_TEXT: Final[str] = "Calibration cancelled. The balance kept its previous calibration."
 
 
 # Capability flags that justify rendering a BalanceCard at all. Below any
@@ -121,6 +165,15 @@ class BalanceCard(DeviceCard):
         self.set_subtitle(f"Device: {spec.name}   Adapter: {self._adapter_label()}")
         # Parameter combos keyed by the SartoriusStateSnapshot field they show.
         self._param_combos: dict[str, QComboBox] = {}
+        # Internal calibration: when the one in flight started (monotonic
+        # seconds; ``None`` when none is) and whether Cancel was sent for it.
+        self._cal_started: float | None = None
+        self._cancel_sent: bool = False
+        self._cancel_button: QPushButton | None = None
+        self._cal_progress: QProgressBar | None = None
+        self._cal_timer = QTimer(self)
+        self._cal_timer.setInterval(250)
+        self._cal_timer.timeout.connect(self._show_cal_progress)
         self._build_capability_sections()
 
     # ------------------------------------------------------------------ build
@@ -165,24 +218,30 @@ class BalanceCard(DeviceCard):
         row.setSpacing(6)
         btn = QPushButton("Run internal calibration…", self)
         btn.setToolTip(
-            "Motorized internal-weight adjustment. Forbidden mid-run. "
-            "Drops the pan briefly while the motorized weight cycles."
+            "Motorized internal-weight adjustment, about 25 s. Forbidden mid-run. "
+            "Drops the pan briefly while the motorized weight cycles; the card "
+            "says when it is done."
         )
-        btn.clicked.connect(
-            lambda: self.schedule_dispatch_and_read_back(
-                kind="internal_adjust",
-                payload={"cal_type": None},
-                destructive=True,
-                destructive_summary=(
-                    "Run internal calibration on the balance (motorized "
-                    "weight). Sample must be off the pan."
-                ),
-            )
-        )
+        btn.clicked.connect(self._on_run_calibration)
         self.register_action_widget(btn)
         row.addWidget(btn)
+        # Not an action widget: enabled only while a calibration runs.
+        cancel = QPushButton("Cancel", self)
+        cancel.setToolTip(
+            "Stop the calibration (xBPI 0x29). The balance unloads its internal "
+            "weight and keeps its previous calibration."
+        )
+        cancel.clicked.connect(self._on_cancel_calibration)
+        cancel.setEnabled(False)
+        row.addWidget(cancel)
+        self._cancel_button = cancel
         row.addStretch(1)
         body.addLayout(row)
+        progress = QProgressBar(self)
+        progress.setRange(0, TYPICAL_CAL_S * 1000)
+        progress.setVisible(False)
+        body.addWidget(progress)
+        self._cal_progress = progress
 
     def _build_parameters_section(self) -> None:
         body = self.add_section("Parameters")
@@ -336,6 +395,133 @@ class BalanceCard(DeviceCard):
         body.addLayout(row)
         return combo
 
+    # ------------------------------------------------------------------ internal calibration
+
+    @property
+    def calibrating(self) -> bool:
+        """Whether an internal calibration started from this card is running."""
+        return self._cal_started is not None
+
+    def _on_run_calibration(self) -> None:
+        if schedule_bg(self._run_calibration()) is None:
+            self._set_status("no event loop — UI not running?", level="error")
+
+    async def _run_calibration(self) -> None:
+        """Confirm, run the calibration with the card in its calibrating
+        state, say how it ended, then re-read the balance ("Last cal")."""
+        cmd = await self.prepare_command(
+            kind="internal_adjust",
+            payload={"cal_type": None},
+            destructive=True,
+            destructive_summary=(
+                "Run internal calibration on the balance (motorized weight). "
+                "Sample must be off the pan."
+            ),
+            destructive_note=(
+                "The balance replaces its calibration. Keep the pan clear and the "
+                "bench still for about 25 s, until this card says it is done."
+            ),
+        )
+        if cmd is None:
+            return
+        self._begin_calibrating()
+        try:
+            result = await self.send_command(cmd)
+        except Exception as exc:
+            text, level = self._calibration_failure(exc)
+            self._end_calibrating()
+            self._set_status(text, level=level)
+            self._emit_manual_event(
+                kind=cmd.kind,
+                severity="error" if level == "error" else "warning",
+                message=str(exc),
+            )
+            _logger.warning(
+                "manual.balance_calibration_failed", device=self.device_name, error=str(exc)
+            )
+        else:
+            self._end_calibrating()
+            if result.accepted:
+                self._set_status(f"✓ {result.detail}", level="ok")
+                self._emit_manual_event(kind=cmd.kind, severity="info", message=result.detail)
+            else:
+                self._set_status(f"✗ calibration refused: {result.detail}", level="warn")
+                self._emit_manual_event(kind=cmd.kind, severity="warning", message=result.detail)
+        await self.refresh_readback()
+
+    def _calibration_failure(self, exc: Exception) -> tuple[str, str]:
+        """Status line and level for a calibration that raised ``exc``."""
+        if not isinstance(exc, BalanceAdjustmentError):
+            return f"internal calibration failed: {exc}", "error"
+        if exc.outcome == "aborted" and self._cancel_sent:
+            return CANCELLED_TEXT, "idle"
+        return _CAL_ENDINGS[exc.outcome]
+
+    def _on_cancel_calibration(self) -> None:
+        if schedule_bg(self._cancel_calibration()) is None:
+            self._set_status("no event loop — UI not running?", level="error")
+
+    async def _cancel_calibration(self) -> None:
+        """Ask the balance to stop. The calibration's own command then ends
+        as aborted, which is what the card reports."""
+        cmd = await self.prepare_command(kind="abort_adjustment")
+        if cmd is None or not self.calibrating:
+            return
+        self._cancel_sent = True
+        self._sync_action_widgets()
+        self._set_status("Cancelling — the balance is unloading its weight…", level="warn")
+        try:
+            result = await self.send_command(cmd)
+        except Exception as exc:
+            self._cancel_sent = False
+            self._sync_action_widgets()
+            self._set_status(f"cancel failed: {exc}. Still calibrating.", level="error")
+            self._emit_manual_event(kind=cmd.kind, severity="error", message=str(exc))
+            return
+        self._emit_manual_event(kind=cmd.kind, severity="info", message=result.detail)
+
+    def _begin_calibrating(self) -> None:
+        self._cal_started = time.monotonic()
+        self._cancel_sent = False
+        self._sync_action_widgets()
+        if self._cal_progress is not None:
+            self._cal_progress.setVisible(True)
+        self._set_status(CALIBRATING_TEXT, level="warn")
+        self._show_cal_progress()
+        self._cal_timer.start()
+
+    def _end_calibrating(self) -> None:
+        self._cal_timer.stop()
+        self._cal_started = None
+        self._cancel_sent = False
+        if self._cal_progress is not None:
+            self._cal_progress.setVisible(False)
+        self._sync_action_widgets()
+
+    def _show_cal_progress(self) -> None:
+        """Fill the bar over the usual duration; past it, the bar stays full
+        and the elapsed time keeps counting."""
+        if self._cal_started is None:
+            return
+        elapsed = time.monotonic() - self._cal_started
+        progress = self._cal_progress
+        if progress is not None:
+            progress.setValue(min(int(elapsed * 1000), progress.maximum()))
+            progress.setFormat(f"{elapsed:.0f} s (usually ~{TYPICAL_CAL_S} s)")
+
+    def _manual_controls_enabled(self, state: RunUiState | None = None) -> bool:
+        """Every control but Cancel waits while a calibration runs."""
+        return super()._manual_controls_enabled(state) and not self.calibrating
+
+    def _sync_action_widgets(self, state: RunUiState | None = None) -> None:
+        super()._sync_action_widgets(state)
+        if self._cancel_button is not None:
+            self._cancel_button.setEnabled(
+                self.calibrating
+                and not self._cancel_sent
+                and super()._manual_controls_enabled(state)
+            )
+
     # ------------------------------------------------------------------ live readback
 
     async def refresh_readback(self) -> None:
@@ -344,10 +530,11 @@ class BalanceCard(DeviceCard):
         commands that change them call it after they land.
 
         Best-effort: a failure leaves the card as it is. Skipped while a
-        run is active (the adapter is busy streaming) and while the pool is
-        still opening — there is no client to ask yet.
+        run is active (the adapter is busy streaming), while the pool is
+        still opening — there is no client to ask yet — and while a
+        calibration runs, which re-reads once it ends.
         """
-        if self._engine_blocks_writes():
+        if self._engine_blocks_writes() or self.calibrating:
             return
         client = self._controller.manual_client
         if client is None:
@@ -374,19 +561,26 @@ class BalanceCard(DeviceCard):
             else:
                 select_or_add(combo, value)
         parts = [f"Device: {self._spec.name}", f"Adapter: {self._adapter_label()}"]
-        # The record has no timestamp; the temperature at the calibration is
-        # the one detail it carries.
         if snapshot.cal_on_record is False:
             parts.append("Last cal: none since power-up")
         elif snapshot.cal_on_record:
-            temperature = snapshot.cal_temperature_c
-            parts.append(
-                "Last cal: on record" if temperature is None else f"Last cal: {temperature:.1f} °C"
-            )
+            parts.append(f"Last cal: {_describe_cal(snapshot)}")
         self.set_subtitle("   ".join(parts))
 
     def _adapter_label(self) -> str:
         return self._spec.adapter.rsplit(".", 1)[-1]
+
+
+def _describe_cal(snapshot: SartoriusStateSnapshot) -> str:
+    """``"26.9 °C at 2026-11-27 15:56 (balance clock)"``, or whichever part
+    the balance reported. The time is the balance's own clock, which need
+    not match the PC's, so it says so."""
+    parts = []
+    if snapshot.cal_temperature_c is not None:
+        parts.append(f"{snapshot.cal_temperature_c:.1f} °C")
+    if snapshot.cal_timestamp is not None:
+        parts.append(f"{snapshot.cal_timestamp:%Y-%m-%d %H:%M} (balance clock)")
+    return " at ".join(parts) or "on record"
 
 
 def _default_sartorius_capabilities() -> frozenset[Capability]:

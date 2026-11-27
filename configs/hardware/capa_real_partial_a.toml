@@ -15,7 +15,7 @@ adapter = "capa.devices.watlow"
 port = "COM6"
 address = 1
 protocol = "stdbus"
-parameters = ["process_value", "setpoint"]
+parameters = ["process_value", "setpoint", "output_power"]  # output %: logged, no channel
 instances = [1]
 rate_hz = 1.0
 auto_reconnect = true
@@ -193,6 +193,7 @@ kind = "mass"
 unit = "g"
 derived_unit = "g"
 plot_group = "mass"
+plot_despike = true   # hide the Cubis's one-sample ±tare glitches in the plot (recorded as is)
 [channels.metadata]
 capa_group = "mass"
 [channels.source]

@@ -11,6 +11,7 @@ protocol = "stdbus"
 parameters = [
     "process_value",
     "setpoint",
+    "output_power",  # PID output %, logged to device_records (no channel)
 ]
 instances = [
     1,
@@ -228,6 +229,26 @@ output_unit = "slpm"
 [channels.metadata]
 capa_group = "purge_gas_flow"
 
+# The method writes purge.setpoint in the device's unit (SLPM). The
+# MCR-200's 8v17 firmware takes a setpoint but can't report one back (no
+# LS), so the value comes from the frame.
+[[channels]]
+name = "purge.setpoint"
+kind = "setpoint"
+unit = "slpm"
+derived_unit = "slpm"
+plot_group = "flows"
+
+[channels.source]
+source = "alicat_frame_field"
+device = "purge_mfc"
+field = "Mass_Flow_Setpt"
+
+[channels.calibration]
+kind = "identity"
+input_unit = "slpm"
+output_unit = "slpm"
+
 [[channels]]
 name = "outer_wall_temperature"
 kind = "tc"
@@ -303,19 +324,21 @@ output_unit = "kW/m^2"
 ref_low_raw = 0.0
 ref_low_value = -0.064771278
 ref_high_raw = 0.01
-ref_high_value = 128.6081421
+ref_high_value = 130.2004287  # 13026.52 kW/m2/V x 0.01 V - 0.064771278 (2026-11-22)
 
 [channels.calibration.uncertainty]
 kind = "relative"
-value = 0.015             # standard (k=1): +-3 % at k=2; capa multiplies by coverage_factor
+value = 0.016             # standard (k=1): +-3.2 % at k=2, mostly NIST's unstated value (1.5 % assumed); capa multiplies by coverage_factor
 coverage_factor = 2.0
-method = "manufacturer cert + reference comparison"
+method = "transfer from NIST-calibrated 223481 (NIST 2022 cone-heater value), open air, 2026-11-22 (configs/calibrations/hfg_223481_2022-12-19.toml)"
 
 [channels.calibration.fit_metadata]
-reference_instrument = "Medtherm Corporation 32-10SB-18-20608"
-reference_serial = "232041"
-fitted_at = 1970-01-01 00:00:00+00:00
-notes = "linear fit: slope 12867.29134 kW/m^2/V, intercept -0.064771278 kW/m^2 (named NI MAX scale 'CAPA HFG'); applied software-side, not via the driver scale. fitted_at is a placeholder; replace with the actual cert date when available."
+reference_instrument = "Medtherm GTW-10SB-4-36-40-484 (NIST-calibrated transfer standard)"
+reference_serial = "223481"
+fitted_at = 2026-11-22T17:28:03Z
+source_procedure_id = "capa.builtin.recipe_runner (hfg_transfer_cal methods) + scripts/analyze_hfg_transfer.py"
+capa_git_sha = "80ff2d0-dirty"
+notes = "This gauge: Medtherm 32-10SB-18-20608 SN 232041. Slope 13026.52 kW/m^2/V = previous 12867.29134 x 1.012375: on 2026-11-22 (run 2026-11-22_141726_HFG2_223481_cal1) 223481 read 108.461 uV per kW/m^2 on the previous scale, against NIST's 2022 cone-heater value 107.135 (9334 kW/m^2/V). NIST's tungsten-lamp fit would give 13143 (+0.9 %); 180253's corrected NIST 2013 value 13328 (+2.3 %). Intercept -0.064771278 kW/m^2 kept from the NI MAX scale 'CAPA HFG'. Applied software-side, not via the driver scale. The transfer's stop asymmetry (1.5 % between estimators) is not in the uncertainty."
 
 [channels.metadata]
 capa_group = "heat_flux_gauge"
@@ -328,6 +351,7 @@ kind = "mass"
 unit = "g"
 derived_unit = "g"
 plot_group = "mass"
+plot_despike = true   # hide the Cubis's one-sample ±tare glitches in the plot (recorded as is)
 
 [channels.source]
 source = "sartorius_reading"

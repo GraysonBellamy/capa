@@ -186,7 +186,11 @@ def test_sim_seed_clears_operator_and_specimen() -> None:
     exp = doc.experiment_payload
     assert exp["operator"] == {}
     metadata = exp["domain_profile"]["metadata"]
-    assert metadata["specimen"] == {"form": "disk", "specimen_holder": "stainless steel cup"}
+    assert metadata["specimen"] == {
+        "form": "disk",
+        "specimen_holder": "stainless steel cup",
+        "conditioning": "23C / 50% RH for 48h",
+    }
     assert metadata["program"]["target_heat_flux_kw_m2"] == 50.0
     # sample mirrors the cleared specimen.
     assert exp["sample"] == {"id": ""}

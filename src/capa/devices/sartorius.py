@@ -13,11 +13,15 @@ Architecture:
   zero or more :class:`ChannelSample`\\ s mapped from the configured
   :class:`SartoriusReading` bindings. The balance's stability flag travels
   on the channel sample's :attr:`status` (``"settling"`` while unstable).
+  While the balance runs an internal adjustment its readings are not pan
+  weights, so no :class:`ChannelSample` is derived from them; a pair of
+  :class:`DeviceEvent`\\ s marks where the withheld stretch starts and ends.
 * ``snapshot`` returns a :class:`DeviceSnapshot` with cached identity plus
   live health fields (auto-reconnect counter, last-sample age,
   :class:`DeviceHealth` pill).
 * ``command`` enforces the authorization gate and dispatches
-  :meth:`Balance.tare` / :meth:`Balance.zero`.
+  :meth:`Balance.tare` / :meth:`Balance.zero`, the internal calibration
+  (which waits for the balance to finish) and the menu writes.
 """
 
 from __future__ import annotations
@@ -31,10 +35,13 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Final, Literal
 
+import anyio
 import sartoriuslib
 from pydantic import BaseModel, ConfigDict, Field
 from sartoriuslib import (
+    AdjustmentResult,
     Balance,
+    BalanceFamily,
     CalRecord,
     DeviceInfo,
     DiscoverySummary,
@@ -42,11 +49,17 @@ from sartoriuslib import (
     PollSourceAdapter,
     ProtocolKind,
     Reading,
+    SartoriusAdjustmentAbortedError,
+    SartoriusAdjustmentError,
+    SartoriusAdjustmentInProgressError,
+    SartoriusAdjustmentNotStartedError,
+    SartoriusAdjustmentTimeoutError,
     SartoriusError,
     Unit,
     sample_to_row,
     summarize_discovery,
 )
+from sartoriuslib.protocol.xbpi import decode_measurement_body, parse_frame
 from sartoriuslib.registry.parameters import PARAMETER_TABLE
 from sartoriuslib.streaming.recorder import record as sartorius_record
 from sartoriuslib.transport import SerialSettings
@@ -72,6 +85,7 @@ from capa.devices.adapter import (
 )
 from capa.devices.records import (
     DeviceEmission,
+    DeviceEvent,
     DeviceHealth,
     DeviceSnapshot,
     SourceRecord,
@@ -145,6 +159,12 @@ class SartoriusAdapterParams(BaseModel):
     overflow: Literal["block", "drop_newest"] = "block"
     """Recorder overflow policy. ``BLOCK`` matches """
 
+    adjust_timeout_s: float = Field(gt=0, default=120.0)
+    """How long an internal calibration may run before capa stops waiting
+    and reports a timeout. An MSE1203S takes ~24.5 s on a quiet bench and
+    longer on a noisy one, since it waits for stability between phases. A
+    timeout does not stop the balance."""
+
     def to_serial_settings(self) -> SerialSettings:
         """Build the :class:`SerialSettings` sartoriuslib expects."""
         return SerialSettings(port=self.port, baudrate=self.baudrate)
@@ -192,9 +212,54 @@ class SartoriusStateSnapshot:
     cal_temperature_c: float | None = None
     """Balance temperature at the last calibration."""
 
+    cal_timestamp: datetime | None = None
+    """When the last calibration finished, on the balance's own clock (naive;
+    whatever the front panel is set to, so not comparable with host time)."""
+
     cal_on_record: bool | None = None
     """Whether a calibration is on record. The record's metadata lives in
     RAM, so it is ``False`` after a cold boot until the next calibration."""
+
+
+AdjustmentOutcome = Literal["aborted", "timeout", "not_started", "in_progress"]
+"""How an internal calibration ended without a new calibration record."""
+
+
+class BalanceAdjustmentError(AdapterError):
+    """An internal calibration ended without a new calibration record.
+
+    Raised by the ``internal_adjust`` command. :attr:`outcome` says which
+    way it ended so the manual card can tell the operator what to do; the
+    library error is kept as ``__cause__``.
+    """
+
+    def __init__(
+        self, message: str, *, outcome: AdjustmentOutcome, device: str | None = None
+    ) -> None:
+        super().__init__(message, device=device)
+        self.outcome: AdjustmentOutcome = outcome
+
+
+_ADJUSTMENT_OUTCOMES: Final[dict[type[SartoriusAdjustmentError], AdjustmentOutcome]] = {
+    SartoriusAdjustmentAbortedError: "aborted",
+    SartoriusAdjustmentTimeoutError: "timeout",
+    SartoriusAdjustmentNotStartedError: "not_started",
+    SartoriusAdjustmentInProgressError: "in_progress",
+}
+
+_ADJUSTMENT_MESSAGES: Final[dict[AdjustmentOutcome, str]] = {
+    "aborted": (
+        "internal calibration ended without a new calibration (aborted from capa "
+        "or the front panel, or the balance gave up); the previous one is kept"
+    ),
+    "timeout": "internal calibration still running after {timeout:g} s; the balance was not stopped",
+    "not_started": "the balance acknowledged the internal calibration but never started it",
+    "in_progress": "an internal calibration was already running",
+}
+
+_ADJUST_DETACH_GRACE_S: Final[float] = 2.0
+"""How long :meth:`SartoriusAdapter.close` waits for a cancelled calibration
+wait to unwind. The library finishes the poll in flight (≤ 0.5 s) first."""
 
 
 # ---------------------------------------------------------------------------
@@ -318,15 +383,19 @@ class SartoriusAdapter:
     """
 
     __slots__ = (
+        "_adjust_done",
+        "_adjust_scope",
         "_balance",
         "_balance_factory",
         "_channels",
         "_device_info",
+        "_flags_mark_adjusting",
         "_interval_max_ms",
         "_interval_min_ms",
         "_interval_narrow_count",
         "_last_monotonic_ns",
         "_state",
+        "_withheld",
         "capabilities",
         "name",
         "params",
@@ -371,6 +440,17 @@ class SartoriusAdapter:
         self._interval_min_ms: float = math.inf
         self._interval_max_ms: float = 0.0
         self._interval_narrow_count: int = 0
+        # The calibration wait started by the ``internal_adjust`` command:
+        # its cancel scope (so ``close`` can detach it) and an event set
+        # once it has unwound. ``None`` when no wait is in flight.
+        self._adjust_scope: anyio.CancelScope | None = None
+        self._adjust_done: anyio.Event | None = None
+        # Whether a reading's measurement flags show an adjustment — only
+        # characterised on Cubis net reads over xBPI; set at ``open``.
+        self._flags_mark_adjusting: bool = False
+        # The stretch of readings currently withheld from the channel
+        # samples because the balance is adjusting, if any.
+        self._withheld: _WithheldStretch | None = None
 
     # ------------------------------------------------------------------ wiring
 
@@ -413,13 +493,24 @@ class SartoriusAdapter:
                 f"sartorius {self.name!r} open failed: {exc}", device=self.name
             ) from exc
         # ``Balance.info`` is populated by ``open_device(identify=True)``.
-        self._device_info = self._balance.info
+        info = self._device_info = self._balance.info
+        self._flags_mark_adjusting = (
+            info is not None
+            and info.family is BalanceFamily.CUBIS
+            and info.protocol is ProtocolKind.XBPI
+        )
         self._state.lifecycle.open()
 
     async def close(self) -> None:
-        """Release the bus / handle. Idempotent."""
+        """Release the bus / handle. Idempotent.
+
+        A calibration wait still in flight is detached first: the waiting
+        stops between polls, nothing is sent to the balance (no abort), and
+        the balance finishes the calibration on its own.
+        """
         if self._state.lifecycle.state == "closed":
             return
+        await self._detach_adjust_wait()
         await self._safe_close_balance()
         self._balance = None
         self._state.lifecycle.close()
@@ -432,6 +523,7 @@ class SartoriusAdapter:
         self._interval_min_ms = math.inf
         self._interval_max_ms = 0.0
         self._interval_narrow_count = 0
+        self._withheld = None
 
     async def stop(self) -> None:
         """Request the streaming loop to exit cleanly. Idempotent."""
@@ -468,6 +560,12 @@ class SartoriusAdapter:
         increment the degradation counter and are dropped from the
         :class:`ChannelSample` stream — the native row is preserved with the
         error fields populated.
+
+        Readings taken while the balance adjusts (see
+        :meth:`_reading_is_adjusting`) are not pan weights: they keep their
+        native row but yield no :class:`ChannelSample`. An ``"adjusting"``
+        :class:`DeviceEvent` opens each such stretch and an
+        ``"adjusting_ended"`` one closes it.
         """
         if self._balance is None:
             raise AdapterError(
@@ -529,8 +627,13 @@ class SartoriusAdapter:
                                 device=self.name,
                             )
                         continue
-                    for cs in self._channel_samples_for(sample, record.record_id):
-                        yield cs
+                    adjusting = self._reading_is_adjusting(sample.reading)
+                    event = self._track_withheld(adjusting, record.t_mono_ns)
+                    if event is not None:
+                        yield event
+                    if not adjusting:
+                        for cs in self._channel_samples_for(sample, record.record_id):
+                            yield cs
                     if self._state.snapshot_due(period_s=self.params.snapshot_period_s):
                         snap = await self.snapshot()
                         self._state.last_snapshot_t_mono_ns = snap.t_mono_ns
@@ -573,12 +676,16 @@ class SartoriusAdapter:
 
         * ``"tare"`` — combined-tare (xBPI ``0x14`` / SBI ``ESC T``).
         * ``"zero"`` — zero command (xBPI ``0x18``).
+        * ``"abort_adjustment"`` — stop a running internal calibration
+          (xBPI ``0x29``); a no-op when none is running.
 
         Persistent / dangerous (CAPA's authorization gate covers the library's
         own ``confirm=True`` gate; we always pass it through here since
         ``reject_unless_authorized`` already accepted the command):
 
         * ``"internal_adjust"`` — payload ``{"cal_type": int | None}``.
+          Returns once the calibration has finished (~25 s); see
+          :meth:`_run_internal_adjust`.
         * ``"set_filter_mode"`` — payload ``{"mode": str | int}``.
         * ``"set_display_unit"`` — payload ``{"unit": str | int}``.
         * ``"set_auto_zero"`` — payload ``{"mode": str | int}``.
@@ -599,9 +706,11 @@ class SartoriusAdapter:
             await self._balance.zero()
             return "zero"
         if kind == "internal_adjust":
-            cal_type = cmd.payload.get("cal_type")
-            await self._balance.internal_adjust(cal_type=cal_type, confirm=True)
-            return f"internal_adjust cal_type={cal_type if cal_type is not None else 'default'}"
+            return await self._run_internal_adjust(cmd.payload.get("cal_type"))
+        if kind == "abort_adjustment":
+            if await self._balance.abort_adjustment():
+                return "abort sent; the balance unloads its internal weight in a few seconds"
+            return "no internal calibration was running"
         if kind == "set_filter_mode":
             mode = cmd.payload["mode"]
             await self._balance.set_filter_mode(mode, confirm=True)
@@ -643,6 +752,87 @@ class SartoriusAdapter:
             f"sartorius {self.name!r}: unknown command kind {kind!r}",
             device=self.name,
         )
+
+    async def _run_internal_adjust(self, cal_type: int | None) -> str:
+        """Start an internal calibration and wait for the balance to finish.
+
+        When the balance is already adjusting (an isoCAL it started itself),
+        nothing is sent and this waits for that one instead — it ends in a
+        fresh calibration just the same. Waits up to
+        :attr:`SartoriusAdapterParams.adjust_timeout_s`.
+
+        Returns the result detail. Raises :class:`BalanceAdjustmentError`
+        when the calibration ends without a new record, and
+        :class:`AdapterError` when :meth:`close` detaches the wait. Readings
+        taken while this runs yield no channel samples.
+        """
+        balance = self._balance
+        assert balance is not None
+        if self._adjust_scope is not None:
+            raise AdapterError(
+                f"sartorius {self.name!r}: an internal calibration started from capa is "
+                "already running",
+                device=self.name,
+            )
+        timeout = self.params.adjust_timeout_s
+        result: AdjustmentResult | None = None
+        attached = False
+        self._adjust_done = anyio.Event()
+        try:
+            with anyio.CancelScope() as scope:
+                self._adjust_scope = scope
+                try:
+                    result = await balance.internal_adjust(
+                        cal_type=cal_type, confirm=True, wait=True, timeout=timeout
+                    )
+                except SartoriusAdjustmentInProgressError:
+                    attached = True
+                    result = await balance.wait_for_adjustment(timeout=timeout)
+        except SartoriusAdjustmentError as exc:
+            outcome = _ADJUSTMENT_OUTCOMES.get(type(exc), "aborted")
+            raise BalanceAdjustmentError(
+                f"sartorius {self.name!r}: "
+                + _ADJUSTMENT_MESSAGES[outcome].format(timeout=timeout),
+                outcome=outcome,
+                device=self.name,
+            ) from exc
+        finally:
+            self._adjust_scope = None
+            self._adjust_done.set()
+        if result is None:
+            # Only a detach from ``close`` cancels the scope.
+            raise AdapterError(
+                f"sartorius {self.name!r}: stopped waiting for the internal calibration "
+                "(connection closing); the balance finishes it on its own",
+                device=self.name,
+            )
+        _log.info(
+            "sartorius %r internal calibration done in %.1f s (%d polls, %d retried)",
+            self.name,
+            result.duration_s,
+            result.polls,
+            result.transient_errors,
+        )
+        detail = f"internal calibration done in {result.duration_s:.0f} s"
+        temperature = result.cal_record.temperature_celsius
+        if temperature is not None:
+            detail += f" at {temperature:.1f} °C"
+        if attached:
+            detail += "; the balance had already started it, so capa waited for that one"
+        return detail
+
+    async def _detach_adjust_wait(self) -> None:
+        """Stop a calibration wait in flight and let it unwind.
+
+        Cancelling the library's wait leaves the port in sync and sends
+        nothing, so the balance carries on and finishes by itself.
+        """
+        scope, done = self._adjust_scope, self._adjust_done
+        if scope is None or done is None:
+            return
+        scope.cancel()
+        with anyio.move_on_after(_ADJUST_DETACH_GRACE_S):
+            await done.wait()
 
     async def tare(
         self,
@@ -694,11 +884,39 @@ class SartoriusAdapter:
         start-of-day calibration; ``cal_type`` selects an external /
         linearization variant (``0x70..0x7B``). Most callers pass
         ``cal_type=None`` and accept the library default.
+
+        Returns once the balance has finished (~25 s). Raises
+        :class:`BalanceAdjustmentError` if it ends without a new
+        calibration record.
         """
         return await self.command(
             DeviceCommand(
                 kind="internal_adjust",
                 payload={"cal_type": cal_type},
+                issued_by=issued_by,
+                authorization_id=authorization_id,
+                confirmed_by=confirmed_by,
+            )
+        )
+
+    async def abort_adjustment(
+        self,
+        *,
+        issued_by: str,
+        authorization_id: str | None = None,
+        confirmed_by: str | None = None,
+    ) -> CommandResult:
+        """Stop a running internal calibration (xBPI ``0x29``).
+
+        The balance unloads its internal weight ~2.5 s later and keeps its
+        previous calibration; a pending :meth:`internal_adjust` then raises
+        :class:`BalanceAdjustmentError` with ``outcome="aborted"``. Accepted
+        whether or not a calibration was running.
+        """
+        return await self.command(
+            DeviceCommand(
+                kind="abort_adjustment",
+                payload={},
                 issued_by=issued_by,
                 authorization_id=authorization_id,
                 confirmed_by=confirmed_by,
@@ -825,7 +1043,7 @@ class SartoriusAdapter:
         """Read the last-calibration record (no authorization gate — read-only).
 
         The record carries the temperature at the last calibration and
-        whether one is on record since the last cold boot — no timestamp.
+        when it finished, on the balance's own clock.
         """
         if self._balance is None:
             raise AdapterError(
@@ -872,6 +1090,7 @@ class SartoriusAdapter:
             display_unit=_mode_label(display_unit),
             tare_behavior=_mode_label(tare_behavior),
             cal_temperature_c=cal.temperature_celsius if cal is not None else None,
+            cal_timestamp=cal.timestamp if cal is not None else None,
             cal_on_record=cal.has_metadata if cal is not None else None,
         )
 
@@ -940,6 +1159,72 @@ class SartoriusAdapter:
             t_utc=sample.t_utc,
             row=row,
             metadata={"protocol": protocol_str} if protocol_str is not None else {},
+        )
+
+    def _reading_is_adjusting(self, reading: Reading) -> bool:
+        """Whether ``reading`` was taken during an internal adjustment.
+
+        Such readings are not pan weights: off-scale for ~6 s, then a fake
+        stable 1300 g, then 0 g (sartoriuslib ``docs/protocol.md`` §8.1).
+        Two signals mark them. One is a calibration capa is waiting for.
+        The other, on Cubis net reads over xBPI, is measurement-flags bit
+        ``0x04``: set on every reading at rest, clear on every reading taken
+        while adjusting. It also catches an isoCAL the balance starts
+        itself, with no command in flight.
+        """
+        if self._adjust_scope is not None:
+            return True
+        if not self._flags_mark_adjusting or reading.protocol is not ProtocolKind.XBPI:
+            return False
+        flags = _measurement_flags(reading.raw)
+        return flags is not None and not flags & _FLAG_AT_REST
+
+    def _track_withheld(self, adjusting: bool, t_mono_ns: int) -> DeviceEvent | None:
+        """Follow the stretch of readings withheld while the balance adjusts.
+
+        Returns the :class:`DeviceEvent` that opens (``"adjusting"``) or
+        closes (``"adjusting_ended"``) a stretch, else ``None``.
+        """
+        stretch = self._withheld
+        if adjusting:
+            if stretch is not None:
+                stretch.readings += 1
+                return None
+            from_capa = self._adjust_scope is not None
+            self._withheld = _WithheldStretch(started_t_mono_ns=t_mono_ns, readings=1)
+            started_by = (
+                "started from capa"
+                if from_capa
+                else "started by the balance itself (isoCAL) or from its front panel"
+            )
+            return DeviceEvent(
+                adapter=ADAPTER_ID,
+                device=self.name,
+                t_mono_ns=t_mono_ns,
+                t_utc=datetime.now(UTC),
+                kind="adjusting",
+                severity="warning",
+                message=(
+                    f"balance is running an internal calibration ({started_by}); its "
+                    "readings are not pan weights, so mass samples are withheld until it ends"
+                ),
+                metadata={"started_by": "capa" if from_capa else "balance"},
+            )
+        if stretch is None:
+            return None
+        self._withheld = None
+        duration_s = (t_mono_ns - stretch.started_t_mono_ns) / 1e9
+        return DeviceEvent(
+            adapter=ADAPTER_ID,
+            device=self.name,
+            t_mono_ns=t_mono_ns,
+            t_utc=datetime.now(UTC),
+            kind="adjusting_ended",
+            message=(
+                f"balance readings are pan weights again; {stretch.readings} readings "
+                f"over {duration_s:.1f} s were withheld from the mass samples"
+            ),
+            metadata={"withheld_readings": stretch.readings, "duration_s": round(duration_s, 3)},
         )
 
     def _channel_samples_for(self, sample: Any, record_id: str) -> list[DeviceEmission]:
@@ -1026,6 +1311,7 @@ class SartoriusAdapter:
             if self._interval_max_ms
             else None,
             "wire_interval_narrow_count": self._interval_narrow_count,
+            "adjusting": self._adjust_scope is not None or self._withheld is not None,
         }
         if interval_min is not None:
             expected_ms = 1000.0 / self.params.rate_hz
@@ -1049,6 +1335,34 @@ class SartoriusAdapter:
             if info.firmware is not None:
                 out["firmware"] = str(info.firmware)
         return out
+
+
+_FLAG_AT_REST: Final[int] = 0x04
+"""Measurement-flags bit set on every Cubis ``0x1E`` reading at rest and
+clear on every one taken during an internal adjustment (sartoriuslib
+``docs/protocol.md`` §8.1). Gross reads use other flags; capa streams net."""
+
+_MEASUREMENT_SUBTYPE: Final[int] = 0x48
+
+
+@dataclass(slots=True)
+class _WithheldStretch:
+    """Readings withheld from the channel samples while the balance adjusts."""
+
+    started_t_mono_ns: int
+    readings: int
+
+
+def _measurement_flags(raw: bytes) -> int | None:
+    """The flags byte of an xBPI short-measurement reply, or ``None`` when
+    ``raw`` is not one (an SBI line, a malformed frame)."""
+    try:
+        frame = parse_frame(raw)
+        if frame.subtype != _MEASUREMENT_SUBTYPE:
+            return None
+        return decode_measurement_body(frame.body).flags
+    except SartoriusError:
+        return None
 
 
 def _mode_label(value: Enum | None) -> str | None:
@@ -1170,6 +1484,8 @@ __all__ = [
     "ADAPTER_ID",
     "DESCRIPTOR",
     "SARTORIUS_SETTINGS",
+    "AdjustmentOutcome",
+    "BalanceAdjustmentError",
     "SartoriusAdapter",
     "SartoriusAdapterParams",
     "SartoriusSettings",

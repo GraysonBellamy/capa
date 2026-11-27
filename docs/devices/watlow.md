@@ -46,7 +46,7 @@ adapter = "capa.devices.watlow"
 port = "COM6"
 address = 1
 protocol = "stdbus"           # "stdbus" | "modbus_rtu" | "auto"
-parameters = ["process_value", "setpoint"]
+parameters = ["process_value", "setpoint", "output_power"]
 instances = [1]
 rate_hz = 1.0
 auto_reconnect = true
@@ -66,6 +66,7 @@ wire_temperature_unit = "F"   # see Quirks
 | `rate_hz` | `1.0` (gt 0, le 100) | Production sits at 1–5 Hz. The 100 Hz cap exists to catch typos and to give unit tests a fast path; real Std Bus round-trips ~50 ms per parameter, so even Modbus tops out near 10 Hz for two-parameter polls. |
 | `auto_reconnect` | `true` | Transient `WatlowConnectionError`s are logged and retried on the next tick instead of ending the stream. |
 | `snapshot_period_s` | `30.0` | Cadence of `DeviceSnapshot` health pings. |
+| `settings_parameters` | `None` (PM loop settings on `ezzone`, none otherwise) | Read into every snapshot, see [Loop settings](#loop-settings). Names or ids; `[]` turns it off. Validated against the profile's registry. |
 | `identify_on_open` | `true` | Run `Controller.identify` after `open` to populate the cached `DeviceInfo`. |
 | `io_timeout_s` | `None` (inherits watlowlib `1.0 s`) | Per-call timeout for `set_setpoint` / `write_parameter` / `read_pv` / `identify`. Bump to 2.0–3.0 s for slow USB-RS485 bridges. Streaming reads ignore this knob. |
 | `wire_temperature_unit` | `"F"` | Operator-asserted wire scale. **See Quirks — this is the most common bring-up footgun.** |
@@ -113,6 +114,38 @@ See [channel bindings](../configuration/channel-bindings.md) for the
 selector contract and [devices overview § emission
 shapes](overview.md#emission-shapes) for how `long_row` differs from the
 other shapes.
+
+A polled parameter doesn't need a channel. The rig configs poll
+`output_power` (the PID output, %) that way: it lands in
+`device_records/watlow.parquet` every tick, with no plot or scalar.
+
+### Loop settings
+
+How the loop is controlling (not what it reads) goes into each
+`DeviceSnapshot`, so into `status.sqlite`: once at run start, then every
+`snapshot_period_s`. On the PM the default list is control mode, heat
+algorithm, the PID gains (`heat_proportional_band` in the wire
+temperature unit, `time_integral`, `time_derivative`), TRU-TUNE+ enable /
+band / gain, autotune aggressiveness / setpoint / status, and the analog
+input filter (id `4014`; the name `filter` resolves to 26026).
+Enumerations are stored as labels (`"PID"`, `"Yes"`, `"Over"`), and the
+snapshot also carries `wire_temperature_unit`.
+
+They are re-read on every snapshot because TRU-TUNE+ rewrites the gains
+while the heater holds. A read the controller rejects is recorded as
+`null`; a timeout records `null` for the rest of that snapshot rather than
+stalling the stream once per setting.
+
+```python
+import json, sqlite3
+db = sqlite3.connect("runs/<run>/status.sqlite")
+rows = db.execute(
+    "select t_utc, fields_json from status where adapter = 'watlow' order by id"
+)
+for t, fields in rows:
+    f = json.loads(fields)
+    print(t, f["heat_proportional_band"], f["time_integral"], f["tru_tune_enable"])
+```
 
 ## Capability flags
 

@@ -107,14 +107,19 @@ def test_load_path_refreshes_overview(qtbot: Any) -> None:
 
 def test_load_path_clears_per_run_fields(qtbot: Any) -> None:
     """Opening a config never carries over the last run's operator or
-    specimen measurements; the rig-level specimen fields stay."""
+    specimen measurements; the rig-level specimen fields and the series'
+    conditioning stay."""
     tab = SetupTab()
     qtbot.addWidget(tab)
     assert tab.load_path(SIM_CAPA_EXP)
     exp = tab.draft.document.experiment_payload
     assert exp["operator"] == {}
     specimen = exp["domain_profile"]["metadata"]["specimen"]
-    assert specimen == {"form": "disk", "specimen_holder": "stainless steel cup"}
+    assert specimen == {
+        "form": "disk",
+        "specimen_holder": "stainless steel cup",
+        "conditioning": "23C / 50% RH for 48h",
+    }
     assert exp["sample"] == {"id": ""}
     assert exp["domain_profile"]["metadata"]["program"]["heater_setpoint_c"] == 600.0
     specimen_path = ("domain_profile", "metadata", "specimen")

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from capa.config.capa_profile import clear_per_run_fields
+from capa.config.capa_profile import clear_per_run_fields, device_settings_with_purge_gas
 from capa.config.document import ConfigDocument
 from capa.config.problems import ConfigProblem
 from capa.config.validate import validate
@@ -49,15 +49,19 @@ class SetupDraft:
 
     # -- editing operations -------------------------------------------------
 
-    def mark_dirty(self, section: str) -> None:
+    def mark_dirty(self, section: str, *, unapplied: bool = True) -> None:
         """Note that ``section`` has unsaved edits.
 
         Section keys use dotted names so the outline-status code can
         resolve nested entries (``"hardware.devices"`` vs
         ``"hardware.channels"``) without parsing.
+
+        ``unapplied=False`` is for edits the rig picks up without Apply &
+        Connect — a method change, which Start reads from the Method tab.
         """
         self.dirty_sections.add(section)
-        self.unapplied = True
+        if unapplied:
+            self.unapplied = True
 
     def clear_dirty(self) -> None:
         """Reset dirty tracking after a successful save."""
@@ -86,6 +90,22 @@ class SetupDraft:
         """``True`` if validation produced at least one error-severity problem."""
         return any(p.severity == "error" for p in self.problems)
 
+    def mirror_purge_gas(self) -> bool:
+        """Write the purge MFC's ``device_settings`` gas from the CAPA
+        profile's purge gas
+        (:func:`~capa.config.capa_profile.device_settings_with_purge_gas`).
+
+        The Setup tab calls this after every edit, so the gas is entered
+        once, in CAPA Profile. Returns ``True`` when ``device_settings``
+        changed.
+        """
+        exp = self.document.experiment_payload
+        settings = device_settings_with_purge_gas(exp, self.document.hardware_payload)
+        if settings is None or settings == exp.get("device_settings"):
+            return False
+        exp["device_settings"] = settings
+        return True
+
     # -- validation ---------------------------------------------------------
 
     def validate(self, *, with_live_checks: bool = False) -> list[ConfigProblem]:
@@ -109,13 +129,17 @@ class SetupDraft:
         """Load a draft from an experiment file.
 
         ``clear_per_run`` empties the operator and the specimen's per-run
-        fields (:func:`~capa.config.capa_profile.clear_per_run_fields`) —
-        what the Setup tab does when the operator opens a config.
+        fields (:func:`~capa.config.capa_profile.clear_per_run_fields`)
+        and writes the purge MFC's gas from the profile
+        (:meth:`mirror_purge_gas`) — what the Setup tab does when the
+        operator opens a config.
         """
         document = ConfigDocument.load(path)
         if clear_per_run:
             document.experiment_payload = clear_per_run_fields(document.experiment_payload)
         draft = cls(document=document)
+        if clear_per_run:
+            draft.mirror_purge_gas()
         draft.validate()
         return draft
 

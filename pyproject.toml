@@ -44,7 +44,7 @@ dependencies = [
     "alicatlib>=0.3.1,<0.4",
     # 0.8.1: Series F4P profile (the IR-564 blackbody's controller).
     "watlowlib>=0.8.1,<0.9",
-    "sartoriuslib>=0.4.3,<0.5",
+    "sartoriuslib>=0.5,<0.6",
     "nidaqlib>=0.3.0,<0.4",
     "fujilib>=0.2.0,<0.3",
     # HID transport for the MCP2221 USB-I2C bridge behind the SHT4x

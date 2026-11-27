@@ -32,6 +32,7 @@ from watlowlib.devices.models import (
 from watlowlib.errors import (
     ErrorContext,
     WatlowConnectionError,
+    WatlowNoSuchAttributeError,
     WatlowTimeoutError,
 )
 from watlowlib.protocol.base import ProtocolKind
@@ -47,7 +48,12 @@ from capa.core.errors import AdapterError
 from capa.devices.adapter import Capability as CapaCapability
 from capa.devices.adapter import DeviceCommand
 from capa.devices.records import ChannelSample, DeviceEvent, DeviceSnapshot, SourceRecord
-from capa.devices.watlow import ADAPTER_ID, WatlowAdapter, WatlowAdapterParams
+from capa.devices.watlow import (
+    ADAPTER_ID,
+    PM_SETTINGS_PARAMETERS,
+    WatlowAdapter,
+    WatlowAdapterParams,
+)
 from tests._adapter_helpers import make_start_ctx
 
 pytestmark = pytest.mark.anyio
@@ -104,6 +110,11 @@ class StubWatlowController:
         self.identify_calls = 0
         self.raise_on_poll: BaseException | None = None
         self.raise_on_set_setpoint: BaseException | None = None
+        # read_parameter answers from ``settings`` (keyed by the name or id
+        # as passed, and instance); unlisted parameters read 0.
+        self.settings: dict[tuple[str | int, int], float | int | None] = {}
+        self.raise_on_read_parameter: dict[str | int, BaseException] = {}
+        self.read_parameter_calls: list[tuple[str | int, int]] = []
 
     async def __aenter__(self) -> StubWatlowController:
         self.aentered = True
@@ -219,6 +230,21 @@ class StubWatlowController:
             {"name": name_or_id, "value": value, "instance": instance, "confirm": confirm}
         )
         spec = PARAMETERS.resolve(name_or_id)
+        return ParameterEntry(spec=spec, instance=instance, value=value, raw=b"")
+
+    async def read_parameter(
+        self,
+        name_or_id: str | int,
+        *,
+        instance: int = 1,
+        timeout: float | None = None,
+    ) -> ParameterEntry:
+        del timeout
+        self.read_parameter_calls.append((name_or_id, instance))
+        if name_or_id in self.raise_on_read_parameter:
+            raise self.raise_on_read_parameter[name_or_id]
+        spec = PARAMETERS.resolve(name_or_id)
+        value = self.settings.get((name_or_id, instance), 0)
         return ParameterEntry(spec=spec, instance=instance, value=value, raw=b"")
 
     async def read_pv(self, *, instance: int = 1, timeout: float | None = None) -> Reading:
@@ -369,6 +395,22 @@ class TestParams:
             port="COM8", address=10, protocol="modbus_rtu", baudrate=19200, profile="f4p"
         )
         assert p.device_profile().name == "f4p"
+        assert p.settings() == ()
+
+    def test_pm_settings_by_default(self) -> None:
+        assert WatlowAdapterParams(port="COM6").settings() == PM_SETTINGS_PARAMETERS
+
+    def test_settings_can_be_turned_off(self) -> None:
+        assert WatlowAdapterParams(port="COM6", settings_parameters=()).settings() == ()
+
+    def test_settings_must_exist_in_profile(self) -> None:
+        with pytest.raises(ValueError, match="not a 'f4p' parameter"):
+            WatlowAdapterParams(port="COM8", profile="f4p", settings_parameters=("time_integral",))
+
+    def test_settings_names_must_be_unique(self) -> None:
+        # "filter" resolves to 26026; 4014 is also named "filter".
+        with pytest.raises(ValueError, match="duplicate names"):
+            WatlowAdapterParams(port="COM6", settings_parameters=("filter", 4014))
 
     def test_unknown_profile_rejected(self) -> None:
         with pytest.raises(Exception):
@@ -929,6 +971,97 @@ class TestReadStateSnapshot:
 # ---------------------------------------------------------------------------
 # Display unit (parameter 17050) — watlowlib 0.3.0 typed-units integration
 # ---------------------------------------------------------------------------
+
+
+class TestSettingsSnapshot:
+    """``settings_parameters`` ride along in every snapshot."""
+
+    @staticmethod
+    def _adapter(stub: StubWatlowController, **params: Any) -> WatlowAdapter:
+        async def factory() -> Any:
+            return stub
+
+        return WatlowAdapter(
+            name="heater", port="fake://stub", controller_factory=factory, **params
+        )
+
+    async def test_settings_recorded_with_labels(self) -> None:
+        stub = StubWatlowController(signals={})
+        stub.settings = {
+            ("heat_algorithm", 1): 71,
+            ("tru_tune_enable", 1): 106,
+            ("heat_proportional_band", 1): 40.81,
+            ("tru_tune_gain", 1): 5,
+            (4014, 1): 0.5,
+        }
+        adapter = self._adapter(stub)
+        await adapter.open()
+        fields = (await adapter.snapshot()).fields
+        await adapter.close()
+        assert fields["heat_algorithm"] == "PID"
+        assert fields["tru_tune_enable"] == "Yes"
+        assert fields["heat_proportional_band"] == pytest.approx(40.81)
+        assert fields["tru_tune_gain"] == 5
+        assert fields["filter"] == pytest.approx(0.5)
+        assert fields["wire_temperature_unit"] == "F"
+        assert len(stub.read_parameter_calls) == len(PM_SETTINGS_PARAMETERS)
+
+    async def test_rejected_read_is_none_and_the_rest_carry_on(self) -> None:
+        stub = StubWatlowController(signals={})
+        stub.settings = {("time_derivative", 1): 7.8}
+        stub.raise_on_read_parameter = {
+            "time_integral": WatlowNoSuchAttributeError(
+                "no such attribute", context=ErrorContext(port="fake://stub")
+            )
+        }
+        adapter = self._adapter(stub, settings_parameters=["time_integral", "time_derivative"])
+        await adapter.open()
+        fields = (await adapter.snapshot()).fields
+        await adapter.close()
+        assert fields["time_integral"] is None
+        assert fields["time_derivative"] == pytest.approx(7.8)
+
+    async def test_transport_failure_skips_the_remaining_reads(self) -> None:
+        stub = StubWatlowController(signals={})
+        stub.raise_on_read_parameter = {
+            "time_integral": WatlowTimeoutError(
+                "no reply", context=ErrorContext(port="fake://stub")
+            )
+        }
+        adapter = self._adapter(
+            stub,
+            settings_parameters=["heat_proportional_band", "time_integral", "time_derivative"],
+        )
+        await adapter.open()
+        fields = (await adapter.snapshot()).fields
+        await adapter.close()
+        assert fields["heat_proportional_band"] == 0
+        assert fields["time_integral"] is None
+        assert fields["time_derivative"] is None
+        assert [c[0] for c in stub.read_parameter_calls] == [
+            "heat_proportional_band",
+            "time_integral",
+        ]
+
+    async def test_every_instance_is_read(self) -> None:
+        stub = StubWatlowController(signals={})
+        stub.settings = {("time_integral", 1): 40.0, ("time_integral", 2): 90.0}
+        adapter = self._adapter(stub, instances=(1, 2), settings_parameters=["time_integral"])
+        await adapter.open()
+        fields = (await adapter.snapshot()).fields
+        await adapter.close()
+        assert fields["time_integral"] == pytest.approx(40.0)
+        assert fields["time_integral[2]"] == pytest.approx(90.0)
+
+    async def test_run_start_snapshot_carries_settings(self) -> None:
+        adapter, stub = _make_adapter(rate_hz=100.0)
+        stub.settings = {("control_mode", 1): 10}
+        await adapter.open()
+        await adapter.start(make_start_ctx())
+        emissions = await _drain(adapter, max_records=2)
+        await adapter.close()
+        _records, _samples, snapshots = _split(emissions)
+        assert snapshots[0].fields["control_mode"] == "Auto"
 
 
 class TestDisplayUnits:

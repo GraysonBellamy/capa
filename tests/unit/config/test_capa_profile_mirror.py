@@ -1,11 +1,19 @@
-"""Specimen → sample mirror helpers in :mod:`capa.config.capa_profile`."""
+"""Specimen → sample and purge gas → purge MFC mirror helpers in
+:mod:`capa.config.capa_profile`."""
 
 from __future__ import annotations
+
+from typing import Any
+
+import pytest
 
 from capa.config.capa_profile import (
     CAPA_PROFILE_ID,
     clear_per_run_fields,
+    device_settings_with_purge_gas,
+    mirrored_purge_gas,
     profile_model_fields,
+    purge_gas_mismatch,
     sample_from_specimen,
     sample_specimen_mismatches,
 )
@@ -90,6 +98,7 @@ def test_clear_per_run_fields_keeps_rig_level_specimen_fields() -> None:
                     "id": "P-1",
                     "material": "PMMA",
                     "initial_mass_g": 5.0,
+                    "mounted_mass_g": 5.6,
                     "thickness_mm": 6.0,
                     "diameter_mm": 70.0,
                     "form": "disk",
@@ -97,6 +106,8 @@ def test_clear_per_run_fields_keeps_rig_level_specimen_fields() -> None:
                     "specimen_holder_diameter_mm": 75.0,
                     "specimen_holder_mass_g": 40.0,
                     "insulation_mass_g": 3.0,
+                    "retainer_mass_g": 6.0,
+                    "assembly_mass_g": 140.0,
                     "conditioning": "dried 24 h",
                     "notes": "box B",
                 },
@@ -112,6 +123,7 @@ def test_clear_per_run_fields_keeps_rig_level_specimen_fields() -> None:
         "form": "disk",
         "specimen_holder": "stainless steel cup",
         "specimen_holder_diameter_mm": 75.0,
+        "conditioning": "dried 24 h",
     }
     assert metadata["program"] == {"target_heat_flux_kw_m2": 50.0}
     assert out["sample"] == {"id": "", "extra": {"lot": "B7"}}
@@ -124,3 +136,92 @@ def test_clear_per_run_fields_keeps_rig_level_specimen_fields() -> None:
 def test_clear_per_run_fields_without_profile_clears_only_operator() -> None:
     payload = {"operator": {"id": "abr", "display_name": "A. Researcher"}, "sample": {"id": "S-1"}}
     assert clear_per_run_fields(payload) == {"operator": {}, "sample": {"id": "S-1"}}
+
+
+# ---------------------------------------------------------------------------
+# Purge gas → purge MFC.
+# ---------------------------------------------------------------------------
+
+_HARDWARE: dict[str, Any] = {
+    "devices": [
+        {"name": "purge_mfc", "adapter": "capa.devices.sim.alicat_sim"},
+        {"name": "heater", "adapter": "capa.devices.sim.watlow_sim"},
+    ],
+    "channels": [
+        {
+            "name": "purge.flow",
+            "source": {"source": "alicat_frame_field", "device": "purge_mfc"},
+            "metadata": {"capa_group": "purge_gas_flow"},
+        },
+        {"name": "heater.pv", "source": {"device": "heater"}},
+    ],
+}
+
+
+def _experiment(species: Any, device_settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    exp: dict[str, Any] = {
+        "domain_profile": {
+            "id": CAPA_PROFILE_ID,
+            "metadata": {"atmosphere": {"purge": {"species": species}}},
+        }
+    }
+    if device_settings is not None:
+        exp["device_settings"] = device_settings
+    return exp
+
+
+def test_purge_gas_is_named_as_the_mfc_names_it() -> None:
+    assert mirrored_purge_gas(_experiment("nitrogen"), _HARDWARE) == ("purge_mfc", "N2")
+
+
+@pytest.mark.parametrize("species", ["5% O2/N2", "", None])
+def test_no_purge_gas_mirror_for_a_mixture_or_unset_species(species: Any) -> None:
+    assert mirrored_purge_gas(_experiment(species), _HARDWARE) is None
+
+
+def test_no_purge_gas_mirror_without_the_profile_or_a_gas_setting() -> None:
+    no_profile = {"device_settings": {"purge_mfc": {"gas": "N2"}}}
+    assert mirrored_purge_gas(no_profile, _HARDWARE) is None
+    unmapped = {**_HARDWARE, "channels": _HARDWARE["channels"][1:]}
+    assert mirrored_purge_gas(_experiment("N2"), unmapped) is None
+    # The heater's adapter has no gas setting.
+    on_heater = {
+        **_HARDWARE,
+        "channels": [
+            {
+                "name": "x",
+                "source": {"device": "heater"},
+                "metadata": {"capa_group": "purge_gas_flow"},
+            }
+        ],
+    }
+    assert mirrored_purge_gas(_experiment("N2"), on_heater) is None
+
+
+def test_device_settings_with_purge_gas_keeps_the_rest() -> None:
+    declared = {"purge_mfc": {"gas": "Ar"}, "balance": {"filter_mode": "stable"}}
+    exp = _experiment("Air", declared)
+    assert device_settings_with_purge_gas(exp, _HARDWARE) == {
+        "purge_mfc": {"gas": "Air"},
+        "balance": {"filter_mode": "stable"},
+    }
+    assert declared["purge_mfc"] == {"gas": "Ar"}  # input untouched
+    assert device_settings_with_purge_gas(_experiment("N2"), _HARDWARE) == {
+        "purge_mfc": {"gas": "N2"}
+    }
+    assert device_settings_with_purge_gas(_experiment("5% O2/N2", declared), _HARDWARE) is None
+
+
+def test_purge_gas_mismatch() -> None:
+    assert (
+        purge_gas_mismatch(_experiment("nitrogen", {"purge_mfc": {"gas": "N2"}}), _HARDWARE) is None
+    )
+    assert purge_gas_mismatch(_experiment("N2", {"purge_mfc": {"gas": "Ar"}}), _HARDWARE) == (
+        "purge_mfc",
+        "N2",
+        "Ar",
+    )
+    assert purge_gas_mismatch(_experiment("N2", {}), _HARDWARE) == ("purge_mfc", "N2", None)
+    # Invalid entries are device_settings validation's to report.
+    assert purge_gas_mismatch(_experiment("N2", {"purge_mfc": {"gas": "N3"}}), _HARDWARE) is None
+    assert purge_gas_mismatch(_experiment("N2", {"purge_mfc": "N2"}), _HARDWARE) is None

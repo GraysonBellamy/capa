@@ -46,24 +46,27 @@ Every sub-model is frozen and `extra="forbid"` — typos in field names fail val
 
 ## Specimen (`CapaSpecimen`)
 
-The physical sample under test.
+The physical sample under test. The Setup tab shows these in three blocks, in the order below: the specimen itself; **Masses**, in the order the loaded holder is built up (the specimen alone, as mounted, each holder part, then the whole assembly); and **Specimen holder**, whose description and size carry over between runs.
 
 | Field | Unit | Required | Notes |
 |---|---|---|---|
 | `id` | — | yes | Operator-assigned specimen id. Mirrored into `sample.id`; Batch runs template it per child. |
 | `material` | — | yes | Free-text material name. The value an analyzer five years from now needs to know "what was this?" |
-| `initial_mass_g` | g | yes | Mass on the load cell before heating begins. Must be > 0. |
-| `thickness_mm` | mm | yes | Specimen thickness; for a powder or granulate, the bed depth. Must be > 0. |
-| `diameter_mm` | mm | yes | Specimen diameter. For a non-disk specimen, the diameter of its exposed surface. Must be > 0. |
 | `form` | `disk` \| `other` | yes | ~99% of CAPA runs use a disk. `other` is the escape hatch for irregular solids, liquids, etc.; describe in `notes`. |
 | `particle_size_um` | µm | no | Median particle size for powder/granulate runs. The Setup tab hides it while `form` is `disk` and drops any value it held. |
+| `diameter_mm` | mm | yes | Specimen diameter. For a non-disk specimen, the diameter of its exposed surface. Must be > 0. |
+| `thickness_mm` | mm | yes | Specimen thickness; for a powder or granulate, the bed depth. Must be > 0. |
+| `conditioning` | — | no | Pre-test conditioning (drying, desiccator, storage humidity). |
+| `notes` | — | no | Free text. |
+| `initial_mass_g` | g | yes | Initial mass of the specimen alone, before heating: without the holder, insulation, retainer or anything bonded to it (that is `mounted_mass_g`). Must be > 0. |
+| `mounted_mass_g` | g | no | The specimen with whatever is bonded to it (adhesive, backing foil and its coating), weighed before the test. Leave unset when nothing is bonded to it. |
+| `specimen_holder_mass_g` | g | no | Mass of the empty specimen holder, without insulation. |
+| `insulation_mass_g` | g | no | Mass of the insulation packed in the holder. Leave unset when the holder has none. |
+| `retainer_mass_g` | g | no | Mass of the ring or clamp that holds the specimen or its backing in the holder. Leave unset when there is none. |
+| `assembly_mass_g` | g | no | The loaded specimen holder as it goes into the rig (holder, insulation, retainer and mounted specimen), weighed on an external balance before the test. |
 | `specimen_holder` | — | yes | Holder description (e.g. `"stainless steel cup"`). Holder geometry varies by run; depth and diameter change the exposed surface area. |
 | `specimen_holder_diameter_mm` | mm | no | Outside / nominal diameter of the holder cup. |
 | `specimen_holder_depth_mm` | mm | no | Internal cup depth. Together with diameter, captures the cavity geometry that affects exposed surface area. |
-| `specimen_holder_mass_g` | g | no | Mass of the empty specimen holder, without insulation. |
-| `insulation_mass_g` | g | no | Mass of the insulation packed in the holder. Leave unset when the holder has none. |
-| `conditioning` | — | no | Pre-test conditioning (drying, desiccator, storage humidity). |
-| `notes` | — | no | Free text. |
 
 ### Why these are captured
 
@@ -79,9 +82,9 @@ Missing fields are a Layer-3 validation error, so the Setup tab refuses to save 
 
 Mass and dimensions change from one specimen to the next, so the GUI never carries them over. Whenever a config opens (File → Open, the Setup tab's Open, Recents, `capa gui <config>`, or New from template) these fields start empty, along with the operator id and name:
 
-`id`, `material`, `initial_mass_g`, `thickness_mm`, `diameter_mm`, `specimen_holder_mass_g`, `insulation_mass_g`, `conditioning`, `notes`
+`id`, `material`, `initial_mass_g`, `mounted_mass_g`, `thickness_mm`, `diameter_mm`, `specimen_holder_mass_g`, `insulation_mass_g`, `retainer_mass_g`, `assembly_mass_g`, `notes`
 
-The rest of the specimen block (`form`, `specimen_holder` and its dimensions) describes the rig and keeps its saved values. Saving a config still writes what you entered; it is cleared again the next time the config opens. A headless `capa run` uses the file as written, so fill these in before running one.
+The rest of the specimen block keeps its saved values: `form`, `specimen_holder` and its dimensions describe the rig, and `conditioning` is usually shared by a whole series of specimens. Saving a config still writes what you entered; it is cleared again the next time the config opens. A headless `capa run` uses the file as written, so fill these in before running one.
 
 ### The `sample` block mirrors the specimen
 
@@ -124,15 +127,15 @@ Controls the gas atmosphere the specimen sees during the run.
 
 | Field | Type | Notes |
 |---|---|---|
-| `mode` | `inert` \| `oxidative` \| `reducing` \| `reactive_blend` | Coarse classification. Drives the `capa.atmosphere_consistency` preflight for modes that need a reactive-gas flow channel. |
-| `purge` | `PurgeGas` | The inert/sweep gas spec. Always required. |
+| `mode` | `inert` \| `oxidative` \| `reducing` \| `reactive_blend` | Coarse classification. An air purge is `oxidative` with no `reactive` gas. `reactive_blend` always needs a reactive-gas flow channel (see `capa.atmosphere_consistency`). |
+| `purge` | `PurgeGas` | The main sweep gas spec: inert, or air for an oxidative run. Always required. |
 | `reactive` | `ReactiveGas` \| `None` | Optional secondary gas for partial-oxidation or doped-purge experiments. `None` for pure-inert runs. |
 
 ### `PurgeGas`
 
 | Field | Notes |
 |---|---|
-| `species` | Common name: `"N2"`, `"Ar"`, `"He"`, `"air"`, `"5% O2/N2"`. |
+| `species` | Common name: `"N2"`, `"Ar"`, `"He"`, `"air"`, `"5% O2/N2"`. Also sets the gas of the MFC mapped to `purge_gas_flow`, when the MFC knows it as one gas: see [Device settings](device-settings.md#the-purge-mfc-follows-the-capa-profile). |
 | `purity` | Grade / purity: `"UHP 5.0"`, `"99.999%"`, `"zero-grade air"`. |
 | `supplier` | Optional. |
 | `cylinder_lot` | Optional. |
@@ -191,7 +194,7 @@ Optional groups (warned, never block):
 
 | Group | Accepted kinds | Why optional |
 |---|---|---|
-| `reactive_gas_flow` | `mfc_flow` or `analog_in` | Required only when atmosphere `mode` is `oxidative` or `reactive_blend`. The `capa.atmosphere_consistency` preflight catches the inconsistency. |
+| `reactive_gas_flow` | `mfc_flow` or `analog_in` | Required only when the atmosphere declares a `reactive` gas, or `mode` is `reactive_blend`. The `capa.atmosphere_consistency` preflight catches the inconsistency. |
 
 The required-mapping list is exposed to the Setup editor as a panel of status chips — red until the group is mapped, then green. Layer-3 validation errors when a required group has fewer than `min_count` members.
 
@@ -204,9 +207,9 @@ The profile contributes the following preflight checks, evaluated when the run i
 | Id | Blocking? | What it checks |
 |---|---|---|
 | `capa.required_channel_mappings` | yes | Every required channel group has at least `min_count` members. |
-| `capa.atmosphere_consistency` | yes | Declared atmosphere mode is consistent with declared channels: `oxidative` / `reactive_blend` modes must declare a `reactive_gas_flow`. |
+| `capa.atmosphere_consistency` | yes | Declared atmosphere is consistent with declared channels: a `reactive` gas, or `mode = reactive_blend`, needs a `reactive_gas_flow` channel. An air purge (`oxidative`, no `reactive`) needs none. |
 | `capa.heater_pv_in_safe_range` | yes | Heater PV reading is within the rig-survival ceiling (< 1000 °C by default). Catches sensor runaway / miswired channel; **not** a cold-start gate. |
-| `capa.purge_flow_established` | yes | Purge gas flow has been seen ≥ `target × 0.5` for ≥ 3 s. Skip by setting `purge.target_flow_slpm = 0`. |
+| `capa.purge_flow_established` | yes | Purge gas flow has been seen ≥ `target × 0.5` for ≥ 3 s. Passes with the purge off when the method checks it itself: a `wait` on a `purge_gas_flow` channel for at least that flow, with `timeout_s` and `on_timeout = "abort"` (or `"safe_shutdown"`), before any step that commands a `heater_setpoint` channel (or any `custom` step). Skip by setting `purge.target_flow_slpm = 0`. |
 | `capa.flux_calibration_freshness` | no | When `target_heat_flux_kw_m2` is declared, `flux_calibration_ref` is set, and the on-disk tune artifact it points to is within the recency window (default 7 days). |
 | `capa.balance_stability` | no | When a mass channel is declared, it reports stable for ≥ 5 s prior to arming. |
 | `capa.disk_projection` | yes | Projected bundle size leaves ≥ 1.5× margin on the bundle volume. |

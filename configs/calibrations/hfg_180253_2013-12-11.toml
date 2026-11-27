@@ -1,0 +1,134 @@
+# NIST calibration of heat-flux gauge 180253 (Medtherm 64-10SB-20TS,
+# Schmidt-Boelter, 10 W/cm2 range, absorptance 0.94 per Medtherm, no window),
+# the old standard reference, 2013-12-11, in the Fire Research Division's
+# tungsten-lamp rig against its reference gauge SN 124421, CORRECTED for the
+# 4.3 % bias in 124421 that NIST later found. Digitized 2026-11-21 from
+# photos of the paper sheets (20261121_160344.jpg: handwritten log;
+# 20261121_160333.jpg: typed reduction; 20261121_160603.jpg: the earlier
+# Medtherm certificate).
+#
+# Result (incident): 14.200 kW/m2 per mV = 70.42 uV per kW/m2
+#   = 14.811 as reduced on the 2013 sheet (mean of the four per-level
+#     constants), divided by 1.043.
+# Least squares through the origin gives 14.319 (+0.8 %), with a free
+# intercept 14.435 (+1.7 %). Valid 2.1-15.6 kW/m2 (lamp). Medtherm's
+# certificate (below) is 1.7 % more sensitive, inside its +-3 % (k=2).
+#
+# The 124421 correction: NIST TN 2282 (Leventon et al., Feb 2024,
+# doi:10.6028/NIST.TN.2282), sec. 2.3: at the end of the parallel-panel test
+# series, a recalibration with the NIST PML Optical Radiation Group found
+# that 124421, "when calibrated against a blackbody, produced a non-linear
+# response that yielded a bias (4.3 % overestimate of measured heat fluxes)
+# in the tungsten lamp calibration apparatus." Three Schmidt-Boelter gauges
+# were then blackbody-calibrated and one became the division's new reference.
+# Details were promised in I. T. Leventon, "Calibration of Water-Cooled
+# Schmidt Boelter Heat Flux Gauges in Response to Multiple Radiation Heat
+# Sources", NIST TN in preparation (not found published as of 2026-11-21).
+# Applied here as a flat 1/1.043 on the reference flux. Assumptions: the bias
+# had the same size in 2013 as when measured, and it is flat over 2-16
+# kW/m2. TN 2282 calls the response non-linear, so the real correction may
+# vary with level; that could also be why 180253's per-level constant rises
+# 2.6 % from 2 to 16 kW/m2 (14.02, 14.17, 14.23, 14.38 corrected), along
+# with a possible zero offset (no zeros are logged).
+#
+# Facility: Pitts, Lawson & Shields, "NIST/BFRL Calibration System for
+# Heat-Flux Gages", Report of Test FR 4014, Aug 2001
+# (tsapps.nist.gov/publication/get_pdf.cfm?pub_id=910735): 2 kW tungsten-
+# halogen lamp in an ellipsoidal mirror (1974), kaleidoscope flux
+# redistributor, gauge flush in a 2.5 cm holder; 20 min lamp settle, 60 s
+# averages, standard then test gauge at each level; ~4/5/6/6.8 A gives
+# ~1.8/4/10/15 kW/m2, capped at 15. FR 4014 lists 124421 as a Medtherm 64-2-20
+# GARDON (23 kW/m2 full scale) bought and NBS-calibrated in 1974 at 2.69
+# kW/m2 per mV, the only standard; TN 2282 calls it a water-cooled Schmidt-
+# Boelter "originally calibrated by the Radiometric Physics Division". Every
+# record through 2013, including this log, uses 2.69, and none shows a
+# recalibration before the one in TN 2282.
+#
+# The 4.3 % fits this rig's record against Medtherm (BFRL constant /
+# Medtherm - 1): FR 4014, ten gauges, +2.4 % mean; SP 1031 round robin
+# (Pitts et al. 2004; Fire Safety J. 41, 2006) Schmidt-Boelter +4.7 %,
+# +4.1 %, Gardon +7.0 %, +7.0 %; this gauge +6.0 % uncorrected, +1.7 %
+# corrected.
+#
+# Log: 124421 read before and after 180253 at each lamp setting. 124421 is
+# incident 2.690 kW/m2 per mV on the log; the typed sheet's numbers reproduce
+# with 2.6925 (0.09 % higher), used here. Q = 2.6925 x mean of the two
+# 124421 readings, as used in 2013 (before the 1.043 correction). The log
+# writes each T as approximate and the same in all three columns; level 2 has
+# no T, the typed sheet fills 20.4.
+#
+#   #  lamp A  T C   124421 mV  180253 mV  124421 mV   Q kW/m2  kW/m2/mV
+#   1  ~4      20.4  0.7907     0.1454     0.7886       2.126   14.62
+#   2  5       20.4  2.0202     0.3674     2.0140       5.431   14.78
+#   3  6       20.8  3.7295     0.6760     3.7209      10.030   14.84
+#   4  6.7     20.4  5.8083     1.0412     5.7936      15.619   15.00
+#
+# Absorbed constant on the typed sheet: alpha*Q/E, 14.52 with alpha 0.98,
+# hand-corrected to alpha 0.94 (Medtherm's value) and annotated 13.98; the
+# arithmetic gives 13.92. The incident constant does not depend on alpha;
+# 13.92-13.98 is an absorbed figure (Medtherm's absorbed equivalent is
+# 0.94 x 13.97 = 13.13).
+#
+# Earlier calibration: Medtherm certificate 18025-3, 2013-02-08, P.O. P162205,
+# reference standard 89943, incident flux, 0.7160 mV per W/cm2 (inverse
+# 1.397 W/cm2 per mV) = 71.60 uV per kW/m2 = 13.966 kW/m2 per mV, full scale
+# 7.16 mV at 10 W/cm2, +-3 % k=2, water 12.8 C at 12 mL/s, ambient 23 +-3 C.
+#
+# 2026-11-21 comparison against the CAPA reference 232041 (a check of 232041,
+# not a recalibration: this file's curve stays on the 2013 value so 180253
+# remains independent). Open-air transfer, CAPA heater at 40 mm, 180253 on
+# HFG2 (ai8, left, stop B), 232041 right (stop A), faces level (0.0 mm),
+# centres 34.4 mm apart, building water (body 23.2 C at the zero, 18.5-27.0 C
+# in the run). Bundle runs/hfg_transfer_cal/2026-11-21_221720_HFG2_180253_cal1;
+#   uv run python scripts/analyze_hfg_transfer.py --ref-slope 12867.29134 \
+#     runs/hfg_transfer_cal/2026-11-21_221720_HFG2_180253_cal1
+# On 232041's scale (12867.29 kW/m2/V): S = 72.939 +- 0.067 uV per kW/m2
+# through the origin, 12 levels 4.2-68.9 kW/m2 (13.710 kW/m2 per mV, 0.7294
+# mV per W/cm2); F = 1.0083. Up/down repeats -0.11 % (10), +0.03 % (30),
+# -0.03 % (50 kW/m2); residuals rms 0.30 %, worst +0.59 % at 4.2 kW/m2. The
+# sensitivity falls ~1 % from 4 to 69 kW/m2 (quadratic t = -9), the same
+# sign as 175681 against 232041; flux, heater temperature and body
+# temperature all rise together, so the cause is not separable here.
+# Against this gauge's references: Medtherm 2013 +1.9 %, corrected NIST 2013
+# +3.6 %, NIST 2013 as reported +8.0 %. Read as 232041 reading 1.9 % (or
+# 3.6 %) low if those values held, inside the combined uncertainties (about
+# +-4.2 % and +-4.8 %, k=2); a two-gauge comparison cannot split 232041
+# error from 180253 drift.
+#
+# Uncertainty (k=1), rough: NIST blackbody calibration 1.5 % and lamp-rig
+# repeatability 0.5 % (both from TN 2282); applying a correction measured
+# years later, assumed flat, to 2013: 1.0 % (assumed); choice of reduction
+# 0.4 %. Combined 1.9 %, so +-3.8 % at k=2.
+#
+# On 232041's 2026-11-22 scale (13026.52 kW/m2/V, from 223481's NIST cone
+# value): S = 72.047 uV per kW/m2, i.e. Medtherm 2013 +0.6 %, corrected NIST
+# 2013 +2.3 %.
+
+name = "hfg_180253_2013-12-11"
+revision = "2"
+
+# Curve key is the gauge, not a rig channel. The Setup tab applies a set by
+# channel name, so this curve applies to no channel as is; it is the record
+# of 180253's value. To read 180253 in kW/m2 live, copy these numbers into
+# the calibration of the channel that carries its volts.
+[curves.hfg_180253]
+kind = "linear_two_point"
+input_unit = "V"
+output_unit = "kW/m^2"
+ref_low_raw = 0.0
+ref_low_value = 0.0
+ref_high_raw = 0.01
+ref_high_value = 142.0025  # 10 mV x 14.81086 / 1.043 kW/m2 per mV, incident
+
+[curves.hfg_180253.uncertainty]
+kind = "relative"
+value = 0.019             # standard (k=1), rough budget in the header; capa multiplies by coverage_factor
+coverage_factor = 2.0
+method = "NIST Fire Research Division lamp calibration 2013-12-11 against 124421, mean of 4 levels 2.1-15.6 kW/m2, divided by 1.043 for the 124421 bias in NIST TN 2282; Medtherm 2013-02-08 certificate 1.7 % more sensitive (see configs/calibrations/hfg_180253_2013-12-11.toml header)"
+
+[curves.hfg_180253.fit_metadata]
+reference_instrument = "NIST Fire Research Division reference heat-flux gauge (lamp rig, FR 4014)"
+reference_serial = "124421"
+fitted_at = 2013-12-11T00:00:00Z
+source_procedure_id = "NIST lamp transfer calibration (paper log + typed reduction), corrected per NIST TN 2282"
+notes = "Incident flux, 14.200 kW/m2 per mV = 70.42 uV per kW/m2: 2013 sheet value 14.811 (124421 at 2.6925 kW/m2 per mV) divided by 1.043 for the 4.3 % overestimate NIST later found in 124421 against a blackbody (TN 2282). fitted_at is the calibration date (time not stated). Digitized 2026-11-21 from photos of the paper sheets."

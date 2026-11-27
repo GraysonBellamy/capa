@@ -75,7 +75,10 @@ graph in one stack:
 
 The right-aligned **source** label shows where the current method came
 from: a file path, `"<name> (unsaved)"` for new methods, or `"no method"`
-when empty.
+when empty. A file-backed method you've edited since it was loaded or
+saved reads `source: <path> (modified)`, and the tab title gains a `*`
+(`Method — <name> *`). Start runs those edits either way; Save only
+matters if you want them in the file.
 
 ---
 
@@ -132,7 +135,9 @@ Edits flow back into the step table immediately. If the edit makes the
 step invalid (e.g. a Hold with neither `duration_s` nor `end_condition`),
 the offending field gets an inline marker; the previous valid row stays
 in the model until you fix the field. **The graph and table never show a
-half-valid step.**
+half-valid step.** While a field is in that state, Start refuses with a
+message naming the step rather than run the old value. Selecting another
+row drops the invalid entry and shows the step's stored value again.
 
 ---
 
@@ -171,25 +176,38 @@ Validators that catch the common foot-guns:
   set both, but at least one is required).
 - **Wait:** at least one of `duration_s` or `end_condition`.
 
-Standalone **Validate** (toolbar button) does the same check without
-writing — useful before clicking Apply & Connect on the Setup tab,
-where the Method tab's in-memory buffer is composed with the experiment
-config.
+Standalone **Validate** (toolbar button) runs the same check Start
+does, without writing.
 
 ---
+
+## When edits take effect
+
+**What the Method tab shows when you click Start is what runs.** You
+don't need to save, and you don't need Apply & Connect again:
+
+- Start takes the config Apply & Connect loaded and puts the Method
+  tab's current method in it, saved or not. The run's bundle records
+  that method in `method.toml`.
+- The Run tab header (`… · Method: <name>`) follows your edits. If the
+  method can't run (an invalid entry, or a step targeting a channel the
+  rig doesn't have), the header turns amber and says so. Hover it for
+  the reason. Start then refuses with the same message.
+- Edits made during a run don't touch that run. They apply at the next
+  Start.
+- Procedures that don't use a method (free run, Heat-Flux Tune) ignore
+  the Method tab.
 
 ## How the Method tab and the Setup tab talk
 
 The Method tab does not reach into the run controller. Instead:
 
-- On successful Save, the tab emits `methodSaved(path)`.
-- The main window's `DocumentCoordinator` mirrors the new path into the
-  Setup draft's `method:` reference. The Setup tab's connection strip
-  flips from CONNECTED → UNAPPLIED if the change isn't yet on the rig.
-- On Setup-tab Apply & Connect, the live method buffer (whatever the
-  Method tab currently has, even if unsaved) is composed with the
-  Setup config and pushed to the conductor. This is what makes "edit a
-  setpoint, click Apply, click Start" work without saving in between.
+- Opening, clearing, or saving a method updates the Setup draft's
+  `method:` reference (through the main window's `DocumentCoordinator`),
+  so a Setup-tab Save writes the right reference. Opening or clearing
+  marks the Setup draft's Files section as unsaved. It doesn't flag the
+  draft as needing Apply & Connect, because Start reads the method
+  directly.
 
 When an experiment with no `method:` reference is loaded, the Method tab
 is cleared and switches to the free-run placeholder pane — the displayed

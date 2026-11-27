@@ -194,11 +194,14 @@ def test_method_tab_edit_updates_setup_payload(qtbot: Any, tmp_path: Path) -> No
             ),
         ),
     )
+    setup.draft.unapplied = False  # as after Apply & Connect
     method_tab.load_method(new_method, path=work_method)
     assert setup.draft.document.method_payload is not None
     assert setup.draft.document.method_payload.get("name") == "overridden"
     # Files section is marked dirty because the payload changed.
     assert "files" in setup.draft.dirty_sections
+    # ...but nothing needs applying: Start reads the Method tab.
+    assert not setup.draft.unapplied
 
 
 # ---------------------------------------------------------------------------

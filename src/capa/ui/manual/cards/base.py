@@ -35,6 +35,7 @@ from capa.devices.adapter import (
     Capability,
     CommandResult,
     DeviceAdapter,
+    DeviceCommand,
 )
 from capa.devices.camera.base import Camera
 from capa.devices.records import DeviceEvent
@@ -230,6 +231,57 @@ class DeviceCard(QGroupBox):
         sentence, which speaks of a write that persists in the device, for
         an operation whose consequence is something else.
         """
+        cmd = await self.prepare_command(
+            kind=kind,
+            payload=payload,
+            target=target,
+            destructive=destructive,
+            destructive_summary=destructive_summary,
+            destructive_note=destructive_note,
+        )
+        if cmd is None:
+            return None
+        try:
+            result = await self.send_command(cmd)
+        except Exception as exc:
+            self._set_status(f"{kind} failed: {exc}", level="error")
+            self._emit_manual_event(
+                kind=kind,
+                severity="error",
+                message=str(exc),
+            )
+            _logger.warning(
+                "manual.dispatch_failed",
+                device=self._name,
+                kind=kind,
+                error=str(exc),
+            )
+            return None
+
+        if result.accepted:
+            self._set_status(f"✓ {kind}: {result.detail}", level="ok")
+            self._emit_manual_event(kind=kind, severity="info", message=result.detail)
+        else:
+            self._set_status(f"✗ {kind} rejected: {result.detail}", level="warn")
+            self._emit_manual_event(kind=kind, severity="warning", message=result.detail)
+        return result
+
+    async def prepare_command(
+        self,
+        *,
+        kind: str,
+        payload: dict[str, Any] | None = None,
+        target: str | None = None,
+        destructive: bool = False,
+        destructive_summary: str | None = None,
+        destructive_note: str | None = None,
+    ) -> DeviceCommand | None:
+        """Run :meth:`dispatch`'s gates and build the command, without sending it.
+
+        For a card that shows its own progress and outcome: it calls this,
+        then :meth:`send_command`. Returns ``None`` when a gate refused (the
+        reason is already on the status line).
+        """
         # Refuse during an active run. The same gate also drops the action
         # widgets so this is belt-and-braces.
         if self._engine_blocks_writes():
@@ -264,8 +316,7 @@ class DeviceCard(QGroupBox):
         if adapter is None:
             return None
 
-        client = self._controller.manual_client
-        if client is None:
+        if self._controller.manual_client is None:
             self._set_status("no config loaded — open a config first", level="warn")
             return None
 
@@ -273,7 +324,7 @@ class DeviceCard(QGroupBox):
         # Authorization helper enforces the issued_by + confirmed_by invariant.
         auth = Authorization(operator_id=operator, run_id="manual")
         try:
-            cmd = auth.issue_manual(
+            return auth.issue_manual(
                 kind=kind,
                 target=target,
                 payload=payload or {},
@@ -284,30 +335,15 @@ class DeviceCard(QGroupBox):
             self._set_status(f"authorization: {exc}", level="error")
             return None
 
-        try:
-            result = await client.dispatch(self._name, cmd)
-        except Exception as exc:
-            self._set_status(f"{kind} failed: {exc}", level="error")
-            self._emit_manual_event(
-                kind=kind,
-                severity="error",
-                message=str(exc),
-            )
-            _logger.warning(
-                "manual.dispatch_failed",
-                device=self._name,
-                kind=kind,
-                error=str(exc),
-            )
-            return None
+    async def send_command(self, cmd: DeviceCommand) -> CommandResult:
+        """Send a command from :meth:`prepare_command` to this card's device.
 
-        if result.accepted:
-            self._set_status(f"✓ {kind}: {result.detail}", level="ok")
-            self._emit_manual_event(kind=kind, severity="info", message=result.detail)
-        else:
-            self._set_status(f"✗ {kind} rejected: {result.detail}", level="warn")
-            self._emit_manual_event(kind=kind, severity="warning", message=result.detail)
-        return result
+        Raises whatever the adapter raised; reports nothing.
+        """
+        client = self._controller.manual_client
+        if client is None:
+            raise RuntimeError("no config loaded — open a config first")
+        return await client.dispatch(self._name, cmd)
 
     async def _confirm(self, text: str) -> bool:
         """Ask ``text`` in a modal Yes/No box and wait for the answer.
