@@ -4,15 +4,15 @@ requires-python = "==3.13.*"
 
 [[package]]
 name = "alicatlib"
-version = "0.3.1"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "anyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6f/6d/773e7f228bcc4071ed71776a80774d3af2acd50e88f24019f4ef126ab206/alicatlib-0.3.1.tar.gz", hash = "sha256:4262022b233deab2f6744acc523e73856cd8b7399224b50e15ce3f282b179564", size = 482303, upload-time = "2026-10-01T13:37:11.767Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/ec/ea8bf5362f116d6694e52e68b87a40038dedd075510d3a4c86ccc0fa786f/alicatlib-0.3.2.tar.gz", hash = "sha256:e326692dd11c5ab3e7cf5fef7c10a1aaacc0670c27fe46d033fff9584bf64a20", size = 512791, upload-time = "2026-11-27T15:50:32.653Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/40/e0/a0f93e224e8044beadcda262e0a877eedd70d1146e7740e8bf7e71ccb238/alicatlib-0.3.1-py3-none-any.whl", hash = "sha256:c0b0754c255c629232e355af4b9752a22b8efef0fb497c14316896e927b8fb63", size = 294041, upload-time = "2026-10-01T13:37:10.152Z" },
+    { url = "https://files.pythonhosted.org/packages/64/09/0d499526122340c588a7c73a0675fd6c5d99da040eb48a9309d7aea8d205/alicatlib-0.3.2-py3-none-any.whl", hash = "sha256:cddc3cceae4b476df210a2be40963f65e2848f4979403b5759e4212cf59c79fd", size = 295505, upload-time = "2026-11-27T15:50:30.74Z" },
 ]
 
 [[package]]
@@ -185,7 +185,7 @@ type = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alicatlib", specifier = ">=0.3.1,<0.4" },
+    { name = "alicatlib", specifier = ">=0.3.2,<0.4" },
     { name = "anyio", specifier = ">=4.6" },
     { name = "av", specifier = ">=13" },
     { name = "capa-flir", marker = "extra == 'flir'", editable = "../capa-flir" },

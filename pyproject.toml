@@ -41,7 +41,7 @@ dependencies = [
     "typer>=0.12",
     # The serial libraries share anyserial; these are the releases that
     # accept the anyserial 0.2 (and, in watlowlib, anymodbus 0.3) fujilib needs.
-    "alicatlib>=0.3.1,<0.4",
+    "alicatlib>=0.3.2,<0.4",
     # 0.8.1: Series F4P profile (the IR-564 blackbody's controller).
     "watlowlib>=0.8.1,<0.9",
     "sartoriuslib>=0.5,<0.6",
