@@ -59,6 +59,7 @@ from capa.storage.catalog import RunCatalog
 from capa.ui.main_window import MainWindow
 from capa.ui.watchdog import LOG_NAME as STALL_LOG_NAME
 from capa.ui.watchdog import GuiStallWatchdog
+from capa.ui.wheel_guard import install_wheel_guard
 
 _logger = structlog.get_logger("capa.ui.app")
 
@@ -124,6 +125,8 @@ def run_gui(
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
+    # Scrolling a pane must not change the spin box or combo under the pointer.
+    install_wheel_guard(app)
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
     # A frozen window leaves the stacks of every thread here; see watchdog.py.
